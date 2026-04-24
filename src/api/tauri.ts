@@ -6,6 +6,7 @@ import type {
   ProviderInfo,
   ProxyStatus,
   RefreshModelListResult,
+  RequestLogFilters,
   Settings,
   SettingsPatch,
   SubscriptionDto,
@@ -45,8 +46,12 @@ export const api = {
     invoke<void>("update_virtual_model", { name, input }),
 
   // request logs
-  listRequests: (page: number, pageSize: number) =>
-    invoke<ListRequestsResult>("list_requests", { page, pageSize }),
+  listRequests: (
+    page: number,
+    pageSize: number,
+    filters?: RequestLogFilters,
+  ) =>
+    invoke<ListRequestsResult>("list_requests", { page, pageSize, filters }),
 
   // settings / proxy
   getSettings: () => invoke<Settings>("get_settings"),

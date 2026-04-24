@@ -1,6 +1,7 @@
 //! 请求日志查询 command。简单 offset/limit 分页，按 timestamp 倒序。
+//! 支持按 virtual_model_name / provider_id / status 筛选。
 
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use sqlx::Row;
 use tauri::State;
 
@@ -33,34 +34,81 @@ pub struct ListRequestsResult {
     pub total: i64,
 }
 
+#[derive(Debug, Default, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub struct RequestLogFilters {
+    pub virtual_model_name: Option<String>,
+    pub provider_id: Option<String>,
+    pub status: Option<String>,
+}
+
 #[tauri::command]
 pub async fn list_requests(
     state: State<'_, AppState>,
     page: u32,
     page_size: u32,
+    filters: Option<RequestLogFilters>,
 ) -> AppResult<ListRequestsResult> {
     let page = page.max(1);
     let page_size = page_size.clamp(1, 200);
     let offset = (page - 1) as i64 * page_size as i64;
+    let filters = filters.unwrap_or_default();
 
-    let total: i64 = sqlx::query("SELECT COUNT(*) AS c FROM requests")
-        .fetch_one(&state.db)
-        .await?
-        .try_get("c")?;
+    // 动态构建 WHERE 子句。列名是白名单字面量，值走 bind，无注入风险。
+    let mut conditions: Vec<&'static str> = Vec::new();
+    if filters.virtual_model_name.is_some() {
+        conditions.push("virtual_model_name = ?");
+    }
+    if filters.provider_id.is_some() {
+        conditions.push("provider_id = ?");
+    }
+    if filters.status.is_some() {
+        conditions.push("status = ?");
+    }
+    let where_clause = if conditions.is_empty() {
+        String::new()
+    } else {
+        format!(" WHERE {}", conditions.join(" AND "))
+    };
 
-    let rows = sqlx::query(
+    let count_sql = format!("SELECT COUNT(*) AS c FROM requests{}", where_clause);
+    let mut count_q = sqlx::query(&count_sql);
+    if let Some(v) = &filters.virtual_model_name {
+        count_q = count_q.bind(v);
+    }
+    if let Some(v) = &filters.provider_id {
+        count_q = count_q.bind(v);
+    }
+    if let Some(v) = &filters.status {
+        count_q = count_q.bind(v);
+    }
+    let total: i64 = count_q.fetch_one(&state.db).await?.try_get("c")?;
+
+    let select_sql = format!(
         "SELECT id, timestamp, virtual_model_name, subscription_id, provider_id, endpoint_id,
                 real_model_name, is_streaming, status, http_status, total_latency_ms,
                 upstream_input_tokens, upstream_output_tokens,
                 upstream_cache_creation, upstream_cache_read, error_message
-         FROM requests
+         FROM requests{}
          ORDER BY timestamp DESC
          LIMIT ? OFFSET ?",
-    )
-    .bind(page_size as i64)
-    .bind(offset)
-    .fetch_all(&state.db)
-    .await?;
+        where_clause
+    );
+    let mut select_q = sqlx::query(&select_sql);
+    if let Some(v) = &filters.virtual_model_name {
+        select_q = select_q.bind(v);
+    }
+    if let Some(v) = &filters.provider_id {
+        select_q = select_q.bind(v);
+    }
+    if let Some(v) = &filters.status {
+        select_q = select_q.bind(v);
+    }
+    let rows = select_q
+        .bind(page_size as i64)
+        .bind(offset)
+        .fetch_all(&state.db)
+        .await?;
 
     let items = rows
         .into_iter()

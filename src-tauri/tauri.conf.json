@@ -28,7 +28,7 @@
     "trayIcon": {
       "id": "cc-router-tray",
       "iconPath": "icons/icon.png",
-      "iconAsTemplate": true,
+      "iconAsTemplate": false,
       "menuOnLeftClick": false,
       "tooltip": "cc-router"
     }

@@ -1,5 +1,5 @@
 import { NavLink } from "react-router-dom";
-import { Layers, Key, ScrollText, Settings as SettingsIcon } from "lucide-react";
+import { Layers, Key, ScrollText, Settings as SettingsIcon, Info } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 const items = [
@@ -7,6 +7,7 @@ const items = [
   { to: "/subscriptions", label: "订阅管理", icon: Key },
   { to: "/request-logs", label: "请求日志", icon: ScrollText },
   { to: "/settings", label: "设置", icon: SettingsIcon },
+  { to: "/about", label: "关于", icon: Info },
 ];
 
 export function Sidebar() {

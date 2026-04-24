@@ -171,3 +171,9 @@ export interface ListRequestsResult {
   items: RequestLogDto[];
   total: number;
 }
+
+export interface RequestLogFilters {
+  virtual_model_name?: VirtualModelName;
+  provider_id?: string;
+  status?: RequestStatus;
+}

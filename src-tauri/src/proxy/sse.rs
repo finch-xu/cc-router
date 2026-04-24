@@ -182,8 +182,11 @@ fn process_event(
         Err(_) => return (Bytes::copy_from_slice(raw), None),
     };
 
-    let is_message_start = text.contains("event: message_start");
-    let is_message_delta = text.contains("event: message_delta");
+    // SSE 规范允许 "event:" 冒号后空格可有可无。Anthropic 原生带空格，
+    // 阿里云百炼等翻译层可能不带。按行解析名字更稳。
+    let event_name = sse_event_name(text);
+    let is_message_start = event_name == Some("message_start");
+    let is_message_delta = event_name == Some("message_delta");
     if !is_message_start && !is_message_delta {
         return (Bytes::copy_from_slice(raw), None);
     }
@@ -269,15 +272,42 @@ fn process_event(
         rebuilt.push_str(&text[end..]);
         (Bytes::from(rebuilt), Some(meta))
     } else {
-        // message_delta: 只提取 usage，原字节透传
+        // message_delta: 提取 usage，原字节透传。
+        // 阿里云百炼把最终的 input_tokens / cache_* 放在 message_delta.usage，
+        // 而 Anthropic 原生只给 output_tokens——都读，读不到保持 None 不覆盖。
         if let Some(usage) = parsed.get("usage") {
             meta.output_tokens = usage
                 .get("output_tokens")
                 .and_then(|v| v.as_u64())
                 .map(|v| v as u32);
+            meta.input_tokens = usage
+                .get("input_tokens")
+                .and_then(|v| v.as_u64())
+                .map(|v| v as u32);
+            meta.cache_creation = usage
+                .get("cache_creation_input_tokens")
+                .and_then(|v| v.as_u64())
+                .map(|v| v as u32);
+            meta.cache_read = usage
+                .get("cache_read_input_tokens")
+                .and_then(|v| v.as_u64())
+                .map(|v| v as u32);
         }
         (Bytes::copy_from_slice(raw), Some(meta))
     }
+}
+
+/// 从 SSE 事件文本中按行找 `event:` 前缀，返回事件名。冒号后允许 0/1/多个空格。
+fn sse_event_name(text: &str) -> Option<&str> {
+    for line in text.lines() {
+        if let Some(rest) = line.strip_prefix("event:") {
+            let name = rest.trim();
+            if !name.is_empty() {
+                return Some(name);
+            }
+        }
+    }
+    None
 }
 
 fn find_sequence(haystack: &[u8], needle: &[u8]) -> Option<usize> {
@@ -330,4 +360,68 @@ fn tokio_stream_adapter(
             None => None,
         }
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn sse_event_name_handles_various_spacing() {
+        assert_eq!(sse_event_name("event: message_start\ndata: {}\n"), Some("message_start"));
+        assert_eq!(sse_event_name("event:message_start\ndata:{}\n"), Some("message_start"));
+        assert_eq!(sse_event_name("event:   message_delta\ndata:{}\n"), Some("message_delta"));
+        assert_eq!(sse_event_name("event: message_start\r\ndata: {}\r\n"), Some("message_start"));
+        assert_eq!(sse_event_name("data: {}\n"), None);
+    }
+
+    /// 百炼风格：event 行冒号后无空格，message_delta.usage 携带全套 token。
+    #[test]
+    fn process_event_alibaba_style_message_start_no_space() {
+        let raw = b"event:message_start\ndata:{\"type\":\"message_start\",\"message\":{\"id\":\"m1\",\"model\":\"qwen-flash\",\"role\":\"assistant\",\"type\":\"message\",\"content\":[],\"usage\":{\"input_tokens\":7,\"output_tokens\":0}}}\n\n";
+        let (_bytes, meta) = process_event(raw, Some("model-sonnet"), "qwen-flash");
+        let meta = meta.expect("alibaba message_start 应被识别");
+        assert_eq!(meta.input_tokens, Some(7));
+        // message_start 没有 cache_* 字段 → None
+        assert_eq!(meta.cache_creation, None);
+        assert_eq!(meta.cache_read, None);
+        assert_eq!(meta.output_tokens, None);
+    }
+
+    #[test]
+    fn process_event_alibaba_style_message_delta_full_usage() {
+        let raw = b"event:message_delta\ndata:{\"type\":\"message_delta\",\"delta\":{\"stop_reason\":\"end_turn\"},\"usage\":{\"output_tokens\":4,\"input_tokens\":15,\"cache_creation_input_tokens\":0,\"cache_read_input_tokens\":0}}\n\n";
+        let (_bytes, meta) = process_event(raw, Some("model-sonnet"), "qwen-flash");
+        let meta = meta.expect("alibaba message_delta 应被识别");
+        assert_eq!(meta.input_tokens, Some(15));
+        assert_eq!(meta.output_tokens, Some(4));
+        assert_eq!(meta.cache_creation, Some(0));
+        assert_eq!(meta.cache_read, Some(0));
+    }
+
+    /// Anthropic 原生风格：event 行带空格，message_delta 只有 output_tokens。
+    #[test]
+    fn process_event_anthropic_style_message_delta_output_only() {
+        let raw = b"event: message_delta\ndata: {\"type\":\"message_delta\",\"delta\":{\"stop_reason\":\"end_turn\"},\"usage\":{\"output_tokens\":42}}\n\n";
+        let (_bytes, meta) = process_event(raw, Some("model-sonnet"), "claude-sonnet");
+        let meta = meta.expect("anthropic message_delta 应被识别");
+        assert_eq!(meta.output_tokens, Some(42));
+        assert_eq!(meta.input_tokens, None);
+        assert_eq!(meta.cache_creation, None);
+        assert_eq!(meta.cache_read, None);
+    }
+
+    /// 非 message_start / message_delta 的事件直接透传，不产生 meta。
+    #[test]
+    fn process_event_other_events_passthrough() {
+        let raw = b"event: ping\ndata: {\"type\":\"ping\"}\n\n";
+        let (bytes, meta) = process_event(raw, Some("model-sonnet"), "x");
+        assert!(meta.is_none());
+        assert_eq!(&bytes[..], raw);
+
+        let raw2 = b"event:content_block_delta\ndata:{\"type\":\"content_block_delta\",\"delta\":{\"type\":\"text_delta\",\"text\":\"hi\"},\"index\":0}\n\n";
+        let (bytes2, meta2) = process_event(raw2, Some("model-sonnet"), "x");
+        assert!(meta2.is_none());
+        assert_eq!(&bytes2[..], raw2);
+    }
 }

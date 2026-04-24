@@ -6,6 +6,7 @@ import { SubscriptionNewPage } from "@/routes/SubscriptionNew";
 import { SubscriptionEditPage } from "@/routes/SubscriptionEdit";
 import { SettingsPage } from "@/routes/Settings";
 import { RequestLogsPage } from "@/routes/RequestLogs";
+import { AboutPage } from "@/routes/About";
 import { OnboardingPage } from "@/routes/Onboarding";
 import { OnboardingGate } from "@/components/layout/OnboardingGate";
 
@@ -27,6 +28,7 @@ export default function App() {
         <Route path="/subscriptions/:id" element={<SubscriptionEditPage />} />
         <Route path="/request-logs" element={<RequestLogsPage />} />
         <Route path="/settings" element={<SettingsPage />} />
+        <Route path="/about" element={<AboutPage />} />
       </Route>
       <Route path="*" element={<Navigate to="/" replace />} />
     </Routes>
