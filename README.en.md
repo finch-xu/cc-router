@@ -1,0 +1,105 @@
+<p align="center">
+  <img src="assets/icon.png" alt="cc-router logo" width="160" height="160" />
+</p>
+
+<h1 align="center">cc-router</h1>
+
+<p align="center">
+  <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-blue.svg?style=flat-square" alt="License: MIT"></a>
+  <img src="https://img.shields.io/badge/Tauri-2-FFC131?style=flat-square&logo=tauri&logoColor=white" alt="Tauri 2">
+  <img src="https://img.shields.io/badge/Rust-1.77+-DEA584?style=flat-square&logo=rust&logoColor=white" alt="Rust 1.77+">
+  <img src="https://img.shields.io/badge/React-19-61DAFB?style=flat-square&logo=react&logoColor=white" alt="React 19">
+  <img src="https://img.shields.io/badge/TypeScript-5-3178C6?style=flat-square&logo=typescript&logoColor=white" alt="TypeScript 5">
+  <img src="https://img.shields.io/badge/Tailwind-4-06B6D4?style=flat-square&logo=tailwindcss&logoColor=white" alt="Tailwind CSS">
+  <img src="https://img.shields.io/badge/platform-macOS%20%7C%20Windows%20%7C%20Linux-lightgrey?style=flat-square" alt="Platform">
+</p>
+
+<p align="center">
+  <a href="README.md">中文</a> · <strong>English</strong>
+</p>
+
+Stacked subscriptions across multiple LLM vendors, but Claude Code can only point at one? cc-router merges the Token Plans, Coding Plans, and pay-as-you-go APIs of DeepSeek, Qwen, Kimi, MiMo, MiniMax, GLM, and Claude into a single virtual plan — mix and match across the opus / sonnet / haiku slots, dispatch sequentially or round-robin, and auto-switch on rate limits or failures. Every last token squeezed out of every subscription.
+
+<p align="center">
+  <img src="assets/screenshot.png" alt="cc-router virtual model configuration page" width="900" />
+</p>
+
+## Tech Stack
+
+- Tauri 2
+- Tailwind 4
+- React 19
+
+## Quick Start
+
+1. Download the installer from Releases and run it.
+2. Add your LLM subscriptions, bind them to virtual models, pick a dispatch mode.
+3. Point Claude Code at cc-router via the env snippet below.
+
+## Using with Claude Code
+
+The **Settings** page renders the full env snippet dynamically — if the default port is taken, cc-router probes upward up to 100 times.
+
+```json
+{
+  "env": {
+    "ANTHROPIC_BASE_URL": "http://127.0.0.1:23456",
+    "ANTHROPIC_AUTH_TOKEN": "do-not-need",
+    "API_TIMEOUT_MS": "3000000",
+    "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC": "1",
+    "ANTHROPIC_MODEL": "model-opus",
+    "ANTHROPIC_DEFAULT_SONNET_MODEL": "model-sonnet",
+    "ANTHROPIC_DEFAULT_OPUS_MODEL": "model-opus",
+    "ANTHROPIC_DEFAULT_HAIKU_MODEL": "model-haiku"
+  }
+}
+```
+
+## Development
+
+Prerequisites: Node.js ≥ 20 (pnpm recommended), Rust ≥ 1.77, Xcode Command Line Tools (macOS).
+
+```bash
+pnpm install
+pnpm tauri dev      # runs frontend + Rust backend + proxy in one process
+```
+
+First launch opens the onboarding flow:
+
+1. Add a subscription (pick provider → endpoint → paste API key → auto-fetch the model list).
+2. Bind the subscription to all three virtual models in one click.
+3. Copy the generated env snippet into your `~/.claude/settings.json`.
+
+## Build
+
+```bash
+# Tauri build needs a full icon size set — generate it from one source PNG first
+pnpm tauri icon src-tauri/icons/icon.png
+pnpm tauri build
+```
+
+Artifacts land in `src-tauri/target/release/bundle/` under per-platform subfolders.
+
+## Built-in Providers
+
+Managed as `src-tauri/providers/*.yaml`, validated against a JSON Schema at startup:
+
+| id | Name | Status |
+|---|---|---|
+| `anthropic` | Anthropic official API (pay-as-you-go only, no Max Plan) | verified |
+| `zhipu` | Zhipu GLM | verified |
+| `deepseek` | DeepSeek | verified |
+| `moonshot` | Moonshot Kimi | verified |
+| `minimax` | MiniMax (3 endpoints) | partial |
+| `xiaomi` | Xiaomi MiMo (pay-as-you-go + 3-cluster plans) | untested |
+| `alibaba` | Alibaba Cloud Bailian (team Token Plan + 2-region pay-as-you-go + discontinued Coding Plan) | verified |
+
+Community PRs welcome.
+
+## Icons
+
+Provider brand logos come from [@lobehub/icons](https://github.com/lobehub/lobe-icons) (MIT). All trademarks belong to their respective owners.
+
+## License
+
+MIT
