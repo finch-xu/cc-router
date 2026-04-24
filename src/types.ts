@@ -1,0 +1,173 @@
+// 与 Rust 后端 DTO 对齐的类型定义。
+// 约定：Rust 侧 serde 使用 serde(rename_all = "snake_case") 序列化。
+
+export type Compatibility = "verified" | "partial" | "untested";
+export type AuthType = "api_key";
+export type AuthHeaderFormat = "raw" | "bearer";
+export type VirtualModelName =
+  | "model-opus"
+  | "model-sonnet"
+  | "model-haiku"
+  | "model-fallback";
+export type SubscriptionSlot = "opus" | "sonnet" | "haiku";
+export type RoutingMode = "sequential" | "round_robin";
+export type SubscriptionState =
+  | "healthy"
+  | "rate_limited"
+  | "quota_exhausted"
+  | "transient_error"
+  | "auth_failed"
+  | "disabled";
+
+export interface ProviderEndpointInfo {
+  id: string;
+  label: string;
+  description?: string;
+  base_url: string;
+  messages_path: string;
+  region?: string;
+  billing?: string;
+}
+
+export interface ProviderInfo {
+  id: string;
+  display_name: string;
+  description?: string;
+  homepage?: string;
+  docs_url?: string;
+  api_key_url?: string;
+  icon?: string;
+  compatibility: Compatibility;
+  compatibility_notes?: string;
+  endpoints: ProviderEndpointInfo[];
+  default_endpoint?: string;
+  auth: {
+    type: AuthType;
+    header_name: string;
+    header_format: AuthHeaderFormat;
+  };
+  model_discovery: {
+    enabled: boolean;
+    path: string;
+    cache_ttl_hours: number;
+    example_models: string[];
+  };
+}
+
+export interface ModelSlots {
+  opus: string;
+  sonnet: string;
+  haiku: string;
+}
+
+export interface ModelInfo {
+  id: string;
+  display_name?: string;
+}
+
+export interface SubscriptionDto {
+  id: string;
+  provider_id: string;
+  endpoint_id: string;
+  display_name: string;
+  model_slots: ModelSlots;
+  enabled: boolean;
+  state: SubscriptionState;
+  cooldown_until?: number;
+  last_error_message?: string;
+  created_at: number;
+  updated_at: number;
+  /** 该订阅被哪些虚拟模型引用 */
+  referenced_by: VirtualModelName[];
+  /** 缓存的模型列表（可能为空，fetched_at = Unix ms） */
+  model_cache?: {
+    fetched_at: number;
+    models: ModelInfo[];
+  };
+}
+
+export interface CreateSubscriptionInput {
+  provider_id: string;
+  endpoint_id: string;
+  display_name: string;
+  api_key: string;
+  model_slots: ModelSlots;
+}
+
+export interface SubscriptionPatch {
+  endpoint_id?: string;
+  display_name?: string;
+  model_slots?: ModelSlots;
+}
+
+export interface TestConnectionResult {
+  ok: boolean;
+  message: string;
+}
+
+export type RefreshModelListResult =
+  | { kind: "auto"; models: ModelInfo[]; fetched_at: number }
+  | { kind: "manual_fallback"; reason: string };
+
+export interface VirtualModelDto {
+  name: VirtualModelName;
+  mode: RoutingMode;
+  subscription_ids: string[];
+}
+
+export interface UpdateVirtualModelInput {
+  mode: RoutingMode;
+  subscription_ids: string[];
+}
+
+export interface Settings {
+  proxy_port: number;
+  /** true: 监听 0.0.0.0（局域网可访问）；false: 仅 127.0.0.1 */
+  listen_all: boolean;
+  autostart: boolean;
+  log_retention_days: number;
+  db_size_limit_mb: number;
+}
+
+export interface SettingsPatch {
+  proxy_port?: number;
+  listen_all?: boolean;
+  autostart?: boolean;
+  log_retention_days?: number;
+  db_size_limit_mb?: number;
+}
+
+export interface ProxyStatus {
+  port: number;
+  running: boolean;
+}
+
+export interface OnboardingState {
+  completed: boolean;
+}
+
+export type RequestStatus = "success" | "error" | "timeout";
+
+export interface RequestLogDto {
+  id: string;
+  timestamp: number;
+  virtual_model_name: VirtualModelName;
+  subscription_id: string;
+  provider_id: string;
+  endpoint_id: string;
+  real_model_name: string;
+  is_streaming: boolean;
+  status: RequestStatus;
+  http_status?: number;
+  total_latency_ms?: number;
+  input_tokens?: number;
+  output_tokens?: number;
+  cache_creation_tokens?: number;
+  cache_read_tokens?: number;
+  error_message?: string;
+}
+
+export interface ListRequestsResult {
+  items: RequestLogDto[];
+  total: number;
+}

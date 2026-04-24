@@ -21,3 +21,36 @@ target
 #.idea/
 
 mydata/
+
+# Node
+node_modules/
+dist/
+dist-ssr/
+*.local
+
+# Editor
+.vscode/*
+!.vscode/extensions.json
+.idea/
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.sw?
+
+# macOS
+.DS_Store
+
+# Env
+.env
+.env.*
+!.env.example
+
+# Tauri build artifacts
+src-tauri/gen/schemas/
+src-tauri/Cargo.lock
+
+
+CLAUDE.md
+.claude/
+

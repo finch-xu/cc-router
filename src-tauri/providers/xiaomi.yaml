@@ -1,0 +1,70 @@
+id: xiaomi
+display_name: "小米 MiMo"
+icon: xiaomi
+description: "小米 MiMo 开放平台 · 按量付费 + Token Plan 订阅（Anthropic 兼容）"
+homepage: "https://platform.xiaomimimo.com"
+docs_url: "https://platform.xiaomimimo.com/docs/api/chat/anthropic-api"
+api_key_url: "https://platform.xiaomimimo.com/#/console/api-keys"
+
+compatibility: untested
+compatibility_notes: |
+  Anthropic 兼容协议, 但尚无实测数据。
+  如果 /anthropic 端点与上游协议存在偏差, 请通过 issue 反馈。
+
+endpoints:
+  - id: paygo
+    label: "国内版 · 按量付费 API"
+    description: "按 token 计费, 最通用的端点"
+    base_url: "https://api.xiaomimimo.com/anthropic"
+    messages_path: "/v1/messages"
+    region: global
+    billing: pay_as_you_go
+
+  - id: token_plan_cn
+    label: "国内版 · Token Plan · 中国集群"
+    description: "订阅制, 中国大陆低延迟"
+    base_url: "https://token-plan-cn.xiaomimimo.com/anthropic"
+    messages_path: "/v1/messages"
+    region: china
+    billing: subscription
+
+  - id: token_plan_sgp
+    label: "国际版 · Token Plan · 新加坡集群"
+    description: "订阅制, 亚太用户推荐"
+    base_url: "https://token-plan-sgp.xiaomimimo.com/anthropic"
+    messages_path: "/v1/messages"
+    region: global
+    billing: subscription
+
+  - id: token_plan_ams
+    label: "国际版 · Token Plan · 欧洲集群"
+    description: "订阅制, 欧洲用户推荐"
+    base_url: "https://token-plan-ams.xiaomimimo.com/anthropic"
+    messages_path: "/v1/messages"
+    region: global
+    billing: subscription
+
+default_endpoint: paygo
+
+auth:
+  type: api_key
+  header_name: "Authorization"
+  header_format: bearer
+
+required_headers:
+  anthropic-version: "2023-06-01"
+
+forward_headers: []
+
+model_discovery:
+  enabled: true
+  # Anthropic 兼容端点的 /anthropic/models 未在文档中列出,
+  # 使用官方 OpenAI 兼容端点作为 discovery URL (/v1/models 是 OpenAI 标准)。
+  # 若订阅 key 对该 URL 返回 401/403, 前端自动 fallback 到手动输入。
+  url: "https://api.xiaomimimo.com/v1/models"
+  path: "/v1/models"
+  cache_ttl_hours: 24
+  example_models:
+    - "mimo-v2-pro"
+    - "mimo-v2-flash"
+    - "mimo-v2-omni"

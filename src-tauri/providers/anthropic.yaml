@@ -1,0 +1,39 @@
+id: anthropic
+display_name: "Anthropic"
+icon: anthropic
+description: "Anthropic 官方 API（按量付费）"
+homepage: "https://www.anthropic.com"
+docs_url: "https://docs.anthropic.com"
+api_key_url: "https://console.anthropic.com/settings/keys"
+
+compatibility: verified
+
+endpoints:
+  - id: api_paygo
+    label: "官方 · 按量付费 API"
+    description: "api.anthropic.com，使用控制台生成的 API Key 直接付费"
+    base_url: "https://api.anthropic.com"
+    messages_path: "/v1/messages"
+    region: global
+    billing: pay_as_you_go
+
+default_endpoint: api_paygo
+
+auth:
+  type: api_key
+  header_name: "x-api-key"
+  header_format: raw
+
+required_headers:
+  anthropic-version: "2023-06-01"
+
+forward_headers: []
+
+model_discovery:
+  enabled: true
+  path: "/v1/models"
+  cache_ttl_hours: 24
+  example_models:
+    - "claude-opus-4-7"
+    - "claude-sonnet-4-6"
+    - "claude-haiku-4-5"

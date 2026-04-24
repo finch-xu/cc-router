@@ -1,0 +1,51 @@
+id: moonshot
+display_name: "Moonshot Kimi"
+icon: moonshot
+description: "Moonshot AI 官方 Anthropic 兼容端点"
+homepage: "https://www.moonshot.cn"
+docs_url: "https://platform.moonshot.cn/docs"
+api_key_url: "https://platform.moonshot.cn/console/api-keys"
+
+compatibility: verified
+
+endpoints:
+  - id: cn_endpoint
+    label: "国内版 · 按量付费 API"
+    description: "Moonshot 国内 Anthropic 兼容端点"
+    base_url: "https://api.moonshot.cn/anthropic"
+    messages_path: "/v1/messages"
+    region: china
+    billing: pay_as_you_go
+
+  - id: global_endpoint
+    label: "国际版 · 按量付费 API"
+    description: "Moonshot 国际 Anthropic 兼容端点"
+    base_url: "https://api.moonshot.ai/anthropic"
+    messages_path: "/v1/messages"
+    region: global
+    billing: pay_as_you_go
+
+default_endpoint: cn_endpoint
+
+auth:
+  type: api_key
+  header_name: "Authorization"
+  header_format: bearer
+
+required_headers:
+  anthropic-version: "2023-06-01"
+
+forward_headers: []
+
+model_discovery:
+  enabled: true
+  # Moonshot 的 /models 在主站 /v1/models, 不在 /anthropic 下
+  url: "https://api.moonshot.cn/v1/models"
+  path: "/v1/models"
+  cache_ttl_hours: 24
+  example_models:
+    - "kimi-k2-turbo-preview"
+    - "kimi-latest"
+    - "moonshot-v1-8k"
+    - "moonshot-v1-32k"
+    - "moonshot-v1-128k"

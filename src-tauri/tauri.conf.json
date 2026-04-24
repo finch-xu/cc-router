@@ -1,0 +1,57 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "cc-router",
+  "version": "0.1.0",
+  "identifier": "com.cc-router.desktop",
+  "build": {
+    "beforeDevCommand": "pnpm dev",
+    "devUrl": "http://localhost:1420",
+    "beforeBuildCommand": "pnpm build",
+    "frontendDist": "../dist"
+  },
+  "app": {
+    "withGlobalTauri": false,
+    "windows": [
+      {
+        "title": "cc-router",
+        "width": 1200,
+        "height": 800,
+        "minWidth": 960,
+        "minHeight": 640,
+        "resizable": true,
+        "fullscreen": false
+      }
+    ],
+    "security": {
+      "csp": null
+    },
+    "trayIcon": {
+      "id": "cc-router-tray",
+      "iconPath": "icons/icon.png",
+      "iconAsTemplate": true,
+      "menuOnLeftClick": false,
+      "tooltip": "cc-router"
+    }
+  },
+  "bundle": {
+    "active": true,
+    "targets": "all",
+    "icon": ["icons/icon.png"],
+    "resources": [
+      "providers/_schema.json",
+      "providers/anthropic.yaml",
+      "providers/zhipu.yaml",
+      "providers/deepseek.yaml",
+      "providers/moonshot.yaml",
+      "providers/minimax.yaml",
+      "providers/xiaomi.yaml",
+      "providers/alibaba.yaml",
+      "migrations/001_init.sql"
+    ],
+    "category": "DeveloperTool",
+    "copyright": "",
+    "shortDescription": "多订阅聚合代理",
+    "longDescription": "将多个大模型订阅的 API Key 聚合成一个 Anthropic 兼容端点，供 Claude Code 调用。"
+  },
+  "plugins": {}
+}

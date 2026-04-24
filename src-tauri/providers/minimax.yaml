@@ -1,0 +1,73 @@
+id: minimax
+display_name: "MiniMax"
+icon: minimax
+description: "MiniMax M2 系列模型"
+homepage: "https://platform.minimax.io"
+docs_url: "https://platform.minimax.io/docs"
+api_key_url: "https://platform.minimax.io/user-center/basic-information/interface-key"
+
+compatibility: partial
+compatibility_notes: |
+  1. 流式响应中可能泄漏 reasoning_content 字段，不影响 Claude Code 主流程。
+  2. MiniMax 未提供 /models 列表接口（/anthropic/models 返回 404），
+     需手动输入模型 ID。常用模型见 example_models。
+
+endpoints:
+  - id: china_coding_plan
+    label: "国内版 · Coding Plan 订阅"
+    description: "订阅制，通过 MiniMax Coding Plan 购买（国内加速）"
+    base_url: "https://api.minimaxi.com/anthropic"
+    messages_path: "/v1/messages"
+    region: china
+    billing: subscription
+
+  - id: global_coding_plan
+    label: "国际版 · Coding Plan 订阅"
+    description: "订阅制，通过 MiniMax Coding Plan 购买"
+    base_url: "https://api.minimax.io/anthropic"
+    messages_path: "/v1/messages"
+    region: global
+    billing: subscription
+
+  - id: china_paygo
+    label: "国内版 · 按量付费 API"
+    description: "国内加速访问"
+    base_url: "https://api.minimaxi.com/anthropic"
+    messages_path: "/v1/messages"
+    region: china
+    billing: pay_as_you_go
+
+  - id: global_paygo
+    label: "国际版 · 按量付费 API"
+    description: "按 token 计费"
+    base_url: "https://api.minimax.io/anthropic"
+    messages_path: "/v1/messages"
+    region: global
+    billing: pay_as_you_go
+
+default_endpoint: china_coding_plan
+
+auth:
+  type: api_key
+  header_name: "Authorization"
+  header_format: bearer
+
+required_headers:
+  anthropic-version: "2023-06-01"
+
+forward_headers: []
+
+model_discovery:
+  # MiniMax 未提供公开的 /models 接口 (/anthropic/models 返回 404), 只能手动输入
+  enabled: false
+  path: "/v1/models"
+  cache_ttl_hours: 24
+  # 来源: https://platform.minimax.io/docs/guides/models-intro (2026-04 核对)
+  example_models:
+    - "MiniMax-M2.7"
+    - "MiniMax-M2.7-highspeed"
+    - "MiniMax-M2.5"
+    - "MiniMax-M2.5-highspeed"
+    - "MiniMax-M2.1"
+    - "MiniMax-M2.1-highspeed"
+    - "MiniMax-M2"

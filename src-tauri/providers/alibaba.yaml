@@ -1,0 +1,72 @@
+id: alibaba
+display_name: "阿里云百炼"
+icon: alibaba
+description: "阿里云 Model Studio（DashScope）· Anthropic 兼容端点"
+homepage: "https://bailian.console.aliyun.com"
+docs_url: "https://help.aliyun.com/zh/model-studio/anthropic-api-messages"
+api_key_url: "https://bailian.console.aliyun.com/?apiKey=1"
+
+compatibility: verified
+
+endpoints:
+  - id: token_plan_team_beijing
+    label: "国内版 · Token Plan 团队版"
+    description: "团队版 token plan 订阅"
+    base_url: "https://token-plan.cn-beijing.maas.aliyuncs.com/apps/anthropic"
+    messages_path: "/v1/messages"
+    region: china
+    billing: subscription
+
+  - id: dashscope_beijing
+    label: "国内版 · 按量付费 API"
+    description: "国内访问, 延迟低"
+    base_url: "https://dashscope.aliyuncs.com/apps/anthropic"
+    messages_path: "/v1/messages"
+    region: china
+    billing: pay_as_you_go
+
+  - id: dashscope_singapore
+    label: "国际版 · 按量付费 API · 新加坡"
+    description: "国际用户推荐"
+    base_url: "https://dashscope-intl.aliyuncs.com/apps/anthropic"
+    messages_path: "/v1/messages"
+    region: global
+    billing: pay_as_you_go
+
+  - id: coding_plan
+    label: "国内版 · Coding Plan 订阅"
+    description: "旧订阅"
+    base_url: "https://coding.dashscope.aliyuncs.com/apps/anthropic"
+    messages_path: "/v1/messages"
+    region: china
+    billing: subscription
+
+default_endpoint: token_plan_team_beijing
+
+auth:
+  type: api_key
+  header_name: "Authorization"
+  # 官方 Anthropic 兼容端点同时支持 x-api-key 和 Authorization: Bearer
+  # 选 bearer 与其他第三方厂商 (DeepSeek / 智谱 / Moonshot / 小米) 保持一致
+  header_format: bearer
+
+required_headers:
+  anthropic-version: "2023-06-01"
+
+forward_headers: []
+
+model_discovery:
+  enabled: true
+  # 按用户指定的路径; 若上游不支持则前端自动 fallback 到手动输入
+  path: "/v1/models"
+  cache_ttl_hours: 24
+  # 来源: https://help.aliyun.com/zh/model-studio/anthropic-api-messages (2026-04 核对)
+  example_models:
+    - "qwen3.6-plus"
+    - "qwen3-max"
+    - "qwen3.6-max-preview"
+    - "qwen-plus"
+    - "qwen-flash"
+    - "qwen-turbo"
+    - "qwen3-coder-plus"
+    - "qwen3-coder-flash"

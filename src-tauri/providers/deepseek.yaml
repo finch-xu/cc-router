@@ -1,0 +1,41 @@
+id: deepseek
+display_name: "DeepSeek"
+icon: deepseek
+description: "DeepSeek 官方 Anthropic 兼容端点"
+homepage: "https://www.deepseek.com"
+docs_url: "https://api-docs.deepseek.com/zh-cn/guides/anthropic_api"
+api_key_url: "https://platform.deepseek.com/api_keys"
+
+compatibility: verified
+
+endpoints:
+  - id: anthropic_endpoint
+    label: "国内版 · 按量付费 API"
+    description: "DeepSeek 官方提供的 Anthropic Messages 兼容端点"
+    base_url: "https://api.deepseek.com/anthropic"
+    messages_path: "/v1/messages"
+    region: global
+    billing: pay_as_you_go
+
+default_endpoint: anthropic_endpoint
+
+auth:
+  type: api_key
+  header_name: "Authorization"
+  header_format: bearer
+
+required_headers:
+  anthropic-version: "2023-06-01"
+
+forward_headers: []
+
+model_discovery:
+  enabled: true
+  # DeepSeek 的 /models 接口位于主站根目录, 不在 Anthropic 兼容端点下
+  # 参考: https://api-docs.deepseek.com/zh-cn/api/list-models
+  url: "https://api.deepseek.com/models"
+  path: "/v1/models"
+  cache_ttl_hours: 24
+  example_models:
+    - "deepseek-chat"
+    - "deepseek-reasoner"

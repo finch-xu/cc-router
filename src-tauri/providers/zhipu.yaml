@@ -1,0 +1,49 @@
+id: zhipu
+display_name: "智谱 GLM"
+icon: zhipu
+description: "智谱 AI 官方 Anthropic 兼容端点"
+homepage: "https://open.bigmodel.cn"
+docs_url: "https://open.bigmodel.cn/dev/api"
+api_key_url: "https://open.bigmodel.cn/usercenter/apikeys"
+
+compatibility: verified
+
+endpoints:
+  - id: cn_endpoint_coding_plan
+    label: "国内版 · Coding Plan 订阅"
+    description: "GLM Coding Plan"
+    base_url: "https://open.bigmodel.cn/api/anthropic"
+    messages_path: "/v1/messages"
+    region: china
+    billing: subscription
+  
+  - id: cn_endpoint
+    label: "国内版 · 按量付费 API"
+    description: "智谱官方提供的 Anthropic Messages 兼容端点"
+    base_url: "https://open.bigmodel.cn/api/anthropic"
+    messages_path: "/v1/messages"
+    region: china
+    billing: pay_as_you_go
+  
+
+default_endpoint: cn_endpoint_coding_plan
+
+auth:
+  type: api_key
+  header_name: "Authorization"
+  header_format: bearer
+
+required_headers:
+  anthropic-version: "2023-06-01"
+
+forward_headers: []
+
+model_discovery:
+  enabled: true
+  # 智谱的 /models 接口在 paas/v4 路径下, 不在 Anthropic 兼容端点下
+  url: "https://open.bigmodel.cn/api/paas/v4/models"
+  path: "/v1/models"
+  cache_ttl_hours: 24
+  example_models:
+    - "glm-4.6"
+    - "glm-4-plus"

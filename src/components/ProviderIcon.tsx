@@ -1,0 +1,61 @@
+import type { ComponentType } from "react";
+import { Bot } from "lucide-react";
+import Anthropic from "@lobehub/icons/es/Anthropic";
+import DeepSeek from "@lobehub/icons/es/DeepSeek";
+import Moonshot from "@lobehub/icons/es/Moonshot";
+import Zhipu from "@lobehub/icons/es/Zhipu";
+import Minimax from "@lobehub/icons/es/Minimax";
+import XiaomiMiMo from "@lobehub/icons/es/XiaomiMiMo";
+import AlibabaCloud from "@lobehub/icons/es/AlibabaCloud";
+import { cn } from "@/lib/utils";
+
+type IconVariant = ComponentType<{ size?: number | string }>;
+
+type BrandIcon = IconVariant & {
+  Color?: IconVariant;
+  colorPrimary: string;
+};
+
+const BRAND_MAP: Record<string, BrandIcon> = {
+  anthropic: Anthropic as unknown as BrandIcon,
+  deepseek: DeepSeek as unknown as BrandIcon,
+  moonshot: Moonshot as unknown as BrandIcon,
+  zhipu: Zhipu as unknown as BrandIcon,
+  minimax: Minimax as unknown as BrandIcon,
+  xiaomi: XiaomiMiMo as unknown as BrandIcon,
+  alibaba: AlibabaCloud as unknown as BrandIcon,
+};
+
+interface Props {
+  iconId?: string | null;
+  size?: number;
+  className?: string;
+}
+
+export function ProviderIcon({ iconId, size = 20, className }: Props) {
+  const Brand = iconId ? BRAND_MAP[iconId] : undefined;
+  if (!Brand) {
+    return (
+      <Bot
+        className={cn("text-muted-foreground shrink-0", className)}
+        style={{ width: size, height: size }}
+      />
+    );
+  }
+  if (Brand.Color) {
+    return (
+      <span className={cn("inline-flex shrink-0", className)} aria-hidden>
+        <Brand.Color size={size} />
+      </span>
+    );
+  }
+  return (
+    <span
+      className={cn("inline-flex shrink-0", className)}
+      style={{ color: "currentColor" }}
+      aria-hidden
+    >
+      <Brand size={size} />
+    </span>
+  );
+}

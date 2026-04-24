@@ -1,0 +1,153 @@
+//! cc-router 桌面 app 入口。
+//!
+//! 这里的 `run()` 是 Tauri 生命周期起点；桌面壳和代理服务、SQLite、Provider 加载
+//! 全部在 `setup()` 中完成初始化。模块粒度见 plan §2。
+
+pub mod commands;
+pub mod db;
+pub mod error;
+pub mod observability;
+pub mod provider;
+pub mod proxy;
+pub mod settings;
+pub mod state;
+pub mod subscription;
+pub mod tray;
+pub mod virtual_model;
+
+use std::sync::Arc;
+
+use tauri::Manager;
+use tokio::sync::{mpsc, RwLock};
+use tracing::{error, info};
+
+use crate::state::AppState;
+
+#[cfg_attr(mobile, tauri::mobile_entry_point)]
+pub fn run() {
+    tauri::Builder::default()
+        .plugin(tauri_plugin_shell::init())
+        .plugin(tauri_plugin_dialog::init())
+        .plugin(tauri_plugin_clipboard_manager::init())
+        .setup(|app| {
+            // 日志初始化
+            let app_data_dir = app
+                .path()
+                .app_data_dir()
+                .expect("无法解析 app_data_dir");
+            observability::logger::init(&app_data_dir)?;
+            info!(?app_data_dir, "cc-router starting");
+
+            // 解析 provider YAML 资源目录
+            let resource_dir = app
+                .path()
+                .resource_dir()
+                .expect("无法解析 resource_dir");
+
+            // 异步初始化：数据库 + providers + 订阅运行时 + 代理
+            let handle = app.handle().clone();
+            tauri::async_runtime::block_on(async move {
+                match bootstrap(handle.clone(), app_data_dir, resource_dir).await {
+                    Ok(state) => {
+                        handle.manage(state);
+                    }
+                    Err(e) => {
+                        error!(?e, "bootstrap failed");
+                        std::process::exit(1);
+                    }
+                }
+            });
+
+            // 系统托盘
+            if let Err(e) = tray::setup(app) {
+                error!(?e, "tray setup failed");
+            }
+
+            Ok(())
+        })
+        .on_window_event(tray::on_window_event)
+        .invoke_handler(tauri::generate_handler![
+            commands::providers::list_providers,
+            commands::subscriptions::list_subscriptions,
+            commands::subscriptions::get_subscription,
+            commands::subscriptions::create_subscription,
+            commands::subscriptions::update_subscription,
+            commands::subscriptions::update_subscription_key,
+            commands::subscriptions::delete_subscription,
+            commands::subscriptions::set_subscription_enabled,
+            commands::subscriptions::test_connection,
+            commands::subscriptions::refresh_model_list,
+            commands::virtual_models::list_virtual_models,
+            commands::virtual_models::update_virtual_model,
+            commands::requests::list_requests,
+            commands::settings::get_settings,
+            commands::settings::update_settings,
+            commands::proxy::proxy_status,
+            commands::proxy::env_snippet,
+            commands::onboarding::get_onboarding_state,
+            commands::onboarding::complete_onboarding,
+            commands::app::factory_reset,
+        ])
+        .run(tauri::generate_context!())
+        .expect("运行 cc-router 时发生错误");
+}
+
+async fn bootstrap(
+    handle: tauri::AppHandle,
+    app_data_dir: std::path::PathBuf,
+    resource_dir: std::path::PathBuf,
+) -> anyhow::Result<AppState> {
+    // 1. DB
+    let db_path = app_data_dir.join("config.db");
+    let pool = db::init_pool(&db_path).await?;
+    db::run_migrations(&pool, &resource_dir).await?;
+
+    // 2. Provider YAML 加载
+    let providers = provider::loader::load_all(&resource_dir)?;
+    info!(provider_count = providers.len(), "providers loaded");
+
+    // 3. Settings
+    let settings = settings::load_or_default(&app_data_dir).await?;
+
+    // 4. 订阅运行时状态初始化
+    let subscription_map = subscription::store::load_runtime(&pool).await?;
+
+    // 5. 虚拟模型绑定
+    let virtual_models = virtual_model::store::load_all(&pool).await?;
+
+    // 6. 请求日志 channel
+    let (log_tx, log_rx) = mpsc::channel(1024);
+    let log_pool = pool.clone();
+    let log_handle = handle.clone();
+    tauri::async_runtime::spawn(async move {
+        observability::request_log::run_consumer(log_pool, log_rx, log_handle).await;
+    });
+
+    // 7. HTTP client 单例
+    let http_client = reqwest::Client::builder()
+        .connect_timeout(std::time::Duration::from_secs(10))
+        .user_agent(concat!("cc-router/", env!("CARGO_PKG_VERSION")))
+        .build()?;
+
+    let state = AppState {
+        db: pool,
+        providers: Arc::new(providers),
+        subscriptions: Arc::new(RwLock::new(subscription_map)),
+        virtual_models: Arc::new(RwLock::new(virtual_models)),
+        settings: Arc::new(RwLock::new(settings)),
+        proxy_port: Arc::new(RwLock::new(0)),
+        request_log_tx: log_tx,
+        http_client,
+        app_handle: handle.clone(),
+    };
+
+    // 8. 启动代理
+    let proxy_state = state.clone();
+    tauri::async_runtime::spawn(async move {
+        if let Err(e) = proxy::server::start(proxy_state).await {
+            error!(?e, "proxy server stopped");
+        }
+    });
+
+    Ok(state)
+}
