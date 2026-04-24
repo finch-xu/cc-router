@@ -3,9 +3,9 @@ import { open as openShell } from "@tauri-apps/plugin-shell";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import logoUrl from "@/assets/logo.png";
+import { version as VERSION } from "../../package.json";
 
 const REPO_URL = "https://github.com/finch-xu/cc-router";
-const VERSION = "0.1.0";
 
 export function AboutPage() {
   return (

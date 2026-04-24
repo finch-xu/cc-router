@@ -1,7 +1,7 @@
 {
   "name": "cc-router",
   "private": true,
-  "version": "0.1.0",
+  "version": "0.2.0",
   "type": "module",
   "scripts": {
     "dev": "vite",
@@ -9,7 +9,8 @@
     "preview": "vite preview",
     "tauri": "tauri",
     "tauri:dev": "tauri dev",
-    "tauri:build": "tauri build"
+    "tauri:build": "tauri build",
+    "version:set": "node scripts/set-version.mjs"
   },
   "dependencies": {
     "@dnd-kit/core": "^6.1.0",
