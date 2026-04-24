@@ -47,7 +47,6 @@ jobs:
       - name: Build, sign & notarize
         uses: tauri-apps/tauri-action@v0
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
           APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
           APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
@@ -55,16 +54,35 @@ jobs:
           APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
           APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
         with:
-          tagName: ${{ env.RELEASE_TAG }}
-          releaseName: cc-router ${{ env.RELEASE_TAG }}
-          releaseBody: |
-            自动构建产物：
-            - macOS (Apple Silicon): .dmg / .app.tar.gz
-            - Windows x64: .msi / .exe
-          releaseDraft: true
-          prerelease: false
-          includeUpdaterJson: false
           args: --target aarch64-apple-darwin
+
+      - name: Rename artifacts with platform suffix
+        shell: bash
+        run: |
+          set -euo pipefail
+          bundle_dir="src-tauri/target/aarch64-apple-darwin/release/bundle"
+          shopt -s nullglob
+          for f in "$bundle_dir"/dmg/*_aarch64.dmg; do
+            mv -v "$f" "${f/_aarch64.dmg/_macOS-arm64.dmg}"
+          done
+          for f in "$bundle_dir"/macos/*.app.tar.gz; do
+            base="$(basename "$f" .app.tar.gz)"
+            mv -v "$f" "$bundle_dir/macos/${base}_macOS-arm64.app.tar.gz"
+          done
+
+      - name: Upload to draft release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ env.RELEASE_TAG }}
+          name: cc-router ${{ env.RELEASE_TAG }}
+          body: |
+            自动构建产物：
+            - macOS (Apple Silicon): `cc-router_<version>_macOS-arm64.dmg`
+            - Windows x64: `cc-router_<version>_windows-x64.msi` / `cc-router_<version>_windows-x64-setup.exe`
+          draft: true
+          files: |
+            src-tauri/target/aarch64-apple-darwin/release/bundle/dmg/*.dmg
+            src-tauri/target/aarch64-apple-darwin/release/bundle/macos/*.app.tar.gz
 
   build-windows:
     name: Build Windows x64
@@ -102,15 +120,40 @@ jobs:
 
       - name: Build
         uses: tauri-apps/tauri-action@v0
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
-          tagName: ${{ env.RELEASE_TAG }}
-          releaseName: cc-router ${{ env.RELEASE_TAG }}
-          releaseDraft: true
-          prerelease: false
-          includeUpdaterJson: false
           args: --target x86_64-pc-windows-msvc
+
+      - name: Rename artifacts with platform suffix
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $bundleDir = "src-tauri/target/x86_64-pc-windows-msvc/release/bundle"
+
+          Get-ChildItem -Path (Join-Path $bundleDir 'msi') -Filter '*_x64_en-US.msi' -ErrorAction SilentlyContinue | ForEach-Object {
+            $newName = $_.Name -replace '_x64_en-US\.msi$', '_windows-x64.msi'
+            Write-Host "Renaming $($_.Name) -> $newName"
+            Rename-Item -LiteralPath $_.FullName -NewName $newName
+          }
+
+          Get-ChildItem -Path (Join-Path $bundleDir 'nsis') -Filter '*_x64-setup.exe' -ErrorAction SilentlyContinue | ForEach-Object {
+            $newName = $_.Name -replace '_x64-setup\.exe$', '_windows-x64-setup.exe'
+            Write-Host "Renaming $($_.Name) -> $newName"
+            Rename-Item -LiteralPath $_.FullName -NewName $newName
+          }
+
+      - name: Upload to draft release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ env.RELEASE_TAG }}
+          name: cc-router ${{ env.RELEASE_TAG }}
+          body: |
+            自动构建产物：
+            - macOS (Apple Silicon): `cc-router_<version>_macOS-arm64.dmg`
+            - Windows x64: `cc-router_<version>_windows-x64.msi` / `cc-router_<version>_windows-x64-setup.exe`
+          draft: true
+          files: |
+            src-tauri/target/x86_64-pc-windows-msvc/release/bundle/msi/*.msi
+            src-tauri/target/x86_64-pc-windows-msvc/release/bundle/nsis/*.exe
 
   publish:
     name: Publish release
