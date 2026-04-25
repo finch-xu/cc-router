@@ -21,7 +21,9 @@
 订阅买多了 Claude Code 却只能用一家？cc-router 把 DeepSeek、Qwen、Kimi、MiMo、MiniMax、GLM、Claude 的 Token Plan、Coding Plan、API 额度合并成一个虚拟 Plan，任意搭配 opus / sonnet / haiku 三槽位，按顺序或轮询调度，限流、失败自动切换——把每一份额度榨到最后一个 token。
 
 <p align="center">
-  <img src="assets/screenshot.png" alt="cc-router 虚拟模型配置页截图" width="900" />
+  <img src="assets/screenshot-models.png" alt="cc-router 虚拟模型配置页截图" width="900" />
+  <br />
+  <img src="assets/screenshot-logs.png" alt="cc-router 请求日志页截图" width="900" />
 </p>
 
 ## 技术栈

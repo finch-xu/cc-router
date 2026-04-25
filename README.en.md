@@ -21,7 +21,9 @@
 Stacked subscriptions across multiple LLM vendors, but Claude Code can only point at one? cc-router merges the Token Plans, Coding Plans, and pay-as-you-go APIs of DeepSeek, Qwen, Kimi, MiMo, MiniMax, GLM, and Claude into a single virtual plan — mix and match across the opus / sonnet / haiku slots, dispatch sequentially or round-robin, and auto-switch on rate limits or failures. Every last token squeezed out of every subscription.
 
 <p align="center">
-  <img src="assets/screenshot.png" alt="cc-router virtual model configuration page" width="900" />
+  <img src="assets/screenshot-models.png" alt="cc-router virtual model configuration page" width="900" />
+  <br />
+  <img src="assets/screenshot-logs.png" alt="cc-router request logs page" width="900" />
 </p>
 
 ## Tech Stack
