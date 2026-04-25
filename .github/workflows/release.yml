@@ -8,6 +8,10 @@ on:
 permissions:
   contents: write
 
+concurrency:
+  group: release-${{ github.ref_name }}
+  cancel-in-progress: false
+
 jobs:
   build-macos:
     name: Build macOS (Apple Silicon)
@@ -44,20 +48,31 @@ jobs:
       - name: Install frontend deps
         run: pnpm install --frozen-lockfile
 
-      - name: Verify Tauri signing secrets are present
+      - name: Verify signing & notarization secrets are present
         env:
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
+          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+          APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
         run: |
-          if [ -z "${TAURI_SIGNING_PRIVATE_KEY:-}" ]; then
-            echo "::error::TAURI_SIGNING_PRIVATE_KEY secret is empty - .sig files will not be generated. Configure it in repo Settings > Secrets and variables > Actions."
+          missing=0
+          for var in TAURI_SIGNING_PRIVATE_KEY TAURI_SIGNING_PRIVATE_KEY_PASSWORD \
+                     APPLE_CERTIFICATE APPLE_CERTIFICATE_PASSWORD \
+                     APPLE_SIGNING_IDENTITY APPLE_ID APPLE_PASSWORD APPLE_TEAM_ID; do
+            if [ -z "${!var:-}" ]; then
+              echo "::error::$var secret is empty — Apple signing/notarization or .sig generation will silently fail."
+              missing=1
+            fi
+          done
+          if [ "$missing" -eq 1 ]; then
+            echo "::error::Configure missing secrets in repo Settings > Environments > APPLE_CERTIFICATE."
             exit 1
           fi
-          if [ -z "${TAURI_SIGNING_PRIVATE_KEY_PASSWORD:-}" ]; then
-            echo "::error::TAURI_SIGNING_PRIVATE_KEY_PASSWORD secret is empty - bundle signing will fail."
-            exit 1
-          fi
-          echo "TAURI signing secrets present."
+          echo "All 8 signing & notarization secrets present."
 
       - name: Build, sign & notarize
         uses: tauri-apps/tauri-action@v0
@@ -125,6 +140,7 @@ jobs:
   build-windows:
     name: Build Windows x64
     runs-on: windows-latest
+    environment: APPLE_CERTIFICATE
     env:
       RELEASE_TAG: ${{ github.ref_name }}
     steps:
@@ -243,6 +259,7 @@ jobs:
   build-linux:
     name: Build Linux x64
     runs-on: ubuntu-22.04
+    environment: APPLE_CERTIFICATE
     env:
       RELEASE_TAG: ${{ github.ref_name }}
     steps:
