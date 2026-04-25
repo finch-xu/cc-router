@@ -219,29 +219,24 @@ jobs:
             Rename-Item -LiteralPath $_.FullName -NewName $newName
           }
 
+          # NSIS .exe 是 updater 在 Windows 上下载的产物 (Tauri 2 直接对 .exe 签名,
+          # 不再生成 v1 时代的 .nsis.zip)。.exe 改名时跟随的 .exe.sig 一起改。
           Get-ChildItem -Path (Join-Path $bundleDir 'nsis') -Filter '*_x64-setup.exe' -ErrorAction SilentlyContinue | ForEach-Object {
+            $oldFull = $_.FullName
+            $oldSig = "$oldFull.sig"
             $newName = $_.Name -replace '_x64-setup\.exe$', '_windows-x64-setup.exe'
             Write-Host "Renaming $($_.Name) -> $newName"
-            Rename-Item -LiteralPath $_.FullName -NewName $newName
-          }
-
-          # NSIS .nsis.zip: updater 实际下载的产物,带 .sig
-          Get-ChildItem -Path (Join-Path $bundleDir 'nsis') -Filter '*_x64-setup.nsis.zip' -ErrorAction SilentlyContinue | ForEach-Object {
-            $newName = $_.Name -replace '_x64-setup\.nsis\.zip$', '_windows-x64-setup.nsis.zip'
-            Write-Host "Renaming $($_.Name) -> $newName"
-            Rename-Item -LiteralPath $_.FullName -NewName $newName
-          }
-          Get-ChildItem -Path (Join-Path $bundleDir 'nsis') -Filter '*_x64-setup.nsis.zip.sig' -ErrorAction SilentlyContinue | ForEach-Object {
-            $newName = $_.Name -replace '_x64-setup\.nsis\.zip\.sig$', '_windows-x64-setup.nsis.zip.sig'
-            Write-Host "Renaming $($_.Name) -> $newName"
-            Rename-Item -LiteralPath $_.FullName -NewName $newName
+            Rename-Item -LiteralPath $oldFull -NewName $newName
+            if (Test-Path $oldSig) {
+              Rename-Item -LiteralPath $oldSig -NewName "$newName.sig"
+            }
           }
 
       - name: Upload .sig artifact (for manifest job)
         uses: actions/upload-artifact@v4
         with:
           name: sig-windows
-          path: src-tauri/target/x86_64-pc-windows-msvc/release/bundle/nsis/*.nsis.zip.sig
+          path: src-tauri/target/x86_64-pc-windows-msvc/release/bundle/nsis/*.exe.sig
           if-no-files-found: error
           retention-days: 1
 
@@ -253,8 +248,7 @@ jobs:
           files: |
             src-tauri/target/x86_64-pc-windows-msvc/release/bundle/msi/*.msi
             src-tauri/target/x86_64-pc-windows-msvc/release/bundle/nsis/*.exe
-            src-tauri/target/x86_64-pc-windows-msvc/release/bundle/nsis/*.nsis.zip
-            src-tauri/target/x86_64-pc-windows-msvc/release/bundle/nsis/*.nsis.zip.sig
+            src-tauri/target/x86_64-pc-windows-msvc/release/bundle/nsis/*.exe.sig
 
   build-linux:
     name: Build Linux x64

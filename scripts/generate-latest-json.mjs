@@ -49,7 +49,8 @@ for (const sigName of files) {
   let key = null;
   if (baseName.endsWith(".app.tar.gz")) {
     key = "darwin-aarch64";
-  } else if (baseName.endsWith(".nsis.zip")) {
+  } else if (baseName.endsWith(".exe")) {
+    // Tauri 2 直接对 NSIS .exe installer 签名,不再生成 v1 的 .nsis.zip
     key = "windows-x86_64";
   } else if (baseName.endsWith(".AppImage")) {
     key = "linux-x86_64";
