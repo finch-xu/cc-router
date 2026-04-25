@@ -43,3 +43,17 @@ pub async fn save(app_data_dir: &Path, settings: &Settings) -> AppResult<()> {
     fs::write(path, raw).await?;
     Ok(())
 }
+
+pub fn generate_token() -> String {
+    uuid::Uuid::new_v4().simple().to_string()
+}
+
+/// 首次启动或老用户升级到加 token 字段的版本时,auth_token 为空。
+/// 在这里生成一个 32 字符 hex token 并立即持久化,这样下次启动会读到同一个 token。
+pub async fn ensure_auth_token(app_data_dir: &Path, settings: &mut Settings) -> AppResult<()> {
+    if settings.auth_token.is_empty() {
+        settings.auth_token = generate_token();
+        save(app_data_dir, settings).await?;
+    }
+    Ok(())
+}

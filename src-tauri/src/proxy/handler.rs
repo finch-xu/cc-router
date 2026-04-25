@@ -23,22 +23,22 @@ pub async fn messages(
     let parsed: serde_json::Value = match serde_json::from_slice(&body) {
         Ok(v) => v,
         Err(e) => {
-            return (
+            return error_response(
                 StatusCode::BAD_REQUEST,
-                Json(error_body("invalid_request_error", &format!("JSON 解析失败: {e}"))),
-            )
-                .into_response();
+                "invalid_request_error",
+                &format!("JSON 解析失败: {e}"),
+            );
         }
     };
 
     let model = match parsed.get("model").and_then(|v| v.as_str()) {
         Some(m) => m.to_string(),
         None => {
-            return (
+            return error_response(
                 StatusCode::BAD_REQUEST,
-                Json(error_body("invalid_request_error", "缺少 model 字段")),
-            )
-                .into_response();
+                "invalid_request_error",
+                "缺少 model 字段",
+            );
         }
     };
 
@@ -53,11 +53,7 @@ pub async fn messages(
         Ok(resp) => resp,
         Err(e) => {
             error!(?e, "pipeline dispatch failed");
-            (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(error_body("api_error", &e.to_string())),
-            )
-                .into_response()
+            error_response(StatusCode::INTERNAL_SERVER_ERROR, "api_error", &e.to_string())
         }
     }
 }
@@ -70,4 +66,8 @@ pub fn error_body(kind: &str, message: &str) -> serde_json::Value {
             "message": message,
         }
     })
+}
+
+pub fn error_response(status: StatusCode, kind: &str, message: &str) -> Response {
+    (status, Json(error_body(kind, message))).into_response()
 }

@@ -7,6 +7,9 @@ import Zhipu from "@lobehub/icons/es/Zhipu";
 import Minimax from "@lobehub/icons/es/Minimax";
 import XiaomiMiMo from "@lobehub/icons/es/XiaomiMiMo";
 import AlibabaCloud from "@lobehub/icons/es/AlibabaCloud";
+import Volcengine from "@lobehub/icons/es/Volcengine";
+import OpenRouter from "@lobehub/icons/es/OpenRouter";
+import TencentCloud from "@lobehub/icons/es/TencentCloud";
 import { cn } from "@/lib/utils";
 
 type IconVariant = ComponentType<{ size?: number | string }>;
@@ -24,6 +27,9 @@ const BRAND_MAP: Record<string, BrandIcon> = {
   minimax: Minimax as unknown as BrandIcon,
   xiaomi: XiaomiMiMo as unknown as BrandIcon,
   alibaba: AlibabaCloud as unknown as BrandIcon,
+  volcengine: Volcengine as unknown as BrandIcon,
+  openrouter: OpenRouter as unknown as BrandIcon,
+  tencent: TencentCloud as unknown as BrandIcon,
 };
 
 interface Props {

@@ -127,6 +127,14 @@ export interface Settings {
   autostart: boolean;
   log_retention_days: number;
   db_size_limit_mb: number;
+  /** true: 校验 token;false: 任何请求放行 */
+  auth_enabled: boolean;
+  /** 当前 token 明文,通过 generate_new_token 命令重新生成 */
+  auth_token: string;
+  /** true: 响应附加 CORS 头;false: 浏览器跨域调用会被拦截 */
+  cors_enabled: boolean;
+  /** Access-Control-Allow-Origin 值,默认 "*" */
+  cors_allow_origin: string;
 }
 
 export interface SettingsPatch {
@@ -135,6 +143,10 @@ export interface SettingsPatch {
   autostart?: boolean;
   log_retention_days?: number;
   db_size_limit_mb?: number;
+  auth_enabled?: boolean;
+  cors_enabled?: boolean;
+  cors_allow_origin?: string;
+  // 注意: auth_token 不在 patch 里,必须通过 generateNewToken() 改
 }
 
 export interface ProxyStatus {

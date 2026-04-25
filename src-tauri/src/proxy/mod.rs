@@ -1,4 +1,5 @@
 pub mod handler;
+pub mod middleware;
 pub mod overloaded;
 pub mod pipeline;
 pub mod retry;

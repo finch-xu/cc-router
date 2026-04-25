@@ -1,0 +1,68 @@
+# OpenRouter provider
+#
+# 官方文档（核对 2026-04）:
+#   - Anthropic Messages API: https://openrouter.ai/docs/api/api-reference/anthropic-messages/create-messages
+#       接口: https://openrouter.ai/api/v1/messages
+#       请求体格式与 Anthropic 官方一致,stream: true 受支持。
+#   - 鉴权: Authorization: Bearer <OPENROUTER_API_KEY>
+#       Key 申请: https://openrouter.ai/keys
+#   - /v1/models 公开接口: https://openrouter.ai/api/v1/models
+#       与 messages 同域同前缀,本 provider 直接启用动态 model_discovery。
+#   - 模型 ID 格式: <vendor>/<model-name>,譬如:
+#       anthropic/claude-sonnet-4-5、openai/gpt-5、google/gemini-2.5-pro、
+#       deepseek/deepseek-chat-v3.1、x-ai/grok-4、meta-llama/llama-4-maverick
+#       完整列表见 https://openrouter.ai/models (500+ 模型)
+
+id: openrouter
+display_name: "OpenRouter"
+icon: openrouter
+description: "OpenRouter 模型路由聚合平台，覆盖 Anthropic / OpenAI / Google / Meta / DeepSeek 等数百款模型"
+homepage: "https://openrouter.ai"
+docs_url: "https://openrouter.ai/docs/api/api-reference/anthropic-messages/create-messages"
+api_key_url: "https://openrouter.ai/keys"
+
+compatibility: untested
+compatibility_notes: |
+  1. OpenRouter 提供 Anthropic Messages API 兼容端点 /api/v1/messages。
+  2. 模型 ID 必须带 vendor 前缀，格式为 "<vendor>/<model>"，
+     譬如 anthropic/claude-sonnet-4-5、openai/gpt-5、google/gemini-2.5-pro。
+  3. 平台 /v1/models 列表非常长（500+ 模型），动态发现可用，
+     但实际选用建议在 OpenRouter 网站确认价格后手动填具体 ID。
+
+endpoints:
+  - id: paygo
+    label: "全球 · 按量付费 API"
+    description: "OpenRouter 唯一端点，按 token 转发到对应底层提供商"
+    base_url: "https://openrouter.ai/api"
+    messages_path: "/v1/messages"
+    region: global
+    billing: pay_as_you_go
+
+default_endpoint: paygo
+
+auth:
+  type: api_key
+  header_name: "Authorization"
+  header_format: bearer
+
+required_headers:
+  anthropic-version: "2023-06-01"
+
+forward_headers: []
+
+model_discovery:
+  # OpenRouter 公开 /v1/models 接口, 与 messages 同域同前缀, 用默认 path 即可
+  enabled: true
+  path: "/v1/models"
+  cache_ttl_hours: 24
+  # 来源: OpenRouter 官网热门模型（2026-04 核对，仅作填写示例）
+  # 排序原则: Claude 系列优先（cc-router 主场景）> 其他主流模型
+  example_models:
+    - "anthropic/claude-sonnet-4-5"
+    - "anthropic/claude-opus-4-1"
+    - "anthropic/claude-haiku-4-5"
+    - "openai/gpt-5"
+    - "google/gemini-2.5-pro"
+    - "deepseek/deepseek-chat-v3.1"
+    - "x-ai/grok-4"
+    - "meta-llama/llama-4-maverick"

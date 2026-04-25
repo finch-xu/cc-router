@@ -22,6 +22,16 @@ export function useUpdateSettings() {
   });
 }
 
+export function useGenerateNewToken() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: () => api.generateNewToken(),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: SETTINGS_KEY });
+    },
+  });
+}
+
 export function useProxyStatus() {
   return useQuery({
     queryKey: PROXY_STATUS_KEY,

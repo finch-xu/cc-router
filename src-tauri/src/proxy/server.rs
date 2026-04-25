@@ -8,7 +8,7 @@ use tokio::net::TcpListener;
 use tracing::{error, info};
 
 use crate::error::{AppError, AppResult};
-use crate::proxy::handler;
+use crate::proxy::{handler, middleware as cc_middleware};
 use crate::state::AppState;
 
 const MAX_PORT_TRIES: u16 = 100;
@@ -31,6 +31,14 @@ pub async fn start(state: AppState) -> AppResult<()> {
     let app = Router::new()
         .route("/v1/messages", post(handler::messages))
         .route("/health", axum::routing::get(handler::health))
+        .layer(axum::middleware::from_fn_with_state(
+            state.clone(),
+            cc_middleware::auth_layer,
+        ))
+        .layer(axum::middleware::from_fn_with_state(
+            state.clone(),
+            cc_middleware::cors_layer,
+        ))
         .with_state(state.clone());
 
     if let Err(e) = axum::serve(listener, app).await {

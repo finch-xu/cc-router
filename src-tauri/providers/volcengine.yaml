@@ -1,0 +1,79 @@
+# 火山引擎方舟 provider
+#
+# 官方文档（核对 2026-04）:
+#   - Coding Plan(订阅) 主文档: https://www.volcengine.com/docs/82379/1928261
+#       接口: https://ark.cn-beijing.volces.com/api/coding
+#       套餐额度仅在此端点扣减;Coding Plan 模式下 minimax-latest / ark-code-latest
+#       等 latest 别名会自动指向当前最新版本。
+#   - 按量付费(Anthropic 兼容) 文档: https://www.volcengine.com/docs/82379/2160841
+#       接口: https://ark.cn-beijing.volces.com/api/compatible
+#       按 token 计费,与 Coding Plan 套餐额度独立。
+#   - 鉴权: Authorization: Bearer <ARK API Key>
+#       两个端点共享同一 ARK API Key,在控制台 → 方舟 → API Key 管理生成:
+#       https://console.volcengine.com/ark/region:ark+cn-beijing/apiKey
+#   - 模型清单: 文档站是 SPA,WebFetch 拿不到详细列表,实际可用模型以控制台为准。
+
+id: volcengine
+display_name: "火山方舟"
+icon: volcengine
+description: "字节跳动火山引擎方舟，聚合豆包自研 + GLM/MiniMax/DeepSeek/Kimi 多家模型"
+homepage: "https://www.volcengine.com/product/ark"
+docs_url: "https://www.volcengine.com/docs/82379/1928261"
+api_key_url: "https://console.volcengine.com/ark/region:ark+cn-beijing/apiKey"
+
+compatibility: untested
+compatibility_notes: |
+  1. 火山方舟未提供 Anthropic 风格的 /v1/models 列表接口，需手动输入模型 ID。
+  2. Coding Plan 与按量付费使用不同 base path：
+     - Coding Plan: /api/coding（套餐额度仅在此端点扣减）
+     - 按量付费: /api/compatible（按 token 计费）
+  3. 两个端点共享同一 ARK API Key，Coding Plan 模式下 minimax-latest / ark-code-latest
+     等"latest 别名"会自动指向当前最新版本。
+
+endpoints:
+  - id: coding_plan
+    label: "国内版 · Coding Plan 订阅"
+    description: "订阅制，套餐额度仅从此端点扣减"
+    base_url: "https://ark.cn-beijing.volces.com/api/coding"
+    messages_path: "/v1/messages"
+    region: china
+    billing: subscription
+
+  - id: paygo
+    label: "国内版 · 按量付费 API"
+    description: "按 token 计费，与 Coding Plan 套餐额度独立"
+    base_url: "https://ark.cn-beijing.volces.com/api/compatible"
+    messages_path: "/v1/messages"
+    region: china
+    billing: pay_as_you_go
+
+default_endpoint: coding_plan
+
+auth:
+  type: api_key
+  header_name: "Authorization"
+  header_format: bearer
+
+required_headers:
+  anthropic-version: "2023-06-01"
+
+forward_headers: []
+
+model_discovery:
+  # 火山方舟公开文档未提供 Anthropic 风格 /v1/models 接口, 只能手动输入
+  enabled: false
+  path: "/v1/models"
+  cache_ttl_hours: 24
+  # 来源: 用户提供的 Coding Plan 模型清单（2026-04 核对）
+  # 排序原则: doubao 自研系列 > 平台聚合 latest 别名 > 各家具体版本
+  example_models:
+    - "doubao-seed-2.0-code"
+    - "doubao-seed-2.0-pro"
+    - "doubao-seed-2.0-lite"
+    - "doubao-seed-code"
+    - "minimax-latest"
+    - "glm-5.1"
+    - "glm-4.7"
+    - "deepseek-v3.2"
+    - "kimi-k2.6"
+    - "kimi-k2.5"

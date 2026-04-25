@@ -57,6 +57,7 @@ export const api = {
   getSettings: () => invoke<Settings>("get_settings"),
   updateSettings: (patch: SettingsPatch) =>
     invoke<Settings>("update_settings", { patch }),
+  generateNewToken: () => invoke<Settings>("generate_new_token"),
   proxyStatus: () => invoke<ProxyStatus>("proxy_status"),
   envSnippet: () => invoke<string>("env_snippet"),
 

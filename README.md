@@ -93,6 +93,9 @@ pnpm tauri build
 | `minimax` | MiniMax（3 个 endpoint） | partial |
 | `xiaomi` | 小米 MiMo（按量付费 + 3 集群订阅） | untested |
 | `alibaba` | 阿里云百炼（Token Plan 团队版 + 按量付费 2 地域 + 停售的 Coding Plan） | verified |
+| `volcengine` | 火山方舟（Coding Plan 订阅 + 按量付费） | untested |
+| `openrouter` | OpenRouter 聚合平台（500+ 模型路由） | untested |
+| `tencent` | 腾讯云大模型（Token Plan 订阅 + TokenHub 按量付费境内/境外） | untested |
 
 社区可 PR 补充。
 

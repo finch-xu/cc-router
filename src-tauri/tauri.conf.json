@@ -52,6 +52,9 @@
       "providers/minimax.yaml",
       "providers/xiaomi.yaml",
       "providers/alibaba.yaml",
+      "providers/volcengine.yaml",
+      "providers/openrouter.yaml",
+      "providers/tencent.yaml",
       "migrations/001_init.sql"
     ],
     "category": "DeveloperTool",

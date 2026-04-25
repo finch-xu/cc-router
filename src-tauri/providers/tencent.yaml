@@ -1,0 +1,84 @@
+# 腾讯云大模型 provider
+#
+# 官方文档（核对 2026-04）:
+#   - Token Plan(订阅): https://cloud.tencent.com/document/product/1823/130070
+#       接口: https://api.lkeap.cloud.tencent.com/plan/anthropic
+#   - TokenHub(按量付费): https://cloud.tencent.com/document/product/1823/130078
+#       平台名: 大模型服务平台 TokenHub,兼容 OpenAI 与 Anthropic 双协议
+#       鉴权: Authorization: Bearer <API_KEY>
+#       4 个 base URL(主备各 2):
+#         境内主: https://tokenhub.tencentmaas.com
+#         境内备: https://tokenhub.tencentmaas.cn
+#         境外主: https://tokenhub-intl.tencentmaas.com
+#         境外备: https://tokenhub-intl.tencentmaas.cn
+#       本 yaml 只列主端点,备用域名作存档注释保留;主端点异常时手改 base_url 即可。
+#   - 模型清单: TokenHub 文档表格列出 Hy3 / HunyuanX / DeepSeek / GLM / Kimi / MiniMax 多系列,
+#     具体模型 ID 需查文档当时版本(平台路由,id 会变)。
+
+id: tencent
+display_name: "腾讯云大模型"
+icon: tencent
+description: "腾讯云大模型服务平台,Token Plan 订阅 + TokenHub 按量付费,聚合 Hy3/HunyuanX/DeepSeek/GLM/Kimi/MiniMax"
+homepage: "https://cloud.tencent.com/product/lkeap"
+docs_url: "https://cloud.tencent.com/document/product/1823/130070"
+api_key_url: "https://console.cloud.tencent.com/lkeap/api"
+
+compatibility: untested
+compatibility_notes: |
+  1. Token Plan 是订阅制,套餐额度仅在 /plan/anthropic 端点扣减。
+  2. TokenHub 按量付费提供 4 个 base URL(境内/境外 主备),本 yaml 默认列主端点,
+     主端点不可用时可手改为 .cn 备用域名(具体见 yaml 顶部注释)。
+  3. 文档未明确公开 /v1/models 接口,模型 ID 需手动输入。
+  4. TokenHub 同时兼容 OpenAI 和 Anthropic 协议,本 provider 仅使用 Anthropic 路径 /v1/messages。
+
+endpoints:
+  - id: token_plan
+    label: "国内版 · Token Plan 订阅"
+    description: "订阅制,套餐额度仅在此端点扣减"
+    base_url: "https://api.lkeap.cloud.tencent.com/plan/anthropic"
+    messages_path: "/v1/messages"
+    region: china
+    billing: subscription
+
+  - id: tokenhub_cn
+    label: "国内版 · TokenHub 按量付费"
+    description: "境内主接入地址,按 token 计费"
+    base_url: "https://tokenhub.tencentmaas.com"
+    messages_path: "/v1/messages"
+    region: china
+    billing: pay_as_you_go
+
+  - id: tokenhub_intl
+    label: "国际版 · TokenHub 按量付费"
+    description: "境外主接入地址,按 token 计费"
+    base_url: "https://tokenhub-intl.tencentmaas.com"
+    messages_path: "/v1/messages"
+    region: global
+    billing: pay_as_you_go
+
+default_endpoint: token_plan
+
+auth:
+  type: api_key
+  header_name: "Authorization"
+  header_format: bearer
+
+required_headers:
+  anthropic-version: "2023-06-01"
+
+forward_headers: []
+
+model_discovery:
+  # 腾讯云文档未明示 /v1/models 公开接口, 走手动输入
+  enabled: false
+  path: "/v1/models"
+  cache_ttl_hours: 24
+  # 来源: TokenHub 文档表格提到的系列(Hy3 / HunyuanX / DeepSeek / GLM / Kimi / MiniMax)
+  # 具体 ID 仅作填写示例,实际可用 ID 以腾讯云控制台为准
+  example_models:
+    - "hunyuan-T1"
+    - "hunyuan-Standard"
+    - "glm-5"
+    - "deepseek-v3.2"
+    - "kimi-k2.6"
+    - "minimax-m2.7"

@@ -105,8 +105,8 @@ pub fn stream_response(
                 }
 
                 if let Err(e) = client_tx.send(Ok(processed)).await {
-                    warn!(?e, "client 接收方已关闭");
-                    break;
+                    warn!(?e, "client 接收方已关闭, 终止流式任务以释放上游连接");
+                    return;
                 }
                 wrote_any_event = true;
             }
