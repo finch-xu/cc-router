@@ -3,8 +3,9 @@ import { Navigate, useLocation } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 import { api } from "@/api/tauri";
 
-// 这些路径在 onboarding 过程中仍允许访问（第一步需要跳过去添加订阅）。
-const ALLOWED_DURING_ONBOARDING = ["/subscriptions"];
+// onboarding 期间只允许访问订阅添加页(承担引导职责)。
+// 收紧到精确前缀, 避免用户从 /subscriptions 列表逃出去触发"来回跳"。
+const ALLOWED_DURING_ONBOARDING = ["/subscriptions/new"];
 
 export function OnboardingGate({ children }: { children: ReactNode }) {
   const location = useLocation();
@@ -27,7 +28,7 @@ export function OnboardingGate({ children }: { children: ReactNode }) {
   );
 
   if (!data?.completed && !allowed) {
-    return <Navigate to="/onboarding" replace />;
+    return <Navigate to="/subscriptions/new?onboarding=1" replace />;
   }
 
   return <>{children}</>;

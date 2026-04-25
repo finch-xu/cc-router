@@ -1,0 +1,60 @@
+# Aiberm provider
+#
+# 官方文档（核对 2026-04）:
+#   - Claude Code 接入: https://aiberm.com/docs/en/claude-code/
+#       ANTHROPIC_BASE_URL = https://aiberm.com
+#       ANTHROPIC_AUTH_TOKEN = <api_key>  (Claude Code 把该环境变量映射为 Authorization: Bearer)
+#   - 模型列表文档: https://aiberm.com/docs/en/models/
+#       文档示例仅给出 gpt-4 / gpt-3.5-turbo / claude-3-sonnet-20240229 三个 ID,
+#       实际可用列表"取决于 API Key 所属的 token group",需调 /v1/models 拿真实清单。
+#   - /v1/models 接口: https://aiberm.com/v1/models
+#       与 messages 同域同前缀, 需 API Key 鉴权(无 key 返回 401),启用动态 model_discovery。
+#   - 仅 API 模式,无订阅套餐。
+
+id: aiberm
+display_name: "Aiberm"
+icon: aiberm
+description: "Aiberm API 聚合服务,按 token 计费,模型清单按 API Key 所属 token group 动态返回"
+homepage: "https://aiberm.com"
+docs_url: "https://aiberm.com/docs/en/claude-code/"
+api_key_url: "https://aiberm.com"
+
+compatibility: untested
+compatibility_notes: 
+
+endpoints:
+  - id: paygo
+    label: "全球 · 按量付费 API"
+    description: "Aiberm.com ,Anthropic Messages 兼容"
+    base_url: "https://aiberm.com"
+    messages_path: "/v1/messages"
+    region: global
+    billing: pay_as_you_go
+
+default_endpoint: paygo
+
+auth:
+  type: api_key
+  header_name: "Authorization"
+  header_format: bearer
+
+required_headers:
+  anthropic-version: "2023-06-01"
+
+forward_headers: []
+
+model_discovery:
+  # /v1/models 与 messages 同域同前缀, 用默认 path 即可
+  enabled: true
+  path: "/v1/models"
+  cache_ttl_hours: 24
+  # 来源: 官方文档示例 + 常见 Anthropic/OpenAI/Google 模型作填写提示
+  # 排序原则: Claude 系列优先(cc-router 主场景) > 其他主流模型
+  # 实际可用列表以 /v1/models 返回为准
+  example_models:
+    - "claude-sonnet-4-5"
+    - "claude-opus-4-1"
+    - "claude-haiku-4-5"
+    - "claude-3-sonnet-20240229"
+    - "gpt-4"
+    - "gpt-3.5-turbo"

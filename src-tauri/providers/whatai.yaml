@@ -1,0 +1,59 @@
+# 神马中转 API provider
+#
+# 官方文档（核对 2026-04）:
+#   - 主页 /v1/chat/completions OpenAPI 文档: https://gpt-best.apifox.cn/api-287780941
+#       公开文档仅描述 OpenAI 兼容端点(/v1/chat/completions, /v1/models),
+#       但实测 https://api.whatai.cc/v1/messages 返回 401(存在但需鉴权),
+#       即同时支持 Anthropic Messages 协议——属国内中转 API 常见的双协议模式。
+#   - 鉴权: Authorization: Bearer <api_key>
+#   - 模型列表接口: GET /v1/models, 与 messages 同域,需 API Key 鉴权。
+#       响应为 OpenAI 格式,文档示例 ID: chatgpt-4o-latest。
+#       具体可用模型与 Key 等级/套餐绑定,需调 /v1/models 获取真实清单。
+#   - 仅按量付费 API,无订阅套餐。
+
+id: whatai
+display_name: "神马中转 API"
+icon: whatai
+description: "神马中转 API 聚合服务,按 token 计费,同时支持 OpenAI 与 Anthropic 双协议(本 provider 仅用 Anthropic 路径)"
+homepage: "https://api.whatai.cc"
+docs_url: "https://gpt-best.apifox.cn/api-287780941"
+api_key_url: "https://api.whatai.cc"
+
+compatibility: untested
+compatibility_notes: 
+
+endpoints:
+  - id: paygo
+    label: "全球 · 按量付费 API"
+    description: "神马中转唯一端点,Anthropic Messages 兼容"
+    base_url: "https://api.whatai.cc"
+    messages_path: "/v1/messages"
+    region: global
+    billing: pay_as_you_go
+
+default_endpoint: paygo
+
+auth:
+  type: api_key
+  header_name: "Authorization"
+  header_format: bearer
+
+required_headers:
+  anthropic-version: "2023-06-01"
+
+forward_headers: []
+
+model_discovery:
+  # /v1/models 与 messages 同域同前缀, 用默认 path 即可
+  enabled: true
+  path: "/v1/models"
+  cache_ttl_hours: 24
+  # 来源: apifox 文档示例(chatgpt-4o-latest) + 常见 Claude 系列(cc-router 主场景)
+  # 实际可用列表以 /v1/models 返回为准
+  example_models:
+    - "claude-sonnet-4-5"
+    - "claude-opus-4-1"
+    - "claude-haiku-4-5"
+    - "chatgpt-4o-latest"
+    - "gpt-4o"
+    - "gemini-2.5-pro"

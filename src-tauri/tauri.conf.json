@@ -55,6 +55,8 @@
       "providers/volcengine.yaml",
       "providers/openrouter.yaml",
       "providers/tencent.yaml",
+      "providers/aiberm.yaml",
+      "providers/whatai.yaml",
       "migrations/001_init.sql",
       "../LICENSE"
     ],

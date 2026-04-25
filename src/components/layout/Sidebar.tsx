@@ -5,6 +5,7 @@ import {
   ScrollText,
   Settings as SettingsIcon,
   Info,
+  BookOpen,
   type LucideIcon,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
@@ -32,6 +33,7 @@ export function Sidebar() {
     { to: "/virtual-models", label: "虚拟模型", icon: Layers, badge: "4" },
     { to: "/subscriptions", label: "订阅管理", icon: Key, badge: subsCount > 0 ? String(subsCount) : undefined },
     { to: "/request-logs", label: "请求日志", icon: ScrollText },
+    { to: "/guide", label: "接入指南", icon: BookOpen },
     { to: "/settings", label: "设置", icon: SettingsIcon },
     { to: "/about", label: "关于", icon: Info },
   ];

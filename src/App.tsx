@@ -7,7 +7,7 @@ import { SubscriptionEditPage } from "@/routes/SubscriptionEdit";
 import { SettingsPage } from "@/routes/Settings";
 import { RequestLogsPage } from "@/routes/RequestLogs";
 import { AboutPage } from "@/routes/About";
-import { OnboardingPage } from "@/routes/Onboarding";
+import { GuidePage } from "@/routes/Guide";
 import { OnboardingGate } from "@/components/layout/OnboardingGate";
 import { useSubscriptionEventBridge } from "@/hooks/useSubscriptions";
 
@@ -15,7 +15,11 @@ export default function App() {
   useSubscriptionEventBridge();
   return (
     <Routes>
-      <Route path="/onboarding" element={<OnboardingPage />} />
+      {/* 兼容旧链接: 引导壳已删, 旧 /onboarding 转到订阅向导 */}
+      <Route
+        path="/onboarding"
+        element={<Navigate to="/subscriptions/new?onboarding=1" replace />}
+      />
       <Route
         element={
           <OnboardingGate>
@@ -29,6 +33,7 @@ export default function App() {
         <Route path="/subscriptions/new" element={<SubscriptionNewPage />} />
         <Route path="/subscriptions/:id" element={<SubscriptionEditPage />} />
         <Route path="/request-logs" element={<RequestLogsPage />} />
+        <Route path="/guide" element={<GuidePage />} />
         <Route path="/settings" element={<SettingsPage />} />
         <Route path="/about" element={<AboutPage />} />
       </Route>

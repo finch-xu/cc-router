@@ -98,6 +98,8 @@ pnpm tauri build
 | `volcengine` | 火山方舟（Coding Plan 订阅 + 按量付费） | untested |
 | `openrouter` | OpenRouter 聚合平台（500+ 模型路由） | untested |
 | `tencent` | 腾讯云大模型（Token Plan 订阅 + TokenHub 按量付费境内/境外） | untested |
+| `aiberm` | Aiberm（按量付费 API，模型按 token group 动态返回） | untested |
+| `whatai` | 神马中转 API（按量付费，OpenAI/Anthropic 双协议中转，仅用 Anthropic 路径） | untested |
 
 社区可 PR 补充。
 

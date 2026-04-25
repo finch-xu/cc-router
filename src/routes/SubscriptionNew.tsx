@@ -3,17 +3,28 @@ import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import { ArrowLeft, ArrowRight, ExternalLink, Check } from "lucide-react";
 import { invoke } from "@tauri-apps/api/core";
 import { open as openShell } from "@tauri-apps/plugin-shell";
+import { useQueryClient } from "@tanstack/react-query";
 import { ProviderBadge } from "@/components/ProviderBadge";
 import { ProviderLogo } from "@/components/ProviderLogo";
 import { Spinner } from "@/components/Spinner";
 import { ModelSlotPicker } from "@/components/ModelSlotPicker";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import { useProviders } from "@/hooks/useProviders";
 import { useCreateSubscription } from "@/hooks/useSubscriptions";
+import { useVirtualModels } from "@/hooks/useVirtualModels";
+import { api } from "@/api/tauri";
 import type {
   CreateSubscriptionInput,
   ModelInfo,
   ModelSlots,
   RefreshModelListResult,
+  VirtualModelName,
 } from "@/types";
 
 type Step = 1 | 2;
@@ -22,8 +33,11 @@ export function SubscriptionNewPage() {
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
   const returnTo = searchParams.get("returnTo");
+  const isOnboarding = searchParams.get("onboarding") === "1";
+  const queryClient = useQueryClient();
   const providers = useProviders();
   const createMut = useCreateSubscription();
+  const vms = useVirtualModels();
 
   const [step, setStep] = useState<Step>(1);
   const [providerId, setProviderId] = useState<string>("");
@@ -136,22 +150,63 @@ export function SubscriptionNewPage() {
       id: createdId,
       patch: { model_slots: slots },
     });
+
+    if (isOnboarding) {
+      const names: VirtualModelName[] = [
+        "model-opus",
+        "model-sonnet",
+        "model-haiku",
+        "model-fallback",
+      ];
+      await Promise.allSettled(
+        names.map((name) => {
+          const current = vms.data?.find((v) => v.name === name);
+          const merged = Array.from(
+            new Set([...(current?.subscription_ids ?? []), createdId]),
+          );
+          return api.updateVirtualModel(name, {
+            mode: current?.mode ?? "sequential",
+            subscription_ids: merged,
+          });
+        }),
+      );
+
+      await api.completeOnboarding();
+
+      // 必须 await 全部 invalidate 完成再 navigate, 否则 OnboardingGate
+      // 读到陈旧的 completed=false 会把人踢回 /subscriptions/new
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ["onboarding-state"] }),
+        queryClient.invalidateQueries({ queryKey: ["virtual-models"] }),
+        queryClient.invalidateQueries({ queryKey: ["subscriptions"] }),
+      ]);
+
+      navigate("/guide", { replace: true });
+      return;
+    }
+
     navigate(returnTo ?? `/subscriptions/${createdId}`);
   }
 
   return (
     <>
-      <Link
-        to={returnTo ?? "/subscriptions"}
-        className="btn bare sm"
-        style={{ marginBottom: 18, textDecoration: "none" }}
-      >
-        <ArrowLeft size={12} /> {returnTo ? "返回" : "返回列表"}
-      </Link>
+      {!isOnboarding && (
+        <Link
+          to={returnTo ?? "/subscriptions"}
+          className="btn bare sm"
+          style={{ marginBottom: 18, textDecoration: "none" }}
+        >
+          <ArrowLeft size={12} /> {returnTo ? "返回" : "返回列表"}
+        </Link>
+      )}
 
       <div className="page-header">
-        <h1>添加订阅</h1>
-        <div className="subtitle">把新厂商的 API Key 接入路由器,绑定到虚拟模型槽位。</div>
+        <h1>{isOnboarding ? "欢迎使用 cc-router" : "添加订阅"}</h1>
+        <div className="subtitle">
+          {isOnboarding
+            ? "添加第一条订阅,我们会自动把它绑定到 4 个虚拟模型,然后跳转到接入指南。"
+            : "把新厂商的 API Key 接入路由器,绑定到虚拟模型槽位。"}
+        </div>
       </div>
 
       <div className="wizard">
@@ -173,20 +228,43 @@ export function SubscriptionNewPage() {
               <>
                 <div style={{ marginBottom: 20 }}>
                   <label className="field-label">厂商</label>
-                  <select
-                    className="select"
-                    value={providerId}
-                    onChange={(e) => handleProviderChange(e.target.value)}
-                  >
-                    <option value="" disabled>
-                      选择厂商
-                    </option>
-                    {providers.data?.map((p) => (
-                      <option key={p.id} value={p.id}>
-                        {p.display_name}
-                      </option>
-                    ))}
-                  </select>
+                  <Select value={providerId} onValueChange={handleProviderChange}>
+                    <SelectTrigger className="select h-auto">
+                      {provider ? (
+                        <span
+                          style={{
+                            display: "inline-flex",
+                            alignItems: "center",
+                            gap: 8,
+                            minWidth: 0,
+                          }}
+                        >
+                          <ProviderLogo iconId={provider.icon} size={20} />
+                          <span style={{ overflow: "hidden", textOverflow: "ellipsis" }}>
+                            {provider.display_name}
+                          </span>
+                        </span>
+                      ) : (
+                        <span style={{ color: "var(--ink-4)" }}>选择厂商</span>
+                      )}
+                    </SelectTrigger>
+                    <SelectContent>
+                      {providers.data?.map((p) => (
+                        <SelectItem key={p.id} value={p.id}>
+                          <span
+                            style={{
+                              display: "inline-flex",
+                              alignItems: "center",
+                              gap: 8,
+                            }}
+                          >
+                            <ProviderLogo iconId={p.icon} size={20} />
+                            <span>{p.display_name}</span>
+                          </span>
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
                   {provider && (
                     <div
                       style={{
@@ -198,7 +276,6 @@ export function SubscriptionNewPage() {
                         color: "var(--ink-3)",
                       }}
                     >
-                      <ProviderLogo iconId={provider.icon} size={22} />
                       <ProviderBadge compatibility={provider.compatibility} />
                       {provider.compatibility_notes && (
                         <span>{provider.compatibility_notes}</span>
@@ -210,17 +287,18 @@ export function SubscriptionNewPage() {
                 {provider && (
                   <div style={{ marginBottom: 20 }}>
                     <label className="field-label">接入点</label>
-                    <select
-                      className="select"
-                      value={endpointId}
-                      onChange={(e) => setEndpointId(e.target.value)}
-                    >
-                      {provider.endpoints.map((e) => (
-                        <option key={e.id} value={e.id}>
-                          {e.label}
-                        </option>
-                      ))}
-                    </select>
+                    <Select value={endpointId} onValueChange={setEndpointId}>
+                      <SelectTrigger className="select h-auto">
+                        <SelectValue placeholder="选择接入点" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {provider.endpoints.map((e) => (
+                          <SelectItem key={e.id} value={e.id} subtitle={e.base_url}>
+                            {e.label}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
                     {endpoint && (
                       <div className="field-hint">
                         {endpoint.description && <div>{endpoint.description}</div>}
@@ -290,9 +368,11 @@ export function SubscriptionNewPage() {
                     borderTop: "1px solid var(--line)",
                   }}
                 >
-                  <Link className="btn" to={returnTo ?? "/subscriptions"}>
-                    取消
-                  </Link>
+                  {!isOnboarding && (
+                    <Link className="btn" to={returnTo ?? "/subscriptions"}>
+                      取消
+                    </Link>
+                  )}
                   <button
                     className="btn primary"
                     onClick={goToStep2}
