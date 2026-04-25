@@ -29,6 +29,16 @@ pub struct Auth {
     pub header_format: AuthHeaderFormat,
 }
 
+impl Auth {
+    /// 拼出该 provider 鉴权 header 应填的值。Bearer 加前缀, Raw 原样。
+    pub fn header_value(&self, api_key: &str) -> String {
+        match self.header_format {
+            AuthHeaderFormat::Bearer => format!("Bearer {api_key}"),
+            AuthHeaderFormat::Raw => api_key.to_string(),
+        }
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ProviderEndpoint {
     pub id: String,
@@ -41,6 +51,21 @@ pub struct ProviderEndpoint {
     pub region: Option<String>,
     #[serde(default)]
     pub billing: Option<String>,
+}
+
+impl ProviderEndpoint {
+    /// 拼出完整 messages 接口 URL: `base_url + messages_path`, 处理斜杠规范化。
+    pub fn messages_url(&self) -> String {
+        format!(
+            "{}{}",
+            self.base_url.trim_end_matches('/'),
+            if self.messages_path.starts_with('/') {
+                self.messages_path.clone()
+            } else {
+                format!("/{}", self.messages_path)
+            }
+        )
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]

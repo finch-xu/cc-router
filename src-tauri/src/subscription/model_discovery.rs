@@ -77,11 +77,7 @@ pub async fn fetch(
     };
 
     let mut req = client.get(&url);
-    let header_value = match provider.auth.header_format {
-        crate::provider::model::AuthHeaderFormat::Bearer => format!("Bearer {api_key}"),
-        crate::provider::model::AuthHeaderFormat::Raw => api_key.to_string(),
-    };
-    req = req.header(&provider.auth.header_name, header_value);
+    req = req.header(&provider.auth.header_name, provider.auth.header_value(api_key));
     for (k, v) in provider.required_headers.iter() {
         req = req.header(k, v);
     }

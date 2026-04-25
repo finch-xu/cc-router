@@ -103,6 +103,12 @@ export interface SubscriptionPatch {
 export interface TestConnectionResult {
   ok: boolean;
   message: string;
+  /** 上游 HTTP 状态码;网络错误时为 undefined */
+  http_status?: number;
+  /** 实际用于测试的 model 名 */
+  model_used?: string;
+  /** 测试通过且触发了状态机复活 */
+  state_reset: boolean;
 }
 
 export type RefreshModelListResult =

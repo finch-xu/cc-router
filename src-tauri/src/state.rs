@@ -22,6 +22,9 @@ pub struct AppState {
     pub proxy_port: Arc<RwLock<u16>>,
     pub request_log_tx: mpsc::Sender<RequestLogEntry>,
     pub http_client: reqwest::Client,
+    /// 短超时(30s) 单例, 仅用于订阅可达性探测(测试连接 + 后台巡检)。
+    /// 与 `http_client` 的 600s 上限分离: 探测期望快速判定, 慢响应等同失败。
+    pub probe_client: reqwest::Client,
     pub app_handle: AppHandle,
 }
 

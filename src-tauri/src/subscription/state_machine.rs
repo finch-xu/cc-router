@@ -32,6 +32,9 @@ pub enum Event {
     UserEnable,
     UserDisable,
     UserUpdateKey,
+    /// 用户手动测试连接通过 → 任意状态(含 AuthFailed)直接复活到 Healthy。
+    /// 与 `UserUpdateKey` 区别: 不要求 key 改动, 是通用复活入口。
+    UserManualReset,
 }
 
 /// 状态转换结果。
@@ -156,6 +159,19 @@ fn transition(
         (_, Event::UserDisable) => {
             rt.row.enabled = false;
             SubscriptionState::Disabled
+        }
+
+        // 用户手动复活: 任意状态都直接清回 Healthy
+        // (Disabled 不复活: 如果用户关掉了订阅, 测试连接也不应自动开起来)
+        (state, Event::UserManualReset) if state != SubscriptionState::Disabled => {
+            rt.row.is_auth_failed = false;
+            rt.row.last_error_message = None;
+            rt.last_error_message = None;
+            rt.consecutive_errors = 0;
+            rt.transient_error_level = 0;
+            rt.cooldown_until = None;
+            last_error_update = None;
+            SubscriptionState::Healthy
         }
 
         // 其余情况保持状态
@@ -366,6 +382,70 @@ mod tests {
         assert!(!t.state_changed);
         let (t, _, _) = transition(&mut rt, &Event::UserUpdateKey);
         assert!(t.state_changed);
+        assert_eq!(rt.state, SubscriptionState::Healthy);
+    }
+
+    #[test]
+    fn manual_reset_revives_from_auth_failed() {
+        let mut rt = runtime();
+        transition(&mut rt, &Event::HttpStatus(401));
+        assert_eq!(rt.state, SubscriptionState::AuthFailed);
+        assert!(rt.row.is_auth_failed);
+
+        let (t, _, _) = transition(&mut rt, &Event::UserManualReset);
+        assert!(t.state_changed);
+        assert_eq!(rt.state, SubscriptionState::Healthy);
+        assert!(!rt.row.is_auth_failed);
+        assert!(rt.last_error_message.is_none());
+    }
+
+    #[test]
+    fn manual_reset_clears_rate_limited_cooldown() {
+        let mut rt = runtime();
+        transition(&mut rt, &Event::HttpStatus(429));
+        assert_eq!(rt.state, SubscriptionState::RateLimited);
+        assert!(rt.cooldown_until.is_some());
+
+        let (t, _, _) = transition(&mut rt, &Event::UserManualReset);
+        assert!(t.state_changed);
+        assert_eq!(rt.state, SubscriptionState::Healthy);
+        assert!(rt.cooldown_until.is_none());
+    }
+
+    #[test]
+    fn manual_reset_clears_transient_error_level() {
+        let mut rt = runtime();
+        for _ in 0..3 {
+            transition(&mut rt, &Event::HttpStatus(500));
+        }
+        assert_eq!(rt.state, SubscriptionState::TransientError);
+        assert!(rt.transient_error_level > 0);
+
+        let (t, _, _) = transition(&mut rt, &Event::UserManualReset);
+        assert!(t.state_changed);
+        assert_eq!(rt.state, SubscriptionState::Healthy);
+        assert_eq!(rt.transient_error_level, 0);
+        assert_eq!(rt.consecutive_errors, 0);
+    }
+
+    #[test]
+    fn manual_reset_does_not_unbreak_disabled() {
+        let mut rt = runtime();
+        transition(&mut rt, &Event::UserDisable);
+        assert_eq!(rt.state, SubscriptionState::Disabled);
+
+        // 手动重置不应自动启用被用户主动关掉的订阅
+        let (t, _, _) = transition(&mut rt, &Event::UserManualReset);
+        assert!(!t.state_changed);
+        assert_eq!(rt.state, SubscriptionState::Disabled);
+        assert!(!rt.row.enabled);
+    }
+
+    #[test]
+    fn manual_reset_idempotent_on_healthy() {
+        let mut rt = runtime();
+        let (t, _, _) = transition(&mut rt, &Event::UserManualReset);
+        assert!(!t.state_changed);
         assert_eq!(rt.state, SubscriptionState::Healthy);
     }
 }

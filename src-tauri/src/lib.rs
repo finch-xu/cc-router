@@ -135,6 +135,13 @@ async fn bootstrap(
         .user_agent(concat!("cc-router/", env!("CARGO_PKG_VERSION")))
         .build()?;
 
+    // probe_client: 仅 ping/测试连接用, 短超时, 与生产路径分离
+    let probe_client = reqwest::Client::builder()
+        .connect_timeout(std::time::Duration::from_secs(10))
+        .timeout(std::time::Duration::from_secs(30))
+        .user_agent(concat!("cc-router-probe/", env!("CARGO_PKG_VERSION")))
+        .build()?;
+
     let state = AppState {
         db: pool,
         providers: Arc::new(providers),
@@ -144,6 +151,7 @@ async fn bootstrap(
         proxy_port: Arc::new(RwLock::new(0)),
         request_log_tx: log_tx,
         http_client,
+        probe_client,
         app_handle: handle.clone(),
     };
 
@@ -153,6 +161,12 @@ async fn bootstrap(
         if let Err(e) = proxy::server::start(proxy_state).await {
             error!(?e, "proxy server stopped");
         }
+    });
+
+    // 9. 启动订阅巡检器:每 10min 扫描被虚拟模型引用且异常的订阅, ping 通过则复活
+    let recheck_state = state.clone();
+    tauri::async_runtime::spawn(async move {
+        subscription::recheck_worker::run(recheck_state).await;
     });
 
     Ok(state)

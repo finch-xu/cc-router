@@ -13,7 +13,6 @@ use uuid::Uuid;
 
 use crate::error::AppResult;
 use crate::observability::request_log::{RequestLogEntry, RequestStatus};
-use crate::provider::model::AuthHeaderFormat;
 use crate::proxy::handler::error_body;
 use crate::proxy::overloaded;
 use crate::proxy::retry::{classify_response, ShouldRetry};
@@ -121,16 +120,7 @@ pub async fn dispatch(
             }
         };
 
-        // 构造上游请求
-        let url = format!(
-            "{}{}",
-            endpoint.base_url.trim_end_matches('/'),
-            if endpoint.messages_path.starts_with('/') {
-                endpoint.messages_path.clone()
-            } else {
-                format!("/{}", endpoint.messages_path)
-            }
-        );
+        let url = endpoint.messages_url();
 
         let mut upstream_body = request_body.clone();
         // fallback 不改写 model 字段（原始 model 即 real_model, body 里已经有）
@@ -140,14 +130,9 @@ pub async fn dispatch(
         let serialized_body = serde_json::to_vec(&upstream_body)?;
 
         let mut upstream_headers = ReqHeaderMap::new();
-        // auth
-        let auth_value = match provider.auth.header_format {
-            AuthHeaderFormat::Bearer => format!("Bearer {api_key}"),
-            AuthHeaderFormat::Raw => api_key.clone(),
-        };
         if let (Ok(name), Ok(value)) = (
             ReqHeaderName::try_from(provider.auth.header_name.as_str()),
-            ReqHeaderValue::from_str(&auth_value),
+            ReqHeaderValue::from_str(&provider.auth.header_value(&api_key)),
         ) {
             upstream_headers.insert(name, value);
         }

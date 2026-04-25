@@ -4,6 +4,7 @@ use chrono::Utc;
 use serde::{Deserialize, Serialize};
 use tauri::State;
 use tokio::sync::RwLock;
+use tracing::warn;
 use uuid::Uuid;
 
 use crate::error::{AppError, AppResult};
@@ -12,7 +13,7 @@ use crate::subscription::{
     model::{
         ModelCache, ModelInfo, ModelSlots, SubscriptionDto, SubscriptionRow, SubscriptionRuntime,
     },
-    model_discovery, state_machine, store,
+    model_discovery, ping, state_machine, store,
 };
 use crate::virtual_model::VirtualModelName;
 
@@ -36,6 +37,14 @@ pub struct SubscriptionPatch {
 pub struct TestConnectionResult {
     pub ok: bool,
     pub message: String,
+    /// 上游 HTTP 状态码; 网络错误时为 None。
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub http_status: Option<u16>,
+    /// 实际用于测试的 model 名(从 slots 或 example_models 兜底选出)。
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub model_used: Option<String>,
+    /// 测试通过且触发了状态机复活 → true。
+    pub state_reset: bool,
 }
 
 #[derive(Debug, Serialize)]
@@ -257,6 +266,15 @@ pub async fn set_subscription_enabled(
     Ok(())
 }
 
+/// 测试一条订阅的真实可达性: 用最小 prompt 直接打 messages 端点。
+///
+/// 设计:
+/// - 不打 /models — 避免 URL 拼接歧义和 enabled:false provider 无法测的限制。
+/// - 通过 → 触发 `Event::UserManualReset` 一键复活订阅(任意非 Disabled 状态)。
+/// - 失败 → 仅回显错误, 不发负面 event 给状态机(避免 false negative 打坏健康订阅;
+///   生产真实流量会自然走状态机)。
+///
+/// 真正的请求构造和发送由 `subscription::ping::probe` 完成,与后台巡检 worker 共用。
 #[tauri::command]
 pub async fn test_connection(
     state: State<'_, AppState>,
@@ -269,26 +287,61 @@ pub async fn test_connection(
             .cloned()
             .ok_or_else(|| AppError::SubscriptionNotFound(id.to_string()))?
     };
-    let (provider_id, endpoint_id, api_key) = {
+    let (provider_id, endpoint_id, api_key, slots) = {
         let g = rt.read().await;
-        (g.row.provider_id.clone(), g.row.endpoint_id.clone(), g.row.api_key.clone())
+        (
+            g.row.provider_id.clone(),
+            g.row.endpoint_id.clone(),
+            g.row.api_key.clone(),
+            g.row.model_slots.clone(),
+        )
     };
     let provider = state
         .providers
         .get(&provider_id)
         .ok_or_else(|| AppError::ProviderNotFound(provider_id.clone()))?
         .clone();
+    let endpoint = provider
+        .endpoint(&endpoint_id)
+        .ok_or_else(|| AppError::EndpointNotFound(endpoint_id.clone()))?
+        .clone();
 
-    match model_discovery::fetch(&state.http_client, &provider, &endpoint_id, &api_key).await {
-        Ok(_) => Ok(TestConnectionResult {
-            ok: true,
-            message: "连接正常".into(),
-        }),
-        Err(e) => Ok(TestConnectionResult {
-            ok: false,
-            message: e.to_string(),
-        }),
+    let model = match ping::pick_test_model(&slots, &provider.model_discovery.example_models) {
+        Some(m) => m,
+        None => {
+            return Ok(TestConnectionResult {
+                ok: false,
+                message: "订阅未配置任何 model 槽位, 且 provider 无 example_models, 无法测试".into(),
+                http_status: None,
+                model_used: None,
+                state_reset: false,
+            });
+        }
+    };
+
+    let result = ping::probe(&state.probe_client, &provider, &endpoint, &api_key, &model).await;
+
+    let mut state_reset = false;
+    if result.ok {
+        match state_machine::apply(
+            &state.db,
+            &state.app_handle,
+            rt.clone(),
+            state_machine::Event::UserManualReset,
+        )
+        .await
+        {
+            Ok(_) => state_reset = true,
+            Err(e) => warn!(?e, "UserManualReset apply 失败, 复活效果未生效"),
+        }
     }
+    Ok(TestConnectionResult {
+        ok: result.ok,
+        message: result.message,
+        http_status: result.http_status,
+        model_used: Some(model),
+        state_reset,
+    })
 }
 
 #[tauri::command]

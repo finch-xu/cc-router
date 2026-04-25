@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import { ArrowLeft, AlertTriangle, Loader2 } from "lucide-react";
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { invoke } from "@tauri-apps/api/core";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -40,6 +40,7 @@ import type { ModelInfo, ModelSlots, RefreshModelListResult, TestConnectionResul
 export function SubscriptionEditPage() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
+  const queryClient = useQueryClient();
 
   const subQuery = useQuery({
     queryKey: ["subscription", id],
@@ -110,8 +111,14 @@ export function SubscriptionEditPage() {
 
   async function testConnection() {
     if (!id) return;
+    setTestResult(null);
     const result = await api.testConnection(id);
     setTestResult(result);
+    if (result.ok && result.state_reset) {
+      // 后端已 emit subscription_state_changed,这里显式 invalidate 保证立即刷新
+      queryClient.invalidateQueries({ queryKey: ["subscriptions"] });
+      queryClient.invalidateQueries({ queryKey: ["subscription", id] });
+    }
   }
 
   async function confirmDelete() {
@@ -248,7 +255,17 @@ export function SubscriptionEditPage() {
 
       {testResult && (
         <Alert variant={testResult.ok ? "default" : "destructive"}>
-          <AlertDescription>{testResult.message}</AlertDescription>
+          <AlertDescription>
+            <div>{testResult.message}</div>
+            {testResult.model_used && (
+              <div className="mt-1 text-xs opacity-80">
+                测试模型: <code className="font-mono">{testResult.model_used}</code>
+              </div>
+            )}
+            {testResult.state_reset && (
+              <div className="mt-1 text-xs">✓ 订阅状态已重置为正常</div>
+            )}
+          </AlertDescription>
         </Alert>
       )}
 
