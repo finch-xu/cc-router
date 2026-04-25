@@ -78,6 +78,14 @@ jobs:
             fi
           done
 
+      - name: Upload .sig artifact (for manifest job)
+        uses: actions/upload-artifact@v4
+        with:
+          name: sig-macos
+          path: src-tauri/target/aarch64-apple-darwin/release/bundle/macos/*.app.tar.gz.sig
+          if-no-files-found: error
+          retention-days: 1
+
       - name: Upload to draft release
         uses: softprops/action-gh-release@v2
         with:
@@ -159,6 +167,14 @@ jobs:
             Write-Host "Renaming $($_.Name) -> $newName"
             Rename-Item -LiteralPath $_.FullName -NewName $newName
           }
+
+      - name: Upload .sig artifact (for manifest job)
+        uses: actions/upload-artifact@v4
+        with:
+          name: sig-windows
+          path: src-tauri/target/x86_64-pc-windows-msvc/release/bundle/nsis/*.nsis.zip.sig
+          if-no-files-found: error
+          retention-days: 1
 
       - name: Upload to draft release
         uses: softprops/action-gh-release@v2
@@ -243,6 +259,14 @@ jobs:
             fi
           done
 
+      - name: Upload .sig artifact (for manifest job)
+        uses: actions/upload-artifact@v4
+        with:
+          name: sig-linux
+          path: src-tauri/target/x86_64-unknown-linux-gnu/release/bundle/appimage/*.AppImage.sig
+          if-no-files-found: error
+          retention-days: 1
+
       - name: Upload to draft release
         uses: softprops/action-gh-release@v2
         with:
@@ -268,15 +292,15 @@ jobs:
         with:
           node-version: 22
 
-      - name: Download .sig assets from draft release
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          GH_REPO: ${{ github.repository }}
-        run: |
-          set -euo pipefail
-          mkdir -p sigs
-          gh release download "$RELEASE_TAG" --dir sigs --pattern '*.sig' --repo "$GH_REPO"
-          ls -la sigs
+      - name: Download .sig artifacts from build jobs
+        uses: actions/download-artifact@v4
+        with:
+          path: sigs
+          pattern: sig-*
+          merge-multiple: true
+
+      - name: List collected .sig files
+        run: ls -la sigs
 
       - name: Generate latest.json
         env:
