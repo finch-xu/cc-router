@@ -17,6 +17,7 @@ pub struct RequestLogDto {
     pub provider_id: String,
     pub endpoint_id: String,
     pub real_model_name: String,
+    pub response_model_name: Option<String>,
     pub is_streaming: bool,
     pub status: String,
     pub http_status: Option<i64>,
@@ -86,7 +87,8 @@ pub async fn list_requests(
 
     let select_sql = format!(
         "SELECT id, timestamp, virtual_model_name, subscription_id, provider_id, endpoint_id,
-                real_model_name, is_streaming, status, http_status, total_latency_ms,
+                real_model_name, response_model_name, is_streaming, status,
+                http_status, total_latency_ms,
                 upstream_input_tokens, upstream_output_tokens,
                 upstream_cache_creation, upstream_cache_read, error_message
          FROM requests{}
@@ -120,6 +122,7 @@ pub async fn list_requests(
             provider_id: r.try_get("provider_id").unwrap_or_default(),
             endpoint_id: r.try_get("endpoint_id").unwrap_or_default(),
             real_model_name: r.try_get("real_model_name").unwrap_or_default(),
+            response_model_name: r.try_get("response_model_name").ok(),
             is_streaming: r.try_get::<i64, _>("is_streaming").unwrap_or(0) != 0,
             status: r.try_get("status").unwrap_or_default(),
             http_status: r.try_get("http_status").ok(),

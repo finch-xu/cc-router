@@ -174,6 +174,8 @@ export interface RequestLogDto {
   provider_id: string;
   endpoint_id: string;
   real_model_name: string;
+  /** 上游响应里的 message.model 原值;错误/超时为 undefined */
+  response_model_name?: string;
   is_streaming: boolean;
   status: RequestStatus;
   http_status?: number;

@@ -47,6 +47,7 @@ CREATE TABLE requests (
   provider_id TEXT NOT NULL,
   endpoint_id TEXT NOT NULL,
   real_model_name TEXT NOT NULL,
+  response_model_name TEXT,
   is_streaming INTEGER NOT NULL,
   status TEXT NOT NULL,
   http_status INTEGER,

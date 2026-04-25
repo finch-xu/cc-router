@@ -9,9 +9,9 @@ import type {
 
 export const SUBSCRIPTIONS_KEY = ["subscriptions"] as const;
 
-export function useSubscriptions() {
+/** 在 App 顶层挂一次,把后端 subscription_state_changed 事件转成 query 失效。 */
+export function useSubscriptionEventBridge() {
   const queryClient = useQueryClient();
-
   useEffect(() => {
     const promise = listen("subscription_state_changed", () => {
       queryClient.invalidateQueries({ queryKey: SUBSCRIPTIONS_KEY });
@@ -20,7 +20,9 @@ export function useSubscriptions() {
       promise.then((unlisten) => unlisten()).catch(() => {});
     };
   }, [queryClient]);
+}
 
+export function useSubscriptions() {
   return useQuery({
     queryKey: SUBSCRIPTIONS_KEY,
     queryFn: () => api.listSubscriptions(),

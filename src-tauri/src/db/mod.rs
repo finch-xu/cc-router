@@ -33,7 +33,7 @@ pub async fn init_pool(db_path: &Path) -> AppResult<SqlitePool> {
 }
 
 /// 执行内嵌 migration。启动时检查 `subscriptions` 表是否存在，没有则执行完整 migration。
-/// `resource_dir` 参数保留为后续版本化迁移预留。
+/// 末尾跑一次幂等的逐列升级,给老 DB 补丁(过渡方案,真正的 schema_version 框架待将来引入)。
 pub async fn run_migrations(pool: &SqlitePool, _resource_dir: &Path) -> AppResult<()> {
     let existing: (i64,) = sqlx::query_as(
         "SELECT count(*) FROM sqlite_master WHERE type='table' AND name='subscriptions'",
@@ -50,6 +50,31 @@ pub async fn run_migrations(pool: &SqlitePool, _resource_dir: &Path) -> AppResul
         seed_onboarding(pool).await?;
         info!("migration completed");
     }
+
+    ensure_column(pool, "requests", "response_model_name", "TEXT").await?;
+    Ok(())
+}
+
+/// 幂等 ALTER TABLE ADD COLUMN。
+/// **callers 必须传静态字面量** —— 三个参数被字符串拼接进 SQL,不走 bind。
+async fn ensure_column(
+    pool: &SqlitePool,
+    table: &str,
+    column: &str,
+    sql_type: &str,
+) -> AppResult<()> {
+    let info_sql = format!("PRAGMA table_info({})", table);
+    let rows = sqlx::query(&info_sql).fetch_all(pool).await?;
+    use sqlx::Row;
+    let exists = rows
+        .iter()
+        .any(|r| r.try_get::<String, _>("name").map(|n| n == column).unwrap_or(false));
+    if exists {
+        return Ok(());
+    }
+    info!(table, column, "adding missing column");
+    let alter_sql = format!("ALTER TABLE {} ADD COLUMN {} {}", table, column, sql_type);
+    sqlx::query(&alter_sql).execute(pool).await?;
     Ok(())
 }
 

@@ -1,11 +1,14 @@
 import { Link } from "react-router-dom";
 import { Plus, Key } from "lucide-react";
-import { Button } from "@/components/ui/button";
-import { Card, CardContent } from "@/components/ui/card";
 import { StatusBadge } from "@/components/StatusBadge";
-import { ProviderIcon } from "@/components/ProviderIcon";
+import { ProviderLogo } from "@/components/ProviderLogo";
+import { EmptyState } from "@/components/EmptyState";
 import { useSubscriptions } from "@/hooks/useSubscriptions";
 import { useProviders } from "@/hooks/useProviders";
+import { fmtTimeShort } from "@/lib/format";
+
+// SubscriptionDto 不带 api_key 预览(CLAUDE.md), 用固定遮罩占位
+const MASKED_KEY = "•••••••••••••••";
 
 export function SubscriptionsPage() {
   const subs = useSubscriptions();
@@ -14,80 +17,89 @@ export function SubscriptionsPage() {
   const providerOf = (id: string) => providers.data?.find((p) => p.id === id);
 
   return (
-    <div className="p-8 space-y-6">
-      <div className="flex items-center justify-between">
-        <div>
-          <h1 className="text-2xl font-semibold">订阅管理</h1>
-          <p className="text-sm text-muted-foreground">
-            每个订阅对应一个厂商的 API Key
-          </p>
+    <>
+      <div className="page-actions">
+        <div className="page-header" style={{ margin: 0 }}>
+          <h1>订阅管理</h1>
+          <div className="subtitle">每个订阅对应一个厂商的 API Key。状态实时反映健康检查结果。</div>
         </div>
-        <Button asChild>
-          <Link to="/subscriptions/new">
-            <Plus className="h-4 w-4" /> 添加订阅
-          </Link>
-        </Button>
+        <Link className="btn primary" to="/subscriptions/new">
+          <Plus size={12} /> 添加订阅
+        </Link>
       </div>
 
-      {subs.isLoading && <div className="text-sm text-muted-foreground">加载中…</div>}
+      {subs.isLoading && <div className="field-hint">加载中…</div>}
 
       {subs.data && subs.data.length === 0 && (
-        <Card>
-          <CardContent className="py-12 text-center space-y-3">
-            <Key className="h-8 w-8 mx-auto text-muted-foreground" />
-            <div className="text-sm text-muted-foreground">
-              还没有订阅。点击"添加订阅"开始。
-            </div>
-            <Button asChild size="sm">
-              <Link to="/subscriptions/new">
-                <Plus className="h-4 w-4" /> 添加第一个订阅
-              </Link>
-            </Button>
-          </CardContent>
-        </Card>
+        <EmptyState
+          icon={Key}
+          message="还没有订阅。点击「添加订阅」开始。"
+          action={
+            <Link className="btn primary sm" to="/subscriptions/new">
+              <Plus size={12} /> 添加第一个订阅
+            </Link>
+          }
+        />
       )}
 
       {subs.data && subs.data.length > 0 && (
-        <div className="rounded-lg border">
-          <table className="w-full text-sm">
-            <thead className="border-b bg-muted/40 text-xs uppercase text-muted-foreground">
+        <div className="card">
+          <table className="table">
+            <thead>
               <tr>
-                <th className="px-4 py-2 text-left font-medium">状态</th>
-                <th className="px-4 py-2 text-left font-medium">厂商</th>
-                <th className="px-4 py-2 text-left font-medium">备注</th>
-                <th className="px-4 py-2 text-left font-medium">引用</th>
-                <th className="px-4 py-2"></th>
+                <th style={{ width: 100 }}>状态</th>
+                <th>厂商</th>
+                <th>备注</th>
+                <th style={{ width: 160 }}>API Key</th>
+                <th style={{ width: 90 }}>引用</th>
+                <th style={{ width: 100 }}>更新时间</th>
+                <th style={{ width: 80 }}></th>
               </tr>
             </thead>
             <tbody>
-              {subs.data.map((sub) => (
-                <tr key={sub.id} className="border-b last:border-b-0 hover:bg-muted/20">
-                  <td className="px-4 py-3">
-                    <StatusBadge state={sub.state} />
-                  </td>
-                  <td className="px-4 py-3">
-                    <div className="flex items-center gap-2">
-                      <ProviderIcon iconId={providerOf(sub.provider_id)?.icon} size={18} />
-                      <span>{providerOf(sub.provider_id)?.display_name ?? sub.provider_id}</span>
-                    </div>
-                  </td>
-                  <td className="px-4 py-3 font-medium">{sub.display_name}</td>
-                  <td className="px-4 py-3 text-muted-foreground">
-                    {sub.referenced_by.length > 0
-                      ? `used: ${sub.referenced_by.length}`
-                      : "未使用"}
-                  </td>
-                  <td className="px-4 py-3 text-right">
-                    <Button asChild variant="ghost" size="sm">
-                      <Link to={`/subscriptions/${sub.id}`}>查看</Link>
-                    </Button>
-                  </td>
-                </tr>
-              ))}
+              {subs.data.map((sub) => {
+                const provider = providerOf(sub.provider_id);
+                return (
+                  <tr key={sub.id}>
+                    <td>
+                      <StatusBadge state={sub.state} />
+                    </td>
+                    <td>
+                      <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                        <ProviderLogo iconId={provider?.icon} size={24} />
+                        <span style={{ fontWeight: 500, color: "var(--ink)" }}>
+                          {provider?.display_name ?? sub.provider_id}
+                        </span>
+                      </div>
+                    </td>
+                    <td>{sub.display_name}</td>
+                    <td className="mono" style={{ color: "var(--ink-3)", fontSize: 12 }}>
+                      {MASKED_KEY}
+                    </td>
+                    <td>
+                      {sub.referenced_by.length > 0 ? (
+                        <span className="pill tag mono">used: {sub.referenced_by.length}</span>
+                      ) : (
+                        <span className="field-hint" style={{ marginTop: 0, fontSize: 11.5 }}>
+                          未使用
+                        </span>
+                      )}
+                    </td>
+                    <td className="mono" style={{ color: "var(--ink-3)", fontSize: 12 }}>
+                      {fmtTimeShort(sub.updated_at)}
+                    </td>
+                    <td>
+                      <Link className="btn sm" to={`/subscriptions/${sub.id}`}>
+                        查看
+                      </Link>
+                    </td>
+                  </tr>
+                );
+              })}
             </tbody>
           </table>
         </div>
       )}
-    </div>
+    </>
   );
 }

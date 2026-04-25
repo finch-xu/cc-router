@@ -1,56 +1,52 @@
 import { cn } from "@/lib/utils";
 import type { SubscriptionState } from "@/types";
 
-const STATE_META: Record<
-  SubscriptionState,
-  { label: string; dotClass: string; textClass: string }
-> = {
-  healthy: {
-    label: "正常",
-    dotClass: "bg-status-healthy",
-    textClass: "text-status-healthy",
-  },
-  rate_limited: {
-    label: "限流",
-    dotClass: "bg-status-rate_limited",
-    textClass: "text-status-rate_limited",
-  },
-  quota_exhausted: {
-    label: "配额耗尽",
-    dotClass: "bg-status-quota_exhausted",
-    textClass: "text-status-quota_exhausted",
-  },
-  transient_error: {
-    label: "临时错误",
-    dotClass: "bg-status-transient_error",
-    textClass: "text-status-transient_error",
-  },
-  auth_failed: {
-    label: "凭证失效",
-    dotClass: "bg-status-auth_failed",
-    textClass: "text-status-auth_failed",
-  },
-  disabled: {
-    label: "已禁用",
-    dotClass: "bg-status-disabled",
-    textClass: "text-status-disabled",
-  },
+export type StatusTone = "ok" | "warn" | "err" | "accent" | "neutral";
+
+interface Meta {
+  label: string;
+  tone: StatusTone;
+}
+
+const STATE_META: Record<SubscriptionState, Meta> = {
+  healthy:         { label: "正常",     tone: "ok" },
+  rate_limited:    { label: "限流",     tone: "warn" },
+  quota_exhausted: { label: "配额耗尽", tone: "warn" },
+  transient_error: { label: "临时错误", tone: "warn" },
+  auth_failed:     { label: "凭证失效", tone: "err" },
+  disabled:        { label: "已禁用",   tone: "neutral" },
 };
+
+export function stateTone(state: SubscriptionState): StatusTone {
+  return STATE_META[state].tone;
+}
+
+export function stateLabel(state: SubscriptionState): string {
+  return STATE_META[state].label;
+}
 
 interface Props {
   state: SubscriptionState;
-  showLabel?: boolean;
   className?: string;
 }
 
-export function StatusBadge({ state, showLabel = true, className }: Props) {
+export function StatusBadge({ state, className }: Props) {
   const meta = STATE_META[state];
   return (
-    <span className={cn("inline-flex items-center gap-1.5", className)}>
-      <span className={cn("h-2 w-2 rounded-full", meta.dotClass)} aria-hidden />
-      {showLabel && (
-        <span className={cn("text-xs font-medium", meta.textClass)}>{meta.label}</span>
-      )}
+    <span className={cn("pill", meta.tone !== "neutral" && meta.tone, className)}>
+      <span className="dot" />
+      {meta.label}
     </span>
+  );
+}
+
+/** 仅渲染一个状态点(用于行内紧凑场景),无 pill 包裹 */
+export function StatusDot({ state, className }: Props) {
+  const meta = STATE_META[state];
+  return (
+    <span
+      className={cn("status-dot", `status-dot-${meta.tone}`, className)}
+      aria-label={meta.label}
+    />
   );
 }

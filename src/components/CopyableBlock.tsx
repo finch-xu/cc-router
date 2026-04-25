@@ -1,22 +1,26 @@
-import { useState } from "react";
+import { useMemo, useState, type ReactNode } from "react";
 import { Copy, Check } from "lucide-react";
 import { writeText } from "@tauri-apps/plugin-clipboard-manager";
-import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 
 interface Props {
   text: string;
   className?: string;
+  /** 是否对 env 片段做轻量语法着色 */
+  highlight?: boolean;
 }
 
-export function CopyableBlock({ text, className }: Props) {
+export function CopyableBlock({ text, className, highlight = true }: Props) {
   const [copied, setCopied] = useState(false);
+  const content = useMemo(
+    () => (highlight ? renderHighlighted(text) : text),
+    [text, highlight],
+  );
 
   async function copy() {
     try {
       await writeText(text);
     } catch {
-      // fallback: 浏览器剪贴板
       try {
         await navigator.clipboard.writeText(text);
       } catch {
@@ -28,26 +32,38 @@ export function CopyableBlock({ text, className }: Props) {
   }
 
   return (
-    <div className={cn("relative", className)}>
-      <pre className="overflow-x-auto rounded-md border bg-muted p-4 font-mono text-xs leading-relaxed">
-        {text}
-      </pre>
-      <Button
-        variant="outline"
-        size="sm"
-        className="absolute right-2 top-2 h-7 px-2 text-xs"
-        onClick={copy}
-      >
+    <pre className={cn("codeblock", className)}>
+      <button className="copy" onClick={copy} type="button">
         {copied ? (
           <>
-            <Check className="h-3 w-3" /> 已复制
+            <Check size={11} /> 已复制
           </>
         ) : (
           <>
-            <Copy className="h-3 w-3" /> 复制
+            <Copy size={11} /> 复制
           </>
         )}
-      </Button>
-    </div>
+      </button>
+      {content}
+    </pre>
   );
+}
+
+const KEYWORDS = new Set(["export", "set", "$env:"]);
+
+/** 极简 env 着色: `<keyword> KEY=VALUE` 三段染色 */
+function renderHighlighted(text: string): ReactNode {
+  return text.split("\n").map((line, i) => {
+    const match = /^(\s*)(\S+)\s+([A-Z_][A-Z0-9_]*)=(.*)$/.exec(line);
+    if (match && KEYWORDS.has(match[2])) {
+      const [, indent, kw, key, val] = match;
+      return (
+        <div key={i}>
+          {indent}
+          <span className="k">{kw}</span> {key}=<span className="v">{val}</span>
+        </div>
+      );
+    }
+    return <div key={i}>{line || " "}</div>;
+  });
 }

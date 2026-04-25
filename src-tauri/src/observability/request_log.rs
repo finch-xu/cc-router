@@ -22,6 +22,8 @@ pub struct RequestLogEntry {
     pub provider_id: String,
     pub endpoint_id: String,
     pub real_model_name: String,
+    /// 上游响应里的 message.model 原值(改写前)。错误/超时为 None。
+    pub response_model_name: Option<String>,
     pub is_streaming: bool,
     pub status: RequestStatus,
     pub http_status: Option<u16>,
@@ -114,12 +116,13 @@ async fn flush(pool: &SqlitePool, buffer: &mut Vec<RequestLogEntry>, app: &AppHa
     for entry in batch {
         let result = sqlx::query(
             "INSERT INTO requests (id, timestamp, virtual_model_name, subscription_id,
-                provider_id, endpoint_id, real_model_name, is_streaming, status,
+                provider_id, endpoint_id, real_model_name, response_model_name,
+                is_streaming, status,
                 http_status, ttft_ms, total_latency_ms,
                 upstream_input_tokens, upstream_output_tokens,
                 upstream_cache_creation, upstream_cache_read,
                 retry_count, error_message)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
         )
         .bind(entry.id.to_string())
         .bind(entry.timestamp_ms)
@@ -128,6 +131,7 @@ async fn flush(pool: &SqlitePool, buffer: &mut Vec<RequestLogEntry>, app: &AppHa
         .bind(entry.provider_id)
         .bind(entry.endpoint_id)
         .bind(entry.real_model_name)
+        .bind(entry.response_model_name)
         .bind(entry.is_streaming as i64)
         .bind(entry.status.as_str())
         .bind(entry.http_status.map(|v| v as i64))

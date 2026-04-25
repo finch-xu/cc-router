@@ -54,6 +54,7 @@ pub fn stream_response(
         let mut output_tokens: Option<u32> = None;
         let mut cache_creation: Option<u32> = None;
         let mut cache_read: Option<u32> = None;
+        let mut response_model: Option<String> = None;
         let mut had_error = false;
 
         while let Some(chunk) = upstream.next().await {
@@ -102,6 +103,9 @@ pub fn stream_response(
                     if let Some(v) = meta.cache_read {
                         cache_read = Some(v);
                     }
+                    if let Some(v) = meta.response_model {
+                        response_model = Some(v);
+                    }
                 }
 
                 if let Err(e) = client_tx.send(Ok(processed)).await {
@@ -128,6 +132,7 @@ pub fn stream_response(
             provider_id,
             endpoint_id,
             real_model_name: real_model,
+            response_model_name: response_model,
             is_streaming: true,
             status: if had_error {
                 RequestStatus::Error
@@ -168,6 +173,8 @@ struct ParsedMeta {
     output_tokens: Option<u32>,
     cache_creation: Option<u32>,
     cache_read: Option<u32>,
+    /// message_start 事件里 message.model 的原值(改写前)
+    response_model: Option<String>,
 }
 
 /// 对单个 SSE 事件（以 `\n\n` 结尾）做改写并提取 tokens。
@@ -228,11 +235,15 @@ fn process_event(
         output_tokens: None,
         cache_creation: None,
         cache_read: None,
+        response_model: None,
     };
 
     if is_message_start {
-        // 提取 usage（无论是否改写 model 都需要记录日志）
+        // 提取 usage 与上游 model 原值(无论是否改写 model 都要记录日志)
         if let Some(message) = parsed.get("message") {
+            if let Some(model) = message.get("model").and_then(|v| v.as_str()) {
+                meta.response_model = Some(model.to_string());
+            }
             if let Some(usage) = message.get("usage") {
                 meta.input_tokens = usage.get("input_tokens").and_then(|v| v.as_u64()).map(|v| v as u32);
                 meta.cache_creation = usage

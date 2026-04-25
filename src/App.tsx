@@ -9,8 +9,10 @@ import { RequestLogsPage } from "@/routes/RequestLogs";
 import { AboutPage } from "@/routes/About";
 import { OnboardingPage } from "@/routes/Onboarding";
 import { OnboardingGate } from "@/components/layout/OnboardingGate";
+import { useSubscriptionEventBridge } from "@/hooks/useSubscriptions";
 
 export default function App() {
+  useSubscriptionEventBridge();
   return (
     <Routes>
       <Route path="/onboarding" element={<OnboardingPage />} />

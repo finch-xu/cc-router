@@ -55,10 +55,11 @@
       "providers/volcengine.yaml",
       "providers/openrouter.yaml",
       "providers/tencent.yaml",
-      "migrations/001_init.sql"
+      "migrations/001_init.sql",
+      "../LICENSE"
     ],
     "category": "DeveloperTool",
-    "copyright": "",
+    "copyright": "Copyright © 2026 finch-xu. MIT License.",
     "shortDescription": "多订阅聚合代理",
     "longDescription": "将多个大模型订阅的 API Key 聚合成一个 Anthropic 兼容端点，供 Claude Code 调用。"
   },

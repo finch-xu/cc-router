@@ -1,21 +1,11 @@
 import { useState, useMemo, useRef } from "react";
 import { Link, useNavigate, useSearchParams } from "react-router-dom";
-import { ArrowLeft, ExternalLink, Loader2 } from "lucide-react";
+import { ArrowLeft, ArrowRight, ExternalLink, Check } from "lucide-react";
 import { invoke } from "@tauri-apps/api/core";
 import { open as openShell } from "@tauri-apps/plugin-shell";
-import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
 import { ProviderBadge } from "@/components/ProviderBadge";
-import { ProviderIcon } from "@/components/ProviderIcon";
+import { ProviderLogo } from "@/components/ProviderLogo";
+import { Spinner } from "@/components/Spinner";
 import { ModelSlotPicker } from "@/components/ModelSlotPicker";
 import { useProviders } from "@/hooks/useProviders";
 import { useCreateSubscription } from "@/hooks/useSubscriptions";
@@ -55,7 +45,7 @@ export function SubscriptionNewPage() {
     [provider, endpointId],
   );
 
-  // 追踪自动生成的 displayName；用户手改后不再覆盖
+  // 追踪自动生成的 displayName;用户手改后不再覆盖
   const autoGenNameRef = useRef<string>("");
 
   function handleProviderChange(v: string) {
@@ -63,8 +53,6 @@ export function SubscriptionNewPage() {
     const p = providers.data?.find((x) => x.id === v);
     setEndpointId(p?.default_endpoint ?? p?.endpoints[0]?.id ?? "");
 
-    // 自动填充备注名：{厂商名} {6 位随机后缀}
-    // 仅当用户尚未手动编辑过（为空，或仍是上一次自动生成的值）时覆盖
     if (p && (displayName === "" || displayName === autoGenNameRef.current)) {
       const suffix = Math.random().toString(36).slice(2, 8);
       const generated = `${p.display_name} ${suffix}`;
@@ -77,16 +65,14 @@ export function SubscriptionNewPage() {
     if (!provider || !endpoint) return;
     if (!apiKey || !displayName) return;
 
-    // 先创建一个临时订阅，在 step 2 保存时更新 slots？
-    // 简化：step 2 保存时一次性 create。暂时在 step2 调用 model_discovery 需要订阅 id。
-    // 退而求其次：step 1 创建一个占位订阅（slots 空字符串），再 step 2 refresh。
-    // 但 store::insert 要求 slots 非空 UI 层。后端允许空字符串。
-
     setFetchingModels(true);
     setModelFetchError(null);
     try {
-      // 模拟：先创建，再 refresh。
-      const placeholderSlots: ModelSlots = { opus: "(pending)", sonnet: "(pending)", haiku: "(pending)" };
+      const placeholderSlots: ModelSlots = {
+        opus: "(pending)",
+        sonnet: "(pending)",
+        haiku: "(pending)",
+      };
       const input: CreateSubscriptionInput = {
         provider_id: provider.id,
         endpoint_id: endpoint.id,
@@ -95,7 +81,6 @@ export function SubscriptionNewPage() {
         model_slots: placeholderSlots,
       };
       const created = await createMut.mutateAsync(input);
-      // 立即尝试 refresh models
       try {
         const result: RefreshModelListResult = await invoke("refresh_model_list", {
           id: created.id,
@@ -113,7 +98,6 @@ export function SubscriptionNewPage() {
       } catch (e) {
         setModelFetchError(String(e));
       }
-      // 保存刚才创建的订阅 id 到局部，用于 step 2 更新
       setCreatedId(created.id);
       setStep(2);
     } catch (e) {
@@ -156,160 +140,210 @@ export function SubscriptionNewPage() {
   }
 
   return (
-    <div className="p-8 max-w-2xl space-y-6">
-      <Button variant="ghost" size="sm" asChild>
-        <Link to={returnTo ?? "/subscriptions"}>
-          <ArrowLeft className="h-4 w-4" /> {returnTo ? "返回" : "返回列表"}
-        </Link>
-      </Button>
+    <>
+      <Link
+        to={returnTo ?? "/subscriptions"}
+        className="btn bare sm"
+        style={{ marginBottom: 18, textDecoration: "none" }}
+      >
+        <ArrowLeft size={12} /> {returnTo ? "返回" : "返回列表"}
+      </Link>
 
-      <div>
-        <h1 className="text-2xl font-semibold">添加订阅</h1>
-        <p className="text-sm text-muted-foreground">
-          步骤 {step} / 2 · {step === 1 ? "基本信息" : "模型槽位配置"}
-        </p>
+      <div className="page-header">
+        <h1>添加订阅</h1>
+        <div className="subtitle">把新厂商的 API Key 接入路由器,绑定到虚拟模型槽位。</div>
       </div>
 
-      {step === 1 && (
-        <Card>
-          <CardHeader>
-            <CardTitle>基本信息</CardTitle>
-          </CardHeader>
-          <CardContent className="space-y-4">
-            <div className="space-y-2">
-              <Label>厂商</Label>
-              <Select value={providerId} onValueChange={handleProviderChange}>
-                <SelectTrigger>
-                  <SelectValue placeholder="选择厂商" />
-                </SelectTrigger>
-                <SelectContent>
-                  {providers.data?.map((p) => (
-                    <SelectItem key={p.id} value={p.id}>
-                      <span className="inline-flex items-center gap-2">
-                        <ProviderIcon iconId={p.icon} size={16} />
+      <div className="wizard">
+        <div className="steps">
+          <div className={`step ${step >= 1 ? "active" : ""} ${step > 1 ? "done" : ""}`}>
+            <span className="num">{step > 1 ? <Check size={11} /> : 1}</span>
+            <span>基本信息</span>
+          </div>
+          <div className="step-bar" />
+          <div className={`step ${step === 2 ? "active" : ""} ${step > 2 ? "done" : ""}`}>
+            <span className="num">2</span>
+            <span>绑定模型</span>
+          </div>
+        </div>
+
+        <div className="card">
+          <div className="card-body" style={{ paddingTop: 24 }}>
+            {step === 1 && (
+              <>
+                <div style={{ marginBottom: 20 }}>
+                  <label className="field-label">厂商</label>
+                  <select
+                    className="select"
+                    value={providerId}
+                    onChange={(e) => handleProviderChange(e.target.value)}
+                  >
+                    <option value="" disabled>
+                      选择厂商
+                    </option>
+                    {providers.data?.map((p) => (
+                      <option key={p.id} value={p.id}>
                         {p.display_name}
-                      </span>
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-              {provider && (
-                <div className="flex items-center gap-2 text-xs">
-                  <ProviderBadge compatibility={provider.compatibility} />
-                  {provider.compatibility_notes && (
-                    <span className="text-muted-foreground">
-                      {provider.compatibility_notes}
-                    </span>
+                      </option>
+                    ))}
+                  </select>
+                  {provider && (
+                    <div
+                      style={{
+                        marginTop: 8,
+                        display: "flex",
+                        alignItems: "center",
+                        gap: 10,
+                        fontSize: 12,
+                        color: "var(--ink-3)",
+                      }}
+                    >
+                      <ProviderLogo iconId={provider.icon} size={22} />
+                      <ProviderBadge compatibility={provider.compatibility} />
+                      {provider.compatibility_notes && (
+                        <span>{provider.compatibility_notes}</span>
+                      )}
+                    </div>
                   )}
                 </div>
-              )}
-            </div>
 
-            {provider && (
-              <div className="space-y-2">
-                <Label>接入点</Label>
-                <Select value={endpointId} onValueChange={setEndpointId}>
-                  <SelectTrigger>
-                    <SelectValue placeholder="选择接入点" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {provider.endpoints.map((e) => (
-                      <SelectItem key={e.id} value={e.id} subtitle={e.base_url}>
-                        {e.label}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-                {endpoint && (
-                  <div className="space-y-0.5 text-xs">
-                    {endpoint.description && (
-                      <div className="text-muted-foreground">{endpoint.description}</div>
+                {provider && (
+                  <div style={{ marginBottom: 20 }}>
+                    <label className="field-label">接入点</label>
+                    <select
+                      className="select"
+                      value={endpointId}
+                      onChange={(e) => setEndpointId(e.target.value)}
+                    >
+                      {provider.endpoints.map((e) => (
+                        <option key={e.id} value={e.id}>
+                          {e.label}
+                        </option>
+                      ))}
+                    </select>
+                    {endpoint && (
+                      <div className="field-hint">
+                        {endpoint.description && <div>{endpoint.description}</div>}
+                        <div className="mono" style={{ color: "var(--ink-3)", marginTop: 4 }}>
+                          {endpoint.base_url}
+                          {endpoint.messages_path}
+                        </div>
+                        {provider.api_key_url && (
+                          <button
+                            type="button"
+                            onClick={() => openShell(provider.api_key_url!).catch(() => {})}
+                            style={{
+                              marginTop: 6,
+                              background: "transparent",
+                              border: "none",
+                              color: "var(--accent-ink)",
+                              padding: 0,
+                              fontSize: 11.5,
+                              display: "inline-flex",
+                              alignItems: "center",
+                              gap: 4,
+                              cursor: "pointer",
+                            }}
+                          >
+                            <ExternalLink size={11} /> 去官网获取 API Key
+                          </button>
+                        )}
+                      </div>
                     )}
-                    <div className="font-mono text-muted-foreground">
-                      {endpoint.base_url}
-                      {endpoint.messages_path}
-                    </div>
                   </div>
                 )}
-                {provider.api_key_url && (
-                  <Button
-                    variant="link"
-                    size="sm"
-                    className="p-0 h-auto text-xs"
-                    onClick={() => openShell(provider.api_key_url!).catch(() => {})}
-                  >
-                    <ExternalLink className="h-3 w-3" /> 去官网获取 API Key
-                  </Button>
+
+                <div style={{ marginBottom: 20 }}>
+                  <label className="field-label">API Key</label>
+                  <input
+                    className="input mono"
+                    type="password"
+                    value={apiKey}
+                    onChange={(e) => setApiKey(e.target.value)}
+                    placeholder="sk-..."
+                  />
+                </div>
+
+                <div style={{ marginBottom: 24 }}>
+                  <label className="field-label">备注名</label>
+                  <input
+                    className="input"
+                    value={displayName}
+                    onChange={(e) => setDisplayName(e.target.value)}
+                    placeholder="例如: MiniMax 主号"
+                  />
+                  <div className="field-hint">仅用于本地区分,不会上传到任何地方。</div>
+                </div>
+
+                {modelFetchError && (
+                  <div className="alert err" style={{ marginBottom: 16 }}>
+                    {modelFetchError}
+                  </div>
                 )}
-              </div>
+
+                <div
+                  style={{
+                    display: "flex",
+                    justifyContent: "flex-end",
+                    gap: 8,
+                    paddingTop: 12,
+                    borderTop: "1px solid var(--line)",
+                  }}
+                >
+                  <Link className="btn" to={returnTo ?? "/subscriptions"}>
+                    取消
+                  </Link>
+                  <button
+                    className="btn primary"
+                    onClick={goToStep2}
+                    disabled={!provider || !endpoint || !apiKey || !displayName || fetchingModels}
+                    type="button"
+                  >
+                    {fetchingModels && <Spinner />}
+                    下一步 <ArrowRight size={12} />
+                  </button>
+                </div>
+              </>
             )}
 
-            <div className="space-y-2">
-              <Label>API Key</Label>
-              <Input
-                type="password"
-                value={apiKey}
-                onChange={(e) => setApiKey(e.target.value)}
-                placeholder="sk-..."
-              />
-            </div>
+            {step === 2 && provider && (
+              <>
+                <ModelSlotPicker
+                  value={slots}
+                  onChange={setSlots}
+                  models={models}
+                  loading={fetchingModels}
+                  error={modelFetchError}
+                  onRefresh={refreshModels}
+                  exampleModels={provider.model_discovery.example_models}
+                />
 
-            <div className="space-y-2">
-              <Label>备注名</Label>
-              <Input
-                value={displayName}
-                onChange={(e) => setDisplayName(e.target.value)}
-                placeholder="例如: MiniMax 主号"
-              />
-            </div>
-
-            {modelFetchError && (
-              <div className="text-sm text-destructive">{modelFetchError}</div>
+                <div
+                  style={{
+                    display: "flex",
+                    justifyContent: "space-between",
+                    paddingTop: 16,
+                    marginTop: 16,
+                    borderTop: "1px solid var(--line)",
+                  }}
+                >
+                  <button className="btn bare" onClick={() => setStep(1)} type="button">
+                    <ArrowLeft size={12} /> 上一步
+                  </button>
+                  <button
+                    className="btn primary"
+                    onClick={save}
+                    disabled={!slots.opus || !slots.sonnet || !slots.haiku}
+                    type="button"
+                  >
+                    保存
+                  </button>
+                </div>
+              </>
             )}
-
-            <div className="flex justify-end pt-2">
-              <Button
-                onClick={goToStep2}
-                disabled={!provider || !endpoint || !apiKey || !displayName || fetchingModels}
-              >
-                {fetchingModels && <Loader2 className="h-4 w-4 animate-spin" />}
-                下一步
-              </Button>
-            </div>
-          </CardContent>
-        </Card>
-      )}
-
-      {step === 2 && provider && (
-        <Card>
-          <CardHeader>
-            <CardTitle>模型槽位配置</CardTitle>
-          </CardHeader>
-          <CardContent className="space-y-4">
-            <ModelSlotPicker
-              value={slots}
-              onChange={setSlots}
-              models={models}
-              loading={fetchingModels}
-              error={modelFetchError}
-              onRefresh={refreshModels}
-              exampleModels={provider.model_discovery.example_models}
-            />
-
-            <div className="flex justify-between pt-2">
-              <Button variant="ghost" onClick={() => setStep(1)}>
-                上一步
-              </Button>
-              <Button
-                onClick={save}
-                disabled={!slots.opus || !slots.sonnet || !slots.haiku}
-              >
-                保存
-              </Button>
-            </div>
-          </CardContent>
-        </Card>
-      )}
-    </div>
+          </div>
+        </div>
+      </div>
+    </>
   );
 }

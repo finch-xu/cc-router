@@ -1,16 +1,5 @@
 import { useEffect, useState } from "react";
 import { RefreshCw, AlertCircle } from "lucide-react";
-import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
-import { Alert, AlertDescription } from "@/components/ui/alert";
 import type { ModelInfo, ModelSlots } from "@/types";
 
 type Mode = "auto" | "manual";
@@ -57,87 +46,94 @@ export function ModelSlotPicker({
   }
 
   return (
-    <div className="space-y-3">
-      <div className="flex items-center justify-between">
-        <div className="flex items-center gap-2">
-          <span className="text-sm font-medium">模型槽位</span>
-          <span className="text-xs text-muted-foreground">
-            模式:
+    <div>
+      <div
+        style={{
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "space-between",
+          marginBottom: 14,
+          gap: 12,
+          flexWrap: "wrap",
+        }}
+      >
+        <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+          <span style={{ fontSize: 13, fontWeight: 500, color: "var(--ink-2)" }}>模型槽位</span>
+          <div className="radio-group">
             <button
-              className={`ml-2 underline-offset-2 ${mode === "auto" ? "underline font-medium" : ""}`}
+              className={mode === "auto" ? "on" : ""}
               onClick={() => setMode("auto")}
               disabled={disabled}
               type="button"
             >
               自动
             </button>
-            {" / "}
             <button
-              className={`underline-offset-2 ${mode === "manual" ? "underline font-medium" : ""}`}
+              className={mode === "manual" ? "on" : ""}
               onClick={() => setMode("manual")}
               disabled={disabled}
               type="button"
             >
               手动
             </button>
-          </span>
+          </div>
         </div>
         {onRefresh && (
-          <Button
-            variant="outline"
-            size="sm"
+          <button
+            className="btn sm"
             onClick={onRefresh}
             disabled={disabled || loading}
             type="button"
           >
-            <RefreshCw className={loading ? "h-3 w-3 animate-spin" : "h-3 w-3"} />
+            <RefreshCw size={12} className={loading ? "animate-spin" : undefined} />
             刷新模型列表
-          </Button>
+          </button>
         )}
       </div>
 
       {error && (
-        <Alert variant="warning">
-          <AlertCircle className="h-4 w-4" />
-          <AlertDescription>
-            无法获取模型列表：{error}。已切换到手动输入。
-          </AlertDescription>
-        </Alert>
-      )}
-
-      {mode === "manual" && exampleModels && exampleModels.length > 0 && (
-        <div className="text-xs text-muted-foreground">
-          示例：{exampleModels.join(", ")}
+        <div className="alert warn" style={{ marginBottom: 12 }}>
+          <AlertCircle size={14} />
+          <span>无法获取模型列表:{error}。已切换到手动输入。</span>
         </div>
       )}
 
-      <div className="grid gap-3">
+      {mode === "manual" && exampleModels && exampleModels.length > 0 && (
+        <div className="field-hint" style={{ marginTop: 0, marginBottom: 10 }}>
+          示例:{exampleModels.join(", ")}
+        </div>
+      )}
+
+      <div style={{ display: "grid", gap: 14 }}>
         {SLOTS.map(({ key, label, hint }) => (
-          <div key={key} className="grid grid-cols-[120px_1fr] items-center gap-3">
-            <Label htmlFor={`slot-${key}`}>
-              <div className="text-sm">{label}</div>
-              <div className="text-[10px] font-normal text-muted-foreground">{hint}</div>
-            </Label>
+          <div key={key}>
+            <label className="field-label" htmlFor={`slot-${key}`}>
+              {label}
+              <span style={{ color: "var(--ink-4)", fontWeight: 400, marginLeft: 6 }}>
+                {hint}
+              </span>
+            </label>
             {mode === "auto" && models && models.length > 0 ? (
-              <Select
-                value={value[key] || undefined}
-                onValueChange={(v) => update(key, v)}
+              <select
+                id={`slot-${key}`}
+                className="select mono"
+                value={value[key] || ""}
+                onChange={(e) => update(key, e.target.value)}
                 disabled={disabled}
               >
-                <SelectTrigger id={`slot-${key}`}>
-                  <SelectValue placeholder="请选择模型" />
-                </SelectTrigger>
-                <SelectContent>
-                  {models.map((m) => (
-                    <SelectItem key={m.id} value={m.id}>
-                      {m.display_name || m.id}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
+                <option value="" disabled>
+                  请选择模型
+                </option>
+                {models.map((m) => (
+                  <option key={m.id} value={m.id}>
+                    {m.display_name || m.id}
+                  </option>
+                ))}
+              </select>
             ) : (
-              <Input
+              <input
                 id={`slot-${key}`}
+                className="input mono"
                 value={value[key]}
                 onChange={(e) => update(key, e.target.value)}
                 placeholder="填入厂商提供的模型 ID"

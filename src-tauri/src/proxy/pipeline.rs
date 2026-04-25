@@ -205,6 +205,11 @@ pub async fn dispatch(
                     continue;
                 }
 
+                let response_model_name = resp_body
+                    .get("model")
+                    .and_then(|v| v.as_str())
+                    .map(|s| s.to_string());
+
                 // 改写响应 model 字段：真实名 → 虚拟名（§5.4）；fallback 透传不改写
                 let final_body = if is_fallback {
                     resp_body
@@ -221,6 +226,7 @@ pub async fn dispatch(
                     provider_id: provider_id.clone(),
                     endpoint_id: endpoint_id.clone(),
                     real_model_name: real_model.clone(),
+                    response_model_name,
                     is_streaming: false,
                     status: if status.is_success() {
                         RequestStatus::Success

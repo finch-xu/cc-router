@@ -1,12 +1,8 @@
 import { useState, useEffect, useRef } from "react";
-import { AlertTriangle, Loader2, RefreshCw, Check } from "lucide-react";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
-import { Switch } from "@/components/ui/switch";
-import { Button } from "@/components/ui/button";
-import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
+import { AlertTriangle, RefreshCw, Check } from "lucide-react";
 import { CopyableBlock } from "@/components/CopyableBlock";
+import { Toggle } from "@/components/Toggle";
+import { Spinner } from "@/components/Spinner";
 import {
   Dialog,
   DialogContent,
@@ -15,13 +11,6 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
 import { api } from "@/api/tauri";
 import {
   useProxyStatus,
@@ -49,6 +38,8 @@ export function SettingsPage() {
   const [resetting, setResetting] = useState(false);
   const [tokenJustRegenerated, setTokenJustRegenerated] = useState(false);
   const regenerateTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // 防止 generateNewToken 等 mutation 触发的 settings 失效把用户未保存的编辑覆盖掉
+  const initializedRef = useRef(false);
 
   const generateTokenMut = useGenerateNewToken();
 
@@ -60,7 +51,7 @@ export function SettingsPage() {
   );
 
   useEffect(() => {
-    if (settings.data) {
+    if (settings.data && !initializedRef.current) {
       setPort(settings.data.proxy_port);
       setListenAll(settings.data.listen_all);
       setAutostart(settings.data.autostart);
@@ -69,6 +60,7 @@ export function SettingsPage() {
       setAuthEnabled(settings.data.auth_enabled);
       setCorsEnabled(settings.data.cors_enabled);
       setCorsAllowOrigin(settings.data.cors_allow_origin);
+      initializedRef.current = true;
     }
   }, [settings.data]);
 
@@ -107,7 +99,7 @@ export function SettingsPage() {
     setResetting(true);
     try {
       await api.factoryReset();
-      // app 会自动重启; 这里不会真正 resolve
+      // app 会自动重启;这里不会真正 resolve
     } catch (e) {
       setResetting(false);
       setResetDialog(false);
@@ -116,263 +108,297 @@ export function SettingsPage() {
   }
 
   return (
-    <div className="p-8 max-w-3xl space-y-6">
-      <h1 className="text-2xl font-semibold">设置</h1>
+    <>
+      <div className="page-header">
+        <h1>设置</h1>
+        <div className="subtitle">代理服务、客户端配置、鉴权与数据保留期。</div>
+      </div>
 
-      <Card>
-        <CardHeader>
-          <CardTitle>代理服务</CardTitle>
-        </CardHeader>
-        <CardContent className="space-y-4">
-          <div className="grid grid-cols-[140px_1fr] gap-3 items-center">
-            <Label>监听端口</Label>
-            <div className="flex items-center gap-2">
-              <Input
+      {/* 代理服务 */}
+      <div className="card section">
+        <div className="card-head">
+          <div className="card-title">代理服务</div>
+          <span className={"pill " + (proxy.data?.running ? "ok" : "")}>
+            <span className="dot" />
+            {proxy.data?.running ? "运行中" : "未运行"}
+          </span>
+        </div>
+        <div className="card-body">
+          <div className="setting-row">
+            <div className="label-col">
+              监听端口
+              <div className="desc">默认 23456,被占用时自动 +1 递增。</div>
+            </div>
+            <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+              <input
+                className="input mono"
                 type="number"
                 value={port}
                 onChange={(e) => setPort(Number(e.target.value) || 23456)}
-                className="max-w-[120px]"
+                style={{ width: 120 }}
               />
-              <span className="text-xs text-muted-foreground">
-                当前实际: {proxy.data?.port ?? "-"}
+              <span style={{ fontSize: 12, color: "var(--ink-4)" }}>
+                当前实际:<span className="mono"> {proxy.data?.port ?? "-"}</span>
               </span>
             </div>
           </div>
 
-          <div className="grid grid-cols-[140px_1fr] gap-3 items-start">
-            <Label className="mt-2">监听地址</Label>
-            <div className="space-y-2">
-              <div className="flex items-center gap-3">
-                <Switch checked={listenAll} onCheckedChange={setListenAll} />
-                <span className="text-sm">
-                  {listenAll ? "局域网可访问 (0.0.0.0)" : "仅本机 (127.0.0.1)"}
+          <div className="setting-row">
+            <div className="label-col">
+              监听地址
+              <div className="desc">
+                默认仅本机回环。开启「局域网可访问」后其他设备 Claude Code 可以指向本机 IP。
+              </div>
+            </div>
+            <div>
+              <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                <Toggle checked={listenAll} onChange={setListenAll} aria-label="局域网可访问" />
+                <span
+                  className="mono"
+                  style={{
+                    fontSize: 12,
+                    color: listenAll ? "var(--ink-2)" : "var(--ink-4)",
+                  }}
+                >
+                  {listenAll ? "0.0.0.0:" : "127.0.0.1:"}
+                  {port}
                 </span>
               </div>
-              <p className="text-xs text-muted-foreground">
-                {listenAll
-                  ? "⚠️ 开启后，同网段的任何设备都能调用代理。代理不做鉴权，慎用于不受信任的网络。"
-                  : "默认仅本机回环。开启「局域网可访问」后其他设备的 Claude Code 可以指向本机 IP。"}
-              </p>
+              {listenAll && (
+                <div className="field-hint" style={{ color: "var(--err)" }}>
+                  ⚠️ 开启后,同网段任何设备都能调用代理。代理不做鉴权,慎用于不受信任的网络。
+                </div>
+              )}
             </div>
           </div>
 
-          <div className="grid grid-cols-[140px_1fr] gap-3 items-center">
-            <Label>运行状态</Label>
-            <div className="flex items-center gap-2 text-sm">
-              <span
-                className={`h-2 w-2 rounded-full ${
-                  proxy.data?.running ? "bg-status-healthy" : "bg-status-disabled"
-                }`}
-              />
-              {proxy.data?.running ? "运行中" : "未运行"}
-            </div>
-          </div>
-          <div className="grid grid-cols-[140px_1fr] gap-3 items-center">
-            <Label>开机自启动</Label>
-            <Switch checked={autostart} onCheckedChange={setAutostart} />
+          <div className="setting-row">
+            <div className="label-col">开机自启动</div>
+            <Toggle checked={autostart} onChange={setAutostart} aria-label="开机自启动" />
           </div>
 
           {needsRestart && (
-            <Alert variant="warning">
-              <AlertTriangle className="h-4 w-4" />
-              <AlertDescription>
-                修改端口或监听地址需要重启 app 才生效。保存后请手动退出 cc-router 再启动。
-              </AlertDescription>
-            </Alert>
+            <div className="alert warn">
+              <AlertTriangle size={14} />
+              修改端口或监听地址需要重启 app 才生效。保存后请手动退出 cc-router 再启动。
+            </div>
           )}
-        </CardContent>
-      </Card>
+        </div>
+      </div>
 
-      <Card>
-        <CardHeader>
-          <CardTitle>Claude Code 配置</CardTitle>
-        </CardHeader>
-        <CardContent className="space-y-3">
-          <p className="text-sm text-muted-foreground">
-            把下面的环境变量加到 Claude Code 的配置里（或 ~/.claude/settings.json 的 env 字段）
-          </p>
-          {env.data && <CopyableBlock text={env.data} />}
-        </CardContent>
-      </Card>
+      {/* Claude Code 配置 */}
+      <div className="card section">
+        <div className="card-head">
+          <div className="card-title">Claude Code 配置</div>
+          <span className="card-sub mono">~/.claude/settings.json · env</span>
+        </div>
+        <div className="card-body">
+          {env.data ? (
+            <CopyableBlock text={env.data} />
+          ) : (
+            <div className="field-hint">加载中…</div>
+          )}
+        </div>
+      </div>
 
-      <Card>
-        <CardHeader>
-          <CardTitle>鉴权与跨域</CardTitle>
-        </CardHeader>
-        <CardContent className="space-y-4">
-          <div className="grid grid-cols-[140px_1fr] gap-3 items-start">
-            <Label className="mt-2">Token 鉴权</Label>
-            <div className="space-y-2">
-              <div className="flex items-center gap-3">
-                <Switch checked={authEnabled} onCheckedChange={setAuthEnabled} />
-                <span className="text-sm">
+      {/* 鉴权与跨域 */}
+      <div className="card section">
+        <div className="card-head">
+          <div className="card-title">鉴权与跨域</div>
+        </div>
+        <div className="card-body">
+          <div className="setting-row">
+            <div className="label-col">
+              Token 鉴权
+              <div className="desc">
+                在 Claude Code 启动时配 ANTHROPIC_API_KEY 或 ANTHROPIC_AUTH_TOKEN 等于此 token。重新生成后所有已配置客户端需同步更新。
+              </div>
+            </div>
+            <div>
+              <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 10 }}>
+                <Toggle checked={authEnabled} onChange={setAuthEnabled} aria-label="Token 鉴权" />
+                <span style={{ fontSize: 12, color: "var(--ink-2)" }}>
                   {authEnabled ? "已开启,请求必须携带正确 token" : "已关闭,所有请求放行"}
                 </span>
               </div>
               {authEnabled && settings.data && (
-                <div className="space-y-2">
-                  <div className="flex items-center gap-2">
-                    <Input
-                      readOnly
-                      value={settings.data.auth_token}
-                      className="font-mono text-xs"
-                    />
-                    <Button
-                      type="button"
-                      variant="outline"
-                      size="sm"
-                      onClick={regenerateToken}
-                      disabled={generateTokenMut.isPending}
-                      className="shrink-0"
-                    >
-                      {generateTokenMut.isPending ? (
-                        <Loader2 className="h-4 w-4 animate-spin" />
-                      ) : tokenJustRegenerated ? (
-                        <Check className="h-4 w-4 text-status-healthy" />
-                      ) : (
-                        <RefreshCw className="h-4 w-4" />
-                      )}
-                      <span className="ml-1">
-                        {tokenJustRegenerated ? "已生成" : "重新生成"}
-                      </span>
-                    </Button>
-                  </div>
-                  <p className="text-xs text-muted-foreground">
-                    在 Claude Code 启动时配 <code className="px-1 bg-muted rounded">ANTHROPIC_API_KEY</code> 或 <code className="px-1 bg-muted rounded">ANTHROPIC_AUTH_TOKEN</code> 等于此 token 即可通过鉴权。重新生成后,所有已配置的客户端需同步更新。
-                  </p>
+                <div style={{ display: "flex", gap: 8 }}>
+                  <input
+                    className="input mono"
+                    value={settings.data.auth_token}
+                    readOnly
+                    style={{ fontSize: 11.5, color: "var(--ink-2)" }}
+                  />
+                  <button
+                    className="btn"
+                    onClick={regenerateToken}
+                    disabled={generateTokenMut.isPending}
+                    type="button"
+                  >
+                    {generateTokenMut.isPending ? (
+                      <Spinner />
+                    ) : tokenJustRegenerated ? (
+                      <Check size={12} style={{ color: "var(--ok)" }} />
+                    ) : (
+                      <RefreshCw size={12} />
+                    )}
+                    {tokenJustRegenerated ? "已生成" : "重新生成"}
+                  </button>
                 </div>
               )}
             </div>
           </div>
 
-          <div className="grid grid-cols-[140px_1fr] gap-3 items-start">
-            <Label className="mt-2">CORS 跨域</Label>
-            <div className="space-y-2">
-              <div className="flex items-center gap-3">
-                <Switch checked={corsEnabled} onCheckedChange={setCorsEnabled} />
-                <span className="text-sm">
+          <div className="setting-row">
+            <div className="label-col">
+              CORS 跨域
+              <div className="desc">
+                {corsEnabled
+                  ? "已开启,响应附加 CORS 头。指定具体值如 http://localhost:5173 仅允许该来源。"
+                  : "已关闭,浏览器跨域调用会被拦截。"}
+              </div>
+            </div>
+            <div>
+              <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 10 }}>
+                <Toggle checked={corsEnabled} onChange={setCorsEnabled} aria-label="CORS 跨域" />
+                <span style={{ fontSize: 12, color: "var(--ink-2)" }}>
                   {corsEnabled ? "已开启,响应附加 CORS 头" : "已关闭,浏览器跨域调用会被拦截"}
                 </span>
               </div>
               {corsEnabled && (
-                <div className="flex items-center gap-2">
-                  <Input
+                <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+                  <input
+                    className="input mono"
                     value={corsAllowOrigin}
                     onChange={(e) => setCorsAllowOrigin(e.target.value)}
                     placeholder="*"
-                    className="font-mono text-xs max-w-[300px]"
+                    style={{ maxWidth: 280 }}
                   />
-                  <span className="text-xs text-muted-foreground">
+                  <span
+                    className="mono"
+                    style={{ fontSize: 11.5, color: "var(--ink-4)" }}
+                  >
                     Access-Control-Allow-Origin
                   </span>
                 </div>
               )}
-              <p className="text-xs text-muted-foreground">
-                留 <code className="px-1 bg-muted rounded">*</code> 允许所有来源(浏览器调试推荐);指定具体值如 <code className="px-1 bg-muted rounded">http://localhost:5173</code> 仅允许该来源。改动即时生效,无需重启。
-              </p>
             </div>
           </div>
-        </CardContent>
-      </Card>
-
-      <Card>
-        <CardHeader>
-          <CardTitle>数据存储</CardTitle>
-        </CardHeader>
-        <CardContent className="space-y-4">
-          <div className="grid grid-cols-[160px_1fr] gap-3 items-center">
-            <Label>请求日志保留期</Label>
-            <Select
-              value={String(retentionDays)}
-              onValueChange={(v) => setRetentionDays(Number(v))}
-            >
-              <SelectTrigger className="max-w-[200px]">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="7">7 天</SelectItem>
-                <SelectItem value="30">30 天</SelectItem>
-                <SelectItem value="90">90 天</SelectItem>
-                <SelectItem value="36500">永久</SelectItem>
-              </SelectContent>
-            </Select>
-          </div>
-          <div className="grid grid-cols-[160px_1fr] gap-3 items-center">
-            <Label>数据库大小上限</Label>
-            <Select
-              value={String(dbLimitMb)}
-              onValueChange={(v) => setDbLimitMb(Number(v))}
-            >
-              <SelectTrigger className="max-w-[200px]">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="100">100 MB</SelectItem>
-                <SelectItem value="500">500 MB</SelectItem>
-                <SelectItem value="1024">1 GB</SelectItem>
-                <SelectItem value="10240">10 GB (近似无限)</SelectItem>
-              </SelectContent>
-            </Select>
-          </div>
-        </CardContent>
-      </Card>
-
-      <div className="flex justify-end">
-        <Button onClick={save} disabled={updateMut.isPending}>
-          保存设置
-        </Button>
+        </div>
       </div>
 
-      <Card className="border-destructive/50">
-        <CardHeader>
-          <CardTitle className="text-destructive">危险区域</CardTitle>
-        </CardHeader>
-        <CardContent className="space-y-3">
-          <Alert variant="destructive">
-            <AlertTriangle className="h-4 w-4" />
-            <AlertTitle>恢复出厂设置</AlertTitle>
-            <AlertDescription>
-              清空所有订阅、Keychain 中的 API Key、虚拟模型绑定、请求日志、设置文件。
-              app 会自动重启并进入初始欢迎页。此操作不可撤销。
-            </AlertDescription>
-          </Alert>
-          <Button variant="destructive" onClick={() => setResetDialog(true)}>
-            恢复出厂设置
-          </Button>
-        </CardContent>
-      </Card>
+      {/* 数据存储 */}
+      <div className="card section">
+        <div className="card-head">
+          <div className="card-title">数据存储</div>
+        </div>
+        <div className="card-body">
+          <div className="setting-row">
+            <div className="label-col">请求日志保留期</div>
+            <select
+              className="select"
+              style={{ maxWidth: 200 }}
+              value={String(retentionDays)}
+              onChange={(e) => setRetentionDays(Number(e.target.value))}
+            >
+              <option value="7">7 天</option>
+              <option value="30">30 天</option>
+              <option value="90">90 天</option>
+              <option value="36500">永久</option>
+            </select>
+          </div>
+          <div className="setting-row">
+            <div className="label-col">数据库大小上限</div>
+            <select
+              className="select"
+              style={{ maxWidth: 200 }}
+              value={String(dbLimitMb)}
+              onChange={(e) => setDbLimitMb(Number(e.target.value))}
+            >
+              <option value="100">100 MB</option>
+              <option value="500">500 MB</option>
+              <option value="1024">1 GB</option>
+              <option value="10240">10 GB (近似无限)</option>
+            </select>
+          </div>
+          <div style={{ display: "flex", justifyContent: "flex-end", paddingTop: 16 }}>
+            <button className="btn primary" onClick={save} disabled={updateMut.isPending} type="button">
+              {updateMut.isPending && <Spinner />}
+              保存设置
+            </button>
+          </div>
+        </div>
+      </div>
 
+      {/* 危险区域 */}
+      <div className="danger-card section">
+        <div>
+          <div
+            style={{
+              display: "flex",
+              alignItems: "center",
+              gap: 8,
+              fontSize: 13,
+              fontWeight: 600,
+              color: "oklch(0.42 0.16 28)",
+              marginBottom: 6,
+            }}
+          >
+            <AlertTriangle size={14} /> 危险区域 · 恢复出厂设置
+          </div>
+          <div style={{ fontSize: 12, color: "var(--ink-3)", lineHeight: 1.6 }}>
+            清空所有订阅、API Key、虚拟模型绑定、请求日志、设置文件。app 会自动重启并进入初始欢迎页。此操作不可撤销。
+          </div>
+        </div>
+        <button className="btn danger" type="button" onClick={() => setResetDialog(true)}>
+          恢复出厂设置
+        </button>
+      </div>
+
+      {/* 恢复出厂确认弹窗 */}
       <Dialog open={resetDialog} onOpenChange={(v) => !resetting && setResetDialog(v)}>
-        <DialogContent>
+        <DialogContent className="cc-dialog">
           <DialogHeader>
             <DialogTitle>
-              <div className="flex items-center gap-2">
-                <AlertTriangle className="h-4 w-4 text-destructive" />
+              <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                <AlertTriangle size={16} style={{ color: "var(--err)" }} />
                 确认恢复出厂设置?
               </div>
             </DialogTitle>
-            <DialogDescription>
-              下面的数据将被永久删除：
-              <ul className="mt-2 list-disc pl-5 text-sm">
-                <li>所有订阅（包括 Keychain 中存储的 API Key）</li>
-                <li>虚拟模型绑定</li>
-                <li>请求日志和模型列表缓存</li>
-                <li>app 设置（端口、保留期等）</li>
-              </ul>
-              <p className="mt-3">操作完成后 app 会自动重启。</p>
+            <DialogDescription asChild>
+              <div>
+                下面的数据将被永久删除:
+                <ul style={{ marginTop: 8, paddingLeft: 20, fontSize: 13, lineHeight: 1.7 }}>
+                  <li>所有订阅(包括明文存储的 API Key)</li>
+                  <li>虚拟模型绑定</li>
+                  <li>请求日志和模型列表缓存</li>
+                  <li>app 设置(端口、保留期等)</li>
+                </ul>
+                <p style={{ marginTop: 12 }}>操作完成后 app 会自动重启。</p>
+              </div>
             </DialogDescription>
           </DialogHeader>
           <DialogFooter>
-            <Button variant="ghost" onClick={() => setResetDialog(false)} disabled={resetting}>
+            <button
+              className="btn"
+              onClick={() => setResetDialog(false)}
+              disabled={resetting}
+              type="button"
+            >
               取消
-            </Button>
-            <Button variant="destructive" onClick={confirmReset} disabled={resetting}>
-              {resetting && <Loader2 className="h-4 w-4 animate-spin" />}
+            </button>
+            <button
+              className="btn danger"
+              onClick={confirmReset}
+              disabled={resetting}
+              type="button"
+            >
+              {resetting && <Spinner />}
               确认清空并重启
-            </Button>
+            </button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
-    </div>
+    </>
   );
 }
