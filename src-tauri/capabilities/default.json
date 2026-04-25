@@ -21,6 +21,7 @@
     "dialog:allow-save",
     "dialog:allow-message",
     "dialog:allow-confirm",
-    "shell:allow-open"
+    "shell:allow-open",
+    "updater:default"
   ]
 }

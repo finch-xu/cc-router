@@ -1,6 +1,5 @@
 import { useState, useEffect, useRef } from "react";
 import { AlertTriangle, RefreshCw, Check } from "lucide-react";
-import { CopyableBlock } from "@/components/CopyableBlock";
 import { Toggle } from "@/components/Toggle";
 import { Spinner } from "@/components/Spinner";
 import {
@@ -16,14 +15,12 @@ import {
   useProxyStatus,
   useSettings,
   useUpdateSettings,
-  useEnvSnippet,
   useGenerateNewToken,
 } from "@/hooks/useSettings";
 
 export function SettingsPage() {
   const settings = useSettings();
   const proxy = useProxyStatus();
-  const env = useEnvSnippet();
   const updateMut = useUpdateSettings();
 
   const [port, setPort] = useState<number>(23456);
@@ -182,21 +179,6 @@ export function SettingsPage() {
               <AlertTriangle size={14} />
               修改端口或监听地址需要重启 app 才生效。保存后请手动退出 cc-router 再启动。
             </div>
-          )}
-        </div>
-      </div>
-
-      {/* Claude Code 配置 */}
-      <div className="card section">
-        <div className="card-head">
-          <div className="card-title">Claude Code 配置</div>
-          <span className="card-sub mono">~/.claude/settings.json · env</span>
-        </div>
-        <div className="card-body">
-          {env.data ? (
-            <CopyableBlock text={env.data} />
-          ) : (
-            <div className="field-hint">加载中…</div>
           )}
         </div>
       </div>

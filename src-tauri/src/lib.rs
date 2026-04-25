@@ -29,6 +29,7 @@ pub fn run() {
         .plugin(tauri_plugin_shell::init())
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_clipboard_manager::init())
+        .plugin(tauri_plugin_updater::Builder::new().build())
         .setup(|app| {
             // 日志初始化
             let app_data_dir = app
@@ -88,6 +89,8 @@ pub fn run() {
             commands::onboarding::get_onboarding_state,
             commands::onboarding::complete_onboarding,
             commands::app::factory_reset,
+            commands::app::is_appimage_runtime,
+            commands::app::relaunch_app,
         ])
         .run(tauri::generate_context!())
         .expect("运行 cc-router 时发生错误");

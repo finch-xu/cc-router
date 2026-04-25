@@ -53,6 +53,8 @@ jobs:
           APPLE_ID: ${{ secrets.APPLE_ID }}
           APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
           APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
         with:
           args: --target aarch64-apple-darwin
 
@@ -65,9 +67,15 @@ jobs:
           for f in "$bundle_dir"/dmg/*_aarch64.dmg; do
             mv -v "$f" "${f/_aarch64.dmg/_macOS-arm64.dmg}"
           done
+          # .app.tar.gz 是 updater 实际下载的产物,跟随其后的 .sig 也一并改名
           for f in "$bundle_dir"/macos/*.app.tar.gz; do
+            [ -f "$f" ] || continue
             base="$(basename "$f" .app.tar.gz)"
-            mv -v "$f" "$bundle_dir/macos/${base}_macOS-arm64.app.tar.gz"
+            new="$bundle_dir/macos/${base}_macOS-arm64.app.tar.gz"
+            mv -v "$f" "$new"
+            if [ -f "${f}.sig" ]; then
+              mv -v "${f}.sig" "${new}.sig"
+            fi
           done
 
       - name: Upload to draft release
@@ -78,6 +86,7 @@ jobs:
           files: |
             src-tauri/target/aarch64-apple-darwin/release/bundle/dmg/*.dmg
             src-tauri/target/aarch64-apple-darwin/release/bundle/macos/*.app.tar.gz
+            src-tauri/target/aarch64-apple-darwin/release/bundle/macos/*.app.tar.gz.sig
 
   build-windows:
     name: Build Windows x64
@@ -115,6 +124,9 @@ jobs:
 
       - name: Build
         uses: tauri-apps/tauri-action@v0
+        env:
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
         with:
           args: --target x86_64-pc-windows-msvc
 
@@ -136,6 +148,18 @@ jobs:
             Rename-Item -LiteralPath $_.FullName -NewName $newName
           }
 
+          # NSIS .nsis.zip: updater 实际下载的产物,带 .sig
+          Get-ChildItem -Path (Join-Path $bundleDir 'nsis') -Filter '*_x64-setup.nsis.zip' -ErrorAction SilentlyContinue | ForEach-Object {
+            $newName = $_.Name -replace '_x64-setup\.nsis\.zip$', '_windows-x64-setup.nsis.zip'
+            Write-Host "Renaming $($_.Name) -> $newName"
+            Rename-Item -LiteralPath $_.FullName -NewName $newName
+          }
+          Get-ChildItem -Path (Join-Path $bundleDir 'nsis') -Filter '*_x64-setup.nsis.zip.sig' -ErrorAction SilentlyContinue | ForEach-Object {
+            $newName = $_.Name -replace '_x64-setup\.nsis\.zip\.sig$', '_windows-x64-setup.nsis.zip.sig'
+            Write-Host "Renaming $($_.Name) -> $newName"
+            Rename-Item -LiteralPath $_.FullName -NewName $newName
+          }
+
       - name: Upload to draft release
         uses: softprops/action-gh-release@v2
         with:
@@ -144,6 +168,8 @@ jobs:
           files: |
             src-tauri/target/x86_64-pc-windows-msvc/release/bundle/msi/*.msi
             src-tauri/target/x86_64-pc-windows-msvc/release/bundle/nsis/*.exe
+            src-tauri/target/x86_64-pc-windows-msvc/release/bundle/nsis/*.nsis.zip
+            src-tauri/target/x86_64-pc-windows-msvc/release/bundle/nsis/*.nsis.zip.sig
 
   build-linux:
     name: Build Linux x64
@@ -192,6 +218,9 @@ jobs:
 
       - name: Build
         uses: tauri-apps/tauri-action@v0
+        env:
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
         with:
           # 显式只打 deb + AppImage; 跳过 rpm (Ubuntu runner 上工具链不稳)
           args: --target x86_64-unknown-linux-gnu --bundles deb,appimage
@@ -202,11 +231,17 @@ jobs:
           set -euo pipefail
           bundle_dir="src-tauri/target/x86_64-unknown-linux-gnu/release/bundle"
           shopt -s nullglob
+          # deb 不参与 updater (无 .sig)
           for f in "$bundle_dir"/deb/*_amd64.deb; do
             mv -v "$f" "${f/_amd64.deb/_linux-x64.deb}"
           done
+          # AppImage 是 updater 产物,带 .sig
           for f in "$bundle_dir"/appimage/*_amd64.AppImage; do
-            mv -v "$f" "${f/_amd64.AppImage/_linux-x64.AppImage}"
+            new="${f/_amd64.AppImage/_linux-x64.AppImage}"
+            mv -v "$f" "$new"
+            if [ -f "${f}.sig" ]; then
+              mv -v "${f}.sig" "${new}.sig"
+            fi
           done
 
       - name: Upload to draft release
@@ -217,10 +252,49 @@ jobs:
           files: |
             src-tauri/target/x86_64-unknown-linux-gnu/release/bundle/deb/*.deb
             src-tauri/target/x86_64-unknown-linux-gnu/release/bundle/appimage/*.AppImage
+            src-tauri/target/x86_64-unknown-linux-gnu/release/bundle/appimage/*.AppImage.sig
+
+  generate-manifest:
+    name: Generate latest.json
+    needs: [build-macos, build-windows, build-linux]
+    runs-on: ubuntu-latest
+    env:
+      RELEASE_TAG: ${{ github.ref_name }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Download .sig assets from draft release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          mkdir -p sigs
+          gh release download "$RELEASE_TAG" --dir sigs --pattern '*.sig' --repo "$GH_REPO"
+          ls -la sigs
+
+      - name: Generate latest.json
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REPO: ${{ github.repository }}
+        run: node scripts/generate-latest-json.mjs "$RELEASE_TAG" sigs latest.json
+
+      - name: Upload latest.json to draft release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ env.RELEASE_TAG }}
+          draft: true
+          files: latest.json
 
   publish:
     name: Publish release
-    needs: [build-macos, build-windows, build-linux]
+    needs: [generate-manifest]
     runs-on: ubuntu-latest
     steps:
       - name: Flip draft to published

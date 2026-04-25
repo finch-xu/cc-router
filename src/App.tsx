@@ -10,9 +10,19 @@ import { AboutPage } from "@/routes/About";
 import { GuidePage } from "@/routes/Guide";
 import { OnboardingGate } from "@/components/layout/OnboardingGate";
 import { useSubscriptionEventBridge } from "@/hooks/useSubscriptions";
+import { UpdaterProvider, useUpdaterAutoCheck } from "@/hooks/useUpdater";
 
 export default function App() {
+  return (
+    <UpdaterProvider>
+      <AppInner />
+    </UpdaterProvider>
+  );
+}
+
+function AppInner() {
   useSubscriptionEventBridge();
+  useUpdaterAutoCheck();
   return (
     <Routes>
       {/* 兼容旧链接: 引导壳已删, 旧 /onboarding 转到订阅向导 */}

@@ -62,6 +62,9 @@ importers:
       '@tauri-apps/plugin-shell':
         specifier: ^2.2.0
         version: 2.3.5
+      '@tauri-apps/plugin-updater':
+        specifier: ^2.7.0
+        version: 2.10.1
       class-variance-authority:
         specifier: ^0.7.0
         version: 0.7.1
@@ -1661,6 +1664,9 @@ packages:
 
   '@tauri-apps/plugin-shell@2.3.5':
     resolution: {integrity: sha512-jewtULhiQ7lI7+owCKAjc8tYLJr92U16bPOeAa472LHJdgaibLP83NcfAF2e+wkEcA53FxKQAZ7byDzs2eeizg==}
+
+  '@tauri-apps/plugin-updater@2.10.1':
+    resolution: {integrity: sha512-NFYMg+tWOZPJdzE/PpFj2qfqwAWwNS3kXrb1tm1gnBJ9mYzZ4WDRrwy8udzWoAnfGCHLuePNLY1WVCNHnh3eRA==}
 
   '@types/babel__core@7.20.5':
     resolution: {integrity: sha512-qoQprZvz5wQFJwMDqeseRXWv3rqMvhgpbXFfVyWhbx9X47POIA6i/+dXefEmZKoAgOaTdaIgNSMqMIU61yRyzA==}
@@ -5391,6 +5397,10 @@ snapshots:
       '@tauri-apps/api': 2.10.1
 
   '@tauri-apps/plugin-shell@2.3.5':
+    dependencies:
+      '@tauri-apps/api': 2.10.1
+
+  '@tauri-apps/plugin-updater@2.10.1':
     dependencies:
       '@tauri-apps/api': 2.10.1
 

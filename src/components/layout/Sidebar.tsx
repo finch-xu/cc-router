@@ -11,6 +11,7 @@ import {
 import { cn } from "@/lib/utils";
 import { useSubscriptions } from "@/hooks/useSubscriptions";
 import { useProxyStatus } from "@/hooks/useSettings";
+import { useUpdater } from "@/hooks/useUpdater";
 import { version as VERSION } from "../../../package.json";
 import logoUrl from "@/assets/logo.png";
 
@@ -19,23 +20,26 @@ interface NavItem {
   label: string;
   icon: LucideIcon;
   badge?: string | (() => string | null);
+  dot?: boolean;
 }
 
 export function Sidebar() {
   const subs = useSubscriptions();
   const proxy = useProxyStatus();
+  const { detected } = useUpdater();
 
   const subsCount = subs.data?.length ?? 0;
   const running = proxy.data?.running ?? false;
   const port = proxy.data?.port;
+  const hasUpdate = detected !== null;
 
   const items: NavItem[] = [
+    { to: "/guide", label: "接入指南", icon: BookOpen },
     { to: "/virtual-models", label: "虚拟模型", icon: Layers, badge: "4" },
     { to: "/subscriptions", label: "订阅管理", icon: Key, badge: subsCount > 0 ? String(subsCount) : undefined },
     { to: "/request-logs", label: "请求日志", icon: ScrollText },
-    { to: "/guide", label: "接入指南", icon: BookOpen },
     { to: "/settings", label: "设置", icon: SettingsIcon },
-    { to: "/about", label: "关于", icon: Info },
+    { to: "/about", label: "关于", icon: Info, dot: hasUpdate },
   ];
 
   return (
@@ -63,6 +67,20 @@ export function Sidebar() {
             </span>
             <span>{it.label}</span>
             {badge && <span className="badge mono">{badge}</span>}
+            {!badge && it.dot && (
+              <span
+                aria-label="有可用更新"
+                title="有可用更新"
+                style={{
+                  marginLeft: "auto",
+                  width: 8,
+                  height: 8,
+                  borderRadius: 9999,
+                  background: "var(--err)",
+                  boxShadow: "0 0 0 2px var(--err-bg)",
+                }}
+              />
+            )}
           </NavLink>
         );
       })}

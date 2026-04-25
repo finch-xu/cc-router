@@ -31,3 +31,19 @@ pub async fn factory_reset(state: State<'_, AppState>, app: AppHandle) -> AppRes
     info!("factory reset finished, restarting app");
     app.restart();
 }
+
+/// 当前 Linux 进程是否运行在 AppImage 中。
+/// AppImage 启动时会向自身导出 `APPIMAGE` 环境变量,Tauri updater 也用同样方式判断。
+/// 前端用此命令决定 Linux 平台是走自动更新流程,还是引导用户去 GitHub release 页手动下载 .deb。
+#[tauri::command]
+pub fn is_appimage_runtime() -> bool {
+    std::env::var("APPIMAGE").is_ok()
+}
+
+/// 用户在 About 页确认"立即重启"后调用,等同 factory reset 里的 app.restart()。
+/// 单独暴露是为了避免前端引入 tauri-plugin-process 依赖——保持依赖最小化。
+#[tauri::command]
+pub fn relaunch_app(app: AppHandle) {
+    info!("relaunch requested by user (post-update)");
+    app.restart();
+}
