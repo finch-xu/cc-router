@@ -74,11 +74,6 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ env.RELEASE_TAG }}
-          name: cc-router ${{ env.RELEASE_TAG }}
-          body: |
-            自动构建产物：
-            - macOS (Apple Silicon): `cc-router_<version>_macOS-arm64.dmg`
-            - Windows x64: `cc-router_<version>_windows-x64.msi` / `cc-router_<version>_windows-x64-setup.exe`
           draft: true
           files: |
             src-tauri/target/aarch64-apple-darwin/release/bundle/dmg/*.dmg
@@ -145,19 +140,87 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ env.RELEASE_TAG }}
-          name: cc-router ${{ env.RELEASE_TAG }}
-          body: |
-            自动构建产物：
-            - macOS (Apple Silicon): `cc-router_<version>_macOS-arm64.dmg`
-            - Windows x64: `cc-router_<version>_windows-x64.msi` / `cc-router_<version>_windows-x64-setup.exe`
           draft: true
           files: |
             src-tauri/target/x86_64-pc-windows-msvc/release/bundle/msi/*.msi
             src-tauri/target/x86_64-pc-windows-msvc/release/bundle/nsis/*.exe
 
+  build-linux:
+    name: Build Linux x64
+    runs-on: ubuntu-22.04
+    env:
+      RELEASE_TAG: ${{ github.ref_name }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 9
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - name: Setup Rust (x86_64-unknown-linux-gnu)
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: x86_64-unknown-linux-gnu
+
+      - name: Cache Cargo
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+          key: linux-x64
+
+      - name: Install system deps (webkit2gtk + tray + AppImage tooling)
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libwebkit2gtk-4.1-dev \
+            libappindicator3-dev \
+            librsvg2-dev \
+            patchelf \
+            libayatana-appindicator3-dev \
+            file
+
+      - name: Install frontend deps
+        run: pnpm install --frozen-lockfile
+
+      - name: Build
+        uses: tauri-apps/tauri-action@v0
+        with:
+          # 显式只打 deb + AppImage; 跳过 rpm (Ubuntu runner 上工具链不稳)
+          args: --target x86_64-unknown-linux-gnu --bundles deb,appimage
+
+      - name: Rename artifacts with platform suffix
+        shell: bash
+        run: |
+          set -euo pipefail
+          bundle_dir="src-tauri/target/x86_64-unknown-linux-gnu/release/bundle"
+          shopt -s nullglob
+          for f in "$bundle_dir"/deb/*_amd64.deb; do
+            mv -v "$f" "${f/_amd64.deb/_linux-x64.deb}"
+          done
+          for f in "$bundle_dir"/appimage/*_amd64.AppImage; do
+            mv -v "$f" "${f/_amd64.AppImage/_linux-x64.AppImage}"
+          done
+
+      - name: Upload to draft release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ env.RELEASE_TAG }}
+          draft: true
+          files: |
+            src-tauri/target/x86_64-unknown-linux-gnu/release/bundle/deb/*.deb
+            src-tauri/target/x86_64-unknown-linux-gnu/release/bundle/appimage/*.AppImage
+
   publish:
     name: Publish release
-    needs: [build-macos, build-windows]
+    needs: [build-macos, build-windows, build-linux]
     runs-on: ubuntu-latest
     steps:
       - name: Flip draft to published
