@@ -44,6 +44,21 @@ jobs:
       - name: Install frontend deps
         run: pnpm install --frozen-lockfile
 
+      - name: Verify Tauri signing secrets are present
+        env:
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+        run: |
+          if [ -z "${TAURI_SIGNING_PRIVATE_KEY:-}" ]; then
+            echo "::error::TAURI_SIGNING_PRIVATE_KEY secret is empty - .sig files will not be generated. Configure it in repo Settings > Secrets and variables > Actions."
+            exit 1
+          fi
+          if [ -z "${TAURI_SIGNING_PRIVATE_KEY_PASSWORD:-}" ]; then
+            echo "::error::TAURI_SIGNING_PRIVATE_KEY_PASSWORD secret is empty - bundle signing will fail."
+            exit 1
+          fi
+          echo "TAURI signing secrets present."
+
       - name: Build, sign & notarize
         uses: tauri-apps/tauri-action@v0
         env:
@@ -57,6 +72,17 @@ jobs:
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
         with:
           args: --target aarch64-apple-darwin
+
+      - name: List bundle contents (diagnostic)
+        if: always()
+        shell: bash
+        run: |
+          bundle_dir="src-tauri/target/aarch64-apple-darwin/release/bundle"
+          if [ -d "$bundle_dir" ]; then
+            find "$bundle_dir" -maxdepth 3 -type f | sort
+          else
+            echo "Bundle dir does not exist: $bundle_dir"
+          fi
 
       - name: Rename artifacts with platform suffix
         shell: bash
@@ -130,6 +156,22 @@ jobs:
       - name: Install frontend deps
         run: pnpm install --frozen-lockfile
 
+      - name: Verify Tauri signing secrets are present
+        shell: pwsh
+        env:
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+        run: |
+          if ([string]::IsNullOrEmpty($env:TAURI_SIGNING_PRIVATE_KEY)) {
+            Write-Host "::error::TAURI_SIGNING_PRIVATE_KEY secret is empty - .sig files will not be generated."
+            exit 1
+          }
+          if ([string]::IsNullOrEmpty($env:TAURI_SIGNING_PRIVATE_KEY_PASSWORD)) {
+            Write-Host "::error::TAURI_SIGNING_PRIVATE_KEY_PASSWORD secret is empty - bundle signing will fail."
+            exit 1
+          }
+          Write-Host "TAURI signing secrets present."
+
       - name: Build
         uses: tauri-apps/tauri-action@v0
         env:
@@ -137,6 +179,17 @@ jobs:
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
         with:
           args: --target x86_64-pc-windows-msvc
+
+      - name: List bundle contents (diagnostic)
+        if: always()
+        shell: pwsh
+        run: |
+          $bundleDir = "src-tauri/target/x86_64-pc-windows-msvc/release/bundle"
+          if (Test-Path $bundleDir) {
+            Get-ChildItem -Path $bundleDir -Recurse -File | Select-Object -ExpandProperty FullName | Sort-Object
+          } else {
+            Write-Host "Bundle dir does not exist: $bundleDir"
+          }
 
       - name: Rename artifacts with platform suffix
         shell: pwsh
@@ -231,6 +284,21 @@ jobs:
       - name: Install frontend deps
         run: pnpm install --frozen-lockfile
 
+      - name: Verify Tauri signing secrets are present
+        env:
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+        run: |
+          if [ -z "${TAURI_SIGNING_PRIVATE_KEY:-}" ]; then
+            echo "::error::TAURI_SIGNING_PRIVATE_KEY secret is empty - .sig files will not be generated."
+            exit 1
+          fi
+          if [ -z "${TAURI_SIGNING_PRIVATE_KEY_PASSWORD:-}" ]; then
+            echo "::error::TAURI_SIGNING_PRIVATE_KEY_PASSWORD secret is empty - bundle signing will fail."
+            exit 1
+          fi
+          echo "TAURI signing secrets present."
+
       - name: Build
         uses: tauri-apps/tauri-action@v0
         env:
@@ -239,6 +307,17 @@ jobs:
         with:
           # 显式只打 deb + AppImage; 跳过 rpm (Ubuntu runner 上工具链不稳)
           args: --target x86_64-unknown-linux-gnu --bundles deb,appimage
+
+      - name: List bundle contents (diagnostic)
+        if: always()
+        shell: bash
+        run: |
+          bundle_dir="src-tauri/target/x86_64-unknown-linux-gnu/release/bundle"
+          if [ -d "$bundle_dir" ]; then
+            find "$bundle_dir" -maxdepth 3 -type f | sort
+          else
+            echo "Bundle dir does not exist: $bundle_dir"
+          fi
 
       - name: Rename artifacts with platform suffix
         shell: bash
