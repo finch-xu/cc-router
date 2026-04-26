@@ -111,6 +111,7 @@ Managed as `src-tauri/providers/*.yaml`, validated against a JSON Schema at star
 | `stepfun` | Stepfun (Step Plan subscription + pay-as-you-go API) | ✅ | ✅ | untested |
 | `baidu` | Baidu Qianfan (Coding Plan subscription, manual model entry) | ✅ | ❌ | untested |
 | `modelscope` | ModelScope (pay-as-you-go, OpenAI/Anthropic dual-protocol, Anthropic path only, covers Qwen / DeepSeek / Kimi / MiniMax and other open-source models) | ❌ | ✅ | partial |
+| `ucloud` | UCloud Modelverse (Coding Plan subscription + pay-as-you-go API in CN/global, aggregates Claude / Qwen / GLM / Kimi and more) | ✅ | ✅ | untested |
 | `Custom` | Bring your own Anthropic-compatible endpoint | ✅ | ✅ | verified |
 
 > The "Token Plan" column covers any subscription-style quota (Token Plan / Coding Plan, etc.); "API" denotes pay-as-you-go Anthropic Messages-compatible endpoints.

@@ -1,0 +1,67 @@
+# 优云智算 (UCloud Modelverse)
+# 优刻得旗下大模型聚合平台, 提供 Anthropic 兼容端点
+# 文档: https://www.compshare.cn (modelverse 子产品)
+# https://www.compshare.cn/docs/modelverse/models/quick-start
+
+id: ucloud
+display_name: "优云智算 UCloud"
+icon: ""
+description: "优云智算 Modelverse · Anthropic 兼容端点 (Coding Plan 订阅 + 按量付费 API)"
+homepage: "https://www.compshare.cn"
+docs_url: "https://www.compshare.cn/docs/modelverse/models/quick-start"
+api_key_url: "https://www.compshare.cn/modelverse/console/api-keys"
+
+compatibility: untested
+
+endpoints:
+  - id: coding_plan
+    label: "国内版 · Coding Plan 订阅"
+    description: "优云智算 Coding Plan 订阅, 适配 Claude Code"
+    base_url: "https://cp.compshare.cn"
+    messages_path: "/v1/messages"
+    region: china
+    billing: subscription
+
+  - id: paygo_cn
+    label: "国内版 · 按量付费 API"
+    description: "Modelverse 国内 Anthropic 兼容端点, 按 token 计费"
+    base_url: "https://api.modelverse.cn"
+    messages_path: "/v1/messages"
+    region: china
+    billing: pay_as_you_go
+
+  - id: paygo_global
+    label: "国际版 · 按量付费 API"
+    description: "Modelverse 海外 Anthropic 兼容端点, 按 token 计费"
+    base_url: "https://api.umodelverse.ai"
+    messages_path: "/v1/messages"
+    region: global
+    billing: pay_as_you_go
+
+default_endpoint: coding_plan
+
+auth:
+  type: api_key
+  header_name: "Authorization"
+  # 上游同时接受 Authorization Bearer 与 x-api-key, 错误信息措辞偏 token,
+  # 选 bearer 与其他第三方厂商 (DeepSeek / 智谱 / Moonshot / 小米 / 阿里云) 保持一致
+  header_format: bearer
+
+required_headers:
+  anthropic-version: "2023-06-01"
+
+forward_headers: []
+
+model_discovery:
+  enabled: true
+  # 三个 endpoint 都暴露同域 /v1/models, 直接走 base_url + path 拼接
+  # 国内/海外按量端无需 auth 即可访问 (公开列表), Coding Plan 端需订阅 key
+  path: "/v1/models"
+  cache_ttl_hours: 24
+  example_models:
+    - "claude-opus-4-7"
+    - "claude-sonnet-4.5-thinking"
+    - "claude-haiku-4-5-20251001"
+    - "qwen3-coder-plus"
+    - "glm-5.1"
+    - "kimi-k2.6"

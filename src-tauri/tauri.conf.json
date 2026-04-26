@@ -63,6 +63,7 @@
       "providers/stepfun.yaml",
       "providers/baidu.yaml",
       "providers/modelscope.yaml",
+      "providers/ucloud.yaml",
       "migrations/001_init.sql",
       "../LICENSE"
     ],
