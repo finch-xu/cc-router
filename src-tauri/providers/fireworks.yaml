@@ -12,6 +12,7 @@
 #       所以这里 enabled: true 走默认 path; 若实测不通再降级 enabled: false。
 #   - 模型 ID 格式: accounts/fireworks/models/<name>
 #       完整列表见 https://fireworks.ai/models
+#   - Fire Pass 订阅套餐 https://app.fireworks.ai/fire-pass
 
 id: fireworks
 display_name: "Fireworks AI"
