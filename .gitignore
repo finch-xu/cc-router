@@ -58,3 +58,4 @@ CLAUDE.md
 .claude/*
 !.claude/skills/
 
+.playwright-mcp/
