@@ -101,6 +101,7 @@ pnpm tauri build
 | `aiberm` | Aiberm（按量付费 API，模型按 token group 动态返回） | untested |
 | `whatai` | 神马中转 API（按量付费，OpenAI/Anthropic 双协议中转，仅用 Anthropic 路径） | untested |
 | `ollama` | Ollama 本地推理（仅 localhost:11434，含云端模型 tag 如 `glm-4.7:cloud`） | partial |
+| `fireworks` | Fireworks AI（按量付费，覆盖 DeepSeek / Qwen / Llama / Kimi 等开源模型） | verified |
 
 社区可 PR 补充。
 

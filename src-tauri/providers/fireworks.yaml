@@ -1,0 +1,59 @@
+# Fireworks AI provider
+#
+# 官方文档（核对 2026-04）:
+#   - Anthropic Messages API: https://docs.fireworks.ai/api-reference/anthropic-messages
+#       接口: https://api.fireworks.ai/inference/v1/messages
+#       兼容 Anthropic Messages, stream: true 受支持。
+#   - 鉴权: Authorization: Bearer <FIREWORKS_API_KEY>
+#       Key 申请: https://app.fireworks.ai/settings/users/api-keys
+#   - /v1/models: 官方 Anthropic 文档没列, 但 OpenAI 兼容层有
+#       https://api.fireworks.ai/inference/v1/models
+#       envelope 是 { data: [{id, ...}] }, 与 cc-router 通用解析兼容,
+#       所以这里 enabled: true 走默认 path; 若实测不通再降级 enabled: false。
+#   - 模型 ID 格式: accounts/fireworks/models/<name>
+#       完整列表见 https://fireworks.ai/models
+
+id: fireworks
+display_name: "Fireworks AI"
+icon: fireworks
+description: "Fireworks AI 推理平台，覆盖 DeepSeek / Qwen / Llama / Kimi 等开源模型"
+homepage: "https://fireworks.ai"
+docs_url: "https://docs.fireworks.ai/api-reference/anthropic-messages"
+api_key_url: "https://app.fireworks.ai/settings/users/api-keys"
+
+compatibility: verified
+compatibility_notes:
+
+endpoints:
+  - id: paygo
+    label: "全球 · 按量付费 API"
+    description: "Fireworks 唯一公开端点，按 token 计费"
+    base_url: "https://api.fireworks.ai/inference"
+    messages_path: "/v1/messages"
+    region: global
+    billing: pay_as_you_go
+
+default_endpoint: paygo
+
+auth:
+  type: api_key
+  header_name: "Authorization"
+  header_format: bearer
+
+required_headers:
+  anthropic-version: "2023-06-01"
+
+forward_headers: []
+
+model_discovery:
+  enabled: true
+  path: "/v1/models"
+  cache_ttl_hours: 24
+  # 来源: Fireworks 主流模型（2026-04 核对，仅作填写示例）
+  # 命名遵循官方 accounts/fireworks/models/<name> 格式
+  example_models:
+    - "accounts/fireworks/models/deepseek-v3p1"
+    - "accounts/fireworks/models/deepseek-r1"
+    - "accounts/fireworks/models/qwen3-coder-480b-a35b-instruct"
+    - "accounts/fireworks/models/kimi-k2-instruct"
+    - "accounts/fireworks/models/llama-v3p1-405b-instruct"

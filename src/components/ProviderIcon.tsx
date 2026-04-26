@@ -11,6 +11,7 @@ import Volcengine from "@lobehub/icons/es/Volcengine";
 import OpenRouter from "@lobehub/icons/es/OpenRouter";
 import TencentCloud from "@lobehub/icons/es/TencentCloud";
 import Ollama from "@lobehub/icons/es/Ollama";
+import Fireworks from "@lobehub/icons/es/Fireworks";
 import { cn } from "@/lib/utils";
 
 type IconVariant = ComponentType<{ size?: number | string }>;
@@ -32,6 +33,7 @@ const BRAND_MAP: Record<string, BrandIcon> = {
   openrouter: OpenRouter as unknown as BrandIcon,
   tencent: TencentCloud as unknown as BrandIcon,
   ollama: Ollama as unknown as BrandIcon,
+  fireworks: Fireworks as unknown as BrandIcon,
 };
 
 interface Props {
