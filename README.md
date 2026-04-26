@@ -47,6 +47,7 @@
 | `stepfun` | 阶跃星辰（Step Plan 订阅 + 按量付费 API） | ✅ | ✅ | untested |
 | `baidu` | 百度千帆（Coding Plan 订阅，模型手动填写） | ✅ | ❌ | untested |
 | `modelscope` | 魔搭 ModelScope（按量付费，OpenAI/Anthropic 双协议，仅用 Anthropic 路径，覆盖 Qwen / DeepSeek / Kimi / MiniMax 等开源模型） | ❌ | ✅ | partial |
+| `自定义` | 自定义任意Anthropic协议API | ✅ | ✅ | verified |
 
 > Token Plan 列包含各厂商的套餐订阅形态（Token Plan / Coding Plan 等）；API 列指按量付费的 Anthropic Messages 兼容端点。
 
