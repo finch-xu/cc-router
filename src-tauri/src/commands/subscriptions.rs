@@ -248,7 +248,6 @@ pub async fn set_subscription_enabled(
     enabled: bool,
 ) -> AppResult<()> {
     let id = Uuid::parse_str(&id).map_err(|_| AppError::BadRequest("无效 id".into()))?;
-    store::update_enabled(&state.db, &id, enabled).await?;
 
     let rt = {
         let subs = state.subscriptions.read().await;
@@ -256,6 +255,13 @@ pub async fn set_subscription_enabled(
             .cloned()
             .ok_or_else(|| AppError::SubscriptionNotFound(id.to_string()))?
     };
+
+    store::update_enabled(&state.db, &id, enabled).await?;
+    {
+        let mut guard = rt.write().await;
+        guard.row.enabled = enabled;
+        guard.row.updated_at = Utc::now();
+    }
 
     let event = if enabled {
         state_machine::Event::UserEnable

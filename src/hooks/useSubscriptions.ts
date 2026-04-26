@@ -1,4 +1,9 @@
-import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import {
+  useQuery,
+  useMutation,
+  useQueryClient,
+  type QueryClient,
+} from "@tanstack/react-query";
 import { useEffect } from "react";
 import { listen } from "@tauri-apps/api/event";
 import { api } from "@/api/tauri";
@@ -8,13 +13,20 @@ import type {
 } from "@/types";
 
 export const SUBSCRIPTIONS_KEY = ["subscriptions"] as const;
+export const SUBSCRIPTION_DETAIL_KEY = ["subscription"] as const;
+
+// 列表 + 所有详情一并失效。详情页用 ["subscription", id],按前缀匹配。
+function invalidateSubscriptions(qc: QueryClient) {
+  qc.invalidateQueries({ queryKey: SUBSCRIPTIONS_KEY });
+  qc.invalidateQueries({ queryKey: SUBSCRIPTION_DETAIL_KEY });
+}
 
 /** 在 App 顶层挂一次,把后端 subscription_state_changed 事件转成 query 失效。 */
 export function useSubscriptionEventBridge() {
   const queryClient = useQueryClient();
   useEffect(() => {
     const promise = listen("subscription_state_changed", () => {
-      queryClient.invalidateQueries({ queryKey: SUBSCRIPTIONS_KEY });
+      invalidateSubscriptions(queryClient);
     });
     return () => {
       promise.then((unlisten) => unlisten()).catch(() => {});
@@ -34,9 +46,7 @@ export function useCreateSubscription() {
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: (input: CreateSubscriptionInput) => api.createSubscription(input),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: SUBSCRIPTIONS_KEY });
-    },
+    onSuccess: () => invalidateSubscriptions(queryClient),
   });
 }
 
@@ -45,9 +55,7 @@ export function useUpdateSubscription() {
   return useMutation({
     mutationFn: ({ id, patch }: { id: string; patch: SubscriptionPatch }) =>
       api.updateSubscription(id, patch),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: SUBSCRIPTIONS_KEY });
-    },
+    onSuccess: () => invalidateSubscriptions(queryClient),
   });
 }
 
@@ -56,7 +64,7 @@ export function useDeleteSubscription() {
   return useMutation({
     mutationFn: (id: string) => api.deleteSubscription(id),
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: SUBSCRIPTIONS_KEY });
+      invalidateSubscriptions(queryClient);
       queryClient.invalidateQueries({ queryKey: ["virtual-models"] });
     },
   });
@@ -67,9 +75,7 @@ export function useSetSubscriptionEnabled() {
   return useMutation({
     mutationFn: ({ id, enabled }: { id: string; enabled: boolean }) =>
       api.setSubscriptionEnabled(id, enabled),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: SUBSCRIPTIONS_KEY });
-    },
+    onSuccess: () => invalidateSubscriptions(queryClient),
   });
 }
 
@@ -78,8 +84,6 @@ export function useUpdateSubscriptionKey() {
   return useMutation({
     mutationFn: ({ id, newKey }: { id: string; newKey: string }) =>
       api.updateSubscriptionKey(id, newKey),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: SUBSCRIPTIONS_KEY });
-    },
+    onSuccess: () => invalidateSubscriptions(queryClient),
   });
 }
