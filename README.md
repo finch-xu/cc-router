@@ -43,7 +43,7 @@
 | `aiberm` | Aiberm（按量付费 API，模型按 token group 动态返回） | ❌ | ✅ | untested |
 | `whatai` | 神马中转 API（按量付费，OpenAI/Anthropic 双协议中转，仅用 Anthropic 路径） | ❌ | ✅ | untested |
 | `ollama` | Ollama 本地推理（仅 localhost:11434，含云端模型 tag 如 `glm-4.7:cloud`） | ❌ | ✅| partial |
-| `fireworks` | Fireworks AI（按量付费，覆盖 DeepSeek / Qwen / Llama / Kimi 等开源模型） | ❌ | ✅ | verified |
+| `fireworks` | Fireworks AI（按量付费，覆盖 DeepSeek / Qwen / Llama / Kimi 等开源模型），支持Fire Pass订阅 | ✅ | ✅ | verified |
 
 > Token Plan 列包含各厂商的套餐订阅形态（Token Plan / Coding Plan 等）；API 列指按量付费的 Anthropic Messages 兼容端点。
 
