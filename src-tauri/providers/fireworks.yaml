@@ -32,6 +32,15 @@ endpoints:
     messages_path: "/v1/messages"
     region: global
     billing: pay_as_you_go
+  
+  - id: subscription_fire_pass
+    label: "全球 · Coding Plan 订阅 · Fire Pass"
+    description: "Fireworks Fire Pass 订阅套餐"
+    base_url: "https://api.fireworks.ai/inference"
+    messages_path: "/v1/messages"
+    region: global
+    billing: subscription
+
 
 default_endpoint: paygo
 
