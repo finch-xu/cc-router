@@ -24,12 +24,7 @@ docs_url: "https://cloud.tencent.com/document/product/1823/130070"
 api_key_url: "https://console.cloud.tencent.com/lkeap/api"
 
 compatibility: untested
-compatibility_notes: |
-  1. Token Plan 是订阅制,套餐额度仅在 /plan/anthropic 端点扣减。
-  2. TokenHub 按量付费提供 4 个 base URL(境内/境外 主备),本 yaml 默认列主端点,
-     主端点不可用时可手改为 .cn 备用域名(具体见 yaml 顶部注释)。
-  3. 文档未明确公开 /v1/models 接口,模型 ID 需手动输入。
-  4. TokenHub 同时兼容 OpenAI 和 Anthropic 协议,本 provider 仅使用 Anthropic 路径 /v1/messages。
+compatibility_notes: 
 
 endpoints:
   - id: token_plan

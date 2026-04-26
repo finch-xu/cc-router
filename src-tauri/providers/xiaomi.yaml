@@ -7,9 +7,7 @@ docs_url: "https://platform.xiaomimimo.com/docs/api/chat/anthropic-api"
 api_key_url: "https://platform.xiaomimimo.com/#/console/api-keys"
 
 compatibility: untested
-compatibility_notes: |
-  Anthropic 兼容协议, 但尚无实测数据。
-  如果 /anthropic 端点与上游协议存在偏差, 请通过 issue 反馈。
+compatibility_notes: 
 
 endpoints:
   - id: paygo

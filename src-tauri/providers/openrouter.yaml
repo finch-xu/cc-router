@@ -21,13 +21,8 @@ homepage: "https://openrouter.ai"
 docs_url: "https://openrouter.ai/docs/api/api-reference/anthropic-messages/create-messages"
 api_key_url: "https://openrouter.ai/keys"
 
-compatibility: untested
-compatibility_notes: |
-  1. OpenRouter 提供 Anthropic Messages API 兼容端点 /api/v1/messages。
-  2. 模型 ID 必须带 vendor 前缀，格式为 "<vendor>/<model>"，
-     譬如 anthropic/claude-sonnet-4-5、openai/gpt-5、google/gemini-2.5-pro。
-  3. 平台 /v1/models 列表非常长（500+ 模型），动态发现可用，
-     但实际选用建议在 OpenRouter 网站确认价格后手动填具体 ID。
+compatibility: verified
+compatibility_notes: 
 
 endpoints:
   - id: paygo

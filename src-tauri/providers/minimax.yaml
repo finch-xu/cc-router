@@ -6,11 +6,8 @@ homepage: "https://platform.minimax.io"
 docs_url: "https://platform.minimax.io/docs"
 api_key_url: "https://platform.minimax.io/user-center/basic-information/interface-key"
 
-compatibility: partial
-compatibility_notes: |
-  1. 流式响应中可能泄漏 reasoning_content 字段，不影响 Claude Code 主流程。
-  2. MiniMax 未提供 /models 列表接口（/anthropic/models 返回 404），
-     需手动输入模型 ID。常用模型见 example_models。
+compatibility: untested
+compatibility_notes: 
 
 endpoints:
   - id: china_coding_plan

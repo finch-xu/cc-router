@@ -19,7 +19,7 @@ homepage: "https://api.whatai.cc"
 docs_url: "https://gpt-best.apifox.cn/api-287780941"
 api_key_url: "https://api.whatai.cc"
 
-compatibility: untested
+compatibility: verified
 compatibility_notes: 
 
 endpoints:

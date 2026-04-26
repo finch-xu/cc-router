@@ -6,7 +6,7 @@ homepage: "https://www.moonshot.cn"
 docs_url: "https://platform.moonshot.cn/docs"
 api_key_url: "https://platform.moonshot.cn/console/api-keys"
 
-compatibility: verified
+compatibility: untested
 
 endpoints:
   - id: cn_endpoint

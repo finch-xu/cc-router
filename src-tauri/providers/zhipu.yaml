@@ -6,7 +6,7 @@ homepage: "https://open.bigmodel.cn"
 docs_url: "https://open.bigmodel.cn/dev/api"
 api_key_url: "https://open.bigmodel.cn/usercenter/apikeys"
 
-compatibility: verified
+compatibility: untested
 
 endpoints:
   - id: cn_endpoint_coding_plan

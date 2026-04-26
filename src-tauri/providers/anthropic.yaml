@@ -6,7 +6,7 @@ homepage: "https://www.anthropic.com"
 docs_url: "https://docs.anthropic.com"
 api_key_url: "https://console.anthropic.com/settings/keys"
 
-compatibility: verified
+compatibility: untested
 
 endpoints:
   - id: api_paygo
