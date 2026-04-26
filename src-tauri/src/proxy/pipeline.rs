@@ -87,7 +87,18 @@ pub async fn dispatch(
         };
         let Some(rt) = rt else { continue };
 
-        let (provider_id, endpoint_id, real_model, display_name, api_key) = {
+        // 从订阅 row snapshot 读取所有连接信息(snapshot 模型: 不再回查 state.providers)
+        let (
+            provider_id,
+            endpoint_id,
+            real_model,
+            display_name,
+            url,
+            auth_header_name,
+            auth_header_value,
+            required_headers,
+            forward_headers,
+        ) = {
             let guard = rt.read().await;
             // fallback 透传原始 model; 其他三个按 slot 映射
             let real_model = if is_fallback {
@@ -101,26 +112,13 @@ pub async fn dispatch(
                 guard.row.endpoint_id.clone(),
                 real_model,
                 guard.row.display_name.clone(),
-                guard.row.api_key.clone(),
+                guard.row.messages_url(),
+                guard.row.auth_header_name.clone(),
+                guard.row.auth_header_value(),
+                guard.row.required_headers.clone(),
+                guard.row.forward_headers.clone(),
             )
         };
-
-        let provider = match state.providers.get(&provider_id) {
-            Some(p) => p.clone(),
-            None => {
-                warn!(%provider_id, "provider 未加载, 跳过订阅");
-                continue;
-            }
-        };
-        let endpoint = match provider.endpoint(&endpoint_id) {
-            Some(e) => e.clone(),
-            None => {
-                warn!(%endpoint_id, "endpoint 未找到, 跳过订阅");
-                continue;
-            }
-        };
-
-        let url = endpoint.messages_url();
 
         let mut upstream_body = request_body.clone();
         // fallback 不改写 model 字段（原始 model 即 real_model, body 里已经有）
@@ -131,13 +129,13 @@ pub async fn dispatch(
 
         let mut upstream_headers = ReqHeaderMap::new();
         if let (Ok(name), Ok(value)) = (
-            ReqHeaderName::try_from(provider.auth.header_name.as_str()),
-            ReqHeaderValue::from_str(&provider.auth.header_value(&api_key)),
+            ReqHeaderName::try_from(auth_header_name.as_str()),
+            ReqHeaderValue::from_str(&auth_header_value),
         ) {
             upstream_headers.insert(name, value);
         }
-        // required headers
-        for (k, v) in provider.required_headers.iter() {
+        // required headers (从订阅 snapshot 读)
+        for (k, v) in required_headers.iter() {
             if let (Ok(name), Ok(value)) = (
                 ReqHeaderName::try_from(k.as_str()),
                 ReqHeaderValue::from_str(v),
@@ -145,8 +143,8 @@ pub async fn dispatch(
                 upstream_headers.insert(name, value);
             }
         }
-        // forward headers (白名单)
-        for fwd in provider.forward_headers.iter() {
+        // forward headers (白名单, 从订阅 snapshot 读)
+        for fwd in forward_headers.iter() {
             if let Some(val) = client_headers.get(fwd.as_str()) {
                 if let (Ok(name), Ok(value)) = (
                     ReqHeaderName::try_from(fwd.as_str()),

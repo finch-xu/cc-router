@@ -1,3 +1,4 @@
+use std::collections::BTreeMap;
 use std::sync::Arc;
 
 use chrono::Utc;
@@ -8,29 +9,61 @@ use tracing::warn;
 use uuid::Uuid;
 
 use crate::error::{AppError, AppResult};
+use crate::provider::model::{AuthHeaderFormat, ModelDiscovery};
 use crate::state::AppState;
 use crate::subscription::{
     model::{
         ModelCache, ModelInfo, ModelSlots, SubscriptionDto, SubscriptionRow, SubscriptionRuntime,
+        CUSTOM_SOURCE_MARKER,
     },
     model_discovery, ping, state_machine, store,
 };
-use crate::virtual_model::VirtualModelName;
+
+/// 创建订阅时的 source 区分: 内置 yaml 模板 vs 用户自定义。
+#[derive(Debug, Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum CreateSource {
+    /// 标准路径: 后端从 yaml 模板 snapshot 连接信息进订阅 row。
+    FromTemplate {
+        provider_id: String,
+        endpoint_id: String,
+    },
+    /// 自定义路径: 用户在表单里填完整连接信息。
+    Custom {
+        provider_display_name: String,
+        base_url: String,
+        messages_path: String,
+        auth_header_name: String,
+        auth_header_format: AuthHeaderFormat,
+    },
+}
 
 #[derive(Debug, Deserialize)]
 pub struct CreateSubscriptionInput {
-    pub provider_id: String,
-    pub endpoint_id: String,
     pub display_name: String,
     pub api_key: String,
     pub model_slots: ModelSlots,
+    pub source: CreateSource,
 }
 
 #[derive(Debug, Deserialize, Default)]
 pub struct SubscriptionPatch {
-    pub endpoint_id: Option<String>,
     pub display_name: Option<String>,
     pub model_slots: Option<ModelSlots>,
+    /// 内置订阅: 切到同 provider 的另一个 endpoint, 后端 re-snapshot base_url/messages_path。
+    /// 自定义订阅传该字段会被拒绝。
+    pub endpoint_id: Option<String>,
+    /// 自定义订阅: 改连接信息。内置订阅传该字段会被拒绝。
+    pub connection: Option<ConnectionPatch>,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct ConnectionPatch {
+    pub base_url: Option<String>,
+    pub messages_path: Option<String>,
+    pub auth_header_name: Option<String>,
+    pub auth_header_format: Option<AuthHeaderFormat>,
+    pub provider_display_name: Option<String>,
 }
 
 #[derive(Debug, Serialize)]
@@ -107,29 +140,83 @@ pub async fn create_subscription(
     state: State<'_, AppState>,
     input: CreateSubscriptionInput,
 ) -> AppResult<SubscriptionDto> {
-    // 校验 provider / endpoint 存在
-    let provider = state
-        .providers
-        .get(&input.provider_id)
-        .ok_or_else(|| AppError::ProviderNotFound(input.provider_id.clone()))?;
-    if provider.endpoint(&input.endpoint_id).is_none() {
-        return Err(AppError::EndpointNotFound(input.endpoint_id));
-    }
-
     let id = Uuid::new_v4();
     let now = Utc::now();
-    let row = SubscriptionRow {
-        id,
-        provider_id: input.provider_id,
-        endpoint_id: input.endpoint_id,
-        display_name: input.display_name,
-        api_key: input.api_key,
-        model_slots: input.model_slots,
-        enabled: true,
-        is_auth_failed: false,
-        last_error_message: None,
-        created_at: now,
-        updated_at: now,
+
+    // 根据 source 拼出 row 的 snapshot 字段
+    let row = match input.source {
+        CreateSource::FromTemplate {
+            provider_id,
+            endpoint_id,
+        } => {
+            let provider = state
+                .providers
+                .get(&provider_id)
+                .ok_or_else(|| AppError::ProviderNotFound(provider_id.clone()))?;
+            let endpoint = provider
+                .endpoint(&endpoint_id)
+                .ok_or_else(|| AppError::EndpointNotFound(endpoint_id.clone()))?;
+            SubscriptionRow {
+                id,
+                provider_id: provider_id.clone(),
+                endpoint_id: endpoint_id.clone(),
+                display_name: input.display_name,
+                api_key: input.api_key,
+                model_slots: input.model_slots,
+                enabled: true,
+                is_auth_failed: false,
+                last_error_message: None,
+                created_at: now,
+                updated_at: now,
+                base_url: endpoint.base_url.clone(),
+                messages_path: endpoint.messages_path.clone(),
+                auth_header_name: provider.auth.header_name.clone(),
+                auth_header_format: provider.auth.header_format.clone(),
+                required_headers: provider.required_headers.clone(),
+                forward_headers: provider.forward_headers.clone(),
+                model_discovery: provider.model_discovery.clone(),
+                provider_display_name: provider.display_name.clone(),
+                provider_icon: provider.icon.clone().unwrap_or_default(),
+                is_user_defined: false,
+            }
+        }
+        CreateSource::Custom {
+            provider_display_name,
+            base_url,
+            messages_path,
+            auth_header_name,
+            auth_header_format,
+        } => {
+            validate_base_url(&base_url)?;
+            validate_messages_path(&messages_path)?;
+            SubscriptionRow {
+                id,
+                provider_id: CUSTOM_SOURCE_MARKER.to_string(),
+                endpoint_id: CUSTOM_SOURCE_MARKER.to_string(),
+                display_name: input.display_name,
+                api_key: input.api_key,
+                model_slots: input.model_slots,
+                enabled: true,
+                is_auth_failed: false,
+                last_error_message: None,
+                created_at: now,
+                updated_at: now,
+                base_url,
+                messages_path,
+                auth_header_name,
+                auth_header_format,
+                required_headers: BTreeMap::new(),
+                forward_headers: Vec::new(),
+                // 自定义订阅默认 disable model_discovery, 走 manual fallback
+                model_discovery: ModelDiscovery {
+                    enabled: false,
+                    ..ModelDiscovery::default()
+                },
+                provider_display_name,
+                provider_icon: "custom".to_string(),
+                is_user_defined: true,
+            }
+        }
     };
 
     store::insert(&state.db, &row).await?;
@@ -158,24 +245,81 @@ pub async fn update_subscription(
             .ok_or_else(|| AppError::SubscriptionNotFound(id.to_string()))?
     };
 
+    // 先做所有校验/反查 (不持锁), 失败时不会留下半应用的内存修改。
+    if patch.endpoint_id.is_some() && patch.connection.is_some() {
+        return Err(AppError::BadRequest(
+            "endpoint_id 与 connection patch 不能同时存在".into(),
+        ));
+    }
+    let endpoint_resnapshot = if let Some(new_endpoint_id) = patch.endpoint_id.as_ref() {
+        let is_user_defined = rt.read().await.row.is_user_defined;
+        if is_user_defined {
+            return Err(AppError::BadRequest(
+                "自定义订阅不支持切 endpoint, 请用 connection patch 改连接信息".into(),
+            ));
+        }
+        let provider_id = rt.read().await.row.provider_id.clone();
+        let provider = state
+            .providers
+            .get(&provider_id)
+            .ok_or_else(|| AppError::ProviderNotFound(provider_id.clone()))?;
+        let endpoint = provider
+            .endpoint(new_endpoint_id)
+            .ok_or_else(|| AppError::EndpointNotFound(new_endpoint_id.clone()))?;
+        Some((
+            new_endpoint_id.clone(),
+            endpoint.base_url.clone(),
+            endpoint.messages_path.clone(),
+        ))
+    } else {
+        None
+    };
+    if let Some(conn) = patch.connection.as_ref() {
+        let is_user_defined = rt.read().await.row.is_user_defined;
+        if !is_user_defined {
+            return Err(AppError::BadRequest(
+                "内置订阅不能改连接信息, 请用 endpoint_id 切换 endpoint".into(),
+            ));
+        }
+        if let Some(v) = conn.base_url.as_deref() {
+            validate_base_url(v)?;
+        }
+        if let Some(v) = conn.messages_path.as_deref() {
+            validate_messages_path(v)?;
+        }
+    }
+
     {
         let mut guard = rt.write().await;
         if let Some(name) = patch.display_name {
             guard.row.display_name = name;
         }
-        if let Some(ep) = patch.endpoint_id {
-            let provider = state
-                .providers
-                .get(&guard.row.provider_id)
-                .ok_or_else(|| AppError::ProviderNotFound(guard.row.provider_id.clone()))?;
-            if provider.endpoint(&ep).is_none() {
-                return Err(AppError::EndpointNotFound(ep));
-            }
-            guard.row.endpoint_id = ep;
-        }
         if let Some(slots) = patch.model_slots {
             guard.row.model_slots = slots;
         }
+        if let Some((eid, base, path)) = endpoint_resnapshot {
+            guard.row.endpoint_id = eid;
+            guard.row.base_url = base;
+            guard.row.messages_path = path;
+        }
+        if let Some(conn) = patch.connection {
+            if let Some(v) = conn.base_url {
+                guard.row.base_url = v;
+            }
+            if let Some(v) = conn.messages_path {
+                guard.row.messages_path = v;
+            }
+            if let Some(v) = conn.auth_header_name {
+                guard.row.auth_header_name = v;
+            }
+            if let Some(v) = conn.auth_header_format {
+                guard.row.auth_header_format = v;
+            }
+            if let Some(v) = conn.provider_display_name {
+                guard.row.provider_display_name = v;
+            }
+        }
+
         guard.row.updated_at = Utc::now();
         store::update_row(&state.db, &guard.row).await?;
     }
@@ -196,7 +340,6 @@ pub async fn update_subscription_key(
 
     store::update_api_key(&state.db, &id, &new_key).await?;
 
-    // 同步更新内存中的 row.api_key
     let rt = {
         let subs = state.subscriptions.read().await;
         subs.get(&id).cloned()
@@ -210,7 +353,6 @@ pub async fn update_subscription_key(
             guard.last_error_message = None;
             guard.row.updated_at = Utc::now();
         }
-        // 触发状态机：auth_failed → healthy
         let _ = state_machine::apply(
             &state.db,
             &state.app_handle,
@@ -225,12 +367,10 @@ pub async fn update_subscription_key(
 #[tauri::command]
 pub async fn delete_subscription(state: State<'_, AppState>, id: String) -> AppResult<()> {
     let id = Uuid::parse_str(&id).map_err(|_| AppError::BadRequest("无效 id".into()))?;
-    // 从内存先移除
     {
         let mut subs = state.subscriptions.write().await;
         subs.remove(&id);
     }
-    // 从虚拟模型绑定中移除
     {
         let mut vms = state.virtual_models.write().await;
         for vm in vms.values_mut() {
@@ -274,13 +414,7 @@ pub async fn set_subscription_enabled(
 
 /// 测试一条订阅的真实可达性: 用最小 prompt 直接打 messages 端点。
 ///
-/// 设计:
-/// - 不打 /models — 避免 URL 拼接歧义和 enabled:false provider 无法测的限制。
-/// - 通过 → 触发 `Event::UserManualReset` 一键复活订阅(任意非 Disabled 状态)。
-/// - 失败 → 仅回显错误, 不发负面 event 给状态机(避免 false negative 打坏健康订阅;
-///   生产真实流量会自然走状态机)。
-///
-/// 真正的请求构造和发送由 `subscription::ping::probe` 完成,与后台巡检 worker 共用。
+/// snapshot 模型: 全部连接信息从订阅 row 自身字段读, 不再回查 state.providers。
 #[tauri::command]
 pub async fn test_connection(
     state: State<'_, AppState>,
@@ -293,31 +427,17 @@ pub async fn test_connection(
             .cloned()
             .ok_or_else(|| AppError::SubscriptionNotFound(id.to_string()))?
     };
-    let (provider_id, endpoint_id, api_key, slots) = {
+    let row = {
         let g = rt.read().await;
-        (
-            g.row.provider_id.clone(),
-            g.row.endpoint_id.clone(),
-            g.row.api_key.clone(),
-            g.row.model_slots.clone(),
-        )
+        g.row.clone()
     };
-    let provider = state
-        .providers
-        .get(&provider_id)
-        .ok_or_else(|| AppError::ProviderNotFound(provider_id.clone()))?
-        .clone();
-    let endpoint = provider
-        .endpoint(&endpoint_id)
-        .ok_or_else(|| AppError::EndpointNotFound(endpoint_id.clone()))?
-        .clone();
 
-    let model = match ping::pick_test_model(&slots, &provider.model_discovery.example_models) {
+    let model = match ping::pick_test_model(&row) {
         Some(m) => m,
         None => {
             return Ok(TestConnectionResult {
                 ok: false,
-                message: "订阅未配置任何 model 槽位, 且 provider 无 example_models, 无法测试".into(),
+                message: "订阅未配置任何 model 槽位, 且未提供 example_models, 无法测试".into(),
                 http_status: None,
                 model_used: None,
                 state_reset: false,
@@ -325,7 +445,7 @@ pub async fn test_connection(
         }
     };
 
-    let result = ping::probe(&state.probe_client, &provider, &endpoint, &api_key, &model).await;
+    let result = ping::probe(&state.probe_client, &row, &model).await;
 
     let mut state_reset = false;
     if result.ok {
@@ -362,28 +482,13 @@ pub async fn refresh_model_list(
             .cloned()
             .ok_or_else(|| AppError::SubscriptionNotFound(id.to_string()))?
     };
-    let (provider_id, endpoint_id, api_key) = {
+    let row = {
         let g = rt.read().await;
-        (g.row.provider_id.clone(), g.row.endpoint_id.clone(), g.row.api_key.clone())
+        g.row.clone()
     };
-    let provider = state
-        .providers
-        .get(&provider_id)
-        .ok_or_else(|| AppError::ProviderNotFound(provider_id.clone()))?
-        .clone();
 
-    match model_discovery::fetch_and_cache(
-        &state.db,
-        &state.http_client,
-        &provider,
-        &endpoint_id,
-        &id,
-        &api_key,
-    )
-    .await
-    {
+    match model_discovery::fetch_and_cache(&state.db, &state.http_client, &row).await {
         Ok(cache) => {
-            // 更新内存缓存
             let mut guard = rt.write().await;
             guard.model_cache = Some(ModelCache {
                 fetched_at: cache.fetched_at,
@@ -400,6 +505,18 @@ pub async fn refresh_model_list(
     }
 }
 
-// 保留 _ 避免 unused warning
-#[allow(dead_code)]
-fn _unused(_: VirtualModelName) {}
+fn validate_base_url(s: &str) -> AppResult<()> {
+    if !(s.starts_with("http://") || s.starts_with("https://")) {
+        return Err(AppError::BadRequest(
+            "base_url 必须以 http:// 或 https:// 开头".into(),
+        ));
+    }
+    Ok(())
+}
+
+fn validate_messages_path(s: &str) -> AppResult<()> {
+    if !s.starts_with('/') {
+        return Err(AppError::BadRequest("messages_path 必须以 / 开头".into()));
+    }
+    Ok(())
+}

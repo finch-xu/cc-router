@@ -1,8 +1,14 @@
+use std::collections::BTreeMap;
+
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
+use crate::provider::model::{join_base_path, AuthHeaderFormat, ModelDiscovery};
 use crate::virtual_model::model::SubscriptionSlot;
+
+/// 自定义订阅的来源标记常量。
+pub const CUSTOM_SOURCE_MARKER: &str = "__custom__";
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ModelSlots {
@@ -29,11 +35,16 @@ pub struct ModelInfo {
 }
 
 /// 订阅的持久化字段。对应 `subscriptions` 表。
-/// `api_key` 明文存储——类比 Claude Code 的 settings.json 做法，安全边界由 OS 进程隔离提供。
+///
+/// snapshot 模型: 创建订阅时把 yaml 模板的连接信息全部拷贝下来,
+/// pipeline 运行时只读 row 自己的字段, 不再反查 state.providers.
+/// `api_key` 明文存储——类比 Claude Code 的 settings.json 做法。
 #[derive(Debug, Clone)]
 pub struct SubscriptionRow {
     pub id: Uuid,
+    /// 来源标记: 内置 yaml id 或 `CUSTOM_SOURCE_MARKER`
     pub provider_id: String,
+    /// 来源 endpoint id, 自定义订阅写 `CUSTOM_SOURCE_MARKER`
     pub endpoint_id: String,
     pub display_name: String,
     pub api_key: String,
@@ -43,6 +54,28 @@ pub struct SubscriptionRow {
     pub last_error_message: Option<String>,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
+
+    pub base_url: String,
+    pub messages_path: String,
+    pub auth_header_name: String,
+    pub auth_header_format: AuthHeaderFormat,
+    pub required_headers: BTreeMap<String, String>,
+    pub forward_headers: Vec<String>,
+    pub model_discovery: ModelDiscovery,
+
+    pub provider_display_name: String,
+    pub provider_icon: String,
+    pub is_user_defined: bool,
+}
+
+impl SubscriptionRow {
+    pub fn messages_url(&self) -> String {
+        join_base_path(&self.base_url, &self.messages_path)
+    }
+
+    pub fn auth_header_value(&self) -> String {
+        self.auth_header_format.apply(&self.api_key)
+    }
 }
 
 /// 订阅健康状态枚举（设计稿 §6.1）。
@@ -139,12 +172,57 @@ pub struct SubscriptionDto {
     pub referenced_by: Vec<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub model_cache: Option<ModelCacheDto>,
+
+    pub base_url: String,
+    pub messages_path: String,
+    pub auth_header_name: String,
+    pub auth_header_format: AuthHeaderFormat,
+    pub required_headers: BTreeMap<String, String>,
+    pub forward_headers: Vec<String>,
+    pub model_discovery: ModelDiscovery,
+    pub provider_display_name: String,
+    pub provider_icon: String,
+    pub is_user_defined: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ModelCacheDto {
     pub fetched_at: i64,
     pub models: Vec<ModelInfo>,
+}
+
+#[cfg(test)]
+impl SubscriptionRow {
+    /// 测试用 fixture: 生成一个连接信息全空但字段齐全的 row, 调用方可后续覆盖关心的字段。
+    pub fn test_fixture(provider_id: &str, endpoint_id: &str) -> Self {
+        Self {
+            id: Uuid::new_v4(),
+            provider_id: provider_id.into(),
+            endpoint_id: endpoint_id.into(),
+            display_name: "test".into(),
+            api_key: "test-key".into(),
+            model_slots: ModelSlots {
+                opus: "a".into(),
+                sonnet: "b".into(),
+                haiku: "c".into(),
+            },
+            enabled: true,
+            is_auth_failed: false,
+            last_error_message: None,
+            created_at: Utc::now(),
+            updated_at: Utc::now(),
+            base_url: String::new(),
+            messages_path: String::new(),
+            auth_header_name: String::new(),
+            auth_header_format: AuthHeaderFormat::Bearer,
+            required_headers: BTreeMap::new(),
+            forward_headers: Vec::new(),
+            model_discovery: ModelDiscovery::default(),
+            provider_display_name: String::new(),
+            provider_icon: String::new(),
+            is_user_defined: false,
+        }
+    }
 }
 
 impl SubscriptionDto {
@@ -166,6 +244,16 @@ impl SubscriptionDto {
                 fetched_at: c.fetched_at.timestamp_millis(),
                 models: c.models.clone(),
             }),
+            base_url: rt.row.base_url.clone(),
+            messages_path: rt.row.messages_path.clone(),
+            auth_header_name: rt.row.auth_header_name.clone(),
+            auth_header_format: rt.row.auth_header_format.clone(),
+            required_headers: rt.row.required_headers.clone(),
+            forward_headers: rt.row.forward_headers.clone(),
+            model_discovery: rt.row.model_discovery.clone(),
+            provider_display_name: rt.row.provider_display_name.clone(),
+            provider_icon: rt.row.provider_icon.clone(),
+            is_user_defined: rt.row.is_user_defined,
         }
     }
 }

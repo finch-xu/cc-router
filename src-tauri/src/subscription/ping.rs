@@ -7,14 +7,15 @@
 //! - 不打 /models — 避免 URL 拼接歧义和 enabled:false provider 无法测的限制
 //! - 与生产请求路径完全等价(URL/auth/required headers 都用同一份 helper)
 //! - 失败原因都编码到 ProbeResult.message, 不返回 Result(调用方逻辑简单)
+//!
+//! snapshot 模型: 不再需要 provider/endpoint, 全部连接信息从订阅 row 自身字段读。
 
 use reqwest::header::{
     HeaderMap as ReqHeaderMap, HeaderName as ReqHeaderName, HeaderValue as ReqHeaderValue,
     CONTENT_TYPE,
 };
 
-use crate::provider::model::{Provider, ProviderEndpoint};
-use crate::subscription::model::ModelSlots;
+use crate::subscription::model::SubscriptionRow;
 
 #[derive(Debug)]
 pub struct ProbeResult {
@@ -25,25 +26,23 @@ pub struct ProbeResult {
 
 /// 用最小 prompt 探测一次 messages 端点。
 ///
-/// 调用方需自行准备好 provider / endpoint / api_key / model — probe 只负责发请求。
+/// 调用方需准备好订阅 row(含 snapshot 连接信息) + 探测用的 model 名 — probe 只负责发请求。
 /// `client` 应使用 `state.probe_client`(30s 短超时单例)。
 pub async fn probe(
     client: &reqwest::Client,
-    provider: &Provider,
-    endpoint: &ProviderEndpoint,
-    api_key: &str,
+    row: &SubscriptionRow,
     model: &str,
 ) -> ProbeResult {
-    let url = endpoint.messages_url();
+    let url = row.messages_url();
 
     let mut headers = ReqHeaderMap::new();
     if let (Ok(name), Ok(value)) = (
-        ReqHeaderName::try_from(provider.auth.header_name.as_str()),
-        ReqHeaderValue::from_str(&provider.auth.header_value(api_key)),
+        ReqHeaderName::try_from(row.auth_header_name.as_str()),
+        ReqHeaderValue::from_str(&row.auth_header_value()),
     ) {
         headers.insert(name, value);
     }
-    for (k, v) in provider.required_headers.iter() {
+    for (k, v) in row.required_headers.iter() {
         if let (Ok(name), Ok(value)) = (
             ReqHeaderName::try_from(k.as_str()),
             ReqHeaderValue::from_str(v),
@@ -94,14 +93,14 @@ pub async fn probe(
 }
 
 /// 选一个 model 名用于探测请求。优先 sonnet → haiku → opus(CC 主用 sonnet),
-/// 都为空时退到 provider.example_models[0]。
+/// 都为空时退到订阅 snapshot 的 model_discovery.example_models[0]。
 /// "(pending)" 是 SubscriptionNewPage 两步向导留下的占位, 跳过。
-pub fn pick_test_model(slots: &ModelSlots, examples: &[String]) -> Option<String> {
-    for s in [&slots.sonnet, &slots.haiku, &slots.opus] {
+pub fn pick_test_model(row: &SubscriptionRow) -> Option<String> {
+    for s in [&row.model_slots.sonnet, &row.model_slots.haiku, &row.model_slots.opus] {
         let trimmed = s.trim();
         if !trimmed.is_empty() && trimmed != "(pending)" {
             return Some(trimmed.to_string());
         }
     }
-    examples.first().cloned()
+    row.model_discovery.example_models.first().cloned()
 }

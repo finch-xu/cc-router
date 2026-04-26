@@ -1,5 +1,5 @@
 import type { ComponentType } from "react";
-import { Bot } from "lucide-react";
+import { Bot, Boxes } from "lucide-react";
 import Anthropic from "@lobehub/icons/es/Anthropic";
 import DeepSeek from "@lobehub/icons/es/DeepSeek";
 import Moonshot from "@lobehub/icons/es/Moonshot";
@@ -49,6 +49,15 @@ interface Props {
 }
 
 export function ProviderIcon({ iconId, size = 20, className }: Props) {
+  // 自定义订阅: 不属于 BRAND_MAP 的任何品牌, 用一个通用图标区分于"未知"
+  if (iconId === "custom") {
+    return (
+      <Boxes
+        className={cn("text-muted-foreground shrink-0", className)}
+        style={{ width: size, height: size }}
+      />
+    );
+  }
   const Brand = iconId ? BRAND_MAP[iconId] : undefined;
   if (!Brand) {
     return (

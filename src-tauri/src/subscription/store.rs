@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
 use std::sync::Arc;
 
 use chrono::{DateTime, TimeZone, Utc};
@@ -6,7 +6,10 @@ use sqlx::{Row, SqlitePool};
 use tokio::sync::RwLock;
 use uuid::Uuid;
 
+use std::str::FromStr;
+
 use crate::error::{AppError, AppResult};
+use crate::provider::model::{AuthHeaderFormat, ModelDiscovery};
 use crate::subscription::model::{
     ModelCache, ModelInfo, ModelSlots, SubscriptionRow, SubscriptionRuntime,
 };
@@ -19,7 +22,10 @@ pub async fn load_runtime(
         "SELECT id, provider_id, endpoint_id, display_name, api_key,
                 model_slot_opus, model_slot_sonnet, model_slot_haiku,
                 enabled, is_auth_failed, last_error_message,
-                created_at, updated_at
+                created_at, updated_at,
+                base_url, messages_path, auth_header_name, auth_header_format,
+                required_headers, forward_headers, model_discovery,
+                provider_display_name, provider_icon, is_user_defined
          FROM subscriptions",
     )
     .fetch_all(pool)
@@ -40,6 +46,17 @@ fn row_to_row(row: &sqlx::sqlite::SqliteRow) -> AppResult<SubscriptionRow> {
     let id_str: String = row.try_get("id")?;
     let id = Uuid::parse_str(&id_str)
         .map_err(|e| AppError::internal(format!("无效 uuid: {e}")))?;
+    let auth_fmt_str: String = row.try_get("auth_header_format")?;
+    let required_json: String = row.try_get("required_headers")?;
+    let forward_json: String = row.try_get("forward_headers")?;
+    let discovery_json: String = row.try_get("model_discovery")?;
+    let required_headers: BTreeMap<String, String> = serde_json::from_str(&required_json)
+        .map_err(|e| AppError::internal(format!("required_headers JSON 解析失败: {e}")))?;
+    let forward_headers: Vec<String> = serde_json::from_str(&forward_json)
+        .map_err(|e| AppError::internal(format!("forward_headers JSON 解析失败: {e}")))?;
+    // ModelDiscovery 各字段均带 #[serde(default)], 空对象 "{}" 自然得到 default。
+    let model_discovery: ModelDiscovery = serde_json::from_str(&discovery_json)
+        .map_err(|e| AppError::internal(format!("model_discovery JSON 解析失败: {e}")))?;
     Ok(SubscriptionRow {
         id,
         provider_id: row.try_get("provider_id")?,
@@ -62,6 +79,20 @@ fn row_to_row(row: &sqlx::sqlite::SqliteRow) -> AppResult<SubscriptionRow> {
         last_error_message: row.try_get("last_error_message")?,
         created_at: ms_to_dt(row.try_get::<i64, _>("created_at")?),
         updated_at: ms_to_dt(row.try_get::<i64, _>("updated_at")?),
+        base_url: row.try_get("base_url")?,
+        messages_path: row.try_get("messages_path")?,
+        auth_header_name: row.try_get("auth_header_name")?,
+        auth_header_format: AuthHeaderFormat::from_str(&auth_fmt_str)
+            .map_err(AppError::internal)?,
+        required_headers,
+        forward_headers,
+        model_discovery,
+        provider_display_name: row.try_get("provider_display_name")?,
+        provider_icon: row.try_get("provider_icon")?,
+        is_user_defined: {
+            let v: i64 = row.try_get("is_user_defined")?;
+            v != 0
+        },
     })
 }
 
@@ -70,11 +101,20 @@ fn ms_to_dt(ms: i64) -> DateTime<Utc> {
 }
 
 pub async fn insert(pool: &SqlitePool, sub: &SubscriptionRow) -> AppResult<()> {
+    let required_json = serde_json::to_string(&sub.required_headers)?;
+    let forward_json = serde_json::to_string(&sub.forward_headers)?;
+    let discovery_json = serde_json::to_string(&sub.model_discovery)?;
     sqlx::query(
         "INSERT INTO subscriptions (id, provider_id, endpoint_id, display_name, api_key,
             model_slot_opus, model_slot_sonnet, model_slot_haiku,
-            enabled, is_auth_failed, last_error_message, created_at, updated_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            enabled, is_auth_failed, last_error_message, created_at, updated_at,
+            base_url, messages_path, auth_header_name, auth_header_format,
+            required_headers, forward_headers, model_discovery,
+            provider_display_name, provider_icon, is_user_defined)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
+                 ?, ?, ?, ?,
+                 ?, ?, ?,
+                 ?, ?, ?)",
     )
     .bind(sub.id.to_string())
     .bind(&sub.provider_id)
@@ -89,6 +129,16 @@ pub async fn insert(pool: &SqlitePool, sub: &SubscriptionRow) -> AppResult<()> {
     .bind(&sub.last_error_message)
     .bind(sub.created_at.timestamp_millis())
     .bind(sub.updated_at.timestamp_millis())
+    .bind(&sub.base_url)
+    .bind(&sub.messages_path)
+    .bind(&sub.auth_header_name)
+    .bind(sub.auth_header_format.as_str())
+    .bind(required_json)
+    .bind(forward_json)
+    .bind(discovery_json)
+    .bind(&sub.provider_display_name)
+    .bind(&sub.provider_icon)
+    .bind(sub.is_user_defined as i64)
     .execute(pool)
     .await?;
     Ok(())
@@ -107,11 +157,17 @@ pub async fn update_api_key(pool: &SqlitePool, id: &Uuid, new_key: &str) -> AppR
 }
 
 pub async fn update_row(pool: &SqlitePool, sub: &SubscriptionRow) -> AppResult<()> {
+    let required_json = serde_json::to_string(&sub.required_headers)?;
+    let forward_json = serde_json::to_string(&sub.forward_headers)?;
+    let discovery_json = serde_json::to_string(&sub.model_discovery)?;
     sqlx::query(
         "UPDATE subscriptions SET
             endpoint_id = ?, display_name = ?,
             model_slot_opus = ?, model_slot_sonnet = ?, model_slot_haiku = ?,
-            enabled = ?, is_auth_failed = ?, last_error_message = ?, updated_at = ?
+            enabled = ?, is_auth_failed = ?, last_error_message = ?, updated_at = ?,
+            base_url = ?, messages_path = ?, auth_header_name = ?, auth_header_format = ?,
+            required_headers = ?, forward_headers = ?, model_discovery = ?,
+            provider_display_name = ?, provider_icon = ?, is_user_defined = ?
          WHERE id = ?",
     )
     .bind(&sub.endpoint_id)
@@ -123,6 +179,16 @@ pub async fn update_row(pool: &SqlitePool, sub: &SubscriptionRow) -> AppResult<(
     .bind(sub.is_auth_failed as i64)
     .bind(&sub.last_error_message)
     .bind(sub.updated_at.timestamp_millis())
+    .bind(&sub.base_url)
+    .bind(&sub.messages_path)
+    .bind(&sub.auth_header_name)
+    .bind(sub.auth_header_format.as_str())
+    .bind(required_json)
+    .bind(forward_json)
+    .bind(discovery_json)
+    .bind(&sub.provider_display_name)
+    .bind(&sub.provider_icon)
+    .bind(sub.is_user_defined as i64)
     .bind(sub.id.to_string())
     .execute(pool)
     .await?;

@@ -1,15 +1,16 @@
 //! 调用 `{base_url}/v1/models` 并缓存结果（设计稿 §8）。
+//!
+//! snapshot 模型: 全部连接信息从订阅 row 自身字段读, 不再回查 state.providers。
 
 use chrono::Utc;
 use serde::Deserialize;
 use sqlx::SqlitePool;
 use tracing::{info, warn};
-use uuid::Uuid;
 
 use crate::error::AppError;
-use crate::provider::Provider;
+use crate::provider::model::join_base_path;
 use crate::subscription::{
-    model::{ModelCache, ModelInfo},
+    model::{ModelCache, ModelInfo, SubscriptionRow},
     store,
 };
 
@@ -49,36 +50,23 @@ struct ModelsItem {
 
 pub async fn fetch(
     client: &reqwest::Client,
-    provider: &Provider,
-    endpoint_id: &str,
-    api_key: &str,
+    row: &SubscriptionRow,
 ) -> Result<Vec<ModelInfo>, DiscoveryError> {
-    if !provider.model_discovery.enabled {
+    if !row.model_discovery.enabled {
         return Err(DiscoveryError::InvalidResponse(
-            "该厂商未提供 /models 接口, 请使用手动输入".into(),
+            "该订阅未启用 /models 自动发现, 请使用手动输入".into(),
         ));
     }
 
-    let endpoint = provider
-        .endpoint(endpoint_id)
-        .ok_or_else(|| AppError::EndpointNotFound(endpoint_id.to_string()))?;
-
-    // models 接口与 messages 不同域时，允许 YAML 里配置完整 url（例如 DeepSeek）。
-    let url = if let Some(full) = provider.model_discovery.url.as_deref() {
-        full.to_string()
-    } else {
-        let path = provider.model_discovery.path.as_str();
-        let normalized = if path.starts_with('/') {
-            path.to_string()
-        } else {
-            format!("/{path}")
-        };
-        format!("{}{}", endpoint.base_url.trim_end_matches('/'), normalized)
+    // models 接口与 messages 不同域时, 订阅 snapshot 里的 model_discovery.url 是完整 URL。
+    let url = match row.model_discovery.url.as_deref() {
+        Some(full) => full.to_string(),
+        None => join_base_path(&row.base_url, &row.model_discovery.path),
     };
 
     let mut req = client.get(&url);
-    req = req.header(&provider.auth.header_name, provider.auth.header_value(api_key));
-    for (k, v) in provider.required_headers.iter() {
+    req = req.header(&row.auth_header_name, row.auth_header_value());
+    for (k, v) in row.required_headers.iter() {
         req = req.header(k, v);
     }
 
@@ -110,21 +98,18 @@ pub async fn fetch(
 pub async fn fetch_and_cache(
     pool: &SqlitePool,
     client: &reqwest::Client,
-    provider: &Provider,
-    endpoint_id: &str,
-    subscription_id: &Uuid,
-    api_key: &str,
+    row: &SubscriptionRow,
 ) -> Result<ModelCache, DiscoveryError> {
-    match fetch(client, provider, endpoint_id, api_key).await {
+    match fetch(client, row).await {
         Ok(models) => {
             let cache = ModelCache {
                 fetched_at: Utc::now(),
                 models,
             };
-            if let Err(e) = store::save_model_cache(pool, subscription_id, endpoint_id, &cache).await {
+            if let Err(e) = store::save_model_cache(pool, &row.id, &row.endpoint_id, &cache).await {
                 warn!(?e, "model cache 持久化失败");
             } else {
-                info!(%subscription_id, "model list cached");
+                info!(subscription_id = %row.id, "model list cached");
             }
             Ok(cache)
         }

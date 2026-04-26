@@ -65,9 +65,19 @@ export interface ModelInfo {
   display_name?: string;
 }
 
+export interface ModelDiscoveryDto {
+  enabled: boolean;
+  path: string;
+  url?: string;
+  cache_ttl_hours: number;
+  example_models: string[];
+}
+
 export interface SubscriptionDto {
   id: string;
+  /** 来源标记: 内置 yaml id 或 "__custom__" */
   provider_id: string;
+  /** 来源 endpoint id, 自定义订阅写 "__custom__" */
   endpoint_id: string;
   display_name: string;
   model_slots: ModelSlots;
@@ -84,20 +94,59 @@ export interface SubscriptionDto {
     fetched_at: number;
     models: ModelInfo[];
   };
+
+  // snapshot 字段
+  base_url: string;
+  messages_path: string;
+  auth_header_name: string;
+  auth_header_format: AuthHeaderFormat;
+  required_headers: Record<string, string>;
+  forward_headers: string[];
+  model_discovery: ModelDiscoveryDto;
+  provider_display_name: string;
+  provider_icon: string;
+  is_user_defined: boolean;
 }
 
+/** 创建订阅时的 source: 内置 yaml 模板 vs 用户自定义 */
+export type CreateSource =
+  | {
+      kind: "from_template";
+      provider_id: string;
+      endpoint_id: string;
+    }
+  | {
+      kind: "custom";
+      provider_display_name: string;
+      base_url: string;
+      messages_path: string;
+      auth_header_name: string;
+      auth_header_format: AuthHeaderFormat;
+    };
+
 export interface CreateSubscriptionInput {
-  provider_id: string;
-  endpoint_id: string;
   display_name: string;
   api_key: string;
   model_slots: ModelSlots;
+  source: CreateSource;
+}
+
+/** 自定义订阅修改连接信息时的 patch */
+export interface ConnectionPatch {
+  base_url?: string;
+  messages_path?: string;
+  auth_header_name?: string;
+  auth_header_format?: AuthHeaderFormat;
+  provider_display_name?: string;
 }
 
 export interface SubscriptionPatch {
-  endpoint_id?: string;
   display_name?: string;
   model_slots?: ModelSlots;
+  /** 内置订阅: 切换 endpoint, 后端 re-snapshot */
+  endpoint_id?: string;
+  /** 自定义订阅: 改连接信息 */
+  connection?: ConnectionPatch;
 }
 
 export interface TestConnectionResult {

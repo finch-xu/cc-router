@@ -16,7 +16,6 @@ import { CSS } from "@dnd-kit/utilities";
 import { GripVertical } from "lucide-react";
 import { ProviderLogo } from "@/components/ProviderLogo";
 import { stateTone } from "@/components/StatusBadge";
-import { useProviders } from "@/hooks/useProviders";
 import type { SubscriptionDto, SubscriptionSlot } from "@/types";
 
 interface Props {
@@ -38,9 +37,6 @@ export function SortableSubscriptionList({
   const sensors = useSensors(
     useSensor(PointerSensor, { activationConstraint: { distance: 4 } }),
   );
-  const providers = useProviders();
-  const iconOf = (providerId: string | undefined) =>
-    providerId ? providers.data?.find((p) => p.id === providerId)?.icon : undefined;
 
   function handleDragEnd(event: DragEndEvent) {
     const { active, over } = event;
@@ -68,7 +64,7 @@ export function SortableSubscriptionList({
               id={id}
               priority={idx + 1}
               sub={sub}
-              iconId={iconOf(sub?.provider_id)}
+              iconId={sub?.provider_icon}
               realModel={realModel}
               onRemove={() => onRemove(id)}
             />

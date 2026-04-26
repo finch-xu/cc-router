@@ -4,7 +4,6 @@ import { StatusBadge } from "@/components/StatusBadge";
 import { ProviderLogo } from "@/components/ProviderLogo";
 import { EmptyState } from "@/components/EmptyState";
 import { useSubscriptions } from "@/hooks/useSubscriptions";
-import { useProviders } from "@/hooks/useProviders";
 import { fmtTimeShort } from "@/lib/format";
 
 // SubscriptionDto 不带 api_key 预览(CLAUDE.md), 用固定遮罩占位
@@ -12,9 +11,6 @@ const MASKED_KEY = "•••••••••••••••";
 
 export function SubscriptionsPage() {
   const subs = useSubscriptions();
-  const providers = useProviders();
-
-  const providerOf = (id: string) => providers.data?.find((p) => p.id === id);
 
   return (
     <>
@@ -58,7 +54,6 @@ export function SubscriptionsPage() {
             </thead>
             <tbody>
               {subs.data.map((sub) => {
-                const provider = providerOf(sub.provider_id);
                 return (
                   <tr key={sub.id}>
                     <td>
@@ -66,10 +61,23 @@ export function SubscriptionsPage() {
                     </td>
                     <td>
                       <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-                        <ProviderLogo iconId={provider?.icon} size={24} />
+                        <ProviderLogo iconId={sub.provider_icon} size={24} />
                         <span style={{ fontWeight: 500, color: "var(--ink)" }}>
-                          {provider?.display_name ?? sub.provider_id}
+                          {sub.provider_display_name}
                         </span>
+                        {sub.is_user_defined && (
+                          <span
+                            style={{
+                              fontSize: 10,
+                              padding: "1px 6px",
+                              borderRadius: 4,
+                              background: "var(--bg-muted, #f0f0f0)",
+                              color: "var(--ink-3)",
+                            }}
+                          >
+                            🔧 自定义
+                          </span>
+                        )}
                       </div>
                     </td>
                     <td>{sub.display_name}</td>

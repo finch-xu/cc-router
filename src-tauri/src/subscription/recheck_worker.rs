@@ -84,35 +84,20 @@ async fn scan_and_recheck(state: &AppState) {
 
     // 3. 顺序 ping (对上游温和, 也避免内存压力)
     for rt in candidates {
-        // 读取必要字段(避免 ping 全程持锁)
-        let snapshot = {
+        // clone 出 row 全字段(含 snapshot 连接信息), 避免 ping 全程持锁
+        let row = {
             let g = rt.read().await;
-            (
-                g.row.id,
-                g.row.provider_id.clone(),
-                g.row.endpoint_id.clone(),
-                g.row.api_key.clone(),
-                g.row.model_slots.clone(),
-                g.row.display_name.clone(),
-            )
+            g.row.clone()
         };
-        let (sub_id, provider_id, endpoint_id, api_key, slots, display_name) = snapshot;
+        let sub_id = row.id;
+        let display_name = row.display_name.clone();
 
-        let Some(provider) = state.providers.get(&provider_id) else {
-            debug!(%sub_id, %provider_id, "recheck_worker: provider 未加载, 跳过");
-            continue;
-        };
-        let Some(endpoint) = provider.endpoint(&endpoint_id) else {
-            debug!(%sub_id, %endpoint_id, "recheck_worker: endpoint 未找到, 跳过");
-            continue;
-        };
-        let Some(model) = ping::pick_test_model(&slots, &provider.model_discovery.example_models)
-        else {
+        let Some(model) = ping::pick_test_model(&row) else {
             debug!(%sub_id, "recheck_worker: 无可用 model, 跳过");
             continue;
         };
 
-        let result = ping::probe(&state.probe_client, provider, endpoint, &api_key, &model).await;
+        let result = ping::probe(&state.probe_client, &row, &model).await;
         if result.ok {
             match state_machine::apply(
                 &state.db,

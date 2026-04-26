@@ -28,6 +28,7 @@ import { StatusBadge } from "@/components/StatusBadge";
 import { ProviderIcon } from "@/components/ProviderIcon";
 import { ModelSlotPicker } from "@/components/ModelSlotPicker";
 import { api } from "@/api/tauri";
+import { validateConnection } from "@/lib/connectionValidation";
 import { useProviders } from "@/hooks/useProviders";
 import {
   useDeleteSubscription,
@@ -35,7 +36,14 @@ import {
   useUpdateSubscription,
   useUpdateSubscriptionKey,
 } from "@/hooks/useSubscriptions";
-import type { ModelInfo, ModelSlots, RefreshModelListResult, TestConnectionResult } from "@/types";
+import type {
+  AuthHeaderFormat,
+  ModelInfo,
+  ModelSlots,
+  RefreshModelListResult,
+  SubscriptionPatch,
+  TestConnectionResult,
+} from "@/types";
 
 export function SubscriptionEditPage() {
   const { id } = useParams<{ id: string }>();
@@ -53,14 +61,26 @@ export function SubscriptionEditPage() {
   const enabledMut = useSetSubscriptionEnabled();
   const updateKeyMut = useUpdateSubscriptionKey();
 
+  // 内置订阅: 在 providers 列表里反查 yaml 模板, 用于显示 endpoint 下拉选项
   const provider = useMemo(
-    () => providers.data?.find((p) => p.id === subQuery.data?.provider_id),
+    () =>
+      subQuery.data && !subQuery.data.is_user_defined
+        ? providers.data?.find((p) => p.id === subQuery.data!.provider_id)
+        : undefined,
     [providers.data, subQuery.data],
   );
 
   const [endpointId, setEndpointId] = useState<string>("");
   const [displayName, setDisplayName] = useState<string>("");
   const [slots, setSlots] = useState<ModelSlots>({ opus: "", sonnet: "", haiku: "" });
+
+  // 自定义订阅可编辑的连接字段
+  const [baseUrl, setBaseUrl] = useState<string>("");
+  const [messagesPath, setMessagesPath] = useState<string>("");
+  const [authHeaderName, setAuthHeaderName] = useState<string>("");
+  const [authHeaderFormat, setAuthHeaderFormat] = useState<AuthHeaderFormat>("bearer");
+  const [providerDisplayName, setProviderDisplayName] = useState<string>("");
+
   const [models, setModels] = useState<ModelInfo[] | null>(null);
   const [fetchingModels, setFetchingModels] = useState(false);
   const [modelError, setModelError] = useState<string | null>(null);
@@ -68,12 +88,18 @@ export function SubscriptionEditPage() {
   const [keyDialog, setKeyDialog] = useState(false);
   const [newKey, setNewKey] = useState("");
   const [deleteDialog, setDeleteDialog] = useState(false);
+  const [saveError, setSaveError] = useState<string | null>(null);
 
   useEffect(() => {
     if (subQuery.data) {
       setEndpointId(subQuery.data.endpoint_id);
       setDisplayName(subQuery.data.display_name);
       setSlots(subQuery.data.model_slots);
+      setBaseUrl(subQuery.data.base_url);
+      setMessagesPath(subQuery.data.messages_path);
+      setAuthHeaderName(subQuery.data.auth_header_name);
+      setAuthHeaderFormat(subQuery.data.auth_header_format);
+      setProviderDisplayName(subQuery.data.provider_display_name);
       if (subQuery.data.model_cache) {
         setModels(subQuery.data.model_cache.models);
       }
@@ -102,11 +128,33 @@ export function SubscriptionEditPage() {
   }
 
   async function save() {
-    if (!id) return;
-    await updateMut.mutateAsync({
-      id,
-      patch: { endpoint_id: endpointId, display_name: displayName, model_slots: slots },
-    });
+    if (!id || !sub) return;
+    setSaveError(null);
+    const patch: SubscriptionPatch = {
+      display_name: displayName,
+      model_slots: slots,
+    };
+    if (sub.is_user_defined) {
+      const connErr = validateConnection({ base_url: baseUrl, messages_path: messagesPath });
+      if (connErr) return setSaveError(connErr);
+      patch.connection = {
+        base_url: baseUrl.trim(),
+        messages_path: messagesPath.trim(),
+        auth_header_name: authHeaderName.trim(),
+        auth_header_format: authHeaderFormat,
+        provider_display_name: providerDisplayName.trim(),
+      };
+    } else {
+      // 内置订阅: 切 endpoint 走 endpoint_id patch (后端 re-snapshot)
+      if (endpointId !== sub.endpoint_id) {
+        patch.endpoint_id = endpointId;
+      }
+    }
+    try {
+      await updateMut.mutateAsync({ id, patch });
+    } catch (e) {
+      setSaveError(`保存失败: ${e}`);
+    }
   }
 
   async function testConnection() {
@@ -115,7 +163,6 @@ export function SubscriptionEditPage() {
     const result = await api.testConnection(id);
     setTestResult(result);
     if (result.ok && result.state_reset) {
-      // 后端已 emit subscription_state_changed,这里显式 invalidate 保证立即刷新
       queryClient.invalidateQueries({ queryKey: ["subscriptions"] });
       queryClient.invalidateQueries({ queryKey: ["subscription", id] });
     }
@@ -144,6 +191,8 @@ export function SubscriptionEditPage() {
     return <div className="p-8 text-sm text-muted-foreground">未找到订阅</div>;
   }
 
+  const isCustom = sub.is_user_defined;
+
   return (
     <div className="p-8 max-w-3xl space-y-6">
       <Button variant="ghost" size="sm" asChild>
@@ -157,6 +206,11 @@ export function SubscriptionEditPage() {
           <h1 className="text-2xl font-semibold">{sub.display_name}</h1>
           <div className="mt-1 flex items-center gap-3 text-sm">
             <StatusBadge state={sub.state} />
+            {isCustom && (
+              <span className="text-xs px-2 py-0.5 rounded bg-muted text-muted-foreground">
+                🔧 自定义
+              </span>
+            )}
             {sub.referenced_by.length > 0 && (
               <span className="text-muted-foreground">
                 引用: {sub.referenced_by.join(", ")}
@@ -185,36 +239,98 @@ export function SubscriptionEditPage() {
         <CardContent className="space-y-4">
           <div className="grid grid-cols-[120px_1fr] gap-3 items-center">
             <Label>厂商</Label>
-            <div className="flex items-center gap-2 text-sm text-muted-foreground">
-              <ProviderIcon iconId={provider?.icon} size={18} />
-              <span>
-                {provider?.display_name ?? sub.provider_id}（不可改）
-              </span>
-            </div>
+            {isCustom ? (
+              <Input
+                value={providerDisplayName}
+                onChange={(e) => setProviderDisplayName(e.target.value)}
+                placeholder="厂商显示名"
+              />
+            ) : (
+              <div className="flex items-center gap-2 text-sm text-muted-foreground">
+                <ProviderIcon iconId={sub.provider_icon} size={18} />
+                <span>{sub.provider_display_name}（不可改）</span>
+              </div>
+            )}
           </div>
-          <div className="grid grid-cols-[120px_1fr] gap-3 items-start">
-            <Label className="mt-2">接入点</Label>
-            <div className="space-y-1">
-              <Select value={endpointId} onValueChange={setEndpointId}>
-                <SelectTrigger>
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  {provider?.endpoints.map((e) => (
-                    <SelectItem key={e.id} value={e.id} subtitle={e.base_url}>
-                      {e.label}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-              {provider?.endpoints.find((e) => e.id === endpointId) && (
+
+          {/* 内置订阅: endpoint 切换下拉 */}
+          {!isCustom && (
+            <div className="grid grid-cols-[120px_1fr] gap-3 items-start">
+              <Label className="mt-2">接入点</Label>
+              <div className="space-y-1">
+                <Select value={endpointId} onValueChange={setEndpointId}>
+                  <SelectTrigger>
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {provider?.endpoints.map((e) => (
+                      <SelectItem key={e.id} value={e.id} subtitle={e.base_url}>
+                        {e.label}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
                 <div className="font-mono text-[10px] text-muted-foreground">
-                  {provider.endpoints.find((e) => e.id === endpointId)!.base_url}
-                  {provider.endpoints.find((e) => e.id === endpointId)!.messages_path}
+                  {sub.base_url}
+                  {sub.messages_path}
                 </div>
-              )}
+                {endpointId !== sub.endpoint_id && (
+                  <div className="text-xs text-amber-600">
+                    保存后将从模板重新拷贝该 endpoint 的连接信息
+                  </div>
+                )}
+              </div>
             </div>
-          </div>
+          )}
+
+          {/* 自定义订阅: base_url / messages_path / auth 可编辑 */}
+          {isCustom && (
+            <>
+              <div className="grid grid-cols-[120px_1fr] gap-3 items-center">
+                <Label>Base URL</Label>
+                <Input
+                  className="font-mono"
+                  value={baseUrl}
+                  onChange={(e) => setBaseUrl(e.target.value)}
+                  placeholder="https://api.example.com"
+                />
+              </div>
+              <div className="grid grid-cols-[120px_1fr] gap-3 items-center">
+                <Label>Messages Path</Label>
+                <Input
+                  className="font-mono"
+                  value={messagesPath}
+                  onChange={(e) => setMessagesPath(e.target.value)}
+                  placeholder="/v1/messages"
+                />
+              </div>
+              <div className="grid grid-cols-[120px_1fr] gap-3 items-center">
+                <Label>鉴权 header 名</Label>
+                <Input
+                  className="font-mono"
+                  value={authHeaderName}
+                  onChange={(e) => setAuthHeaderName(e.target.value)}
+                  placeholder="Authorization 或 x-api-key"
+                />
+              </div>
+              <div className="grid grid-cols-[120px_1fr] gap-3 items-center">
+                <Label>鉴权格式</Label>
+                <Select
+                  value={authHeaderFormat}
+                  onValueChange={(v) => setAuthHeaderFormat(v as AuthHeaderFormat)}
+                >
+                  <SelectTrigger>
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="bearer">Bearer (header 值前加 "Bearer ")</SelectItem>
+                    <SelectItem value="raw">Raw (header 值原样填 key)</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+            </>
+          )}
+
           <div className="grid grid-cols-[120px_1fr] gap-3 items-center">
             <Label>备注名</Label>
             <Input value={displayName} onChange={(e) => setDisplayName(e.target.value)} />
@@ -243,7 +359,7 @@ export function SubscriptionEditPage() {
             loading={fetchingModels}
             error={modelError}
             onRefresh={refreshModels}
-            exampleModels={provider?.model_discovery.example_models}
+            exampleModels={sub.model_discovery.example_models}
           />
           {sub.model_cache && (
             <div className="mt-3 text-xs text-muted-foreground">
@@ -269,6 +385,12 @@ export function SubscriptionEditPage() {
         </Alert>
       )}
 
+      {saveError && (
+        <Alert variant="destructive">
+          <AlertDescription>{saveError}</AlertDescription>
+        </Alert>
+      )}
+
       <div className="flex justify-between">
         <Button variant="outline" onClick={testConnection}>
           测试连接
@@ -288,7 +410,7 @@ export function SubscriptionEditPage() {
         <DialogContent>
           <DialogHeader>
             <DialogTitle>修改 API Key</DialogTitle>
-            <DialogDescription>新 Key 会覆盖 Keychain 中的当前值。</DialogDescription>
+            <DialogDescription>新 Key 会立即生效。</DialogDescription>
           </DialogHeader>
           <Input
             type="password"
@@ -328,7 +450,7 @@ export function SubscriptionEditPage() {
                   <p className="mt-2">删除后这些虚拟模型的订阅列表会少一个。</p>
                 </>
               ) : (
-                "删除订阅会同时清除 Keychain 中存储的 API Key。"
+                "删除订阅会同时清除存储的 API Key。"
               )}
             </DialogDescription>
           </DialogHeader>

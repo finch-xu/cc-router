@@ -1,6 +1,6 @@
 import { useState, useMemo, useRef } from "react";
 import { Link, useNavigate, useSearchParams } from "react-router-dom";
-import { ArrowLeft, ArrowRight, ExternalLink, Check } from "lucide-react";
+import { ArrowLeft, ArrowRight, ExternalLink, Check, Plus, Boxes } from "lucide-react";
 import { invoke } from "@tauri-apps/api/core";
 import { open as openShell } from "@tauri-apps/plugin-shell";
 import { useQueryClient } from "@tanstack/react-query";
@@ -19,7 +19,9 @@ import { useProviders } from "@/hooks/useProviders";
 import { useCreateSubscription } from "@/hooks/useSubscriptions";
 import { useVirtualModels } from "@/hooks/useVirtualModels";
 import { api } from "@/api/tauri";
+import { validateConnection } from "@/lib/connectionValidation";
 import type {
+  AuthHeaderFormat,
   CreateSubscriptionInput,
   ModelInfo,
   ModelSlots,
@@ -28,6 +30,15 @@ import type {
 } from "@/types";
 
 type Step = 1 | 2;
+
+const CUSTOM_VALUE = "__custom__";
+
+/** 自定义路径的鉴权方式预设: 选一个就同时确定 header_name + header_format */
+type AuthPreset = "bearer" | "x_api_key";
+const AUTH_PRESETS: Record<AuthPreset, { name: string; format: AuthHeaderFormat; label: string }> = {
+  bearer: { name: "Authorization", format: "bearer", label: "Authorization: Bearer <key>" },
+  x_api_key: { name: "x-api-key", format: "raw", label: "x-api-key: <key>" },
+};
 
 export function SubscriptionNewPage() {
   const navigate = useNavigate();
@@ -49,10 +60,20 @@ export function SubscriptionNewPage() {
   const [models, setModels] = useState<ModelInfo[] | null>(null);
   const [modelFetchError, setModelFetchError] = useState<string | null>(null);
   const [fetchingModels, setFetchingModels] = useState(false);
+  const [submitError, setSubmitError] = useState<string | null>(null);
+  const [submitting, setSubmitting] = useState(false);
+
+  // 自定义路径专用字段
+  const [customProviderName, setCustomProviderName] = useState<string>("");
+  const [customBaseUrl, setCustomBaseUrl] = useState<string>("");
+  const [customMessagesPath, setCustomMessagesPath] = useState<string>("/v1/messages");
+  const [customAuthPreset, setCustomAuthPreset] = useState<AuthPreset>("bearer");
+
+  const isCustom = providerId === CUSTOM_VALUE;
 
   const provider = useMemo(
-    () => providers.data?.find((p) => p.id === providerId),
-    [providers.data, providerId],
+    () => (isCustom ? undefined : providers.data?.find((p) => p.id === providerId)),
+    [providers.data, providerId, isCustom],
   );
   const endpoint = useMemo(
     () => provider?.endpoints.find((e) => e.id === endpointId),
@@ -64,6 +85,17 @@ export function SubscriptionNewPage() {
 
   function handleProviderChange(v: string) {
     setProviderId(v);
+    setSubmitError(null);
+    if (v === CUSTOM_VALUE) {
+      setEndpointId("");
+      // 自定义路径备注名自动: <自定义厂商名> <随机后缀>
+      // 等用户填了 customProviderName 再生成,这里清掉旧值
+      if (displayName === autoGenNameRef.current) {
+        setDisplayName("");
+        autoGenNameRef.current = "";
+      }
+      return;
+    }
     const p = providers.data?.find((x) => x.id === v);
     setEndpointId(p?.default_endpoint ?? p?.endpoints[0]?.id ?? "");
 
@@ -75,6 +107,17 @@ export function SubscriptionNewPage() {
     }
   }
 
+  function handleCustomProviderNameChange(v: string) {
+    setCustomProviderName(v);
+    if (v && (displayName === "" || displayName === autoGenNameRef.current)) {
+      const suffix = Math.random().toString(36).slice(2, 8);
+      const generated = `${v} ${suffix}`;
+      setDisplayName(generated);
+      autoGenNameRef.current = generated;
+    }
+  }
+
+  // 内置路径: step1 → 调 create_subscription(from_template, placeholder slots) → refresh_model_list → step2
   async function goToStep2() {
     if (!provider || !endpoint) return;
     if (!apiKey || !displayName) return;
@@ -88,11 +131,14 @@ export function SubscriptionNewPage() {
         haiku: "(pending)",
       };
       const input: CreateSubscriptionInput = {
-        provider_id: provider.id,
-        endpoint_id: endpoint.id,
         display_name: displayName,
         api_key: apiKey,
         model_slots: placeholderSlots,
+        source: {
+          kind: "from_template",
+          provider_id: provider.id,
+          endpoint_id: endpoint.id,
+        },
       };
       const created = await createMut.mutateAsync(input);
       try {
@@ -144,6 +190,36 @@ export function SubscriptionNewPage() {
     }
   }
 
+  async function bindToVirtualModelsIfOnboarding(subscriptionId: string) {
+    if (!isOnboarding) return;
+    const names: VirtualModelName[] = [
+      "model-opus",
+      "model-sonnet",
+      "model-haiku",
+      "model-fallback",
+    ];
+    await Promise.allSettled(
+      names.map((name) => {
+        const current = vms.data?.find((v) => v.name === name);
+        const merged = Array.from(
+          new Set([...(current?.subscription_ids ?? []), subscriptionId]),
+        );
+        return api.updateVirtualModel(name, {
+          mode: current?.mode ?? "sequential",
+          subscription_ids: merged,
+        });
+      }),
+    );
+
+    await api.completeOnboarding();
+    await Promise.all([
+      queryClient.invalidateQueries({ queryKey: ["onboarding-state"] }),
+      queryClient.invalidateQueries({ queryKey: ["virtual-models"] }),
+      queryClient.invalidateQueries({ queryKey: ["subscriptions"] }),
+    ]);
+  }
+
+  // 内置路径 step2: 保存 slot
   async function save() {
     if (!createdId || !provider || !endpoint) return;
     await invoke("update_subscription", {
@@ -151,41 +227,60 @@ export function SubscriptionNewPage() {
       patch: { model_slots: slots },
     });
 
+    await bindToVirtualModelsIfOnboarding(createdId);
+
     if (isOnboarding) {
-      const names: VirtualModelName[] = [
-        "model-opus",
-        "model-sonnet",
-        "model-haiku",
-        "model-fallback",
-      ];
-      await Promise.allSettled(
-        names.map((name) => {
-          const current = vms.data?.find((v) => v.name === name);
-          const merged = Array.from(
-            new Set([...(current?.subscription_ids ?? []), createdId]),
-          );
-          return api.updateVirtualModel(name, {
-            mode: current?.mode ?? "sequential",
-            subscription_ids: merged,
-          });
-        }),
-      );
-
-      await api.completeOnboarding();
-
-      // 必须 await 全部 invalidate 完成再 navigate, 否则 OnboardingGate
-      // 读到陈旧的 completed=false 会把人踢回 /subscriptions/new
-      await Promise.all([
-        queryClient.invalidateQueries({ queryKey: ["onboarding-state"] }),
-        queryClient.invalidateQueries({ queryKey: ["virtual-models"] }),
-        queryClient.invalidateQueries({ queryKey: ["subscriptions"] }),
-      ]);
-
       navigate("/guide", { replace: true });
       return;
     }
-
     navigate(returnTo ?? `/subscriptions/${createdId}`);
+  }
+
+  // 自定义路径: 单页提交
+  async function saveCustom() {
+    setSubmitError(null);
+    if (!customProviderName) return setSubmitError("请填写厂商显示名");
+    if (!customBaseUrl) return setSubmitError("请填写 base URL");
+    const connErr = validateConnection({
+      base_url: customBaseUrl,
+      messages_path: customMessagesPath,
+    });
+    if (connErr) return setSubmitError(connErr);
+    if (!apiKey) return setSubmitError("请填写 API Key");
+    if (!displayName) return setSubmitError("请填写订阅备注名");
+    if (!slots.opus || !slots.sonnet || !slots.haiku) {
+      return setSubmitError("请填写三个虚拟模型槽位的真实模型名");
+    }
+
+    const preset = AUTH_PRESETS[customAuthPreset];
+    const input: CreateSubscriptionInput = {
+      display_name: displayName,
+      api_key: apiKey,
+      model_slots: slots,
+      source: {
+        kind: "custom",
+        provider_display_name: customProviderName,
+        base_url: customBaseUrl.trim(),
+        messages_path: customMessagesPath.trim(),
+        auth_header_name: preset.name,
+        auth_header_format: preset.format,
+      },
+    };
+
+    setSubmitting(true);
+    try {
+      const created = await createMut.mutateAsync(input);
+      await bindToVirtualModelsIfOnboarding(created.id);
+      if (isOnboarding) {
+        navigate("/guide", { replace: true });
+        return;
+      }
+      navigate(returnTo ?? `/subscriptions/${created.id}`);
+    } catch (e) {
+      setSubmitError(`创建失败: ${e}`);
+    } finally {
+      setSubmitting(false);
+    }
   }
 
   return (
@@ -210,35 +305,37 @@ export function SubscriptionNewPage() {
       </div>
 
       <div className="wizard">
-        <div className="steps">
-          <div className={`step ${step >= 1 ? "active" : ""} ${step > 1 ? "done" : ""}`}>
-            <span className="num">{step > 1 ? <Check size={11} /> : 1}</span>
-            <span>基本信息</span>
+        {/* 自定义路径不分步, 隐藏步骤指示器 */}
+        {!isCustom && (
+          <div className="steps">
+            <div className={`step ${step >= 1 ? "active" : ""} ${step > 1 ? "done" : ""}`}>
+              <span className="num">{step > 1 ? <Check size={11} /> : 1}</span>
+              <span>基本信息</span>
+            </div>
+            <div className="step-bar" />
+            <div className={`step ${step === 2 ? "active" : ""} ${step > 2 ? "done" : ""}`}>
+              <span className="num">2</span>
+              <span>绑定模型</span>
+            </div>
           </div>
-          <div className="step-bar" />
-          <div className={`step ${step === 2 ? "active" : ""} ${step > 2 ? "done" : ""}`}>
-            <span className="num">2</span>
-            <span>绑定模型</span>
-          </div>
-        </div>
+        )}
 
         <div className="card">
           <div className="card-body" style={{ paddingTop: 24 }}>
+            {/* 步骤 1 (内置) 或 单页表单 (自定义) 共用厂商 dropdown */}
             {step === 1 && (
               <>
                 <div style={{ marginBottom: 20 }}>
                   <label className="field-label">厂商</label>
                   <Select value={providerId} onValueChange={handleProviderChange}>
                     <SelectTrigger className="select h-auto">
-                      {provider ? (
-                        <span
-                          style={{
-                            display: "inline-flex",
-                            alignItems: "center",
-                            gap: 8,
-                            minWidth: 0,
-                          }}
-                        >
+                      {isCustom ? (
+                        <span style={{ display: "inline-flex", alignItems: "center", gap: 8, minWidth: 0 }}>
+                          <Boxes size={20} />
+                          <span>自定义厂商</span>
+                        </span>
+                      ) : provider ? (
+                        <span style={{ display: "inline-flex", alignItems: "center", gap: 8, minWidth: 0 }}>
                           <ProviderLogo iconId={provider.icon} size={20} />
                           <span style={{ overflow: "hidden", textOverflow: "ellipsis" }}>
                             {provider.display_name}
@@ -251,21 +348,23 @@ export function SubscriptionNewPage() {
                     <SelectContent>
                       {providers.data?.map((p) => (
                         <SelectItem key={p.id} value={p.id}>
-                          <span
-                            style={{
-                              display: "inline-flex",
-                              alignItems: "center",
-                              gap: 8,
-                            }}
-                          >
+                          <span style={{ display: "inline-flex", alignItems: "center", gap: 8 }}>
                             <ProviderLogo iconId={p.icon} size={20} />
                             <span>{p.display_name}</span>
                           </span>
                         </SelectItem>
                       ))}
+                      {/* 末尾分隔: 自定义入口 */}
+                      <div style={{ height: 1, background: "var(--line)", margin: "4px 0" }} />
+                      <SelectItem value={CUSTOM_VALUE}>
+                        <span style={{ display: "inline-flex", alignItems: "center", gap: 8 }}>
+                          <Plus size={20} />
+                          <span>自定义厂商</span>
+                        </span>
+                      </SelectItem>
                     </SelectContent>
                   </Select>
-                  {provider && (
+                  {provider && !isCustom && (
                     <div
                       style={{
                         marginTop: 8,
@@ -282,9 +381,15 @@ export function SubscriptionNewPage() {
                       )}
                     </div>
                   )}
+                  {isCustom && (
+                    <div className="field-hint" style={{ marginTop: 6 }}>
+                      自定义路径: 一次性填完连接信息和模型 slot, 不走两步向导。
+                    </div>
+                  )}
                 </div>
 
-                {provider && (
+                {/* 内置路径: endpoint dropdown */}
+                {provider && !isCustom && (
                   <div style={{ marginBottom: 20 }}>
                     <label className="field-label">接入点</label>
                     <Select value={endpointId} onValueChange={setEndpointId}>
@@ -331,6 +436,63 @@ export function SubscriptionNewPage() {
                   </div>
                 )}
 
+                {/* 自定义路径: 厂商显示名 / base_url / messages_path / 鉴权方式 */}
+                {isCustom && (
+                  <>
+                    <div style={{ marginBottom: 20 }}>
+                      <label className="field-label">厂商显示名</label>
+                      <input
+                        className="input"
+                        value={customProviderName}
+                        onChange={(e) => handleCustomProviderNameChange(e.target.value)}
+                        placeholder="例如: 我的自建网关"
+                      />
+                      <div className="field-hint">下拉里看到的厂商名,可后续编辑。</div>
+                    </div>
+
+                    <div style={{ marginBottom: 20 }}>
+                      <label className="field-label">Base URL</label>
+                      <input
+                        className="input mono"
+                        value={customBaseUrl}
+                        onChange={(e) => setCustomBaseUrl(e.target.value)}
+                        placeholder="https://api.example.com"
+                      />
+                      <div className="field-hint">不含 /v1/messages 路径,只到域名根。</div>
+                    </div>
+
+                    <div style={{ marginBottom: 20 }}>
+                      <label className="field-label">Messages Path</label>
+                      <input
+                        className="input mono"
+                        value={customMessagesPath}
+                        onChange={(e) => setCustomMessagesPath(e.target.value)}
+                        placeholder="/v1/messages"
+                      />
+                      <div className="field-hint">通常是 /v1/messages,部分代理会用别的路径。</div>
+                    </div>
+
+                    <div style={{ marginBottom: 20 }}>
+                      <label className="field-label">鉴权方式</label>
+                      <Select
+                        value={customAuthPreset}
+                        onValueChange={(v) => setCustomAuthPreset(v as AuthPreset)}
+                      >
+                        <SelectTrigger className="select h-auto">
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {Object.entries(AUTH_PRESETS).map(([k, v]) => (
+                            <SelectItem key={k} value={k}>
+                              {v.label}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    </div>
+                  </>
+                )}
+
                 <div style={{ marginBottom: 20 }}>
                   <label className="field-label">API Key</label>
                   <input
@@ -353,9 +515,34 @@ export function SubscriptionNewPage() {
                   <div className="field-hint">仅用于本地区分,不会上传到任何地方。</div>
                 </div>
 
-                {modelFetchError && (
+                {/* 自定义路径: 单页直接显示 3 slot 输入 */}
+                {isCustom && (
+                  <div style={{ marginBottom: 24 }}>
+                    <label className="field-label">虚拟模型槽位</label>
+                    <div className="field-hint" style={{ marginBottom: 8 }}>
+                      这三个 slot 决定 cc-router 把 model-opus / model-sonnet / model-haiku 路由成哪个真实模型字符串。
+                    </div>
+                    <SlotInput
+                      label="model-opus →"
+                      value={slots.opus}
+                      onChange={(v) => setSlots({ ...slots, opus: v })}
+                    />
+                    <SlotInput
+                      label="model-sonnet →"
+                      value={slots.sonnet}
+                      onChange={(v) => setSlots({ ...slots, sonnet: v })}
+                    />
+                    <SlotInput
+                      label="model-haiku →"
+                      value={slots.haiku}
+                      onChange={(v) => setSlots({ ...slots, haiku: v })}
+                    />
+                  </div>
+                )}
+
+                {(modelFetchError || submitError) && (
                   <div className="alert err" style={{ marginBottom: 16 }}>
-                    {modelFetchError}
+                    {submitError ?? modelFetchError}
                   </div>
                 )}
 
@@ -373,15 +560,27 @@ export function SubscriptionNewPage() {
                       取消
                     </Link>
                   )}
-                  <button
-                    className="btn primary"
-                    onClick={goToStep2}
-                    disabled={!provider || !endpoint || !apiKey || !displayName || fetchingModels}
-                    type="button"
-                  >
-                    {fetchingModels && <Spinner />}
-                    下一步 <ArrowRight size={12} />
-                  </button>
+                  {isCustom ? (
+                    <button
+                      className="btn primary"
+                      onClick={saveCustom}
+                      disabled={submitting}
+                      type="button"
+                    >
+                      {submitting && <Spinner />}
+                      保存
+                    </button>
+                  ) : (
+                    <button
+                      className="btn primary"
+                      onClick={goToStep2}
+                      disabled={!provider || !endpoint || !apiKey || !displayName || fetchingModels}
+                      type="button"
+                    >
+                      {fetchingModels && <Spinner />}
+                      下一步 <ArrowRight size={12} />
+                    </button>
+                  )}
                 </div>
               </>
             )}
@@ -425,5 +624,30 @@ export function SubscriptionNewPage() {
         </div>
       </div>
     </>
+  );
+}
+
+function SlotInput({
+  label,
+  value,
+  onChange,
+}: {
+  label: string;
+  value: string;
+  onChange: (v: string) => void;
+}) {
+  return (
+    <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 8 }}>
+      <span style={{ fontFamily: "var(--mono)", fontSize: 12, color: "var(--ink-3)", width: 130 }}>
+        {label}
+      </span>
+      <input
+        className="input mono"
+        style={{ flex: 1 }}
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        placeholder="例如: claude-3-5-sonnet-20241022"
+      />
+    </div>
   );
 }

@@ -279,26 +279,10 @@ fn bump_transient(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::subscription::model::{ModelSlots, SubscriptionRow};
+    use crate::subscription::model::SubscriptionRow;
 
     fn runtime() -> SubscriptionRuntime {
-        let row = SubscriptionRow {
-            id: Uuid::new_v4(),
-            provider_id: "anthropic".into(),
-            endpoint_id: "api_paygo".into(),
-            display_name: "test".into(),
-            api_key: "test-key".into(),
-            model_slots: ModelSlots {
-                opus: "a".into(),
-                sonnet: "b".into(),
-                haiku: "c".into(),
-            },
-            enabled: true,
-            is_auth_failed: false,
-            last_error_message: None,
-            created_at: Utc::now(),
-            updated_at: Utc::now(),
-        };
+        let row = SubscriptionRow::test_fixture("anthropic", "api_paygo");
         SubscriptionRuntime::from_row(row)
     }
 

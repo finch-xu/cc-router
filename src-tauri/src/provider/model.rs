@@ -1,3 +1,5 @@
+use std::str::FromStr;
+
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -21,6 +23,34 @@ pub enum AuthHeaderFormat {
     Bearer,
 }
 
+impl AuthHeaderFormat {
+    /// 把 api_key 包装成 header 值。Bearer 加前缀, Raw 原样。
+    pub fn apply(&self, api_key: &str) -> String {
+        match self {
+            Self::Bearer => format!("Bearer {api_key}"),
+            Self::Raw => api_key.to_string(),
+        }
+    }
+
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::Bearer => "bearer",
+            Self::Raw => "raw",
+        }
+    }
+}
+
+impl FromStr for AuthHeaderFormat {
+    type Err = String;
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s {
+            "bearer" => Ok(Self::Bearer),
+            "raw" => Ok(Self::Raw),
+            other => Err(format!("无效 auth_header_format: {other}")),
+        }
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Auth {
     #[serde(rename = "type")]
@@ -30,12 +60,18 @@ pub struct Auth {
 }
 
 impl Auth {
-    /// 拼出该 provider 鉴权 header 应填的值。Bearer 加前缀, Raw 原样。
     pub fn header_value(&self, api_key: &str) -> String {
-        match self.header_format {
-            AuthHeaderFormat::Bearer => format!("Bearer {api_key}"),
-            AuthHeaderFormat::Raw => api_key.to_string(),
-        }
+        self.header_format.apply(api_key)
+    }
+}
+
+/// 拼接 base + path, 处理首尾斜杠规范化。被 endpoint URL 和 model_discovery URL 共用。
+pub fn join_base_path(base: &str, path: &str) -> String {
+    let trimmed_base = base.trim_end_matches('/');
+    if path.starts_with('/') {
+        format!("{trimmed_base}{path}")
+    } else {
+        format!("{trimmed_base}/{path}")
     }
 }
 
@@ -54,17 +90,8 @@ pub struct ProviderEndpoint {
 }
 
 impl ProviderEndpoint {
-    /// 拼出完整 messages 接口 URL: `base_url + messages_path`, 处理斜杠规范化。
     pub fn messages_url(&self) -> String {
-        format!(
-            "{}{}",
-            self.base_url.trim_end_matches('/'),
-            if self.messages_path.starts_with('/') {
-                self.messages_path.clone()
-            } else {
-                format!("/{}", self.messages_path)
-            }
-        )
+        join_base_path(&self.base_url, &self.messages_path)
     }
 }
 

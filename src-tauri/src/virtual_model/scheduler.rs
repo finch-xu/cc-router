@@ -68,27 +68,13 @@ pub async fn build_candidate_order(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::subscription::model::{ModelSlots, SubscriptionRow, SubscriptionState};
+    use crate::subscription::model::{SubscriptionRow, SubscriptionState};
     use crate::virtual_model::model::VirtualModelName;
 
     fn make_rt(enabled: bool, state: SubscriptionState) -> SubscriptionRuntime {
-        let row = SubscriptionRow {
-            id: Uuid::new_v4(),
-            provider_id: "p".into(),
-            endpoint_id: "e".into(),
-            display_name: "sub".into(),
-            api_key: "k".into(),
-            model_slots: ModelSlots {
-                opus: "a".into(),
-                sonnet: "b".into(),
-                haiku: "c".into(),
-            },
-            enabled,
-            is_auth_failed: matches!(state, SubscriptionState::AuthFailed),
-            last_error_message: None,
-            created_at: Utc::now(),
-            updated_at: Utc::now(),
-        };
+        let mut row = SubscriptionRow::test_fixture("p", "e");
+        row.enabled = enabled;
+        row.is_auth_failed = matches!(state, SubscriptionState::AuthFailed);
         let mut rt = SubscriptionRuntime::from_row(row);
         rt.state = state;
         rt
