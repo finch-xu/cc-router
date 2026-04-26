@@ -104,6 +104,9 @@ Managed as `src-tauri/providers/*.yaml`, validated against a JSON Schema at star
 | `whatai` | Shenma relay API (pay-as-you-go, OpenAI/Anthropic dual-protocol relay, Anthropic path only) | ❌ | ✅ | untested |
 | `ollama` | Ollama local inference (localhost:11434 only, includes cloud tags like `glm-4.7:cloud`) | ❌ | ✅ | partial |
 | `fireworks` | Fireworks AI (pay-as-you-go, covers DeepSeek / Qwen / Llama / Kimi and other open-source models), Fire Pass | ✅ | ✅ | verified |
+| `stepfun` | Stepfun (Step Plan subscription + pay-as-you-go API) | ✅ | ✅ | untested |
+| `baidu` | Baidu Qianfan (Coding Plan subscription, manual model entry) | ✅ | ❌ | untested |
+| `modelscope` | ModelScope (pay-as-you-go, OpenAI/Anthropic dual-protocol, Anthropic path only, covers Qwen / DeepSeek / Kimi / MiniMax and other open-source models) | ❌ | ✅ | partial |
 
 > The "Token Plan" column covers any subscription-style quota (Token Plan / Coding Plan, etc.); "API" denotes pay-as-you-go Anthropic Messages-compatible endpoints.
 

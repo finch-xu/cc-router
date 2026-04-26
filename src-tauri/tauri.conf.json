@@ -62,6 +62,7 @@
       "providers/fireworks.yaml",
       "providers/stepfun.yaml",
       "providers/baidu.yaml",
+      "providers/modelscope.yaml",
       "migrations/001_init.sql",
       "../LICENSE"
     ],

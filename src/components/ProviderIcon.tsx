@@ -14,6 +14,7 @@ import Ollama from "@lobehub/icons/es/Ollama";
 import Fireworks from "@lobehub/icons/es/Fireworks";
 import Stepfun from "@lobehub/icons/es/Stepfun";
 import BaiduCloud from "@lobehub/icons/es/BaiduCloud";
+import ModelScope from "@lobehub/icons/es/ModelScope";
 import { cn } from "@/lib/utils";
 
 type IconVariant = ComponentType<{ size?: number | string }>;
@@ -38,6 +39,7 @@ const BRAND_MAP: Record<string, BrandIcon> = {
   fireworks: Fireworks as unknown as BrandIcon,
   stepfun: Stepfun as unknown as BrandIcon,
   baidu: BaiduCloud as unknown as BrandIcon,
+  modelscope: ModelScope as unknown as BrandIcon,
 };
 
 interface Props {

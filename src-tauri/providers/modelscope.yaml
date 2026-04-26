@@ -1,0 +1,46 @@
+id: modelscope
+display_name: "魔搭 ModelScope"
+icon: modelscope
+description: "阿里达摩院魔搭社区 API-Inference, Anthropic 兼容端点 (OpenAI/Anthropic 双协议, 仅用 Anthropic 路径)"
+homepage: "https://modelscope.cn"
+docs_url: "https://modelscope.cn/docs/model-service/API-Inference/intro"
+api_key_url: "https://modelscope.cn/my/myaccesstoken"
+
+compatibility: partial
+compatibility_notes: |
+  魔搭支持 Anthropic Messages 兼容路径 /v1/messages。
+  已知 issue: 部分开源模型 (Qwen / GLM 系) 在带 system prompt 的请求下可能返回 "message must be json_object" 错误,
+  需要在 Claude Code 侧避开 system 参数, 或换用对 system 兼容更好的模型。
+  /models 接口未携带 token 时只返回公共列表, 携带 token 可能返回更完整的私有/受限模型列表。
+
+endpoints:
+  - id: api_endpoint
+    label: "按量付费 API"
+    description: "魔搭社区 API-Inference 按量推理服务"
+    base_url: "https://api-inference.modelscope.cn"
+    messages_path: "/v1/messages"
+    region: china
+    billing: pay_as_you_go
+
+default_endpoint: api_endpoint
+
+auth:
+  type: api_key
+  header_name: "Authorization"
+  header_format: bearer
+
+required_headers:
+  anthropic-version: "2023-06-01"
+
+forward_headers: []
+
+model_discovery:
+  enabled: true
+  path: "/v1/models"
+  cache_ttl_hours: 24
+  example_models:
+    - "Qwen/Qwen3-Coder-480B-A35B-Instruct"
+    - "deepseek-ai/DeepSeek-V4-Flash"
+    - "deepseek-ai/DeepSeek-V3.2"
+    - "moonshotai/Kimi-K2.5"
+    - "MiniMax/MiniMax-M2.7"
