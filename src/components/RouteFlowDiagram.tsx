@@ -6,11 +6,13 @@ import { useProxyStatus } from "@/hooks/useSettings";
 import { useVirtualModels } from "@/hooks/useVirtualModels";
 import { useSubscriptions } from "@/hooks/useSubscriptions";
 import { useProviders } from "@/hooks/useProviders";
-import { MODE_LABEL, VM_ORDER } from "@/lib/virtualModels";
+import { MODE_LABEL_KEY, VM_ORDER } from "@/lib/virtualModels";
+import { useT } from "@/i18n";
 import logoUrl from "@/assets/logo.png";
 import type { SubscriptionDto, VirtualModelDto } from "@/types";
 
 export function RouteFlowDiagram() {
+  const { t } = useT();
   const proxy = useProxyStatus();
   const vms = useVirtualModels();
   const subs = useSubscriptions();
@@ -54,10 +56,10 @@ export function RouteFlowDiagram() {
       <div className="diagram-inner">
         <div className="card-head" style={{ padding: "0 0 18px" }}>
           <div className="card-title">
-            <span>请求路由</span>
+            <span>{t("routeFlow.title")}</span>
             <span className="pill accent">
               <span className="dot" />
-              {running ? "实时" : "未运行"}
+              {running ? t("routeFlow.live") : t("routeFlow.offline")}
             </span>
           </div>
           <div className="card-sub mono">
@@ -97,16 +99,16 @@ export function RouteFlowDiagram() {
             </div>
             {orderedVms.length === 0 ? (
               <div className="route-row">
-                <div className="chain-empty">加载中…</div>
+                <div className="chain-empty">{t("common.loading")}</div>
               </div>
             ) : (
               orderedVms.map((vm) => (
                 <div className="route-row" key={vm.name}>
                   <div className="route-slot">{vm.name}</div>
-                  <div className="route-mode">{MODE_LABEL[vm.mode]}</div>
+                  <div className="route-mode">{t(MODE_LABEL_KEY[vm.mode])}</div>
                   <div className="route-chain">
                     {vm.subscription_ids.length === 0 ? (
-                      <span className="chain-empty">未绑定</span>
+                      <span className="chain-empty">{t("routeFlow.notBound")}</span>
                     ) : (
                       vm.subscription_ids.map((sid, i) => {
                         const sub = subsMap.get(sid);
@@ -134,10 +136,10 @@ export function RouteFlowDiagram() {
 
           <div className="node">
             <div className="node-label">UPSTREAMS</div>
-            <div className="node-title">厂商订阅</div>
+            <div className="node-title">{t("routeFlow.providersTitle")}</div>
             <div className="node-list">
               {providersInUse.length === 0 ? (
-                <div className="chain-empty">未绑定任何订阅</div>
+                <div className="chain-empty">{t("routeFlow.providersEmpty")}</div>
               ) : (
                 providersInUse.map((p) => {
                   const info = providerOf(p.id);

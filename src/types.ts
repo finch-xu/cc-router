@@ -190,6 +190,8 @@ export interface Settings {
   cors_enabled: boolean;
   /** Access-Control-Allow-Origin 值,默认 "*" */
   cors_allow_origin: string;
+  /** 前端 UI 语言偏好: "system" 跟随系统 / "zh" / "en"。默认 system */
+  preferred_language: "system" | "zh" | "en";
 }
 
 export interface SettingsPatch {
@@ -201,6 +203,7 @@ export interface SettingsPatch {
   auth_enabled?: boolean;
   cors_enabled?: boolean;
   cors_allow_origin?: string;
+  preferred_language?: "system" | "zh" | "en";
   // 注意: auth_token 不在 patch 里,必须通过 generateNewToken() 改
 }
 

@@ -16,6 +16,7 @@ import { CSS } from "@dnd-kit/utilities";
 import { GripVertical } from "lucide-react";
 import { ProviderLogo } from "@/components/ProviderLogo";
 import { stateTone } from "@/components/StatusBadge";
+import { useT } from "@/i18n";
 import type { SubscriptionDto, SubscriptionSlot } from "@/types";
 
 interface Props {
@@ -34,6 +35,7 @@ export function SortableSubscriptionList({
   onChange,
   onRemove,
 }: Props) {
+  const { t } = useT();
   const sensors = useSensors(
     useSensor(PointerSensor, { activationConstraint: { distance: 4 } }),
   );
@@ -48,7 +50,7 @@ export function SortableSubscriptionList({
   }
 
   if (subscriptionIds.length === 0) {
-    return <div className="endpoint-empty">暂无订阅,点击下方按钮添加</div>;
+    return <div className="endpoint-empty">{t("sortableSub.empty")}</div>;
   }
 
   return (
@@ -57,7 +59,7 @@ export function SortableSubscriptionList({
         {subscriptionIds.map((id, idx) => {
           const sub = subscriptions.get(id);
           const realModel =
-            slot === null ? "原样透传请求的 model" : sub ? sub.model_slots[slot] : "?";
+            slot === null ? t("sortableSub.passthrough") : sub ? sub.model_slots[slot] : "?";
           return (
             <SortableRow
               key={id}
@@ -90,6 +92,7 @@ function SortableRow({
   realModel: string;
   onRemove: () => void;
 }) {
+  const { t } = useT();
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id });
   const style = {
     transform: CSS.Transform.toString(transform),
@@ -103,20 +106,20 @@ function SortableRow({
 
   return (
     <div ref={setNodeRef} style={style} className="endpoint">
-      <button className="grip" {...attributes} {...listeners} type="button" aria-label="拖拽排序">
+      <button className="grip" {...attributes} {...listeners} type="button" aria-label={t("sortableSub.dragHandle")}>
         <GripVertical size={14} strokeWidth={1.6} />
       </button>
       <span className="priority mono">{priority}</span>
       <ProviderLogo iconId={iconId} size={22} />
       <div className="endpoint-info">
         <div className="endpoint-name">
-          {sub?.display_name ?? "(未找到)"}
+          {sub?.display_name ?? t("common.notFound")}
           <span className={`endpoint-status${dotClass}`} aria-hidden />
         </div>
         <div className="endpoint-model mono">{realModel}</div>
       </div>
       <button className="remove" onClick={onRemove} type="button">
-        移除
+        {t("sortableSub.remove")}
       </button>
     </div>
   );

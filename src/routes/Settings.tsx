@@ -17,8 +17,10 @@ import {
   useUpdateSettings,
   useGenerateNewToken,
 } from "@/hooks/useSettings";
+import { useT, type LanguagePref } from "@/i18n";
 
 export function SettingsPage() {
+  const { t } = useT();
   const settings = useSettings();
   const proxy = useProxyStatus();
   const updateMut = useUpdateSettings();
@@ -31,6 +33,7 @@ export function SettingsPage() {
   const [authEnabled, setAuthEnabled] = useState(true);
   const [corsEnabled, setCorsEnabled] = useState(true);
   const [corsAllowOrigin, setCorsAllowOrigin] = useState("*");
+  const [preferredLanguage, setPreferredLanguage] = useState<LanguagePref>("system");
   const [resetDialog, setResetDialog] = useState(false);
   const [resetting, setResetting] = useState(false);
   const [tokenJustRegenerated, setTokenJustRegenerated] = useState(false);
@@ -57,6 +60,7 @@ export function SettingsPage() {
       setAuthEnabled(settings.data.auth_enabled);
       setCorsEnabled(settings.data.cors_enabled);
       setCorsAllowOrigin(settings.data.cors_allow_origin);
+      setPreferredLanguage(settings.data.preferred_language ?? "system");
       initializedRef.current = true;
     }
   }, [settings.data]);
@@ -75,7 +79,14 @@ export function SettingsPage() {
       auth_enabled: authEnabled,
       cors_enabled: corsEnabled,
       cors_allow_origin: corsAllowOrigin,
+      preferred_language: preferredLanguage,
     });
+  }
+
+  // 语言下拉单独立即保存,无需用户点"保存设置";其他字段需要点保存按钮。
+  async function changeLanguage(next: LanguagePref) {
+    setPreferredLanguage(next);
+    await updateMut.mutateAsync({ preferred_language: next });
   }
 
   async function regenerateToken() {
@@ -88,7 +99,7 @@ export function SettingsPage() {
         2000,
       );
     } catch (e) {
-      alert(`Token 生成失败: ${e}`);
+      alert(`${t("settings.auth.token.alertFailed")}: ${e}`);
     }
   }
 
@@ -100,31 +111,58 @@ export function SettingsPage() {
     } catch (e) {
       setResetting(false);
       setResetDialog(false);
-      alert(`恢复出厂失败: ${e}`);
+      alert(`${t("settings.danger.alertFailed")}: ${e}`);
     }
   }
 
   return (
     <>
       <div className="page-header">
-        <h1>设置</h1>
-        <div className="subtitle">代理服务、客户端配置、鉴权与数据保留期。</div>
+        <h1>{t("settings.title")}</h1>
+        <div className="subtitle">{t("settings.subtitle")}</div>
+      </div>
+
+      {/* 语言 */}
+      <div className="card section">
+        <div className="card-head">
+          <div className="card-title">{t("settings.section.language")}</div>
+        </div>
+        <div className="card-body">
+          <div className="setting-row">
+            <div className="label-col">
+              {t("settings.language.label")}
+              <div className="desc">{t("settings.language.desc")}</div>
+            </div>
+            <select
+              className="select"
+              style={{ maxWidth: 200 }}
+              value={preferredLanguage}
+              onChange={(e) => changeLanguage(e.target.value as LanguagePref)}
+            >
+              <option value="system">{t("settings.language.system")}</option>
+              <option value="zh">中文</option>
+              <option value="en">English</option>
+            </select>
+          </div>
+        </div>
       </div>
 
       {/* 代理服务 */}
       <div className="card section">
         <div className="card-head">
-          <div className="card-title">代理服务</div>
+          <div className="card-title">{t("settings.section.proxy")}</div>
           <span className={"pill " + (proxy.data?.running ? "ok" : "")}>
             <span className="dot" />
-            {proxy.data?.running ? "运行中" : "未运行"}
+            {proxy.data?.running
+              ? t("settings.proxy.statusRunning")
+              : t("settings.proxy.statusStopped")}
           </span>
         </div>
         <div className="card-body">
           <div className="setting-row">
             <div className="label-col">
-              监听端口
-              <div className="desc">默认 23456,被占用时自动 +1 递增。</div>
+              {t("settings.proxy.port.label")}
+              <div className="desc">{t("settings.proxy.port.desc")}</div>
             </div>
             <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
               <input
@@ -135,21 +173,24 @@ export function SettingsPage() {
                 style={{ width: 120 }}
               />
               <span style={{ fontSize: 12, color: "var(--ink-4)" }}>
-                当前实际:<span className="mono"> {proxy.data?.port ?? "-"}</span>
+                {t("settings.proxy.port.actual")}
+                <span className="mono"> {proxy.data?.port ?? "-"}</span>
               </span>
             </div>
           </div>
 
           <div className="setting-row">
             <div className="label-col">
-              监听地址
-              <div className="desc">
-                默认仅本机回环。开启「局域网可访问」后其他设备 Claude Code 可以指向本机 IP。
-              </div>
+              {t("settings.proxy.bind.label")}
+              <div className="desc">{t("settings.proxy.bind.desc")}</div>
             </div>
             <div>
               <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-                <Toggle checked={listenAll} onChange={setListenAll} aria-label="局域网可访问" />
+                <Toggle
+                  checked={listenAll}
+                  onChange={setListenAll}
+                  aria-label={t("settings.proxy.bind.aria")}
+                />
                 <span
                   className="mono"
                   style={{
@@ -163,21 +204,25 @@ export function SettingsPage() {
               </div>
               {listenAll && (
                 <div className="field-hint" style={{ color: "var(--err)" }}>
-                  ⚠️ 开启后,同网段任何设备都能调用代理。代理不做鉴权,慎用于不受信任的网络。
+                  {t("settings.proxy.bind.warning")}
                 </div>
               )}
             </div>
           </div>
 
           <div className="setting-row">
-            <div className="label-col">开机自启动</div>
-            <Toggle checked={autostart} onChange={setAutostart} aria-label="开机自启动" />
+            <div className="label-col">{t("settings.proxy.autostart.label")}</div>
+            <Toggle
+              checked={autostart}
+              onChange={setAutostart}
+              aria-label={t("settings.proxy.autostart.label")}
+            />
           </div>
 
           {needsRestart && (
             <div className="alert warn">
               <AlertTriangle size={14} />
-              修改端口或监听地址需要重启 app 才生效。保存后请手动退出 cc-router 再启动。
+              {t("settings.proxy.needsRestart")}
             </div>
           )}
         </div>
@@ -186,21 +231,25 @@ export function SettingsPage() {
       {/* 鉴权与跨域 */}
       <div className="card section">
         <div className="card-head">
-          <div className="card-title">鉴权与跨域</div>
+          <div className="card-title">{t("settings.section.auth")}</div>
         </div>
         <div className="card-body">
           <div className="setting-row">
             <div className="label-col">
-              Token 鉴权
-              <div className="desc">
-                在 Claude Code 启动时配 ANTHROPIC_API_KEY 或 ANTHROPIC_AUTH_TOKEN 等于此 token。重新生成后所有已配置客户端需同步更新。
-              </div>
+              {t("settings.auth.token.label")}
+              <div className="desc">{t("settings.auth.token.desc")}</div>
             </div>
             <div>
               <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 10 }}>
-                <Toggle checked={authEnabled} onChange={setAuthEnabled} aria-label="Token 鉴权" />
+                <Toggle
+                  checked={authEnabled}
+                  onChange={setAuthEnabled}
+                  aria-label={t("settings.auth.token.label")}
+                />
                 <span style={{ fontSize: 12, color: "var(--ink-2)" }}>
-                  {authEnabled ? "已开启,请求必须携带正确 token" : "已关闭,所有请求放行"}
+                  {authEnabled
+                    ? t("settings.auth.token.enabled")
+                    : t("settings.auth.token.disabled")}
                 </span>
               </div>
               {authEnabled && settings.data && (
@@ -224,7 +273,9 @@ export function SettingsPage() {
                     ) : (
                       <RefreshCw size={12} />
                     )}
-                    {tokenJustRegenerated ? "已生成" : "重新生成"}
+                    {tokenJustRegenerated
+                      ? t("settings.auth.token.regenerated")
+                      : t("settings.auth.token.regenerate")}
                   </button>
                 </div>
               )}
@@ -233,18 +284,24 @@ export function SettingsPage() {
 
           <div className="setting-row">
             <div className="label-col">
-              CORS 跨域
+              {t("settings.auth.cors.label")}
               <div className="desc">
                 {corsEnabled
-                  ? "已开启,响应附加 CORS 头。指定具体值如 http://localhost:5173 仅允许该来源。"
-                  : "已关闭,浏览器跨域调用会被拦截。"}
+                  ? t("settings.auth.cors.descEnabled")
+                  : t("settings.auth.cors.descDisabled")}
               </div>
             </div>
             <div>
               <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 10 }}>
-                <Toggle checked={corsEnabled} onChange={setCorsEnabled} aria-label="CORS 跨域" />
+                <Toggle
+                  checked={corsEnabled}
+                  onChange={setCorsEnabled}
+                  aria-label={t("settings.auth.cors.label")}
+                />
                 <span style={{ fontSize: 12, color: "var(--ink-2)" }}>
-                  {corsEnabled ? "已开启,响应附加 CORS 头" : "已关闭,浏览器跨域调用会被拦截"}
+                  {corsEnabled
+                    ? t("settings.auth.cors.statusEnabled")
+                    : t("settings.auth.cors.statusDisabled")}
                 </span>
               </div>
               {corsEnabled && (
@@ -272,25 +329,25 @@ export function SettingsPage() {
       {/* 数据存储 */}
       <div className="card section">
         <div className="card-head">
-          <div className="card-title">数据存储</div>
+          <div className="card-title">{t("settings.section.storage")}</div>
         </div>
         <div className="card-body">
           <div className="setting-row">
-            <div className="label-col">请求日志保留期</div>
+            <div className="label-col">{t("settings.storage.retention.label")}</div>
             <select
               className="select"
               style={{ maxWidth: 200 }}
               value={String(retentionDays)}
               onChange={(e) => setRetentionDays(Number(e.target.value))}
             >
-              <option value="7">7 天</option>
-              <option value="30">30 天</option>
-              <option value="90">90 天</option>
-              <option value="36500">永久</option>
+              <option value="7">{t("settings.storage.retention.7d")}</option>
+              <option value="30">{t("settings.storage.retention.30d")}</option>
+              <option value="90">{t("settings.storage.retention.90d")}</option>
+              <option value="36500">{t("settings.storage.retention.forever")}</option>
             </select>
           </div>
           <div className="setting-row">
-            <div className="label-col">数据库大小上限</div>
+            <div className="label-col">{t("settings.storage.dbLimit.label")}</div>
             <select
               className="select"
               style={{ maxWidth: 200 }}
@@ -300,13 +357,13 @@ export function SettingsPage() {
               <option value="100">100 MB</option>
               <option value="500">500 MB</option>
               <option value="1024">1 GB</option>
-              <option value="10240">10 GB (近似无限)</option>
+              <option value="10240">{t("settings.storage.dbLimit.unlimited")}</option>
             </select>
           </div>
           <div style={{ display: "flex", justifyContent: "flex-end", paddingTop: 16 }}>
             <button className="btn primary" onClick={save} disabled={updateMut.isPending} type="button">
               {updateMut.isPending && <Spinner />}
-              保存设置
+              {t("common.saveSettings")}
             </button>
           </div>
         </div>
@@ -326,14 +383,14 @@ export function SettingsPage() {
               marginBottom: 6,
             }}
           >
-            <AlertTriangle size={14} /> 危险区域 · 恢复出厂设置
+            <AlertTriangle size={14} /> {t("settings.section.danger")}
           </div>
           <div style={{ fontSize: 12, color: "var(--ink-3)", lineHeight: 1.6 }}>
-            清空所有订阅、API Key、虚拟模型绑定、请求日志、设置文件。app 会自动重启并进入初始欢迎页。此操作不可撤销。
+            {t("settings.danger.desc")}
           </div>
         </div>
         <button className="btn danger" type="button" onClick={() => setResetDialog(true)}>
-          恢复出厂设置
+          {t("settings.danger.button")}
         </button>
       </div>
 
@@ -344,19 +401,19 @@ export function SettingsPage() {
             <DialogTitle>
               <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
                 <AlertTriangle size={16} style={{ color: "var(--err)" }} />
-                确认恢复出厂设置?
+                {t("settings.danger.dialog.title")}
               </div>
             </DialogTitle>
             <DialogDescription asChild>
               <div>
-                下面的数据将被永久删除:
+                {t("settings.danger.dialog.intro")}
                 <ul style={{ marginTop: 8, paddingLeft: 20, fontSize: 13, lineHeight: 1.7 }}>
-                  <li>所有订阅(包括明文存储的 API Key)</li>
-                  <li>虚拟模型绑定</li>
-                  <li>请求日志和模型列表缓存</li>
-                  <li>app 设置(端口、保留期等)</li>
+                  <li>{t("settings.danger.dialog.item.subscriptions")}</li>
+                  <li>{t("settings.danger.dialog.item.virtualModels")}</li>
+                  <li>{t("settings.danger.dialog.item.logs")}</li>
+                  <li>{t("settings.danger.dialog.item.settings")}</li>
                 </ul>
-                <p style={{ marginTop: 12 }}>操作完成后 app 会自动重启。</p>
+                <p style={{ marginTop: 12 }}>{t("settings.danger.dialog.outro")}</p>
               </div>
             </DialogDescription>
           </DialogHeader>
@@ -367,7 +424,7 @@ export function SettingsPage() {
               disabled={resetting}
               type="button"
             >
-              取消
+              {t("common.cancel")}
             </button>
             <button
               className="btn danger"
@@ -376,7 +433,7 @@ export function SettingsPage() {
               type="button"
             >
               {resetting && <Spinner />}
-              确认清空并重启
+              {t("settings.danger.dialog.confirm")}
             </button>
           </DialogFooter>
         </DialogContent>

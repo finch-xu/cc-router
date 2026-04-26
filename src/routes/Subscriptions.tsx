@@ -4,35 +4,37 @@ import { StatusBadge } from "@/components/StatusBadge";
 import { ProviderLogo } from "@/components/ProviderLogo";
 import { EmptyState } from "@/components/EmptyState";
 import { useSubscriptions } from "@/hooks/useSubscriptions";
+import { useT } from "@/i18n";
 import { fmtTimeShort } from "@/lib/format";
 
 // SubscriptionDto 不带 api_key 预览(CLAUDE.md), 用固定遮罩占位
 const MASKED_KEY = "•••••••••••••••";
 
 export function SubscriptionsPage() {
+  const { t } = useT();
   const subs = useSubscriptions();
 
   return (
     <>
       <div className="page-actions">
         <div className="page-header" style={{ margin: 0 }}>
-          <h1>订阅管理</h1>
-          <div className="subtitle">每个订阅对应一个厂商的 API Key。状态实时反映健康检查结果。</div>
+          <h1>{t("subscriptions.title")}</h1>
+          <div className="subtitle">{t("subscriptions.subtitle")}</div>
         </div>
         <Link className="btn primary" to="/subscriptions/new">
-          <Plus size={12} /> 添加订阅
+          <Plus size={12} /> {t("subscriptions.add")}
         </Link>
       </div>
 
-      {subs.isLoading && <div className="field-hint">加载中…</div>}
+      {subs.isLoading && <div className="field-hint">{t("common.loading")}</div>}
 
       {subs.data && subs.data.length === 0 && (
         <EmptyState
           icon={Key}
-          message="还没有订阅。点击「添加订阅」开始。"
+          message={t("subscriptions.empty.message")}
           action={
             <Link className="btn primary sm" to="/subscriptions/new">
-              <Plus size={12} /> 添加第一个订阅
+              <Plus size={12} /> {t("subscriptions.empty.action")}
             </Link>
           }
         />
@@ -43,12 +45,12 @@ export function SubscriptionsPage() {
           <table className="table">
             <thead>
               <tr>
-                <th style={{ width: 100 }}>状态</th>
-                <th>厂商</th>
-                <th>备注</th>
+                <th style={{ width: 100 }}>{t("subscriptions.col.status")}</th>
+                <th>{t("subscriptions.col.provider")}</th>
+                <th>{t("subscriptions.col.note")}</th>
                 <th style={{ width: 160 }}>API Key</th>
-                <th style={{ width: 90 }}>引用</th>
-                <th style={{ width: 100 }}>更新时间</th>
+                <th style={{ width: 90 }}>{t("subscriptions.col.referenced")}</th>
+                <th style={{ width: 100 }}>{t("subscriptions.col.updatedAt")}</th>
                 <th style={{ width: 80 }}></th>
               </tr>
             </thead>
@@ -75,7 +77,7 @@ export function SubscriptionsPage() {
                               color: "var(--ink-3)",
                             }}
                           >
-                            🔧 自定义
+                            🔧 {t("subscriptions.custom")}
                           </span>
                         )}
                       </div>
@@ -89,7 +91,7 @@ export function SubscriptionsPage() {
                         <span className="pill tag mono">used: {sub.referenced_by.length}</span>
                       ) : (
                         <span className="field-hint" style={{ marginTop: 0, fontSize: 11.5 }}>
-                          未使用
+                          {t("subscriptions.notUsed")}
                         </span>
                       )}
                     </td>
@@ -98,7 +100,7 @@ export function SubscriptionsPage() {
                     </td>
                     <td>
                       <Link className="btn sm" to={`/subscriptions/${sub.id}`}>
-                        查看
+                        {t("subscriptions.view")}
                       </Link>
                     </td>
                   </tr>

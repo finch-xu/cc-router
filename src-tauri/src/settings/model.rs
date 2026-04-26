@@ -26,6 +26,10 @@ pub struct Settings {
     /// CORS Access-Control-Allow-Origin 值,默认 `*` 放行所有来源。
     #[serde(default = "default_cors_origin")]
     pub cors_allow_origin: String,
+    /// 前端 UI 语言偏好。"system" / "zh" / "en"。默认 system,
+    /// system 模式下前端用 navigator.language 决定 zh 或 en。
+    #[serde(default = "default_preferred_language")]
+    pub preferred_language: String,
 }
 
 fn default_port() -> u16 {
@@ -46,6 +50,9 @@ fn default_cors_enabled() -> bool {
 fn default_cors_origin() -> String {
     "*".to_string()
 }
+fn default_preferred_language() -> String {
+    "system".to_string()
+}
 
 impl Default for Settings {
     fn default() -> Self {
@@ -59,6 +66,7 @@ impl Default for Settings {
             auth_token: String::new(),
             cors_enabled: default_cors_enabled(),
             cors_allow_origin: default_cors_origin(),
+            preferred_language: default_preferred_language(),
         }
     }
 }
@@ -73,6 +81,7 @@ pub struct SettingsPatch {
     pub auth_enabled: Option<bool>,
     pub cors_enabled: Option<bool>,
     pub cors_allow_origin: Option<String>,
+    pub preferred_language: Option<String>,
 }
 
 impl Settings {
@@ -100,6 +109,9 @@ impl Settings {
         }
         if let Some(p) = patch.cors_allow_origin {
             self.cors_allow_origin = p;
+        }
+        if let Some(p) = patch.preferred_language {
+            self.preferred_language = p;
         }
     }
 }

@@ -2,6 +2,7 @@ import { useMemo, useState, type ReactNode } from "react";
 import { Copy, Check } from "lucide-react";
 import { writeText } from "@tauri-apps/plugin-clipboard-manager";
 import { cn } from "@/lib/utils";
+import { useT } from "@/i18n";
 
 interface Props {
   text: string;
@@ -11,6 +12,7 @@ interface Props {
 }
 
 export function CopyableBlock({ text, className, highlight = true }: Props) {
+  const { t } = useT();
   const [copied, setCopied] = useState(false);
   const content = useMemo(
     () => (highlight ? renderHighlighted(text) : text),
@@ -36,11 +38,11 @@ export function CopyableBlock({ text, className, highlight = true }: Props) {
       <button className="copy" onClick={copy} type="button">
         {copied ? (
           <>
-            <Check size={11} /> 已复制
+            <Check size={11} /> {t("copyable.copied")}
           </>
         ) : (
           <>
-            <Copy size={11} /> 复制
+            <Copy size={11} /> {t("copyable.copy")}
           </>
         )}
       </button>

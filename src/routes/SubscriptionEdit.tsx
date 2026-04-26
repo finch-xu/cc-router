@@ -36,6 +36,7 @@ import {
   useUpdateSubscription,
   useUpdateSubscriptionKey,
 } from "@/hooks/useSubscriptions";
+import { useT } from "@/i18n";
 import type {
   AuthHeaderFormat,
   ModelInfo,
@@ -46,6 +47,7 @@ import type {
 } from "@/types";
 
 export function SubscriptionEditPage() {
+  const { t } = useT();
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
   const queryClient = useQueryClient();
@@ -135,8 +137,8 @@ export function SubscriptionEditPage() {
       model_slots: slots,
     };
     if (sub.is_user_defined) {
-      const connErr = validateConnection({ base_url: baseUrl, messages_path: messagesPath });
-      if (connErr) return setSaveError(connErr);
+      const connErrKey = validateConnection({ base_url: baseUrl, messages_path: messagesPath });
+      if (connErrKey) return setSaveError(t(connErrKey));
       patch.connection = {
         base_url: baseUrl.trim(),
         messages_path: messagesPath.trim(),
@@ -153,7 +155,7 @@ export function SubscriptionEditPage() {
     try {
       await updateMut.mutateAsync({ id, patch });
     } catch (e) {
-      setSaveError(`保存失败: ${e}`);
+      setSaveError(`${t("subscriptionEdit.errSave")}: ${e}`);
     }
   }
 
@@ -184,11 +186,11 @@ export function SubscriptionEditPage() {
   const sub = subQuery.data;
 
   if (subQuery.isLoading) {
-    return <div className="p-8 text-sm text-muted-foreground">加载中…</div>;
+    return <div className="p-8 text-sm text-muted-foreground">{t("common.loading")}</div>;
   }
 
   if (!sub) {
-    return <div className="p-8 text-sm text-muted-foreground">未找到订阅</div>;
+    return <div className="p-8 text-sm text-muted-foreground">{t("subscriptionEdit.notFound")}</div>;
   }
 
   const isCustom = sub.is_user_defined;
@@ -197,7 +199,7 @@ export function SubscriptionEditPage() {
     <div className="p-8 max-w-3xl space-y-6">
       <Button variant="ghost" size="sm" asChild>
         <Link to="/subscriptions">
-          <ArrowLeft className="h-4 w-4" /> 返回列表
+          <ArrowLeft className="h-4 w-4" /> {t("subscriptionNew.backToList")}
         </Link>
       </Button>
 
@@ -208,12 +210,12 @@ export function SubscriptionEditPage() {
             <StatusBadge state={sub.state} />
             {isCustom && (
               <span className="text-xs px-2 py-0.5 rounded bg-muted text-muted-foreground">
-                🔧 自定义
+                🔧 {t("subscriptions.custom")}
               </span>
             )}
             {sub.referenced_by.length > 0 && (
               <span className="text-muted-foreground">
-                引用: {sub.referenced_by.join(", ")}
+                {t("subscriptionEdit.referencedPrefix")}{sub.referenced_by.join(", ")}
               </span>
             )}
           </div>
@@ -222,7 +224,7 @@ export function SubscriptionEditPage() {
           )}
         </div>
         <div className="flex items-center gap-2">
-          <Label className="text-sm">启用</Label>
+          <Label className="text-sm">{t("subscriptionEdit.enabled")}</Label>
           <Switch
             checked={sub.enabled}
             onCheckedChange={(checked) =>
@@ -234,21 +236,21 @@ export function SubscriptionEditPage() {
 
       <Card>
         <CardHeader>
-          <CardTitle>基本信息</CardTitle>
+          <CardTitle>{t("subscriptionEdit.basicInfo")}</CardTitle>
         </CardHeader>
         <CardContent className="space-y-4">
           <div className="grid grid-cols-[120px_1fr] gap-3 items-center">
-            <Label>厂商</Label>
+            <Label>{t("subscriptionNew.field.provider")}</Label>
             {isCustom ? (
               <Input
                 value={providerDisplayName}
                 onChange={(e) => setProviderDisplayName(e.target.value)}
-                placeholder="厂商显示名"
+                placeholder={t("subscriptionEdit.providerNamePh")}
               />
             ) : (
               <div className="flex items-center gap-2 text-sm text-muted-foreground">
                 <ProviderIcon iconId={sub.provider_icon} size={18} />
-                <span>{sub.provider_display_name}（不可改）</span>
+                <span>{sub.provider_display_name}{t("subscriptionEdit.providerLocked")}</span>
               </div>
             )}
           </div>
@@ -256,7 +258,7 @@ export function SubscriptionEditPage() {
           {/* 内置订阅: endpoint 切换下拉 */}
           {!isCustom && (
             <div className="grid grid-cols-[120px_1fr] gap-3 items-start">
-              <Label className="mt-2">接入点</Label>
+              <Label className="mt-2">{t("subscriptionNew.field.endpoint")}</Label>
               <div className="space-y-1">
                 <Select value={endpointId} onValueChange={setEndpointId}>
                   <SelectTrigger>
@@ -276,7 +278,7 @@ export function SubscriptionEditPage() {
                 </div>
                 {endpointId !== sub.endpoint_id && (
                   <div className="text-xs text-amber-600">
-                    保存后将从模板重新拷贝该 endpoint 的连接信息
+                    {t("subscriptionEdit.endpointChangeWarn")}
                   </div>
                 )}
               </div>
@@ -305,16 +307,16 @@ export function SubscriptionEditPage() {
                 />
               </div>
               <div className="grid grid-cols-[120px_1fr] gap-3 items-center">
-                <Label>鉴权 header 名</Label>
+                <Label>{t("subscriptionEdit.authHeaderName")}</Label>
                 <Input
                   className="font-mono"
                   value={authHeaderName}
                   onChange={(e) => setAuthHeaderName(e.target.value)}
-                  placeholder="Authorization 或 x-api-key"
+                  placeholder={t("subscriptionEdit.authHeaderNamePh")}
                 />
               </div>
               <div className="grid grid-cols-[120px_1fr] gap-3 items-center">
-                <Label>鉴权格式</Label>
+                <Label>{t("subscriptionEdit.authHeaderFormat")}</Label>
                 <Select
                   value={authHeaderFormat}
                   onValueChange={(v) => setAuthHeaderFormat(v as AuthHeaderFormat)}
@@ -323,8 +325,8 @@ export function SubscriptionEditPage() {
                     <SelectValue />
                   </SelectTrigger>
                   <SelectContent>
-                    <SelectItem value="bearer">Bearer (header 值前加 "Bearer ")</SelectItem>
-                    <SelectItem value="raw">Raw (header 值原样填 key)</SelectItem>
+                    <SelectItem value="bearer">{t("subscriptionEdit.authBearerOption")}</SelectItem>
+                    <SelectItem value="raw">{t("subscriptionEdit.authRawOption")}</SelectItem>
                   </SelectContent>
                 </Select>
               </div>
@@ -332,7 +334,7 @@ export function SubscriptionEditPage() {
           )}
 
           <div className="grid grid-cols-[120px_1fr] gap-3 items-center">
-            <Label>备注名</Label>
+            <Label>{t("subscriptionNew.field.note")}</Label>
             <Input value={displayName} onChange={(e) => setDisplayName(e.target.value)} />
           </div>
           <div className="grid grid-cols-[120px_1fr] gap-3 items-center">
@@ -340,7 +342,7 @@ export function SubscriptionEditPage() {
             <div className="flex items-center gap-2">
               <Input type="password" value="••••••••••••••" disabled />
               <Button variant="outline" size="sm" onClick={() => setKeyDialog(true)}>
-                修改
+                {t("common.modify")}
               </Button>
             </div>
           </div>
@@ -349,7 +351,7 @@ export function SubscriptionEditPage() {
 
       <Card>
         <CardHeader>
-          <CardTitle>模型槽位</CardTitle>
+          <CardTitle>{t("subscriptionEdit.modelSlotsTitle")}</CardTitle>
         </CardHeader>
         <CardContent>
           <ModelSlotPicker
@@ -363,7 +365,7 @@ export function SubscriptionEditPage() {
           />
           {sub.model_cache && (
             <div className="mt-3 text-xs text-muted-foreground">
-              模型列表更新: {new Date(sub.model_cache.fetched_at).toLocaleString("zh-CN")}
+              {t("subscriptionEdit.modelCacheUpdated")}{new Date(sub.model_cache.fetched_at).toLocaleString()}
             </div>
           )}
         </CardContent>
@@ -375,11 +377,11 @@ export function SubscriptionEditPage() {
             <div>{testResult.message}</div>
             {testResult.model_used && (
               <div className="mt-1 text-xs opacity-80">
-                测试模型: <code className="font-mono">{testResult.model_used}</code>
+                {t("subscriptionEdit.testModel")}<code className="font-mono">{testResult.model_used}</code>
               </div>
             )}
             {testResult.state_reset && (
-              <div className="mt-1 text-xs">✓ 订阅状态已重置为正常</div>
+              <div className="mt-1 text-xs">{t("subscriptionEdit.stateReset")}</div>
             )}
           </AlertDescription>
         </Alert>
@@ -393,15 +395,15 @@ export function SubscriptionEditPage() {
 
       <div className="flex justify-between">
         <Button variant="outline" onClick={testConnection}>
-          测试连接
+          {t("subscriptionEdit.testConn")}
         </Button>
         <div className="flex gap-2">
           <Button variant="destructive" onClick={() => setDeleteDialog(true)}>
-            删除
+            {t("common.delete")}
           </Button>
           <Button onClick={save} disabled={updateMut.isPending}>
             {updateMut.isPending && <Loader2 className="h-4 w-4 animate-spin" />}
-            保存
+            {t("common.save")}
           </Button>
         </div>
       </div>
@@ -409,21 +411,21 @@ export function SubscriptionEditPage() {
       <Dialog open={keyDialog} onOpenChange={setKeyDialog}>
         <DialogContent>
           <DialogHeader>
-            <DialogTitle>修改 API Key</DialogTitle>
-            <DialogDescription>新 Key 会立即生效。</DialogDescription>
+            <DialogTitle>{t("subscriptionEdit.keyDialog.title")}</DialogTitle>
+            <DialogDescription>{t("subscriptionEdit.keyDialog.desc")}</DialogDescription>
           </DialogHeader>
           <Input
             type="password"
             value={newKey}
             onChange={(e) => setNewKey(e.target.value)}
-            placeholder="新的 API Key"
+            placeholder={t("subscriptionEdit.keyDialog.placeholder")}
           />
           <DialogFooter>
             <Button variant="ghost" onClick={() => setKeyDialog(false)}>
-              取消
+              {t("common.cancel")}
             </Button>
             <Button onClick={confirmUpdateKey} disabled={!newKey}>
-              保存
+              {t("common.save")}
             </Button>
           </DialogFooter>
         </DialogContent>
@@ -435,31 +437,31 @@ export function SubscriptionEditPage() {
             <DialogTitle>
               <div className="flex items-center gap-2">
                 <AlertTriangle className="h-4 w-4 text-destructive" />
-                删除 "{sub.display_name}"?
+                {t("subscriptionEdit.deleteDialog.titlePrefix")}{sub.display_name}{t("subscriptionEdit.deleteDialog.titleSuffix")}
               </div>
             </DialogTitle>
             <DialogDescription>
               {sub.referenced_by.length > 0 ? (
                 <>
-                  该订阅被 {sub.referenced_by.length} 个虚拟模型引用：
+                  {t("subscriptionEdit.deleteDialog.refByPrefix")}{sub.referenced_by.length}{t("subscriptionEdit.deleteDialog.refBySuffix")}
                   <ul className="mt-2 list-disc pl-5">
                     {sub.referenced_by.map((name) => (
                       <li key={name}>{name}</li>
                     ))}
                   </ul>
-                  <p className="mt-2">删除后这些虚拟模型的订阅列表会少一个。</p>
+                  <p className="mt-2">{t("subscriptionEdit.deleteDialog.refByOutro")}</p>
                 </>
               ) : (
-                "删除订阅会同时清除存储的 API Key。"
+                t("subscriptionEdit.deleteDialog.noRef")
               )}
             </DialogDescription>
           </DialogHeader>
           <DialogFooter>
             <Button variant="ghost" onClick={() => setDeleteDialog(false)}>
-              取消
+              {t("common.cancel")}
             </Button>
             <Button variant="destructive" onClick={confirmDelete}>
-              确认删除
+              {t("subscriptionEdit.deleteDialog.confirm")}
             </Button>
           </DialogFooter>
         </DialogContent>

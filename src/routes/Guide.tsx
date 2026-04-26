@@ -4,20 +4,20 @@ import { Construction } from "lucide-react";
 import { CopyableBlock } from "@/components/CopyableBlock";
 import { EmptyState } from "@/components/EmptyState";
 import { useEnvSnippet, useProxyStatus, useSettings } from "@/hooks/useSettings";
+import { useT } from "@/i18n";
 import { cn } from "@/lib/utils";
 
 type Tab = "claude-code" | "cc-switch" | "other";
 
 export function GuidePage() {
+  const { t } = useT();
   const [tab, setTab] = useState<Tab>("claude-code");
 
   return (
     <>
       <div className="page-header">
-        <h1>接入指南</h1>
-        <div className="subtitle">
-          把 cc-router 作为 Anthropic Messages 兼容端点接入各类客户端。
-        </div>
+        <h1>{t("guide.title")}</h1>
+        <div className="subtitle">{t("guide.subtitle")}</div>
       </div>
 
       <div className="tabs">
@@ -40,7 +40,7 @@ export function GuidePage() {
           onClick={() => setTab("other")}
           type="button"
         >
-          其他 AI Agent 工具
+          {t("guide.tab.other")}
         </button>
       </div>
 
@@ -48,13 +48,13 @@ export function GuidePage() {
       {tab === "cc-switch" && (
         <EmptyState
           icon={Construction}
-          message="cc-switch 接入指引正在完善中。"
+          message={t("guide.tab.ccSwitchEmpty")}
         />
       )}
       {tab === "other" && (
         <EmptyState
           icon={Construction}
-          message="其他 AI Agent 工具的接入指引正在完善中。"
+          message={t("guide.tab.otherEmpty")}
         />
       )}
     </>
@@ -62,6 +62,7 @@ export function GuidePage() {
 }
 
 function ClaudeCodeTab() {
+  const { t } = useT();
   const proxy = useProxyStatus();
   const settings = useSettings();
   const env = useEnvSnippet();
@@ -92,15 +93,15 @@ function ClaudeCodeTab() {
       {/* 代理监听地址 */}
       <div className="card section">
         <div className="card-head">
-          <div className="card-title">代理监听地址</div>
+          <div className="card-title">{t("guide.proxy.title")}</div>
           <span className="card-sub mono">
-            127.0.0.1:{port} · {running ? "运行中" : "未启动"}
+            127.0.0.1:{port} ·{" "}
+            {running ? t("settings.proxy.statusRunning") : t("guide.proxy.statusNotStarted")}
           </span>
         </div>
         <div className="card-body">
           <div className="field-hint">
-            cc-router 在本地启动 HTTP 代理,把多家订阅聚合成单一 Anthropic Messages 端点。
-            端口、监听地址、鉴权 token 可在
+            {t("guide.proxy.intro1")}
             <Link
               to="/settings"
               style={{
@@ -109,9 +110,9 @@ function ClaudeCodeTab() {
                 margin: "0 4px",
               }}
             >
-              设置
+              {t("guide.proxy.settingsLink")}
             </Link>
-            页修改(改端口/监听地址需重启 app 生效)。
+            {t("guide.proxy.intro2")}
           </div>
         </div>
       </div>
@@ -119,12 +120,12 @@ function ClaudeCodeTab() {
       {/* 方式 1: settings.json (推荐) */}
       <div className="card section">
         <div className="card-head">
-          <div className="card-title">方式 1 · 直接写入 settings.json(推荐)</div>
-          <span className="card-sub">最稳,不依赖 shell 环境</span>
+          <div className="card-title">{t("guide.method1.title")}</div>
+          <span className="card-sub">{t("guide.method1.sub")}</span>
         </div>
         <div className="card-body">
           <div className="field-hint" style={{ marginBottom: 10 }}>
-            把下面的 JSON 合并写入 Claude Code 配置文件。如果文件不存在,新建即可。
+            {t("guide.method1.desc")}
           </div>
           <table
             className="table"
@@ -151,8 +152,8 @@ function ClaudeCodeTab() {
           </table>
           <CopyableBlock text={claudeJson} highlight={false} />
           <div className="field-hint" style={{ marginTop: 10 }}>
-            <span className="mono">ANTHROPIC_AUTH_TOKEN</span> 已填入 cc-router 当前的真实 token,
-            可直接使用。token 可在
+            <span className="mono">ANTHROPIC_AUTH_TOKEN</span>
+            {t("guide.method1.note1")}
             <Link
               to="/settings"
               style={{
@@ -161,9 +162,9 @@ function ClaudeCodeTab() {
                 margin: "0 4px",
               }}
             >
-              设置
+              {t("guide.proxy.settingsLink")}
             </Link>
-            页重新生成。
+            {t("guide.method1.note2")}
           </div>
         </div>
       </div>
@@ -171,19 +172,21 @@ function ClaudeCodeTab() {
       {/* 方式 2: env */}
       <div className="card section">
         <div className="card-head">
-          <div className="card-title">方式 2 · 环境变量(备选)</div>
-          <span className="card-sub">GUI 启动的客户端可能读不到 shell env,优先用方式 1</span>
+          <div className="card-title">{t("guide.method2.title")}</div>
+          <span className="card-sub">{t("guide.method2.sub")}</span>
         </div>
         <div className="card-body">
           {env.data ? (
             <CopyableBlock text={env.data} />
           ) : (
-            <div className="field-hint">加载中…</div>
+            <div className="field-hint">{t("common.loading")}</div>
           )}
           <div className="field-hint" style={{ marginTop: 10 }}>
-            把上面这几行加到 <span className="mono">~/.zshrc</span>、
-            <span className="mono"> ~/.bashrc</span> 或 PowerShell profile,
-            然后重启 terminal 后启动 Claude Code。
+            {t("guide.method2.note1")}
+            <span className="mono">~/.zshrc</span>
+            {t("guide.method2.note2")}
+            <span className="mono">~/.bashrc</span>
+            {t("guide.method2.note3")}
           </div>
         </div>
       </div>

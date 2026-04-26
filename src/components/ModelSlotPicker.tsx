@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { RefreshCw, AlertCircle } from "lucide-react";
+import { useT } from "@/i18n";
 import type { ModelInfo, ModelSlots } from "@/types";
 
 type Mode = "auto" | "manual";
@@ -15,10 +16,10 @@ interface Props {
   disabled?: boolean;
 }
 
-const SLOTS: Array<{ key: keyof ModelSlots; label: string; hint: string }> = [
-  { key: "opus", label: "Opus 槽", hint: "高级任务 / Plan Mode" },
-  { key: "sonnet", label: "Sonnet 槽", hint: "主对话" },
-  { key: "haiku", label: "Haiku 槽", hint: "小任务 / 工具调用" },
+const SLOTS: Array<{ key: keyof ModelSlots; labelKey: string; hintKey: string }> = [
+  { key: "opus",   labelKey: "modelSlot.opus.label",   hintKey: "modelSlot.opus.hint" },
+  { key: "sonnet", labelKey: "modelSlot.sonnet.label", hintKey: "modelSlot.sonnet.hint" },
+  { key: "haiku",  labelKey: "modelSlot.haiku.label",  hintKey: "modelSlot.haiku.hint" },
 ];
 
 export function ModelSlotPicker({
@@ -31,6 +32,7 @@ export function ModelSlotPicker({
   exampleModels,
   disabled,
 }: Props) {
+  const { t } = useT();
   // null 表示还没初始化;一旦用户主动点击切换,userChose 置 true,不再被外部 data 反向覆盖。
   const [mode, setMode] = useState<Mode | null>(null);
   const userChoseRef = useRef(false);
@@ -68,7 +70,9 @@ export function ModelSlotPicker({
         }}
       >
         <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
-          <span style={{ fontSize: 13, fontWeight: 500, color: "var(--ink-2)" }}>模型槽位</span>
+          <span style={{ fontSize: 13, fontWeight: 500, color: "var(--ink-2)" }}>
+            {t("modelSlot.label")}
+          </span>
           <div className="radio-group">
             <button
               className={effectiveMode === "auto" ? "on" : ""}
@@ -76,7 +80,7 @@ export function ModelSlotPicker({
               disabled={disabled}
               type="button"
             >
-              自动
+              {t("modelSlot.modeAuto")}
             </button>
             <button
               className={effectiveMode === "manual" ? "on" : ""}
@@ -84,7 +88,7 @@ export function ModelSlotPicker({
               disabled={disabled}
               type="button"
             >
-              手动
+              {t("modelSlot.modeManual")}
             </button>
           </div>
         </div>
@@ -96,7 +100,7 @@ export function ModelSlotPicker({
             type="button"
           >
             <RefreshCw size={12} className={loading ? "animate-spin" : undefined} />
-            刷新模型列表
+            {t("modelSlot.refresh")}
           </button>
         )}
       </div>
@@ -104,18 +108,18 @@ export function ModelSlotPicker({
       {error && (
         <div className="alert warn" style={{ marginBottom: 12 }}>
           <AlertCircle size={14} />
-          <span>无法获取模型列表:{error}。已切换到手动输入。</span>
+          <span>{t("modelSlot.errPrefix")}{error}{t("modelSlot.errSuffix")}</span>
         </div>
       )}
 
       {effectiveMode === "manual" && exampleModels && exampleModels.length > 0 && (
         <div className="field-hint" style={{ marginTop: 0, marginBottom: 10 }}>
-          示例:{exampleModels.join(", ")}
+          {t("modelSlot.examplePrefix")}{exampleModels.join(", ")}
         </div>
       )}
 
       <div style={{ display: "grid", gap: 14 }}>
-        {SLOTS.map(({ key, label, hint }) => {
+        {SLOTS.map(({ key, labelKey, hintKey }) => {
           const current = value[key];
           const inList = !!models && models.some((m) => m.id === current);
           const showHistorical =
@@ -123,9 +127,9 @@ export function ModelSlotPicker({
           return (
             <div key={key}>
               <label className="field-label" htmlFor={`slot-${key}`}>
-                {label}
+                {t(labelKey)}
                 <span style={{ color: "var(--ink-4)", fontWeight: 400, marginLeft: 6 }}>
-                  {hint}
+                  {t(hintKey)}
                 </span>
               </label>
               {effectiveMode === "auto" && models && models.length > 0 ? (
@@ -139,10 +143,10 @@ export function ModelSlotPicker({
                     disabled={disabled}
                   >
                     <option value="" disabled>
-                      请选择模型
+                      {t("modelSlot.placeholder")}
                     </option>
                     {showHistorical && (
-                      <option value={current}>{current}(历史值)</option>
+                      <option value={current}>{current}{t("modelSlot.historicalSuffix")}</option>
                     )}
                     {models.map((m) => (
                       <option key={m.id} value={m.id}>
@@ -152,7 +156,7 @@ export function ModelSlotPicker({
                   </select>
                   {showHistorical && (
                     <span
-                      title={`${current} 不在自动列表中,可能是历史手动输入。如需修改请切到手动模式。`}
+                      title={t("modelSlot.historicalTitle", { model: current })}
                       style={{ color: "var(--warn, #d97706)", display: "inline-flex" }}
                     >
                       <AlertCircle size={14} />
@@ -165,7 +169,7 @@ export function ModelSlotPicker({
                   className="input mono"
                   value={current}
                   onChange={(e) => update(key, e.target.value)}
-                  placeholder="填入厂商提供的模型 ID"
+                  placeholder={t("modelSlot.modelIdPh")}
                   disabled={disabled}
                 />
               )}

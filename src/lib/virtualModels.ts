@@ -12,33 +12,34 @@ export const VM_ORDER: VirtualModelName[] = [
 ];
 
 export interface VmMeta {
-  /** 用于详情页/卡片标题的"用途" */
-  purpose: string;
-  purposeEn: string;
-  /** 用于下拉菜单/页面的人类可读 label */
-  label: string;
+  /** i18n key for the "purpose" line shown above the slot */
+  purposeKey: string;
+  /** i18n key for the secondary English-style purpose tag */
+  purposeEnKey: string;
+  /** i18n key for the long human-readable label (used in dropdowns) */
+  labelKey: string;
 }
 
 export const VM_META: Record<VirtualModelName, VmMeta> = {
   "model-opus": {
-    purpose: "高级任务",
-    purposeEn: "Plan Mode",
-    label: "高级任务 / Plan Mode",
+    purposeKey: "vm.opus.purpose",
+    purposeEnKey: "vm.opus.purposeEn",
+    labelKey: "vm.opus.label",
   },
   "model-sonnet": {
-    purpose: "主对话",
-    purposeEn: "Default chat",
-    label: "主对话",
+    purposeKey: "vm.sonnet.purpose",
+    purposeEnKey: "vm.sonnet.purposeEn",
+    labelKey: "vm.sonnet.label",
   },
   "model-haiku": {
-    purpose: "小任务",
-    purposeEn: "Tool calls",
-    label: "小任务 / 工具调用",
+    purposeKey: "vm.haiku.purpose",
+    purposeEnKey: "vm.haiku.purposeEn",
+    labelKey: "vm.haiku.label",
   },
   "model-fallback": {
-    purpose: "兜底",
-    purposeEn: "Unknown models",
-    label: "兜底 · 未知模型透传",
+    purposeKey: "vm.fallback.purpose",
+    purposeEnKey: "vm.fallback.purposeEn",
+    labelKey: "vm.fallback.label",
   },
 };
 
@@ -54,7 +55,7 @@ export function vmNameToSlot(name: VirtualModelName): SubscriptionSlot | null {
   return SLOT_BY_VM[name];
 }
 
-export const MODE_LABEL: Record<RoutingMode, string> = {
-  sequential: "顺序",
-  round_robin: "轮询",
+export const MODE_LABEL_KEY: Record<RoutingMode, string> = {
+  sequential: "vm.mode.sequential",
+  round_robin: "vm.mode.round_robin",
 };

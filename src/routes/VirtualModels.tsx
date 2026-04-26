@@ -7,15 +7,17 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
-import { StatusDot } from "@/components/StatusBadge";
+import { StatusDot, stateLabel } from "@/components/StatusBadge";
 import { SortableSubscriptionList } from "@/components/SortableSubscriptionList";
 import { RouteFlowDiagram } from "@/components/RouteFlowDiagram";
 import { useSubscriptions } from "@/hooks/useSubscriptions";
 import { useVirtualModels, useUpdateVirtualModel } from "@/hooks/useVirtualModels";
 import { VM_META, vmNameToSlot } from "@/lib/virtualModels";
+import { useT } from "@/i18n";
 import type { RoutingMode, SubscriptionDto, VirtualModelDto } from "@/types";
 
 export function VirtualModelsPage() {
+  const { t } = useT();
   const subs = useSubscriptions();
   const vms = useVirtualModels();
 
@@ -28,11 +30,11 @@ export function VirtualModelsPage() {
   return (
     <>
       <div className="page-header">
-        <h1>虚拟模型</h1>
+        <h1>{t("virtualModels.title")}</h1>
         <div className="subtitle">
-          三个固定虚拟模型对应 Claude Code 的模型槽位;
-          <span className="mono" style={{ color: "var(--ink-2)" }}> model-fallback</span>{" "}
-          是兜底,任何其他 model 请求都走这里。
+          {t("virtualModels.subtitle1")}
+          <span className="mono" style={{ color: "var(--ink-2)" }}> model-fallback</span>
+          {t("virtualModels.subtitle2")}
         </div>
       </div>
 
@@ -61,6 +63,7 @@ function VirtualModelCard({
   subsMap: Map<string, SubscriptionDto>;
   allSubs: SubscriptionDto[];
 }) {
+  const { t } = useT();
   const updateMut = useUpdateVirtualModel();
   const [pickerOpen, setPickerOpen] = useState(false);
   const meta = VM_META[vm.name];
@@ -82,7 +85,9 @@ function VirtualModelCard({
 
   const slot = vmNameToSlot(vm.name);
   const modeHint =
-    vm.mode === "round_robin" ? "均匀分发,限流时跳过" : "按优先级,失败下降";
+    vm.mode === "round_robin"
+      ? t("virtualModels.mode.roundRobinHint")
+      : t("virtualModels.mode.sequentialHint");
 
   return (
     <div className="slot-card">
@@ -90,31 +95,31 @@ function VirtualModelCard({
         <div>
           <span className="slot-name">{vm.name}</span>
           <span className="slot-purpose">
-            <strong>{meta.purpose}</strong> · {meta.purposeEn}
+            <strong>{t(meta.purposeKey)}</strong> · {t(meta.purposeEnKey)}
           </span>
         </div>
         <span className="pill accent">
           <span className="dot" />
-          {vm.subscription_ids.length} 端点
+          {vm.subscription_ids.length}{t("virtualModels.endpointsSuffix")}
         </span>
       </div>
 
       <div className="slot-mode-row">
-        <span style={{ fontWeight: 500, color: "var(--ink-2)" }}>调度模式</span>
+        <span style={{ fontWeight: 500, color: "var(--ink-2)" }}>{t("virtualModels.mode.label")}</span>
         <div className="radio-group">
           <button
             className={vm.mode === "sequential" ? "on" : ""}
             onClick={() => update("sequential", vm.subscription_ids)}
             type="button"
           >
-            顺序
+            {t("vm.mode.sequential")}
           </button>
           <button
             className={vm.mode === "round_robin" ? "on" : ""}
             onClick={() => update("round_robin", vm.subscription_ids)}
             type="button"
           >
-            轮询
+            {t("vm.mode.round_robin")}
           </button>
         </div>
         <span
@@ -134,7 +139,7 @@ function VirtualModelCard({
       />
 
       <button className="add-endpoint" onClick={() => setPickerOpen(true)} type="button">
-        <Plus size={12} /> 添加订阅到此虚拟模型
+        <Plus size={12} /> {t("virtualModels.addButton")}
       </button>
 
       <AddSubscriptionDialog
@@ -164,6 +169,7 @@ function AddSubscriptionDialog({
   allSubs: SubscriptionDto[];
   onConfirm: (ids: string[]) => void;
 }) {
+  const { t } = useT();
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const candidates = allSubs.filter((s) => s.enabled && !existingIds.includes(s.id));
 
@@ -184,10 +190,10 @@ function AddSubscriptionDialog({
     >
       <DialogContent className="cc-dialog">
         <DialogHeader>
-          <DialogTitle>选择要添加的订阅</DialogTitle>
+          <DialogTitle>{t("virtualModels.dialog.title")}</DialogTitle>
         </DialogHeader>
         {candidates.length === 0 ? (
-          <div className="field-hint">没有可用的订阅。先到「订阅管理」添加一个。</div>
+          <div className="field-hint">{t("virtualModels.dialog.empty")}</div>
         ) : (
           <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
             {candidates.map((sub) => (
@@ -219,7 +225,7 @@ function AddSubscriptionDialog({
                 <StatusDot state={sub.state} />
                 <span style={{ fontSize: 13, flex: 1 }}>{sub.display_name}</span>
                 {sub.state === "auth_failed" && (
-                  <span className="pill err">凭证失效</span>
+                  <span className="pill err">{stateLabel("auth_failed", t)}</span>
                 )}
               </label>
             ))}
@@ -227,7 +233,7 @@ function AddSubscriptionDialog({
         )}
         <DialogFooter>
           <button className="btn" onClick={() => onOpenChange(false)} type="button">
-            取消
+            {t("common.cancel")}
           </button>
           <button
             className="btn primary"
@@ -235,7 +241,7 @@ function AddSubscriptionDialog({
             onClick={() => onConfirm(Array.from(selected))}
             type="button"
           >
-            添加所选
+            {t("virtualModels.dialog.add")}
           </button>
         </DialogFooter>
       </DialogContent>

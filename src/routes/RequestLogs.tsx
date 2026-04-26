@@ -4,6 +4,7 @@ import { EmptyState } from "@/components/EmptyState";
 import { ProviderLogo } from "@/components/ProviderLogo";
 import { useRequests } from "@/hooks/useRequests";
 import { useProviders } from "@/hooks/useProviders";
+import { useT } from "@/i18n";
 import { fmtNum, fmtKilo, fmtTime } from "@/lib/format";
 import { VM_META } from "@/lib/virtualModels";
 import type {
@@ -18,10 +19,10 @@ const ALL = "__all__";
 const SPARK_BUCKETS = 14;
 const EMPTY_ITEMS: RequestLogDto[] = [];
 
-const STATUS_TONE: Record<RequestStatus, { tone: "ok" | "warn" | "err"; label: string }> = {
-  success: { tone: "ok",   label: "成功" },
-  timeout: { tone: "warn", label: "超时" },
-  error:   { tone: "err",  label: "失败" },
+const STATUS_TONE: Record<RequestStatus, { tone: "ok" | "warn" | "err"; labelKey: string }> = {
+  success: { tone: "ok",   labelKey: "requestLogs.status.success" },
+  timeout: { tone: "warn", labelKey: "requestLogs.status.timeout" },
+  error:   { tone: "err",  labelKey: "requestLogs.status.error" },
 };
 
 /** 把最近 N 条延迟样本均匀分桶,产出 SPARK_BUCKETS 高度数组(0-1) */
@@ -50,6 +51,7 @@ function buildSparkline(items: RequestLogDto[]): number[] {
 }
 
 export function RequestLogsPage() {
+  const { t } = useT();
   const [page, setPage] = useState(1);
   const [vmFilter, setVmFilter] = useState<VirtualModelName | undefined>();
   const [providerFilter, setProviderFilter] = useState<string | undefined>();
@@ -102,8 +104,8 @@ export function RequestLogsPage() {
     <>
       <div className="page-actions">
         <div className="page-header" style={{ margin: 0 }}>
-          <h1>请求日志</h1>
-          <div className="subtitle">最近经过代理的请求记录,按时间倒序。</div>
+          <h1>{t("requestLogs.title")}</h1>
+          <div className="subtitle">{t("requestLogs.subtitle")}</div>
         </div>
         <button
           className="btn"
@@ -112,28 +114,33 @@ export function RequestLogsPage() {
           type="button"
         >
           <RefreshCw size={12} className={query.isFetching ? "spin" : undefined} />
-          刷新
+          {t("requestLogs.refresh")}
         </button>
       </div>
 
       <div className="log-stats">
         <div className="stat">
-          <div className="stat-label">总请求</div>
+          <div className="stat-label">{t("requestLogs.stat.totalRequests")}</div>
           <div className="stat-val tnum">{fmtNum(total)}</div>
-          <div className="stat-delta">本页 {items.length} 条</div>
+          <div className="stat-delta">
+            {t("requestLogs.stat.thisPagePrefix")}{items.length}{t("requestLogs.stat.thisPageSuffix")}
+          </div>
         </div>
         <div className="stat">
-          <div className="stat-label">成功率</div>
+          <div className="stat-label">{t("requestLogs.stat.successRate")}</div>
           <div className="stat-val tnum">
             {pageStats.successRate.toFixed(1)}
             <span style={{ fontSize: 14, color: "var(--ink-3)" }}>%</span>
           </div>
           <div className={"stat-delta" + (pageStats.failCount > 0 ? " down" : "")}>
-            {pageStats.failCount} 失败 / {items.length}
+            {t("requestLogs.stat.failedFormat", {
+              failed: pageStats.failCount,
+              total: items.length,
+            })}
           </div>
         </div>
         <div className="stat">
-          <div className="stat-label">平均延迟</div>
+          <div className="stat-label">{t("requestLogs.stat.avgLatency")}</div>
           <div className="stat-val tnum">
             {pageStats.avgLat > 0 ? pageStats.avgLat.toFixed(2) : "-"}
             <span style={{ fontSize: 14, color: "var(--ink-3)" }}>s</span>
@@ -145,9 +152,11 @@ export function RequestLogsPage() {
           </div>
         </div>
         <div className="stat">
-          <div className="stat-label">总 Token (输出)</div>
+          <div className="stat-label">{t("requestLogs.stat.totalTokensOut")}</div>
           <div className="stat-val tnum">{fmtKilo(pageStats.totalOut)}</div>
-          <div className="stat-delta">≈ {fmtKilo(pageStats.totalIn)} 输入</div>
+          <div className="stat-delta">
+            {t("requestLogs.stat.tokensInPrefix")}{fmtKilo(pageStats.totalIn)}{t("requestLogs.stat.tokensInSuffix")}
+          </div>
         </div>
       </div>
 
@@ -161,7 +170,7 @@ export function RequestLogsPage() {
             setPage(1);
           }}
         >
-          <option value={ALL}>全部虚拟模型</option>
+          <option value={ALL}>{t("requestLogs.filter.allVm")}</option>
           {(Object.keys(VM_META) as VirtualModelName[]).map((name) => (
             <option key={name} value={name}>
               {name}
@@ -178,7 +187,7 @@ export function RequestLogsPage() {
             setPage(1);
           }}
         >
-          <option value={ALL}>全部厂商</option>
+          <option value={ALL}>{t("requestLogs.filter.allProvider")}</option>
           {providers.data?.map((p) => (
             <option key={p.id} value={p.id}>
               {p.display_name}
@@ -195,10 +204,10 @@ export function RequestLogsPage() {
             setPage(1);
           }}
         >
-          <option value={ALL}>全部状态</option>
+          <option value={ALL}>{t("requestLogs.filter.allStatus")}</option>
           {(Object.keys(STATUS_TONE) as RequestStatus[]).map((s) => (
             <option key={s} value={s}>
-              {STATUS_TONE[s].label}
+              {t(STATUS_TONE[s].labelKey)}
             </option>
           ))}
         </select>
@@ -207,24 +216,26 @@ export function RequestLogsPage() {
           className="mono"
           style={{ marginLeft: "auto", fontSize: 12, color: "var(--ink-3)" }}
         >
-          {total > 0 ? `${total} 条 · 第 ${page} 页 / 共 ${totalPages} 页` : "0 条"}
+          {total > 0
+            ? t("requestLogs.summaryFormat", { total, page, pages: totalPages })
+            : t("requestLogs.summaryEmpty")}
         </span>
       </div>
 
-      {query.isLoading && <div className="field-hint">加载中…</div>}
+      {query.isLoading && <div className="field-hint">{t("common.loading")}</div>}
 
       {query.data && total === 0 && (
         <EmptyState
           icon={ScrollText}
           message={
             hasActiveFilter
-              ? "当前筛选下无记录。"
-              : "暂无请求日志。让 Claude Code 通过代理跑一次对话即可看到记录。"
+              ? t("requestLogs.empty.filtered")
+              : t("requestLogs.empty.none")
           }
           action={
             hasActiveFilter ? (
               <button className="btn sm" onClick={clearFilters} type="button">
-                清除筛选
+                {t("requestLogs.clearFilter")}
               </button>
             ) : undefined
           }
@@ -236,15 +247,15 @@ export function RequestLogsPage() {
           <table className="table">
             <thead>
               <tr>
-                <th style={{ width: 150 }}>时间</th>
-                <th style={{ width: 110 }}>状态</th>
-                <th style={{ width: 130 }}>虚拟模型</th>
-                <th style={{ width: 200 }}>真实模型</th>
-                <th>响应模型</th>
-                <th style={{ width: 140 }}>厂商</th>
-                <th style={{ width: 70, textAlign: "right" }}>输入</th>
-                <th style={{ width: 70, textAlign: "right" }}>输出</th>
-                <th style={{ width: 90, textAlign: "right" }}>延迟</th>
+                <th style={{ width: 150 }}>{t("requestLogs.col.time")}</th>
+                <th style={{ width: 110 }}>{t("requestLogs.col.status")}</th>
+                <th style={{ width: 130 }}>{t("requestLogs.col.virtualModel")}</th>
+                <th style={{ width: 200 }}>{t("requestLogs.col.realModel")}</th>
+                <th>{t("requestLogs.col.responseModel")}</th>
+                <th style={{ width: 140 }}>{t("requestLogs.col.provider")}</th>
+                <th style={{ width: 70, textAlign: "right" }}>{t("requestLogs.col.tokensIn")}</th>
+                <th style={{ width: 70, textAlign: "right" }}>{t("requestLogs.col.tokensOut")}</th>
+                <th style={{ width: 90, textAlign: "right" }}>{t("requestLogs.col.latency")}</th>
               </tr>
             </thead>
             <tbody>
@@ -259,10 +270,10 @@ export function RequestLogsPage() {
                       <div style={{ display: "inline-flex", alignItems: "center", gap: 4 }}>
                         <span className={`pill ${status.tone}`}>
                           <span className="dot" />
-                          {status.label}
+                          {t(status.labelKey)}
                         </span>
                         {row.is_streaming && (
-                          <span className="pill tag mono" title="SSE 流式">
+                          <span className="pill tag mono" title={t("requestLogs.sse")}>
                             SSE
                           </span>
                         )}
@@ -313,7 +324,7 @@ export function RequestLogsPage() {
               type="button"
               style={{ marginRight: "auto" }}
             >
-              清除筛选
+              {t("requestLogs.clearFilter")}
             </button>
           )}
           <button
@@ -322,7 +333,7 @@ export function RequestLogsPage() {
             onClick={() => setPage((p) => Math.max(1, p - 1))}
             type="button"
           >
-            上一页
+            {t("requestLogs.prevPage")}
           </button>
           <button
             className="btn sm"
@@ -330,7 +341,7 @@ export function RequestLogsPage() {
             onClick={() => setPage((p) => p + 1)}
             type="button"
           >
-            下一页
+            {t("requestLogs.nextPage")}
           </button>
         </div>
       )}
