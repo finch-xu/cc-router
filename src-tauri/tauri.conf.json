@@ -58,6 +58,7 @@
       "providers/tencent.yaml",
       "providers/aiberm.yaml",
       "providers/whatai.yaml",
+      "providers/ollama.yaml",
       "migrations/001_init.sql",
       "../LICENSE"
     ],

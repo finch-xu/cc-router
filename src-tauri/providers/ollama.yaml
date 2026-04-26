@@ -1,0 +1,43 @@
+id: ollama
+display_name: "Ollama"
+icon: ollama
+description: "Ollama 本地推理服务（Anthropic 兼容端点）"
+homepage: "https://ollama.com"
+docs_url: "https://docs.ollama.com/api/anthropic-compatibility"
+api_key_url: "https://ollama.com/settings/keys"
+
+compatibility: untested
+compatibility_notes: |
+  1. Ollama 仅监听 localhost:11434, 没有公网端点; 云端模型 (如 glm-4.7:cloud)
+     也是通过本地 Ollama 客户端转发, 使用前必须本机已安装 Ollama 并 pull/login
+     对应模型.
+  2. Token默认填写"ollama".
+  3. Ollama 未提供 Anthropic 风格的 /v1/models 列表接口, 需手动输入模型 tag
+     (如 "qwen3-coder", "glm-4.7:cloud"). 本地模型用 `ollama list` 查看.
+
+endpoints:
+  - id: localhost
+    label: "本地 · 默认端口"
+    description: "本机已运行 Ollama (默认 11434 端口)"
+    base_url: "http://localhost:11434"
+    messages_path: "/v1/messages"
+    region: local
+    billing: free
+
+default_endpoint: localhost
+
+auth:
+  type: api_key
+  header_name: "x-api-key"
+  header_format: raw
+
+required_headers:
+  anthropic-version: "2023-06-01"
+
+forward_headers: []
+
+model_discovery:
+  enabled: false
+  path: "/v1/models"
+  cache_ttl_hours: 24
+  example_models: []
