@@ -18,6 +18,10 @@
   <strong>中文</strong> · <a href="README.en.md">English</a>
 </p>
 
+<p align="center">
+  <a href="https://finch-xu.github.io/docs/zh/cc-router/getting-started/">📖 中文文档</a>
+</p>
+
 订阅买多了 Claude Code 却只能用一家？cc-router 把 DeepSeek、Qwen、Kimi、MiMo、MiniMax、GLM、Claude 的 Token Plan、Coding Plan、API 额度合并成一个虚拟 Plan，任意搭配 opus / sonnet / haiku 三槽位，按顺序或轮询调度，限流、失败自动切换——把每一份额度榨到最后一个 token。
 
 <p align="center">
