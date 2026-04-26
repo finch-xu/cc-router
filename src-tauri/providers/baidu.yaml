@@ -1,0 +1,41 @@
+id: baidu
+display_name: "百度千帆"
+icon: baidu
+description: "百度智能云千帆 Coding Plan 订阅, Anthropic 兼容端点"
+homepage: "https://qianfan.cloud.baidu.com"
+docs_url: "https://cloud.baidu.com/doc/qianfan/s/0mn2mnemj"
+api_key_url: "https://console.bce.baidu.com/iam/#/iam/apikey/list"
+
+compatibility: untested
+compatibility_notes: |
+  千帆未提供公开的 /v1/models 接口, 模型需手动填写。
+  Coding Plan 推荐使用 qianfan-code-latest 作为统一模型, 由平台路由到底层文心系/混合模型。
+
+endpoints:
+  - id: coding_plan
+    label: "国内版 · Coding Plan"
+    description: "百度智能云千帆 Coding Plan, 订阅制, 适配 Claude Code"
+    base_url: "https://qianfan.baidubce.com/anthropic/coding"
+    messages_path: "/v1/messages"
+    region: china
+    billing: subscription
+
+default_endpoint: coding_plan
+
+auth:
+  type: api_key
+  header_name: "Authorization"
+  header_format: bearer
+
+required_headers:
+  anthropic-version: "2023-06-01"
+
+forward_headers: []
+
+model_discovery:
+  # 千帆未提供 Anthropic 兼容的模型列表接口, 只能手动输入
+  enabled: false
+  path: "/v1/models"
+  cache_ttl_hours: 24
+  example_models:
+    - "qianfan-code-latest"

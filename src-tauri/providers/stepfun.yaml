@@ -1,0 +1,51 @@
+id: stepfun
+display_name: "阶跃星辰 Stepfun"
+icon: stepfun
+description: "阶跃星辰官方 Anthropic 兼容端点（Step Plan 订阅 + 按量付费 API）"
+homepage: "https://www.stepfun.com"
+docs_url: "https://platform.stepfun.com/docs/zh/api-reference/chat/messages-create"
+api_key_url: "https://platform.stepfun.com/interface-key"
+
+compatibility: untested
+
+endpoints:
+  - id: step_plan
+    label: "Step Plan · 订阅套餐"
+    description: "阶跃星辰订阅套餐, 推荐配合 step-3.5-flash 系列"
+    base_url: "https://api.stepfun.com/step_plan"
+    messages_path: "/v1/messages"
+    region: china
+    billing: subscription
+
+  - id: api_endpoint
+    label: "按量付费 API"
+    description: "阶跃星辰官方按量付费 Anthropic 兼容端点"
+    base_url: "https://api.stepfun.com"
+    messages_path: "/v1/messages"
+    region: china
+    billing: pay_as_you_go
+
+default_endpoint: step_plan
+
+auth:
+  type: api_key
+  header_name: "Authorization"
+  header_format: bearer
+
+required_headers:
+  anthropic-version: "2023-06-01"
+
+forward_headers: []
+
+model_discovery:
+  enabled: true
+  # /models 在按量主域下, Step Plan 订阅域 (/step_plan) 没有独立的 /models
+  # 参考: https://platform.stepfun.com/docs/zh/api-reference/models/list
+  url: "https://api.stepfun.com/v1/models"
+  path: "/v1/models"
+  cache_ttl_hours: 24
+  example_models:
+    - "step-3.5-flash"
+    - "step-3.5-flash-2603"
+    - "step-2-16k"
+    - "step-1-32k"

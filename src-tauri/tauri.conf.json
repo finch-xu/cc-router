@@ -60,6 +60,8 @@
       "providers/whatai.yaml",
       "providers/ollama.yaml",
       "providers/fireworks.yaml",
+      "providers/stepfun.yaml",
+      "providers/baidu.yaml",
       "migrations/001_init.sql",
       "../LICENSE"
     ],
