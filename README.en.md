@@ -97,7 +97,7 @@ Managed as `src-tauri/providers/*.yaml`, validated against a JSON Schema at star
 | `anthropic` | Anthropic official API (pay-as-you-go only, no Max Plan) | ❌ | ✅ | verified |
 | `zhipu` | Zhipu GLM | ✅ | ✅ | verified |
 | `deepseek` | DeepSeek | ❌ | ✅ | verified |
-| `moonshot` | Moonshot Kimi | ❌ | ✅ | verified |
+| `moonshot` | Moonshot Kimi | ✅ | ✅ | untested |
 | `minimax` | MiniMax (3 endpoints) | ✅ | ✅ | partial |
 | `xiaomi` | Xiaomi MiMo (pay-as-you-go + 3-cluster plans) | ✅ | ✅ | untested |
 | `alibaba` | Alibaba Cloud Bailian (team Token Plan + 2-region pay-as-you-go + discontinued Coding Plan) | ✅ | ✅ | verified |

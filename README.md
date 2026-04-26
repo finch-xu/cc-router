@@ -37,7 +37,7 @@
 | `anthropic` | Anthropic 官方 API（仅按量付费，不含 Max Plan） | ❌ | ✅ | verified |
 | `zhipu` | 智谱 GLM | ✅ | ✅ | verified |
 | `deepseek` | DeepSeek | ❌ | ✅ | verified |
-| `moonshot` | Moonshot Kimi | ❌ | ✅ | verified |
+| `moonshot` | Moonshot Kimi | ✅ | ✅ | untested |
 | `minimax` | MiniMax（3 个 endpoint） | ✅ | ✅ | partial |
 | `xiaomi` | 小米 MiMo（按量付费 + 3 集群订阅） | ✅ | ✅ | untested |
 | `alibaba` | 阿里云百炼（Token Plan 团队版 + 按量付费 2 地域 + 停售的 Coding Plan） | ✅ | ✅ | verified |

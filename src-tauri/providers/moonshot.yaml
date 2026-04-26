@@ -1,3 +1,6 @@
+# moonshot kimi
+# coding plan 文档 https://www.kimi.com/code/docs/en/#api-key-third-party-tools-self-built-apps
+
 id: moonshot
 display_name: "Moonshot Kimi"
 icon: moonshot
@@ -9,6 +12,14 @@ api_key_url: "https://platform.moonshot.cn/console/api-keys"
 compatibility: untested
 
 endpoints:
+  - id: cn_endpoint_subscription
+    label: "国内版 · Coding Plan 订阅"
+    description: "Moonshot kimi Coding Plan 订阅"
+    base_url: "https://api.kimi.com/coding"
+    messages_path: "/v1/messages"
+    region: china
+    billing: subscription
+  
   - id: cn_endpoint
     label: "国内版 · 按量付费 API"
     description: "Moonshot 国内 Anthropic 兼容端点"
