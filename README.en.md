@@ -72,29 +72,40 @@ First launch opens the onboarding flow:
 2. Bind the subscription to all three virtual models in one click.
 3. Copy the generated env snippet into your `~/.claude/settings.json`.
 
+## Adding a new provider
+
+If you use **Claude Code**, this repo ships a `SKILL` named `new-provider`. Run it with the official docs URL or endpoint info of the target provider, and it will scaffold the YAML and wire up the related changes for you.
+
 ## Build
 
 ```bash
-# Tauri build needs a full icon size set — generate it from one source PNG first
-pnpm tauri icon src-tauri/icons/icon.png
 pnpm tauri build
 ```
 
 Artifacts land in `src-tauri/target/release/bundle/` under per-platform subfolders.
 
-## Built-in Providers
+## Supported Coding Plans and APIs
 
 Managed as `src-tauri/providers/*.yaml`, validated against a JSON Schema at startup:
 
-| id | Name | Status |
-|---|---|---|
-| `anthropic` | Anthropic official API (pay-as-you-go only, no Max Plan) | verified |
-| `zhipu` | Zhipu GLM | verified |
-| `deepseek` | DeepSeek | verified |
-| `moonshot` | Moonshot Kimi | verified |
-| `minimax` | MiniMax (3 endpoints) | partial |
-| `xiaomi` | Xiaomi MiMo (pay-as-you-go + 3-cluster plans) | untested |
-| `alibaba` | Alibaba Cloud Bailian (team Token Plan + 2-region pay-as-you-go + discontinued Coding Plan) | verified |
+| id | Name | Token Plan | API | Status |
+|---|---|---|---|---|
+| `anthropic` | Anthropic official API (pay-as-you-go only, no Max Plan) | ❌ | ✅ | verified |
+| `zhipu` | Zhipu GLM | ✅ | ✅ | verified |
+| `deepseek` | DeepSeek | ❌ | ✅ | verified |
+| `moonshot` | Moonshot Kimi | ❌ | ✅ | verified |
+| `minimax` | MiniMax (3 endpoints) | ✅ | ✅ | partial |
+| `xiaomi` | Xiaomi MiMo (pay-as-you-go + 3-cluster plans) | ✅ | ✅ | untested |
+| `alibaba` | Alibaba Cloud Bailian (team Token Plan + 2-region pay-as-you-go + discontinued Coding Plan) | ✅ | ✅ | verified |
+| `volcengine` | Volcengine Ark (Coding Plan subscription + pay-as-you-go) | ✅ | ✅ | untested |
+| `openrouter` | OpenRouter aggregator (500+ models routed) | ❌ | ✅ | untested |
+| `tencent` | Tencent Cloud LLM (Token Plan subscription + TokenHub pay-as-you-go, mainland / overseas) | ✅ | ✅ | untested |
+| `aiberm` | Aiberm (pay-as-you-go API, models returned dynamically by token group) | ❌ | ✅ | untested |
+| `whatai` | Shenma relay API (pay-as-you-go, OpenAI/Anthropic dual-protocol relay, Anthropic path only) | ❌ | ✅ | untested |
+| `ollama` | Ollama local inference (localhost:11434 only, includes cloud tags like `glm-4.7:cloud`) | ❌ | ✅ | partial |
+| `fireworks` | Fireworks AI (pay-as-you-go, covers DeepSeek / Qwen / Llama / Kimi and other open-source models) | ❌ | ✅ | verified |
+
+> The "Token Plan" column covers any subscription-style quota (Token Plan / Coding Plan, etc.); "API" denotes pay-as-you-go Anthropic Messages-compatible endpoints.
 
 Community PRs welcome.
 
