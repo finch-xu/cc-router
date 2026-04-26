@@ -52,5 +52,9 @@ src-tauri/Cargo.lock
 
 
 CLAUDE.md
-.claude/
+
+# Claude Code: 默认屏蔽 .claude/ 下所有自动生成文件 (transcripts/cache/local
+# settings 含敏感数据), 仅白名单仓库专属 skills (跟着 git track 让贡献者共享)
+.claude/*
+!.claude/skills/
 
