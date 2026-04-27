@@ -91,6 +91,7 @@ export function SubscriptionEditPage() {
   const [newKey, setNewKey] = useState("");
   const [deleteDialog, setDeleteDialog] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
+  const [supportsThinking, setSupportsThinking] = useState<boolean>(false);
 
   useEffect(() => {
     if (subQuery.data) {
@@ -102,6 +103,7 @@ export function SubscriptionEditPage() {
       setAuthHeaderName(subQuery.data.auth_header_name);
       setAuthHeaderFormat(subQuery.data.auth_header_format);
       setProviderDisplayName(subQuery.data.provider_display_name);
+      setSupportsThinking(subQuery.data.supports_thinking_blocks);
       if (subQuery.data.model_cache) {
         setModels(subQuery.data.model_cache.models);
       }
@@ -135,6 +137,7 @@ export function SubscriptionEditPage() {
     const patch: SubscriptionPatch = {
       display_name: displayName,
       model_slots: slots,
+      supports_thinking_blocks: supportsThinking,
     };
     if (sub.is_user_defined) {
       const connErrKey = validateConnection({ base_url: baseUrl, messages_path: messagesPath });
@@ -368,6 +371,28 @@ export function SubscriptionEditPage() {
               {t("subscriptionEdit.modelCacheUpdated")}{new Date(sub.model_cache.fetched_at).toLocaleString()}
             </div>
           )}
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader>
+          <CardTitle>{t("subscriptionEdit.advancedTitle")}</CardTitle>
+        </CardHeader>
+        <CardContent>
+          <div className="flex items-start justify-between gap-4">
+            <div className="space-y-1">
+              <Label className="text-sm">
+                {t("subscriptionEdit.supportsThinkingBlocks")}
+              </Label>
+              <div className="text-xs text-muted-foreground max-w-xl">
+                {t("subscriptionEdit.supportsThinkingBlocksDesc")}
+              </div>
+            </div>
+            <Switch
+              checked={supportsThinking}
+              onCheckedChange={setSupportsThinking}
+            />
+          </div>
         </CardContent>
       </Card>
 

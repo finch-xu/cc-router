@@ -95,6 +95,16 @@ impl ProviderEndpoint {
     }
 }
 
+/// Provider 能力声明 (在 yaml 顶层 `capabilities` 字段)。
+/// 创建订阅时把对应字段拷贝到 `SubscriptionRow`,后续可被 UI 覆盖。
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct ProviderCapabilities {
+    /// 上游是否支持 Anthropic extended thinking 块 (顶层 thinking 字段 + content[].type=thinking)。
+    /// 关闭时 pipeline 会在转发前剥离 thinking 字段和 thinking 块,避免不兼容 provider 返回 400。
+    #[serde(default)]
+    pub supports_thinking_blocks: bool,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct ModelDiscovery {
     #[serde(default = "default_true")]
@@ -153,6 +163,9 @@ pub struct Provider {
 
     #[serde(default)]
     pub model_discovery: ModelDiscovery,
+
+    #[serde(default)]
+    pub capabilities: ProviderCapabilities,
 }
 
 impl Provider {

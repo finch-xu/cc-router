@@ -65,6 +65,7 @@
       "providers/modelscope.yaml",
       "providers/ucloud.yaml",
       "migrations/001_init.sql",
+      "migrations/002_add_supports_thinking_blocks.sql",
       "../LICENSE"
     ],
     "category": "DeveloperTool",

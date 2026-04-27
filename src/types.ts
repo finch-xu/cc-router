@@ -106,6 +106,11 @@ export interface SubscriptionDto {
   provider_display_name: string;
   provider_icon: string;
   is_user_defined: boolean;
+  /**
+   * 上游是否支持 Anthropic extended thinking 块。
+   * 创建订阅时从 provider yaml 拷贝默认值,关闭后 pipeline 转发前会剥离请求体里的 thinking 字段和块。
+   */
+  supports_thinking_blocks: boolean;
 }
 
 /** 创建订阅时的 source: 内置 yaml 模板 vs 用户自定义 */
@@ -147,6 +152,8 @@ export interface SubscriptionPatch {
   endpoint_id?: string;
   /** 自定义订阅: 改连接信息 */
   connection?: ConnectionPatch;
+  /** 覆盖 provider 默认的 thinking 块支持开关 */
+  supports_thinking_blocks?: boolean;
 }
 
 export interface TestConnectionResult {

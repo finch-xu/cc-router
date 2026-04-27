@@ -120,6 +120,7 @@ pub async fn dispatch(
             auth_header_value,
             required_headers,
             forward_headers,
+            supports_thinking,
         ) = {
             let guard = rt.read().await;
             // fallback 透传原始 model; 其他三个按 slot 映射
@@ -139,6 +140,7 @@ pub async fn dispatch(
                 guard.row.auth_header_value(),
                 guard.row.required_headers.clone(),
                 guard.row.forward_headers.clone(),
+                guard.row.supports_thinking_blocks,
             )
         };
 
@@ -146,6 +148,11 @@ pub async fn dispatch(
         // fallback 不改写 model 字段（原始 model 即 real_model, body 里已经有）
         if !is_fallback {
             upstream_body["model"] = Value::String(real_model.clone());
+        }
+        // 不支持 extended thinking 的订阅: 剥离顶层 thinking 字段 + messages 历史中的 thinking 块,
+        // 避免上游因「messages 含 thinking 块但 thinking 模式未启用 / 不支持」返回 400。
+        if !supports_thinking {
+            strip_thinking(&mut upstream_body);
         }
         let serialized_body = serde_json::to_vec(&upstream_body)?;
 
@@ -401,4 +408,115 @@ fn build_error_status(status: reqwest::StatusCode) -> Response {
         )),
     )
         .into_response()
+}
+
+/// 剥离请求体里与 Anthropic extended thinking 协议相关的部分:
+///
+/// 1. 顶层 `thinking` 字段 (启用开关 `{type: "enabled", budget_tokens: ...}`)
+/// 2. `messages[].content[]` 数组中 `type == "thinking"` 或 `type == "redacted_thinking"` 的块
+///
+/// 触发条件: 订阅的 `supports_thinking_blocks` 为 false。
+///
+/// 背景: Claude Code 在收到上游返回的 thinking 块后,会把它存进 assistant 历史,下一轮请求会
+/// 推回到 messages 数组。如果这一轮路由到不支持 extended thinking 的 provider, 上游会以
+/// 「thinking 块存在但 thinking 模式未启用」为由返回 400。剥离干净避免这个循环。
+fn strip_thinking(body: &mut Value) {
+    if let Some(obj) = body.as_object_mut() {
+        obj.remove("thinking");
+    }
+    let Some(messages) = body.get_mut("messages").and_then(|v| v.as_array_mut()) else {
+        return;
+    };
+    for msg in messages {
+        let Some(content) = msg.get_mut("content") else {
+            continue;
+        };
+        let Some(arr) = content.as_array_mut() else {
+            continue; // 字符串形式的 content 不动
+        };
+        arr.retain(|block| {
+            !matches!(
+                block.get("type").and_then(|t| t.as_str()),
+                Some("thinking") | Some("redacted_thinking")
+            )
+        });
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::strip_thinking;
+    use serde_json::json;
+
+    #[test]
+    fn removes_top_level_thinking_field() {
+        let mut body = json!({
+            "model": "claude-opus-4-7",
+            "thinking": { "type": "enabled", "budget_tokens": 1024 },
+            "messages": []
+        });
+        strip_thinking(&mut body);
+        assert!(body.get("thinking").is_none());
+        assert!(body.get("model").is_some());
+    }
+
+    #[test]
+    fn removes_thinking_blocks_in_assistant_messages() {
+        let mut body = json!({
+            "messages": [
+                { "role": "user", "content": [{ "type": "text", "text": "hi" }] },
+                {
+                    "role": "assistant",
+                    "content": [
+                        { "type": "thinking", "thinking": "let me think...", "signature": "abc" },
+                        { "type": "text", "text": "hello" },
+                        { "type": "redacted_thinking", "data": "encrypted" }
+                    ]
+                }
+            ]
+        });
+        strip_thinking(&mut body);
+        let assistant_content = body["messages"][1]["content"].as_array().unwrap();
+        assert_eq!(assistant_content.len(), 1);
+        assert_eq!(assistant_content[0]["type"], "text");
+    }
+
+    #[test]
+    fn preserves_text_and_tool_blocks() {
+        let mut body = json!({
+            "messages": [{
+                "role": "assistant",
+                "content": [
+                    { "type": "text", "text": "answer" },
+                    { "type": "tool_use", "id": "x", "name": "calc", "input": {} }
+                ]
+            }]
+        });
+        strip_thinking(&mut body);
+        let content = body["messages"][0]["content"].as_array().unwrap();
+        assert_eq!(content.len(), 2);
+    }
+
+    #[test]
+    fn does_not_break_string_content() {
+        // 用户消息常用字符串形式的 content
+        let mut body = json!({
+            "messages": [
+                { "role": "user", "content": "hello" }
+            ]
+        });
+        strip_thinking(&mut body);
+        assert_eq!(body["messages"][0]["content"], "hello");
+    }
+
+    #[test]
+    fn empty_or_missing_messages_is_safe() {
+        let mut body = json!({ "model": "x" });
+        strip_thinking(&mut body);
+        assert!(body.get("messages").is_none());
+
+        let mut body2 = json!({ "messages": [] });
+        strip_thinking(&mut body2);
+        assert_eq!(body2["messages"].as_array().unwrap().len(), 0);
+    }
 }

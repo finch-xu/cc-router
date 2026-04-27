@@ -61,6 +61,16 @@
           "items": { "type": "string" }
         }
       }
+    },
+    "capabilities": {
+      "type": "object",
+      "additionalProperties": true,
+      "properties": {
+        "supports_thinking_blocks": {
+          "type": "boolean",
+          "description": "上游是否支持 Anthropic extended thinking 块。订阅创建时拷贝此默认值,可在 UI 上覆盖。"
+        }
+      }
     }
   }
 }

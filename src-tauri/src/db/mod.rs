@@ -9,7 +9,15 @@ use tracing::info;
 
 use crate::error::AppResult;
 
-const INLINE_MIGRATION: &str = include_str!("../../migrations/001_init.sql");
+/// 按版本号顺序的 migration 表。新增 schema 变更时,在末尾追加 (next_version, include_str!(...))。
+/// 启动时按版本号顺序应用未跑过的 migration; 已跑过的 (在 `_schema_version` 表里) 跳过。
+const MIGRATIONS: &[(u32, &str)] = &[
+    (1, include_str!("../../migrations/001_init.sql")),
+    (
+        2,
+        include_str!("../../migrations/002_add_supports_thinking_blocks.sql"),
+    ),
+];
 
 pub async fn init_pool(db_path: &Path) -> AppResult<SqlitePool> {
     if let Some(parent) = db_path.parent() {
@@ -32,49 +40,66 @@ pub async fn init_pool(db_path: &Path) -> AppResult<SqlitePool> {
     Ok(pool)
 }
 
-/// 执行内嵌 migration。启动时检查 `subscriptions` 表是否存在，没有则执行完整 migration。
-/// 末尾跑一次幂等的逐列升级,给老 DB 补丁(过渡方案,真正的 schema_version 框架待将来引入)。
+/// 应用 schema migrations。
+///
+/// 流程:
+/// 1. 确保 `_schema_version` 表存在 (始终幂等)
+/// 2. 检测老 DB (subscriptions 已存在但 `_schema_version` 为空) → 标定为 v=1 baseline
+/// 3. 读取当前版本号
+/// 4. 按顺序应用版本号 > 当前版本的 migration, 每跑完一项写一行版本记录
+/// 5. seed 默认数据 (始终幂等)
 pub async fn run_migrations(pool: &SqlitePool, _resource_dir: &Path) -> AppResult<()> {
-    let existing: (i64,) = sqlx::query_as(
+    sqlx::query(
+        "CREATE TABLE IF NOT EXISTS _schema_version (
+            version INTEGER PRIMARY KEY,
+            applied_at INTEGER NOT NULL
+        )",
+    )
+    .execute(pool)
+    .await?;
+
+    let has_subscriptions: (i64,) = sqlx::query_as(
         "SELECT count(*) FROM sqlite_master WHERE type='table' AND name='subscriptions'",
     )
     .fetch_one(pool)
     .await?;
+    let already_versioned: (i64,) = sqlx::query_as("SELECT count(*) FROM _schema_version")
+        .fetch_one(pool)
+        .await?;
 
-    if existing.0 == 0 {
-        info!("running initial migration");
-        for stmt in split_sql_statements(INLINE_MIGRATION) {
+    if has_subscriptions.0 > 0 && already_versioned.0 == 0 {
+        // 老 DB (1.2.0 及之前): subscriptions 已建好但还没有版本号表。
+        // 标定为 v=1, 后面会从 v=2 开始应用增量 migration。
+        info!("legacy v1 schema detected, baselining at v=1");
+        sqlx::query("INSERT OR IGNORE INTO _schema_version (version, applied_at) VALUES (?, ?)")
+            .bind(1_i64)
+            .bind(chrono::Utc::now().timestamp_millis())
+            .execute(pool)
+            .await?;
+    }
+
+    let current: (Option<i64>,) = sqlx::query_as("SELECT MAX(version) FROM _schema_version")
+        .fetch_one(pool)
+        .await?;
+    let current_version = current.0.unwrap_or(0) as u32;
+
+    for (v, sql) in MIGRATIONS {
+        if *v <= current_version {
+            continue;
+        }
+        info!(version = v, "applying migration");
+        for stmt in split_sql_statements(sql) {
             sqlx::query(&stmt).execute(pool).await?;
         }
-        seed_virtual_model_config(pool).await?;
-        seed_onboarding(pool).await?;
-        info!("migration completed");
+        sqlx::query("INSERT OR IGNORE INTO _schema_version (version, applied_at) VALUES (?, ?)")
+            .bind(*v as i64)
+            .bind(chrono::Utc::now().timestamp_millis())
+            .execute(pool)
+            .await?;
     }
 
-    ensure_column(pool, "requests", "response_model_name", "TEXT").await?;
-    Ok(())
-}
-
-/// 幂等 ALTER TABLE ADD COLUMN。
-/// **callers 必须传静态字面量** —— 三个参数被字符串拼接进 SQL,不走 bind。
-async fn ensure_column(
-    pool: &SqlitePool,
-    table: &str,
-    column: &str,
-    sql_type: &str,
-) -> AppResult<()> {
-    let info_sql = format!("PRAGMA table_info({})", table);
-    let rows = sqlx::query(&info_sql).fetch_all(pool).await?;
-    use sqlx::Row;
-    let exists = rows
-        .iter()
-        .any(|r| r.try_get::<String, _>("name").map(|n| n == column).unwrap_or(false));
-    if exists {
-        return Ok(());
-    }
-    info!(table, column, "adding missing column");
-    let alter_sql = format!("ALTER TABLE {} ADD COLUMN {} {}", table, column, sql_type);
-    sqlx::query(&alter_sql).execute(pool).await?;
+    seed_virtual_model_config(pool).await?;
+    seed_onboarding(pool).await?;
     Ok(())
 }
 
@@ -151,7 +176,9 @@ fn split_sql_statements(sql: &str) -> Vec<String> {
 
 #[cfg(test)]
 mod tests {
-    use super::split_sql_statements;
+    use super::*;
+    use sqlx::Row;
+    use sqlx::sqlite::SqlitePoolOptions;
 
     #[test]
     fn splits_basic_statements() {
@@ -177,6 +204,73 @@ mod tests {
     fn ignores_semicolon_in_string() {
         let s = "INSERT INTO t VALUES ('a;b'); INSERT INTO t VALUES ('c');";
         assert_eq!(split_sql_statements(s).len(), 2);
+    }
+
+    async fn in_memory_pool() -> SqlitePool {
+        SqlitePoolOptions::new()
+            .max_connections(1)
+            .connect("sqlite::memory:")
+            .await
+            .expect("open in-memory db")
+    }
+
+    async fn applied_versions(pool: &SqlitePool) -> Vec<i64> {
+        let rows = sqlx::query("SELECT version FROM _schema_version ORDER BY version")
+            .fetch_all(pool)
+            .await
+            .expect("select versions");
+        rows.iter()
+            .map(|r| r.try_get::<i64, _>("version").unwrap())
+            .collect()
+    }
+
+    async fn has_column(pool: &SqlitePool, table: &str, column: &str) -> bool {
+        let rows = sqlx::query(&format!("PRAGMA table_info({})", table))
+            .fetch_all(pool)
+            .await
+            .unwrap();
+        rows.iter()
+            .any(|r| r.try_get::<String, _>("name").map(|n| n == column).unwrap_or(false))
+    }
+
+    #[tokio::test]
+    async fn fresh_db_applies_all_migrations() {
+        let pool = in_memory_pool().await;
+        let dir = std::path::PathBuf::from(".");
+        run_migrations(&pool, &dir).await.expect("migrate fresh");
+
+        let versions = applied_versions(&pool).await;
+        assert_eq!(versions, vec![1, 2]);
+        assert!(has_column(&pool, "subscriptions", "supports_thinking_blocks").await);
+    }
+
+    #[tokio::test]
+    async fn legacy_v1_db_baselines_then_applies_v2() {
+        let pool = in_memory_pool().await;
+        // 模拟 v1 老 DB: 只跑 001, 不写 _schema_version
+        for stmt in split_sql_statements(MIGRATIONS[0].1) {
+            sqlx::query(&stmt).execute(&pool).await.unwrap();
+        }
+        // 此时 subscriptions 存在, _schema_version 不存在
+
+        let dir = std::path::PathBuf::from(".");
+        run_migrations(&pool, &dir).await.expect("migrate legacy");
+
+        let versions = applied_versions(&pool).await;
+        assert_eq!(versions, vec![1, 2]); // baseline 写 v=1, 然后跑 v=2
+        assert!(has_column(&pool, "subscriptions", "supports_thinking_blocks").await);
+    }
+
+    #[tokio::test]
+    async fn rerunning_migrations_is_idempotent() {
+        let pool = in_memory_pool().await;
+        let dir = std::path::PathBuf::from(".");
+        run_migrations(&pool, &dir).await.expect("first run");
+        run_migrations(&pool, &dir).await.expect("second run");
+        run_migrations(&pool, &dir).await.expect("third run");
+
+        let versions = applied_versions(&pool).await;
+        assert_eq!(versions, vec![1, 2]); // 没有重复写
     }
 }
 

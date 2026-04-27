@@ -304,6 +304,31 @@ mod tests {
     }
 
     #[test]
+    fn http_400_does_not_cool_down() {
+        // 即便 retry.rs 把 400 改为可重试,state_machine 应保留「不冷却」语义
+        // 避免客户端 bug 把所有订阅冷却。
+        let mut rt = runtime();
+        let (t, _, _) = transition(&mut rt, &Event::HttpStatus(400));
+        assert!(!t.state_changed);
+        assert_eq!(rt.state, SubscriptionState::Healthy);
+        assert!(rt.cooldown_until.is_none());
+        assert_eq!(rt.consecutive_errors, 0);
+    }
+
+    #[test]
+    fn other_4xx_does_not_cool_down() {
+        // 404/422 等同 400 的语义: 跳下家但不冷却
+        let mut rt = runtime();
+        for status in [404, 422, 410, 408] {
+            let (t, _, _) = transition(&mut rt, &Event::HttpStatus(status));
+            assert!(!t.state_changed, "status {} should not change state", status);
+            assert_eq!(rt.state, SubscriptionState::Healthy);
+            assert!(rt.cooldown_until.is_none());
+        }
+        assert_eq!(rt.consecutive_errors, 0);
+    }
+
+    #[test]
     fn transient_error_after_three_fives() {
         let mut rt = runtime();
         for _ in 0..2 {
