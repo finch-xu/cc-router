@@ -134,6 +134,7 @@ function VirtualModelCard({
         subscriptionIds={vm.subscription_ids}
         subscriptions={subsMap}
         slot={slot}
+        vmName={vm.name}
         onChange={onReorder}
         onRemove={onRemove}
       />

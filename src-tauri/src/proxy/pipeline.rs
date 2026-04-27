@@ -8,6 +8,7 @@ use axum::Json;
 use chrono::Utc;
 use reqwest::header::{HeaderMap as ReqHeaderMap, HeaderName as ReqHeaderName, HeaderValue as ReqHeaderValue};
 use serde_json::Value;
+use tauri::Emitter;
 use tracing::{info, warn};
 use uuid::Uuid;
 
@@ -22,6 +23,27 @@ use crate::state::AppState;
 use crate::subscription::state_machine;
 use crate::virtual_model::scheduler::build_candidate_order;
 use crate::virtual_model::VirtualModelName;
+
+fn emit_attempt_started(state: &AppState, sub_id: Uuid, vm_name: VirtualModelName) {
+    let _ = state.app_handle.emit(
+        "route_attempt_started",
+        serde_json::json!({
+            "subscription_id": sub_id.to_string(),
+            "virtual_model": vm_name.as_str(),
+        }),
+    );
+}
+
+fn emit_attempt_finished(state: &AppState, sub_id: Uuid, vm_name: VirtualModelName, success: bool) {
+    let _ = state.app_handle.emit(
+        "route_attempt_finished",
+        serde_json::json!({
+            "subscription_id": sub_id.to_string(),
+            "virtual_model": vm_name.as_str(),
+            "success": success,
+        }),
+    );
+}
 
 pub async fn dispatch(
     state: &AppState,
@@ -169,6 +191,8 @@ pub async fn dispatch(
             "forwarding to upstream"
         );
 
+        emit_attempt_started(state, sub_id, vm_name);
+
         let upstream_result = upstream::send(
             &state.http_client,
             &url,
@@ -184,6 +208,7 @@ pub async fn dispatch(
                 headers: resp_headers,
                 body: resp_body,
             }) => {
+                emit_attempt_finished(state, sub_id, vm_name, status.is_success());
                 let should_retry = classify_response(status.as_u16(), None);
                 // 状态机事件
                 let event = match should_retry {
@@ -250,6 +275,7 @@ pub async fn dispatch(
                 headers: resp_headers,
                 stream,
             }) => {
+                emit_attempt_finished(state, sub_id, vm_name, status.is_success());
                 // 流式：若非 2xx 按非流式错误处理
                 if !status.is_success() {
                     let event = state_machine::Event::HttpStatus(status.as_u16());
@@ -291,6 +317,7 @@ pub async fn dispatch(
                 return Ok(response);
             }
             Err(upstream::UpstreamError::Reqwest(e)) => {
+                emit_attempt_finished(state, sub_id, vm_name, false);
                 warn!(?e, "upstream network error");
                 let _ = state_machine::apply(
                     &state.db,

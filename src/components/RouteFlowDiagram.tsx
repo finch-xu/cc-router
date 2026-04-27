@@ -6,10 +6,11 @@ import { useProxyStatus } from "@/hooks/useSettings";
 import { useVirtualModels } from "@/hooks/useVirtualModels";
 import { useSubscriptions } from "@/hooks/useSubscriptions";
 import { useProviders } from "@/hooks/useProviders";
+import { useRouteFlashState } from "@/hooks/useRouteFlash";
 import { MODE_LABEL_KEY, VM_ORDER } from "@/lib/virtualModels";
 import { useT } from "@/i18n";
 import logoUrl from "@/assets/logo.png";
-import type { SubscriptionDto, VirtualModelDto } from "@/types";
+import type { SubscriptionDto, VirtualModelDto, VirtualModelName } from "@/types";
 
 export function RouteFlowDiagram() {
   const { t } = useT();
@@ -115,10 +116,12 @@ export function RouteFlowDiagram() {
                         const dotColor = i === 0 ? "var(--accent)" : "var(--ink-4)";
                         return (
                           <Fragment key={sid}>
-                            <span className="chain-chip">
-                              <span className="dot" style={{ background: dotColor }} />
-                              {sub?.display_name ?? "?"}
-                            </span>
+                            <ChainChip
+                              vmName={vm.name}
+                              subId={sid}
+                              displayName={sub?.display_name ?? "?"}
+                              dotColor={dotColor}
+                            />
                             {i < vm.subscription_ids.length - 1 && (
                               <span className="chain-arrow">
                                 {vm.mode === "round_robin" ? "↻" : "→"}
@@ -160,5 +163,26 @@ export function RouteFlowDiagram() {
         </div>
       </div>
     </div>
+  );
+}
+
+function ChainChip({
+  vmName,
+  subId,
+  displayName,
+  dotColor,
+}: {
+  vmName: VirtualModelName;
+  subId: string;
+  displayName: string;
+  dotColor: string;
+}) {
+  const flash = useRouteFlashState(vmName, subId);
+  const flashClass = flash ? ` route-flash-${flash.kind}` : "";
+  return (
+    <span key={flash?.token ?? 0} className={`chain-chip${flashClass}`}>
+      <span className="dot" style={{ background: dotColor }} />
+      {displayName}
+    </span>
   );
 }

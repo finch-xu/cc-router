@@ -581,6 +581,26 @@ input, select, textarea { font: inherit; color: inherit; }
   50% { box-shadow: 0 0 0 5px oklch(0.62 0.13 150 / 0); }
 }
 
+/* === 路由实时高亮 (proxy/pipeline.rs emit 的事件 → useRouteFlash) === */
+@keyframes routeFlashAttempt {
+  0%   { background: var(--accent-bg); }
+  100% { background: transparent; }
+}
+@keyframes routeFlashSuccess {
+  0%   { background: var(--ok-bg); }
+  100% { background: transparent; }
+}
+@keyframes routeFlashError {
+  0%   { background: var(--err-bg); }
+  100% { background: transparent; }
+}
+.chain-chip.route-flash-attempt,
+.endpoint.route-flash-attempt { animation: routeFlashAttempt 600ms ease-out; }
+.chain-chip.route-flash-success,
+.endpoint.route-flash-success { animation: routeFlashSuccess 600ms ease-out; }
+.chain-chip.route-flash-error,
+.endpoint.route-flash-error { animation: routeFlashError 600ms ease-out; }
+
 .route-row {
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto;

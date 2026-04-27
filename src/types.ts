@@ -249,3 +249,17 @@ export interface RequestLogFilters {
   provider_id?: string;
   status?: RequestStatus;
 }
+
+// 路由实时事件(对应 proxy/pipeline.rs 里 emit 的 payload)
+export interface RouteAttemptStartedEvent {
+  subscription_id: string;
+  virtual_model: VirtualModelName;
+}
+
+export interface RouteAttemptFinishedEvent {
+  subscription_id: string;
+  virtual_model: VirtualModelName;
+  success: boolean;
+}
+
+export type RouteFlashKind = "attempt" | "success" | "error";

@@ -16,14 +16,17 @@ import { CSS } from "@dnd-kit/utilities";
 import { GripVertical } from "lucide-react";
 import { ProviderLogo } from "@/components/ProviderLogo";
 import { stateTone } from "@/components/StatusBadge";
+import { useRouteFlashState } from "@/hooks/useRouteFlash";
 import { useT } from "@/i18n";
-import type { SubscriptionDto, SubscriptionSlot } from "@/types";
+import type { SubscriptionDto, SubscriptionSlot, VirtualModelName } from "@/types";
 
 interface Props {
   subscriptionIds: string[];
   subscriptions: Map<string, SubscriptionDto>;
   /** null 表示 fallback 模式: 订阅会原样透传请求 model,不走 slot 映射 */
   slot: SubscriptionSlot | null;
+  /** 用于关联实时路由事件: 同一订阅在不同 vm 槽位下独立闪烁 */
+  vmName: VirtualModelName;
   onChange: (ids: string[]) => void;
   onRemove: (id: string) => void;
 }
@@ -32,6 +35,7 @@ export function SortableSubscriptionList({
   subscriptionIds,
   subscriptions,
   slot,
+  vmName,
   onChange,
   onRemove,
 }: Props) {
@@ -64,6 +68,7 @@ export function SortableSubscriptionList({
             <SortableRow
               key={id}
               id={id}
+              vmName={vmName}
               priority={idx + 1}
               sub={sub}
               iconId={sub?.provider_icon}
@@ -79,6 +84,7 @@ export function SortableSubscriptionList({
 
 function SortableRow({
   id,
+  vmName,
   priority,
   sub,
   iconId,
@@ -86,6 +92,7 @@ function SortableRow({
   onRemove,
 }: {
   id: string;
+  vmName: VirtualModelName;
   priority: number;
   sub: SubscriptionDto | undefined;
   iconId: string | undefined;
@@ -94,6 +101,7 @@ function SortableRow({
 }) {
   const { t } = useT();
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id });
+  const flash = useRouteFlashState(vmName, id);
   const style = {
     transform: CSS.Transform.toString(transform),
     transition,
@@ -103,9 +111,10 @@ function SortableRow({
   const tone = sub ? stateTone(sub.state) : "neutral";
   const dotClass =
     tone === "ok" ? "" : tone === "err" ? " err" : tone === "warn" ? " warn" : " idle";
+  const flashClass = flash ? ` route-flash-${flash.kind}` : "";
 
   return (
-    <div ref={setNodeRef} style={style} className="endpoint">
+    <div ref={setNodeRef} style={style} className={`endpoint${flashClass}`}>
       <button className="grip" {...attributes} {...listeners} type="button" aria-label={t("sortableSub.dragHandle")}>
         <GripVertical size={14} strokeWidth={1.6} />
       </button>
