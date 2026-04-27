@@ -30,7 +30,15 @@ export function OnboardingGate({ children }: { children: ReactNode }) {
   );
 
   if (!data?.completed && !allowed) {
-    return <Navigate to="/subscriptions/new?onboarding=1" replace />;
+    const accepted =
+      typeof window !== "undefined" &&
+      window.localStorage.getItem("cc-router.disclaimer-accepted") === "1";
+    return (
+      <Navigate
+        to={accepted ? "/subscriptions/new?onboarding=1" : "/onboarding/disclaimer"}
+        replace
+      />
+    );
   }
 
   return <>{children}</>;

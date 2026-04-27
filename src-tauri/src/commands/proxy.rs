@@ -27,10 +27,13 @@ pub async fn env_snippet(state: State<'_, AppState>) -> AppResult<String> {
         "export ANTHROPIC_BASE_URL=http://127.0.0.1:{port}\n\
          export ANTHROPIC_AUTH_TOKEN={token}\n\
          export API_TIMEOUT_MS=3000000\n\
-         export CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1\n\
          export ANTHROPIC_MODEL=model-opus\n\
          export ANTHROPIC_DEFAULT_OPUS_MODEL=model-opus\n\
          export ANTHROPIC_DEFAULT_SONNET_MODEL=model-sonnet\n\
-         export ANTHROPIC_DEFAULT_HAIKU_MODEL=model-haiku"
+         export ANTHROPIC_DEFAULT_HAIKU_MODEL=model-haiku\n\
+         export CLAUDE_CODE_SUBAGENT_MODEL=model-opus\n\
+         export CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1\n\
+         export CLAUDE_CODE_DISABLE_NONSTREAMING_FALLBACK=1\n\
+         export CLAUDE_CODE_EFFORT_LEVEL=max"
     ))
 }

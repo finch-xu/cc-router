@@ -92,6 +92,13 @@
   "about.updater.restart": "立即重启",
   "about.updater.error": "更新检查失败",
   "about.updater.retry": "重试",
+  "about.disclaimer.title": "免责声明",
+  "about.disclaimer.usage": "本工具仅限于自动切换订阅套餐,请求体几乎完全透传,不涉及逆向、不涉及破解等操作。用户需自行遵守每个编程套餐的使用规则。此工具只能用于 Claude Code 等编程工具,切勿用于其他用途。",
+  "about.disclaimer.tos": "各家 provider 的 ToS 不一定明确允许「订阅 Key 接第三方代理 + 多虚拟模型混调度」的用法,尤其是 Coding Plan / Token Plan 这类 per-seat 订阅,可能触发风控。因使用本工具导致账号被限速、被封禁、订阅被取消的,作者不承担任何责任。",
+  "about.disclaimer.warranty": "本软件按 As-Is 提供,不对任何因使用造成的直接或间接损失负责,包括但不限于额度异常消耗、数据丢失、业务中断。",
+  "onboarding.disclaimer.title": "免责声明",
+  "onboarding.disclaimer.subtitle": "在开始使用 cc-router 前,请阅读并知悉以下内容。",
+  "onboarding.disclaimer.accept": "我已阅读并同意",
 
   "guide.title": "接入指南",
   "guide.subtitle": "把 cc-router 作为 Anthropic Messages 兼容端点接入各类客户端。",

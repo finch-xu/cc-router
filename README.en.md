@@ -22,13 +22,47 @@
   <a href="https://finch-xu.github.io/docs/cc-router/getting-started/">📖 Documentation</a>
 </p>
 
-Stacked subscriptions across multiple LLM vendors, but Claude Code can only point at one? cc-router merges the Token Plans, Coding Plans, and pay-as-you-go APIs of DeepSeek, Qwen, Kimi, MiMo, MiniMax, GLM, and Claude into a single virtual plan — mix and match across the opus / sonnet / haiku slots, dispatch sequentially or round-robin, and auto-switch on rate limits or failures. Every last token squeezed out of every subscription.
+Stacked subscriptions across multiple LLM vendors, but Claude Code can only point at one? cc-router merges the Token Plans, Coding Plans, and pay-as-you-go APIs of DeepSeek, Qwen, Kimi, MiMo, MiniMax, GLM, and Claude into a single virtual plan — mix and match across the opus / sonnet / haiku slots, dispatch sequentially or round-robin, and auto-switch on rate limits or failures, so every quota you paid for actually gets used.
+
+> ⚠️ Notice: this tool only switches between subscription plans you already own. Request bodies are passed through almost verbatim — no reverse engineering, no jailbreak, no circumvention. You are responsible for complying with each plan's terms of service. cc-router is intended for use with coding tools like Claude Code only; do not use it for anything else.
+>
+> Provider terms of service do not necessarily allow "routing a subscription key through a third-party proxy with multi-virtual-model dispatch" — especially for per-seat subscriptions like Coding Plans / Token Plans, where this pattern may trip risk controls. The author assumes no liability for any account being throttled, banned, or having its subscription cancelled as a result of using this tool.
+>
+> This software is provided As-Is, without warranty of any kind. The author is not liable for any direct or indirect damages arising from its use, including but not limited to abnormal quota consumption, data loss, or business interruption.
 
 <p align="center">
   <img src="assets/screenshot-models.png" alt="cc-router virtual model configuration page" width="900" />
   <br />
   <img src="assets/screenshot-logs.png" alt="cc-router request logs page" width="900" />
 </p>
+
+## Supported Coding Plans and APIs
+
+| id | Name | Token Plan | API | Status |
+|---|---|---|---|---|
+| `anthropic` | Anthropic official API (pay-as-you-go only, no Max Plan) | ❌ | ✅ | verified |
+| `zhipu` | Zhipu GLM | ✅ | ✅ | verified |
+| `deepseek` | DeepSeek | ❌ | ✅ | verified |
+| `moonshot` | Moonshot Kimi | ✅ | ✅ | untested |
+| `minimax` | MiniMax (3 endpoints) | ✅ | ✅ | partial |
+| `xiaomi` | Xiaomi MiMo (pay-as-you-go + 3-cluster plans) | ✅ | ✅ | untested |
+| `alibaba` | Alibaba Cloud Bailian (team Token Plan + 2-region pay-as-you-go + discontinued Coding Plan) | ✅ | ✅ | verified |
+| `volcengine` | Volcengine Ark (Coding Plan subscription + pay-as-you-go) | ✅ | ✅ | untested |
+| `openrouter` | OpenRouter aggregator (500+ models routed) | ❌ | ✅ | untested |
+| `tencent` | Tencent Cloud LLM (Token Plan subscription + TokenHub pay-as-you-go, mainland / overseas) | ✅ | ✅ | untested |
+| `aiberm` | Aiberm (pay-as-you-go API, models returned dynamically by token group) | ❌ | ✅ | untested |
+| `whatai` | Shenma relay API (pay-as-you-go, OpenAI/Anthropic dual-protocol relay, Anthropic path only) | ❌ | ✅ | untested |
+| `ollama` | Ollama local inference (localhost:11434 only, includes cloud tags like `glm-4.7:cloud`) | ❌ | ✅ | partial |
+| `fireworks` | Fireworks AI (pay-as-you-go, covers DeepSeek / Qwen / Llama / Kimi and other open-source models), Fire Pass | ✅ | ✅ | verified |
+| `stepfun` | Stepfun (Step Plan subscription + pay-as-you-go API) | ✅ | ✅ | untested |
+| `baidu` | Baidu Qianfan (Coding Plan subscription, manual model entry) | ✅ | ❌ | untested |
+| `modelscope` | ModelScope (pay-as-you-go, OpenAI/Anthropic dual-protocol, Anthropic path only, covers Qwen / DeepSeek / Kimi / MiniMax and other open-source models) | ❌ | ✅ | partial |
+| `ucloud` | UCloud Modelverse (Coding Plan subscription + pay-as-you-go API in CN/global, aggregates Claude / Qwen / GLM / Kimi and more) | ✅ | ✅ | untested |
+| `Custom` | Bring your own Anthropic-compatible endpoint | ✅ | ✅ | verified |
+
+> The "Token Plan" column covers any subscription-style quota (Token Plan / Coding Plan, etc.); "API" denotes pay-as-you-go Anthropic Messages-compatible endpoints.
+
+Community PRs welcome.
 
 ## Tech Stack
 
@@ -50,16 +84,21 @@ The **Settings** page renders the full env snippet dynamically — if the defaul
 {
   "env": {
     "ANTHROPIC_BASE_URL": "http://127.0.0.1:23456",
-    "ANTHROPIC_AUTH_TOKEN": "do-not-need",
+    "ANTHROPIC_AUTH_TOKEN": "your token, show in this app settings",
     "API_TIMEOUT_MS": "3000000",
-    "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC": "1",
     "ANTHROPIC_MODEL": "model-opus",
-    "ANTHROPIC_DEFAULT_SONNET_MODEL": "model-sonnet",
     "ANTHROPIC_DEFAULT_OPUS_MODEL": "model-opus",
-    "ANTHROPIC_DEFAULT_HAIKU_MODEL": "model-haiku"
+    "ANTHROPIC_DEFAULT_SONNET_MODEL": "model-sonnet",
+    "ANTHROPIC_DEFAULT_HAIKU_MODEL": "model-haiku",
+    "CLAUDE_CODE_SUBAGENT_MODEL": "model-opus",
+    "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC": "1",
+    "CLAUDE_CODE_DISABLE_NONSTREAMING_FALLBACK": "1",
+    "CLAUDE_CODE_EFFORT_LEVEL": "max"
   }
 }
 ```
+
+When the `OPUS_MODEL` supports a `1m` context window, set it to `model-opus[1m]` to get Claude Code's full long-context support.
 
 ## Development
 
@@ -87,36 +126,6 @@ pnpm tauri build
 ```
 
 Artifacts land in `src-tauri/target/release/bundle/` under per-platform subfolders.
-
-## Supported Coding Plans and APIs
-
-Managed as `src-tauri/providers/*.yaml`, validated against a JSON Schema at startup:
-
-| id | Name | Token Plan | API | Status |
-|---|---|---|---|---|
-| `anthropic` | Anthropic official API (pay-as-you-go only, no Max Plan) | ❌ | ✅ | verified |
-| `zhipu` | Zhipu GLM | ✅ | ✅ | verified |
-| `deepseek` | DeepSeek | ❌ | ✅ | verified |
-| `moonshot` | Moonshot Kimi | ✅ | ✅ | untested |
-| `minimax` | MiniMax (3 endpoints) | ✅ | ✅ | partial |
-| `xiaomi` | Xiaomi MiMo (pay-as-you-go + 3-cluster plans) | ✅ | ✅ | untested |
-| `alibaba` | Alibaba Cloud Bailian (team Token Plan + 2-region pay-as-you-go + discontinued Coding Plan) | ✅ | ✅ | verified |
-| `volcengine` | Volcengine Ark (Coding Plan subscription + pay-as-you-go) | ✅ | ✅ | untested |
-| `openrouter` | OpenRouter aggregator (500+ models routed) | ❌ | ✅ | untested |
-| `tencent` | Tencent Cloud LLM (Token Plan subscription + TokenHub pay-as-you-go, mainland / overseas) | ✅ | ✅ | untested |
-| `aiberm` | Aiberm (pay-as-you-go API, models returned dynamically by token group) | ❌ | ✅ | untested |
-| `whatai` | Shenma relay API (pay-as-you-go, OpenAI/Anthropic dual-protocol relay, Anthropic path only) | ❌ | ✅ | untested |
-| `ollama` | Ollama local inference (localhost:11434 only, includes cloud tags like `glm-4.7:cloud`) | ❌ | ✅ | partial |
-| `fireworks` | Fireworks AI (pay-as-you-go, covers DeepSeek / Qwen / Llama / Kimi and other open-source models), Fire Pass | ✅ | ✅ | verified |
-| `stepfun` | Stepfun (Step Plan subscription + pay-as-you-go API) | ✅ | ✅ | untested |
-| `baidu` | Baidu Qianfan (Coding Plan subscription, manual model entry) | ✅ | ❌ | untested |
-| `modelscope` | ModelScope (pay-as-you-go, OpenAI/Anthropic dual-protocol, Anthropic path only, covers Qwen / DeepSeek / Kimi / MiniMax and other open-source models) | ❌ | ✅ | partial |
-| `ucloud` | UCloud Modelverse (Coding Plan subscription + pay-as-you-go API in CN/global, aggregates Claude / Qwen / GLM / Kimi and more) | ✅ | ✅ | untested |
-| `Custom` | Bring your own Anthropic-compatible endpoint | ✅ | ✅ | verified |
-
-> The "Token Plan" column covers any subscription-style quota (Token Plan / Coding Plan, etc.); "API" denotes pay-as-you-go Anthropic Messages-compatible endpoints.
-
-Community PRs welcome.
 
 ## Icons
 

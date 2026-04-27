@@ -92,6 +92,13 @@
   "about.updater.restart": "Restart now",
   "about.updater.error": "Update check failed",
   "about.updater.retry": "Retry",
+  "about.disclaimer.title": "Disclaimer",
+  "about.disclaimer.usage": "This tool only switches between subscription plans you already own. Request bodies are passed through almost verbatim — no reverse engineering, no jailbreak, no circumvention. You are responsible for complying with each plan's terms of service. cc-router is intended for use with coding tools like Claude Code only; do not use it for anything else.",
+  "about.disclaimer.tos": "Provider terms of service do not necessarily allow \"routing a subscription key through a third-party proxy with multi-virtual-model dispatch\" — especially for per-seat subscriptions like Coding Plans / Token Plans, where this pattern may trip risk controls. The author assumes no liability for any account being throttled, banned, or having its subscription cancelled as a result of using this tool.",
+  "about.disclaimer.warranty": "This software is provided As-Is, without warranty of any kind. The author is not liable for any direct or indirect damages arising from its use, including but not limited to abnormal quota consumption, data loss, or business interruption.",
+  "onboarding.disclaimer.title": "Disclaimer",
+  "onboarding.disclaimer.subtitle": "Please read the following before you start using cc-router.",
+  "onboarding.disclaimer.accept": "I have read and agree",
 
   "guide.title": "Setup guide",
   "guide.subtitle": "Use cc-router as an Anthropic Messages-compatible endpoint for various clients.",

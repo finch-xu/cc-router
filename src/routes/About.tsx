@@ -5,6 +5,7 @@ import {
   Download,
   RotateCw,
   AlertCircle,
+  AlertTriangle,
   CheckCircle2,
 } from "lucide-react";
 import { open as openShell } from "@tauri-apps/plugin-shell";
@@ -60,6 +61,16 @@ export function AboutPage() {
           <span>·</span>
           <span>Tauri 2 · React 19</span>
         </div>
+      </div>
+
+      <div className="card disclaimer-card">
+        <div className="disclaimer-title">
+          <AlertTriangle size={13} />
+          {t("about.disclaimer.title")}
+        </div>
+        <p>{t("about.disclaimer.usage")}</p>
+        <p>{t("about.disclaimer.tos")}</p>
+        <p>{t("about.disclaimer.warranty")}</p>
       </div>
     </>
   );

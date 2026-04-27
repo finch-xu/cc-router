@@ -8,6 +8,7 @@ import { SettingsPage } from "@/routes/Settings";
 import { RequestLogsPage } from "@/routes/RequestLogs";
 import { AboutPage } from "@/routes/About";
 import { GuidePage } from "@/routes/Guide";
+import { OnboardingDisclaimerPage } from "@/routes/OnboardingDisclaimer";
 import { OnboardingGate } from "@/components/layout/OnboardingGate";
 import { useSubscriptionEventBridge } from "@/hooks/useSubscriptions";
 import { UpdaterProvider, useUpdaterAutoCheck } from "@/hooks/useUpdater";
@@ -25,6 +26,8 @@ function AppInner() {
   useUpdaterAutoCheck();
   return (
     <Routes>
+      {/* 免责声明门禁: 全屏顶层路由, 不进 OnboardingGate / AppShell */}
+      <Route path="/onboarding/disclaimer" element={<OnboardingDisclaimerPage />} />
       {/* 兼容旧链接: 引导壳已删, 旧 /onboarding 转到订阅向导 */}
       <Route
         path="/onboarding"

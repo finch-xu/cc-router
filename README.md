@@ -22,7 +22,13 @@
   <a href="https://finch-xu.github.io/docs/zh/cc-router/getting-started/">📖 中文文档</a>
 </p>
 
-订阅买多了 Claude Code 却只能用一家？cc-router 把 DeepSeek、Qwen、Kimi、MiMo、MiniMax、GLM、Claude 的 Token Plan、Coding Plan、API 额度合并成一个虚拟 Plan，任意搭配 opus / sonnet / haiku 三槽位，按顺序或轮询调度，限流、失败自动切换——把每一份额度榨到最后一个 token。
+订阅买多了 Claude Code 却只能用一家？cc-router 把 DeepSeek、Qwen、Kimi、MiMo、MiniMax、GLM、Claude 的 Token Plan、Coding Plan、API 额度合并成一个虚拟 Plan，任意搭配 opus / sonnet / haiku 三槽位，按顺序或轮询调度，限流、失败自动切换——充分利用每一份额度。
+
+> 注意⚠️ 本工具仅限于自动切换订阅套餐，请求体几乎完全透传，不涉及逆向、不涉及破解等操作。用户需自行遵守每个编程套餐的使用规则。此工具只能用于 Claude Code 等编程工具，切勿用于其他用途。
+>
+> 各家 provider 的 ToS 不一定明确允许"订阅 Key 接第三方代理 + 多虚拟模型混调度"的用法，尤其是 Coding Plan / Token Plan 这类 per-seat 订阅，可能触发风控。因使用本工具导致账号被限速、被封禁、订阅被取消的，作者不承担任何责任。
+>
+> 本软件按 As-Is 提供，不对任何因使用造成的直接或间接损失负责，包括但不限于额度异常消耗、数据丢失、业务中断。
 
 <p align="center">
   <img src="assets/screenshot-models.png" alt="cc-router 虚拟模型配置页截图" width="900" />
@@ -78,16 +84,21 @@
 {
   "env": {
     "ANTHROPIC_BASE_URL": "http://127.0.0.1:23456",
-    "ANTHROPIC_AUTH_TOKEN": "do-not-need",
+    "ANTHROPIC_AUTH_TOKEN": "your token, show in this app settings",
     "API_TIMEOUT_MS": "3000000",
-    "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC": "1",
     "ANTHROPIC_MODEL": "model-opus",
-    "ANTHROPIC_DEFAULT_SONNET_MODEL": "model-sonnet",
     "ANTHROPIC_DEFAULT_OPUS_MODEL": "model-opus",
-    "ANTHROPIC_DEFAULT_HAIKU_MODEL": "model-haiku"
+    "ANTHROPIC_DEFAULT_SONNET_MODEL": "model-sonnet",
+    "ANTHROPIC_DEFAULT_HAIKU_MODEL": "model-haiku",
+    "CLAUDE_CODE_SUBAGENT_MODEL": "model-opus",
+    "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC": "1",
+    "CLAUDE_CODE_DISABLE_NONSTREAMING_FALLBACK": "1",
+    "CLAUDE_CODE_EFFORT_LEVEL": "max"
   }
 }
 ```
+
+当`OPUS_MODEL`支持`1m`上下文的时候，可以设置为`model-opus[1m]`以获得Claude code工具的完整上下文支持。
 
 ## 开发
 
