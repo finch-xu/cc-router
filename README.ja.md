@@ -1,0 +1,136 @@
+<p align="center">
+  <img src="assets/icon.png" alt="cc-router logo" width="160" height="160" />
+</p>
+
+<h1 align="center">cc-router</h1>
+
+<p align="center">
+  <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-blue.svg?style=flat-square" alt="License: MIT"></a>
+  <img src="https://img.shields.io/badge/Tauri-2-FFC131?style=flat-square&logo=tauri&logoColor=white" alt="Tauri 2">
+  <img src="https://img.shields.io/badge/Rust-1.77+-DEA584?style=flat-square&logo=rust&logoColor=white" alt="Rust 1.77+">
+  <img src="https://img.shields.io/badge/React-19-61DAFB?style=flat-square&logo=react&logoColor=white" alt="React 19">
+  <img src="https://img.shields.io/badge/TypeScript-5-3178C6?style=flat-square&logo=typescript&logoColor=white" alt="TypeScript 5">
+  <img src="https://img.shields.io/badge/Tailwind-4-06B6D4?style=flat-square&logo=tailwindcss&logoColor=white" alt="Tailwind CSS">
+  <img src="https://img.shields.io/badge/platform-macOS%20%7C%20Windows%20%7C%20Linux-lightgrey?style=flat-square" alt="Platform">
+</p>
+
+<p align="center">
+  <a href="README.md">中文</a> · <a href="README.en.md">English</a> · <strong>日本語</strong>
+</p>
+
+<p align="center">
+  <a href="https://finch-xu.github.io/docs/cc-router/getting-started/">📖 Documentation</a>
+</p>
+
+複数の LLM ベンダーのサブスクリプションを契約しているのに、Claude Code は 1 社しか指せない——cc-router は DeepSeek・Qwen（通義千問）・Kimi・MiMo・MiniMax・GLM・Claude の Token Plan / Coding Plan / 従量課金 API を 1 つの仮想プランに統合します。opus / sonnet / haiku の 3 スロットに自由に割り当て、順次（sequential）またはラウンドロビン（round_robin）でディスパッチ。レート制限や障害時には自動でフォールバックするので、契約したクォータを余すことなく使い切れます。
+
+> ⚠️ 注意: 本ツールは「すでに保有しているサブスクリプションプラン間の自動切り替え」のみを目的としています。リクエストボディはほぼそのまま透過するだけで、リバースエンジニアリングや脱獄、回避行為は一切含みません。各プランの利用規約は利用者ご自身で遵守してください。Claude Code などのコーディングツール用途専用であり、それ以外の用途には使用しないでください。
+>
+> 各プロバイダの利用規約が「サブスクリプションキーをサードパーティのプロキシ経由でルーティングし、複数仮想モデルでディスパッチする」用途を明示的に許可しているとは限りません。特に Coding Plan / Token Plan のような per-seat サブスクリプションでは、リスク管理機構に検知される可能性があります。本ツールの使用に起因するアカウントのレート制限、BAN、サブスクリプション解約等について、作者は一切の責任を負いません。
+>
+> 本ソフトウェアは As-Is（現状有姿）で提供され、明示・黙示を問わずいかなる保証もしません。クォータの異常消費、データ損失、業務中断を含む直接・間接の損害について作者は責任を負いません。
+
+<p align="center">
+  <img src="assets/screenshot-models.png" alt="cc-router 仮想モデル設定画面" width="900" />
+  <br />
+  <img src="assets/screenshot-logs.png" alt="cc-router リクエストログ画面" width="900" />
+</p>
+
+## 対応プラン・API 一覧
+
+| id | 名称 | Token Plan | API | 動作確認 |
+|---|---|---|---|---|
+| `anthropic` | Anthropic 公式 API（従量課金のみ、Max Plan は非対応） | ❌ | ✅ | verified |
+| `zhipu` | 智譜 GLM | ✅ | ✅ | verified |
+| `deepseek` | DeepSeek | ❌ | ✅ | verified |
+| `moonshot` | Moonshot Kimi | ✅ | ✅ | untested |
+| `minimax` | MiniMax（3 エンドポイント） | ✅ | ✅ | partial |
+| `xiaomi` | Xiaomi MiMo（従量課金 + 3 クラスタサブスクリプション） | ✅ | ✅ | untested |
+| `alibaba` | Alibaba Cloud Bailian（チーム版 Token Plan + 2 リージョン従量課金 + 販売終了の Coding Plan） | ✅ | ✅ | verified |
+| `volcengine` | 火山方舟 Volcengine Ark（Coding Plan サブスクリプション + 従量課金） | ✅ | ✅ | untested |
+| `openrouter` | OpenRouter アグリゲーター（500+ モデルをルーティング） | ❌ | ✅ | untested |
+| `tencent` | Tencent Cloud LLM（Token Plan サブスクリプション + TokenHub 従量課金、中国本土/海外） | ✅ | ✅ | untested |
+| `aiberm` | Aiberm（従量課金 API、token group ごとに動的にモデル返却） | ❌ | ✅ | untested |
+| `whatai` | 神馬中継 API（従量課金、OpenAI/Anthropic デュアルプロトコル中継、Anthropic 経路のみ使用） | ❌ | ✅ | untested |
+| `ollama` | Ollama ローカル推論（localhost:11434 のみ、`glm-4.7:cloud` のようなクラウドタグも含む） | ❌ | ✅ | partial |
+| `fireworks` | Fireworks AI（従量課金、DeepSeek / Qwen / Llama / Kimi 等の OSS モデルを網羅）、Fire Pass サブスクリプション対応 | ✅ | ✅ | verified |
+| `stepfun` | 階躍星辰 Stepfun（Step Plan サブスクリプション + 従量課金 API） | ✅ | ✅ | untested |
+| `baidu` | 百度千帆（Coding Plan サブスクリプション、モデルは手動入力） | ✅ | ❌ | untested |
+| `modelscope` | ModelScope 魔搭（従量課金、OpenAI/Anthropic デュアルプロトコル、Anthropic 経路のみ、Qwen / DeepSeek / Kimi / MiniMax 等の OSS モデルを網羅） | ❌ | ✅ | partial |
+| `ucloud` | 優雲智算 UCloud Modelverse（Coding Plan サブスクリプション + 従量課金 API、中国国内/海外、Claude / Qwen / GLM / Kimi 等を集約） | ✅ | ✅ | untested |
+| `カスタム` | Anthropic プロトコル準拠の任意の API を自前で追加 | ✅ | ✅ | verified |
+
+> 「Token Plan」列はサブスクリプション形式のクォータ全般（Token Plan / Coding Plan 等）を指し、「API」列は従量課金の Anthropic Messages 互換エンドポイントを指します。
+
+コミュニティからの PR 歓迎です。
+
+## 技術スタック
+
+- Tauri 2
+- Tailwind 4
+- React 19
+
+## クイックスタート
+
+1. Releases からインストーラをダウンロードして実行します。
+2. LLM サブスクリプションを追加し、仮想モデルに紐付けてディスパッチモードを選択します。
+3. 下記の env スニペットで Claude Code を cc-router に向けます。
+
+## Claude Code での利用
+
+**設定** ページが完全な env スニペットを動的に表示します。デフォルトポートが使用中の場合は、最大 100 回まで自動でインクリメントして空きを探します。
+
+```json
+{
+  "env": {
+    "ANTHROPIC_BASE_URL": "http://127.0.0.1:23456",
+    "ANTHROPIC_AUTH_TOKEN": "your token, show in this app settings",
+    "API_TIMEOUT_MS": "3000000",
+    "ANTHROPIC_MODEL": "model-opus",
+    "ANTHROPIC_DEFAULT_OPUS_MODEL": "model-opus",
+    "ANTHROPIC_DEFAULT_SONNET_MODEL": "model-sonnet",
+    "ANTHROPIC_DEFAULT_HAIKU_MODEL": "model-haiku",
+    "CLAUDE_CODE_SUBAGENT_MODEL": "model-opus",
+    "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC": "1",
+    "CLAUDE_CODE_DISABLE_NONSTREAMING_FALLBACK": "1",
+    "CLAUDE_CODE_EFFORT_LEVEL": "max"
+  }
+}
+```
+
+`OPUS_MODEL` が `1m` コンテキストに対応している場合、`model-opus[1m]` に設定すると Claude Code のロングコンテキストをフルに活用できます。
+
+## 開発
+
+前提条件: Node.js ≥ 20（pnpm 推奨）、Rust ≥ 1.77、Xcode Command Line Tools（macOS）。
+
+```bash
+pnpm install
+pnpm tauri dev      # フロントエンド + Rust バックエンド + プロキシを単一プロセスで起動
+```
+
+初回起動時は onboarding フローが表示されます:
+
+1. サブスクリプションを追加（プロバイダ選択 → エンドポイント選択 → API Key 入力 → モデル一覧を自動取得）
+2. ワンクリックで 3 つの仮想モデルすべてに紐付け
+3. 生成された env スニペットを `~/.claude/settings.json` に貼り付け
+
+## 新しいプロバイダの追加
+
+**Claude Code** を使用している場合、本リポジトリには `new-provider` という `SKILL` が同梱されています。対象プロバイダの公式ドキュメント URL またはエンドポイント情報を渡して実行すると、YAML のスキャフォールディングと関連箇所の修正を自動で行います。
+
+## ビルド
+
+```bash
+pnpm tauri build
+```
+
+成果物は `src-tauri/target/release/bundle/` 配下のプラットフォーム別サブフォルダに出力されます。
+
+## アイコン
+
+プロバイダのブランドロゴは [@lobehub/icons](https://github.com/lobehub/lobe-icons)（MIT）を使用しています。各商標は各権利者に帰属します。
+
+## ライセンス
+
+MIT
