@@ -15,6 +15,7 @@ use uuid::Uuid;
 use crate::error::AppResult;
 use crate::observability::events::{self, Severity};
 use crate::observability::request_log::{RequestLogEntry, RequestStatus};
+use crate::provider::model::ANTHROPIC_THINKING_FIELD;
 use crate::proxy::handler::error_body;
 use crate::proxy::overloaded;
 use crate::proxy::retry::{classify_response, ShouldRetry};
@@ -143,6 +144,7 @@ pub async fn dispatch(
             required_headers,
             forward_headers,
             supports_thinking,
+            thinking_field_name,
         ) = {
             let guard = rt.read().await;
             // fallback 透传原始 model; 其他三个按 slot 映射
@@ -163,6 +165,7 @@ pub async fn dispatch(
                 guard.row.required_headers.clone(),
                 guard.row.forward_headers.clone(),
                 guard.row.supports_thinking_blocks,
+                guard.row.thinking_block_field_name.clone(),
             )
         };
 
@@ -171,10 +174,15 @@ pub async fn dispatch(
         if !is_fallback {
             upstream_body["model"] = Value::String(real_model.clone());
         }
-        // 不支持 extended thinking 的订阅: 剥离顶层 thinking 字段 + messages 历史中的 thinking 块,
-        // 避免上游因「messages 含 thinking 块但 thinking 模式未启用 / 不支持」返回 400。
+        // thinking 处理:
+        // - 不支持 thinking 的订阅: 直接剥离顶层 thinking 字段 + messages 历史中的 thinking 块
+        // - 支持但字段名是协议方言 (如 DeepSeek 的 "think"): 把 messages 历史中 thinking 块的
+        //   承载字段从 "thinking" 重命名为目标字段名, 让上游识别
+        // - 支持且字段名是 "thinking": 不动
         if !supports_thinking {
             strip_thinking(&mut upstream_body);
+        } else if thinking_field_name != ANTHROPIC_THINKING_FIELD {
+            translate_thinking_request(&mut upstream_body, &thinking_field_name);
         }
         let serialized_body = serde_json::to_vec(&upstream_body)?;
 
@@ -395,6 +403,7 @@ pub async fn dispatch(
                     state.db.clone(),
                     state.app_handle.clone(),
                     rt.clone(),
+                    thinking_field_name,
                 );
                 return Ok(response);
             }
@@ -571,9 +580,43 @@ fn strip_thinking(body: &mut Value) {
     }
 }
 
+/// 把请求体 `messages[].content[]` 里 `type=="thinking"` 块的承载字段从 "thinking"
+/// 重命名为目标字段名 (例: DeepSeek 用 "think")。
+///
+/// 触发条件: 订阅 `supports_thinking_blocks=true` 且 `thinking_block_field_name != "thinking"`。
+///
+/// 与 `strip_thinking` 互斥——这里走的是「上游支持 thinking 但用方言字段名」的路径。
+/// 顶层 `thinking` 字段不动 (启用开关本身在所有兼容层语义一致)。
+/// `redacted_thinking` 暂不翻译: 是 Anthropic 加密块, 跨 provider 没意义, 让上游报错更安全。
+fn translate_thinking_request(body: &mut Value, target_field: &str) {
+    let Some(messages) = body.get_mut("messages").and_then(|v| v.as_array_mut()) else {
+        return;
+    };
+    for msg in messages {
+        let Some(arr) = msg.get_mut("content").and_then(|c| c.as_array_mut()) else {
+            continue;
+        };
+        for block in arr {
+            let Some(obj) = block.as_object_mut() else {
+                continue;
+            };
+            let is_thinking = matches!(
+                obj.get("type").and_then(|t| t.as_str()),
+                Some("thinking")
+            );
+            if !is_thinking {
+                continue;
+            }
+            if let Some(val) = obj.remove(ANTHROPIC_THINKING_FIELD) {
+                obj.insert(target_field.to_string(), val);
+            }
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
-    use super::strip_thinking;
+    use super::{strip_thinking, translate_thinking_request};
     use serde_json::json;
 
     #[test]
@@ -646,5 +689,87 @@ mod tests {
         let mut body2 = json!({ "messages": [] });
         strip_thinking(&mut body2);
         assert_eq!(body2["messages"].as_array().unwrap().len(), 0);
+    }
+
+    // -- translate_thinking_request 单测 --------------------------
+
+    #[test]
+    fn translate_renames_thinking_field_to_think() {
+        let mut body = json!({
+            "thinking": { "type": "enabled", "budget_tokens": 1024 },
+            "messages": [
+                { "role": "user", "content": [{ "type": "text", "text": "hi" }] },
+                {
+                    "role": "assistant",
+                    "content": [
+                        { "type": "thinking", "thinking": "let me think...", "signature": "abc" },
+                        { "type": "text", "text": "hello" }
+                    ]
+                }
+            ]
+        });
+        translate_thinking_request(&mut body, "think");
+        // 顶层 thinking 启用字段不动
+        assert!(body.get("thinking").is_some());
+        // assistant 消息的 thinking 块字段名被改写
+        let block = &body["messages"][1]["content"][0];
+        assert_eq!(block["type"], "thinking");
+        assert!(block.get("thinking").is_none(), "原 thinking 字段应被移除");
+        assert_eq!(block["think"], "let me think...");
+        assert_eq!(block["signature"], "abc", "其他字段不动");
+        // text 块完全不动
+        assert_eq!(body["messages"][1]["content"][1]["type"], "text");
+    }
+
+    #[test]
+    fn translate_does_not_touch_redacted_thinking() {
+        let mut body = json!({
+            "messages": [{
+                "role": "assistant",
+                "content": [{ "type": "redacted_thinking", "data": "encrypted" }]
+            }]
+        });
+        translate_thinking_request(&mut body, "think");
+        let block = &body["messages"][0]["content"][0];
+        assert_eq!(block["type"], "redacted_thinking");
+        assert_eq!(block["data"], "encrypted");
+    }
+
+    #[test]
+    fn translate_does_not_break_string_content() {
+        let mut body = json!({
+            "messages": [{ "role": "user", "content": "hello" }]
+        });
+        translate_thinking_request(&mut body, "think");
+        assert_eq!(body["messages"][0]["content"], "hello");
+    }
+
+    #[test]
+    fn translate_skips_non_thinking_blocks() {
+        let mut body = json!({
+            "messages": [{
+                "role": "assistant",
+                "content": [
+                    { "type": "text", "text": "answer" },
+                    { "type": "tool_use", "id": "x", "name": "calc", "input": {} }
+                ]
+            }]
+        });
+        translate_thinking_request(&mut body, "think");
+        let content = body["messages"][0]["content"].as_array().unwrap();
+        assert_eq!(content.len(), 2);
+        assert_eq!(content[0]["text"], "answer");
+        assert_eq!(content[1]["name"], "calc");
+    }
+
+    #[test]
+    fn translate_safe_on_empty_messages() {
+        let mut body = json!({ "messages": [] });
+        translate_thinking_request(&mut body, "think");
+        assert_eq!(body["messages"].as_array().unwrap().len(), 0);
+
+        let mut body2 = json!({ "model": "x" });
+        translate_thinking_request(&mut body2, "think");
+        assert!(body2.get("messages").is_none());
     }
 }

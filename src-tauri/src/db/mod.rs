@@ -21,6 +21,10 @@ const MIGRATIONS: &[(u32, &str)] = &[
         3,
         include_str!("../../migrations/003_add_events_and_diagnostics.sql"),
     ),
+    (
+        4,
+        include_str!("../../migrations/004_add_thinking_block_field_name.sql"),
+    ),
 ];
 
 pub async fn init_pool(db_path: &Path) -> AppResult<SqlitePool> {
@@ -183,6 +187,7 @@ mod tests {
     use super::*;
     use sqlx::Row;
     use sqlx::sqlite::SqlitePoolOptions;
+    use uuid::Uuid;
 
     #[test]
     fn splits_basic_statements() {
@@ -255,8 +260,9 @@ mod tests {
         run_migrations(&pool, &dir).await.expect("migrate fresh");
 
         let versions = applied_versions(&pool).await;
-        assert_eq!(versions, vec![1, 2, 3]);
+        assert_eq!(versions, vec![1, 2, 3, 4]);
         assert!(has_column(&pool, "subscriptions", "supports_thinking_blocks").await);
+        assert!(has_column(&pool, "subscriptions", "thinking_block_field_name").await);
         assert!(has_column(&pool, "requests", "upstream_response_body").await);
         assert!(has_table(&pool, "events").await);
     }
@@ -274,8 +280,9 @@ mod tests {
         run_migrations(&pool, &dir).await.expect("migrate legacy");
 
         let versions = applied_versions(&pool).await;
-        assert_eq!(versions, vec![1, 2, 3]); // baseline v=1, 然后跑 v=2/v=3
+        assert_eq!(versions, vec![1, 2, 3, 4]); // baseline v=1, 然后跑 v=2/v=3/v=4
         assert!(has_column(&pool, "subscriptions", "supports_thinking_blocks").await);
+        assert!(has_column(&pool, "subscriptions", "thinking_block_field_name").await);
         assert!(has_column(&pool, "requests", "upstream_response_body").await);
         assert!(has_table(&pool, "events").await);
     }
@@ -289,7 +296,96 @@ mod tests {
         run_migrations(&pool, &dir).await.expect("third run");
 
         let versions = applied_versions(&pool).await;
-        assert_eq!(versions, vec![1, 2, 3]); // 没有重复写
+        assert_eq!(versions, vec![1, 2, 3, 4]); // 没有重复写
+    }
+
+    /// 模拟一个跑过 v1+v2+v3 但还没跑 v4 的 DB:
+    /// 建 `_schema_version` 表, 跑前 3 个 migration, 标记版本号。
+    async fn setup_pre_v4_pool() -> SqlitePool {
+        let pool = in_memory_pool().await;
+        sqlx::query(
+            "CREATE TABLE IF NOT EXISTS _schema_version (version INTEGER PRIMARY KEY, applied_at INTEGER NOT NULL)",
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+        for (v, sql) in &MIGRATIONS[..3] {
+            for stmt in split_sql_statements(sql) {
+                sqlx::query(&stmt).execute(&pool).await.unwrap();
+            }
+            sqlx::query("INSERT INTO _schema_version (version, applied_at) VALUES (?, ?)")
+                .bind(*v as i64)
+                .bind(0_i64)
+                .execute(&pool)
+                .await
+                .unwrap();
+        }
+        pool
+    }
+
+    /// 插入一条 v3-schema 风格的订阅 (supports_thinking_blocks=0, 没有 thinking_block_field_name 列)。
+    /// 用于测试 v4 migration 的回填行为是否按 provider_id 区分。
+    async fn insert_pre_v4_subscription(pool: &SqlitePool, provider_id: &str) {
+        sqlx::query(
+            "INSERT INTO subscriptions (id, provider_id, endpoint_id, display_name, api_key,
+                model_slot_opus, model_slot_sonnet, model_slot_haiku,
+                enabled, is_auth_failed, last_error_message, created_at, updated_at,
+                base_url, messages_path, auth_header_name, auth_header_format,
+                required_headers, forward_headers, model_discovery,
+                provider_display_name, provider_icon, is_user_defined,
+                supports_thinking_blocks)
+             VALUES (?, ?, 'ep', 'name', 'k',
+                     'a','b','c', 1, 0, NULL, 0, 0,
+                     '', '', '', 'bearer', '{}', '[]', '{}',
+                     'pname', 'icon', 0, 0)",
+        )
+        .bind(Uuid::new_v4().to_string())
+        .bind(provider_id)
+        .execute(pool)
+        .await
+        .unwrap();
+    }
+
+    #[tokio::test]
+    async fn v4_backfills_existing_deepseek_subscriptions() {
+        let pool = setup_pre_v4_pool().await;
+        insert_pre_v4_subscription(&pool, "deepseek").await;
+
+        run_migrations(&pool, &std::path::PathBuf::from("."))
+            .await
+            .expect("migrate to v4");
+
+        let row = sqlx::query(
+            "SELECT supports_thinking_blocks, thinking_block_field_name FROM subscriptions WHERE provider_id='deepseek'",
+        )
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        let supports: i64 = row.try_get("supports_thinking_blocks").unwrap();
+        let field: String = row.try_get("thinking_block_field_name").unwrap();
+        assert_eq!(supports, 1, "deepseek 订阅 supports_thinking_blocks 应被回填为 1");
+        assert_eq!(field, "think", "deepseek 订阅 thinking_block_field_name 应被回填为 think");
+    }
+
+    #[tokio::test]
+    async fn v4_does_not_touch_non_deepseek_subscriptions() {
+        let pool = setup_pre_v4_pool().await;
+        insert_pre_v4_subscription(&pool, "zhipu").await;
+
+        run_migrations(&pool, &std::path::PathBuf::from("."))
+            .await
+            .unwrap();
+
+        let row = sqlx::query(
+            "SELECT supports_thinking_blocks, thinking_block_field_name FROM subscriptions WHERE provider_id='zhipu'",
+        )
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        let supports: i64 = row.try_get("supports_thinking_blocks").unwrap();
+        let field: String = row.try_get("thinking_block_field_name").unwrap();
+        assert_eq!(supports, 0, "非 deepseek 订阅不应被回填");
+        assert_eq!(field, "thinking", "非 deepseek 订阅应保留默认 'thinking'");
     }
 }
 

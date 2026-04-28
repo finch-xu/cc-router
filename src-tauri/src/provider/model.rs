@@ -2,6 +2,11 @@ use std::str::FromStr;
 
 use serde::{Deserialize, Serialize};
 
+/// Anthropic 标准协议里 thinking 块的内部承载字段名。其他厂商兼容层若用方言
+/// (例 DeepSeek "think") 通过 `capabilities.thinking_block_field_name` 覆盖,
+/// pipeline 在请求/响应两侧做双向重命名让 CC 始终看到此标准命名。
+pub const ANTHROPIC_THINKING_FIELD: &str = "thinking";
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub enum Compatibility {
@@ -97,12 +102,33 @@ impl ProviderEndpoint {
 
 /// Provider 能力声明 (在 yaml 顶层 `capabilities` 字段)。
 /// 创建订阅时把对应字段拷贝到 `SubscriptionRow`,后续可被 UI 覆盖。
-#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ProviderCapabilities {
     /// 上游是否支持 Anthropic extended thinking 块 (顶层 thinking 字段 + content[].type=thinking)。
     /// 关闭时 pipeline 会在转发前剥离 thinking 字段和 thinking 块,避免不兼容 provider 返回 400。
     #[serde(default)]
     pub supports_thinking_blocks: bool,
+
+    /// thinking 块内部承载字段的名字。
+    /// Anthropic 标准: "thinking"; DeepSeek 兼容层: "think"。
+    /// 仅当 supports_thinking_blocks=true 且值非 "thinking" 时,
+    /// pipeline 在请求侧把 anthropic→自定义、响应侧把自定义→anthropic 翻译,
+    /// 让 CC 始终以 Anthropic 标准格式收发。
+    #[serde(default = "default_thinking_block_field_name")]
+    pub thinking_block_field_name: String,
+}
+
+impl Default for ProviderCapabilities {
+    fn default() -> Self {
+        Self {
+            supports_thinking_blocks: false,
+            thinking_block_field_name: default_thinking_block_field_name(),
+        }
+    }
+}
+
+fn default_thinking_block_field_name() -> String {
+    ANTHROPIC_THINKING_FIELD.to_string()
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]

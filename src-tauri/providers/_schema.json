@@ -69,6 +69,12 @@
         "supports_thinking_blocks": {
           "type": "boolean",
           "description": "上游是否支持 Anthropic extended thinking 块。订阅创建时拷贝此默认值,可在 UI 上覆盖。"
+        },
+        "thinking_block_field_name": {
+          "type": "string",
+          "minLength": 1,
+          "default": "thinking",
+          "description": "thinking content block 内部承载字段名。Anthropic 标准 thinking; DeepSeek 兼容层用 think。"
         }
       }
     }

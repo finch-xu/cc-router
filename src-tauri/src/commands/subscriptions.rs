@@ -9,7 +9,7 @@ use tracing::warn;
 use uuid::Uuid;
 
 use crate::error::{AppError, AppResult};
-use crate::provider::model::{AuthHeaderFormat, ModelDiscovery};
+use crate::provider::model::{AuthHeaderFormat, ModelDiscovery, ANTHROPIC_THINKING_FIELD};
 use crate::state::AppState;
 use crate::subscription::{
     model::{
@@ -182,6 +182,7 @@ pub async fn create_subscription(
                 provider_icon: provider.icon.clone().unwrap_or_default(),
                 is_user_defined: false,
                 supports_thinking_blocks: provider.capabilities.supports_thinking_blocks,
+                thinking_block_field_name: provider.capabilities.thinking_block_field_name.clone(),
             }
         }
         CreateSource::Custom {
@@ -221,6 +222,8 @@ pub async fn create_subscription(
                 is_user_defined: true,
                 // 自定义订阅默认 false; 用户在 UI 上按需开启。
                 supports_thinking_blocks: false,
+                // 自定义订阅默认走 Anthropic 标准命名; 协议方言由内置 provider yaml 声明。
+                thinking_block_field_name: ANTHROPIC_THINKING_FIELD.to_string(),
             }
         }
     };

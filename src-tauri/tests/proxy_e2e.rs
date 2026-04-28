@@ -110,3 +110,34 @@ fn anthropic_uses_raw_header_format() {
     assert!(matches!(anthropic.auth.header_format, AuthHeaderFormat::Raw));
     assert_eq!(anthropic.auth.header_name, "x-api-key");
 }
+
+/// DeepSeek 兼容层在 thinking 块内部用 "think" 字段 (而非 Anthropic 的 "thinking"),
+/// pipeline 据此在请求/响应两侧做方言翻译。这个测试守护 yaml 配置不被无意改回默认值。
+#[test]
+fn deepseek_declares_thinking_dialect_for_protocol_translation() {
+    let resource_dir = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    let providers = cc_router_lib::provider::loader::load_all(&resource_dir)
+        .expect("load providers");
+
+    let deepseek = providers.get("deepseek").expect("deepseek present");
+    assert!(
+        deepseek.capabilities.supports_thinking_blocks,
+        "DeepSeek 必须声明 supports_thinking_blocks=true 以走方言翻译路径而非 strip"
+    );
+    assert_eq!(
+        deepseek.capabilities.thinking_block_field_name, "think",
+        "DeepSeek 兼容层 thinking 块用 think 字段; 改回 thinking 会导致客户端 400"
+    );
+
+    // Anthropic 标准命名守护
+    let anthropic = providers.get("anthropic").expect("anthropic present");
+    assert_eq!(
+        anthropic.capabilities.thinking_block_field_name, "thinking",
+        "Anthropic 必须用标准命名 thinking"
+    );
+
+    // 未声明 capabilities 的 provider (如 zhipu/moonshot) 取默认值, supports=false + 字段=thinking
+    let zhipu = providers.get("zhipu").expect("zhipu present");
+    assert!(!zhipu.capabilities.supports_thinking_blocks);
+    assert_eq!(zhipu.capabilities.thinking_block_field_name, "thinking");
+}

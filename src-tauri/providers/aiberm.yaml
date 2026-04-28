@@ -58,3 +58,6 @@ model_discovery:
     - "claude-3-sonnet-20240229"
     - "gpt-4"
     - "gpt-3.5-turbo"
+
+capabilities:
+  supports_thinking_blocks: true

@@ -39,3 +39,10 @@ model_discovery:
   example_models:
     - "deepseek-v4-pro"
     - "deepseek-v4-flash"
+
+# DeepSeek 的 Anthropic 兼容层支持 thinking, 但 thinking 块内部承载字段名是 "think"
+# (而非 Anthropic 标准的 "thinking"). cc-router 会在请求侧把 thinking→think, 响应侧反向回填,
+# 让 CC 始终以 Anthropic 标准格式收发, 对协议方言无感知。
+capabilities:
+  supports_thinking_blocks: true
+  thinking_block_field_name: think
