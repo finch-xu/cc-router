@@ -8,21 +8,26 @@ import {
 import { useSettings } from "@/hooks/useSettings";
 import zh from "./locales/zh.json";
 import en from "./locales/en.json";
+import ja from "./locales/ja.json";
 
-export type Locale = "zh" | "en";
-export type LanguagePref = "system" | "zh" | "en";
+export type Locale = "zh" | "en" | "ja";
+export type LanguagePref = "system" | "zh" | "en" | "ja";
 
 const dictionaries: Record<Locale, Record<string, string>> = {
   zh: zh as Record<string, string>,
   en: en as Record<string, string>,
+  ja: ja as Record<string, string>,
 };
 
-/** Read system locale via webview navigator. zh* → zh, otherwise → en. */
+/** Read system locale via webview navigator. zh* → zh, ja* → ja, otherwise → en. */
 export function detectSystemLocale(): Locale {
   if (typeof navigator === "undefined") return "en";
   const lang =
     navigator.language || (navigator.languages && navigator.languages[0]) || "en";
-  return lang.toLowerCase().startsWith("zh") ? "zh" : "en";
+  const lower = lang.toLowerCase();
+  if (lower.startsWith("zh")) return "zh";
+  if (lower.startsWith("ja")) return "ja";
+  return "en";
 }
 
 function resolveLocale(pref: LanguagePref | undefined): Locale {

@@ -58,7 +58,7 @@
   "settings.storage.dbLimit.unlimited": "10 GB (effectively unlimited)",
   "settings.section.language": "Language",
   "settings.language.label": "UI language",
-  "settings.language.desc": "Choose the cc-router UI display language. \"Follow system\" reads your system locale: Chinese → 中文, otherwise → English.",
+  "settings.language.desc": "Choose the cc-router UI display language. \"Follow system\" reads your system locale: Chinese → 中文, Japanese → 日本語, otherwise → English.",
   "settings.language.system": "Follow system",
   "settings.section.danger": "Danger zone · Factory reset",
   "settings.danger.desc": "Erase all subscriptions, API keys, virtual model bindings, request logs and settings. The app restarts into the initial welcome page. This cannot be undone.",
