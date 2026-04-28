@@ -58,8 +58,6 @@ export function AboutPage() {
           <span>© 2026 finch-xu</span>
           <span>·</span>
           <span>MIT License</span>
-          <span>·</span>
-          <span>Tauri 2 · React 19</span>
         </div>
       </div>
 
