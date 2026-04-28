@@ -39,7 +39,7 @@ export function Sidebar() {
     { to: "/guide", label: t("sidebar.nav.guide"), icon: BookOpen },
     { to: "/virtual-models", label: t("sidebar.nav.virtualModels"), icon: Layers, badge: "4" },
     { to: "/subscriptions", label: t("sidebar.nav.subscriptions"), icon: Key, badge: subsCount > 0 ? String(subsCount) : undefined },
-    { to: "/request-logs", label: t("sidebar.nav.requestLogs"), icon: ScrollText },
+    { to: "/request-logs", label: t("sidebar.nav.logs"), icon: ScrollText },
     { to: "/settings", label: t("sidebar.nav.settings"), icon: SettingsIcon },
     { to: "/about", label: t("sidebar.nav.about"), icon: Info, dot: hasUpdate },
   ];

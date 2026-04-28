@@ -27,6 +27,8 @@ pub struct RequestLogDto {
     pub cache_creation_tokens: Option<i64>,
     pub cache_read_tokens: Option<i64>,
     pub error_message: Option<String>,
+    /// 上游错误响应 body 截断, 仅在错误路径有值, 用于前端排障详情抽屉
+    pub upstream_response_body: Option<String>,
 }
 
 #[derive(Debug, Serialize)]
@@ -90,7 +92,8 @@ pub async fn list_requests(
                 real_model_name, response_model_name, is_streaming, status,
                 http_status, total_latency_ms,
                 upstream_input_tokens, upstream_output_tokens,
-                upstream_cache_creation, upstream_cache_read, error_message
+                upstream_cache_creation, upstream_cache_read, error_message,
+                upstream_response_body
          FROM requests{}
          ORDER BY timestamp DESC
          LIMIT ? OFFSET ?",
@@ -132,6 +135,7 @@ pub async fn list_requests(
             cache_creation_tokens: r.try_get("upstream_cache_creation").ok(),
             cache_read_tokens: r.try_get("upstream_cache_read").ok(),
             error_message: r.try_get("error_message").ok(),
+            upstream_response_body: r.try_get("upstream_response_body").ok(),
         })
         .collect();
 

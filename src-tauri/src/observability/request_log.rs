@@ -3,6 +3,8 @@
 //! 生产端：请求 pipeline 发送 `RequestLogEntry`。
 //! 消费端：独立 tokio 任务累积到 50 条或 5 秒 flush 一次。
 
+use std::collections::VecDeque;
+
 use chrono::Utc;
 use sqlx::SqlitePool;
 use tauri::{AppHandle, Emitter};
@@ -35,6 +37,8 @@ pub struct RequestLogEntry {
     pub upstream_cache_read: Option<u32>,
     pub retry_count: u32,
     pub error_message: Option<String>,
+    /// 仅错误路径填充, 截断至 4KB
+    pub upstream_response_body: Option<String>,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -63,7 +67,7 @@ pub async fn run_consumer(
     mut rx: mpsc::Receiver<RequestLogEntry>,
     app: AppHandle,
 ) {
-    let mut buffer: Vec<RequestLogEntry> = Vec::with_capacity(FLUSH_SIZE);
+    let mut buffer: VecDeque<RequestLogEntry> = VecDeque::with_capacity(FLUSH_SIZE);
     let mut ticker = interval(FLUSH_INTERVAL);
 
     loop {
@@ -72,16 +76,14 @@ pub async fn run_consumer(
                 match maybe_entry {
                     Some(entry) => {
                         if buffer.len() >= BUFFER_MAX {
-                            // drop 最老的，避免内存爆炸
-                            buffer.remove(0);
+                            buffer.pop_front();
                         }
-                        buffer.push(entry);
+                        buffer.push_back(entry);
                         if buffer.len() >= FLUSH_SIZE {
                             flush(&pool, &mut buffer, &app).await;
                         }
                     }
                     None => {
-                        // sender 全部关闭，drain 剩余
                         flush(&pool, &mut buffer, &app).await;
                         break;
                     }
@@ -96,18 +98,18 @@ pub async fn run_consumer(
     }
 }
 
-async fn flush(pool: &SqlitePool, buffer: &mut Vec<RequestLogEntry>, app: &AppHandle) {
+async fn flush(pool: &SqlitePool, buffer: &mut VecDeque<RequestLogEntry>, app: &AppHandle) {
     if buffer.is_empty() {
         return;
     }
-    let batch = std::mem::take(buffer);
+    let batch: Vec<RequestLogEntry> = buffer.drain(..).collect();
     debug!(count = batch.len(), "flushing request logs");
 
     let mut tx = match pool.begin().await {
         Ok(tx) => tx,
         Err(e) => {
             warn!(?e, "无法开启事务, 放回 buffer");
-            *buffer = batch;
+            buffer.extend(batch);
             let _ = app.emit("log_write_failed", e.to_string());
             return;
         }
@@ -121,8 +123,8 @@ async fn flush(pool: &SqlitePool, buffer: &mut Vec<RequestLogEntry>, app: &AppHa
                 http_status, ttft_ms, total_latency_ms,
                 upstream_input_tokens, upstream_output_tokens,
                 upstream_cache_creation, upstream_cache_read,
-                retry_count, error_message)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                retry_count, error_message, upstream_response_body)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
         )
         .bind(entry.id.to_string())
         .bind(entry.timestamp_ms)
@@ -143,6 +145,7 @@ async fn flush(pool: &SqlitePool, buffer: &mut Vec<RequestLogEntry>, app: &AppHa
         .bind(entry.upstream_cache_read.map(|v| v as i64))
         .bind(entry.retry_count as i64)
         .bind(entry.error_message)
+        .bind(entry.upstream_response_body)
         .execute(&mut *tx)
         .await;
         if let Err(e) = result {

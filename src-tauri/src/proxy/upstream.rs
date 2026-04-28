@@ -15,6 +15,9 @@ pub enum UpstreamResponse {
         status: StatusCode,
         headers: ReqHeaderMap,
         body: Value,
+        /// 原始响应文本。仅在非 2xx 时填充, 用于错误路径诊断展示;
+        /// 成功路径不保留, 避免每个响应多 hold 一份 KB 级 String。
+        body_text: Option<String>,
     },
     Streaming {
         status: StatusCode,
@@ -51,11 +54,13 @@ pub async fn send(
         // 非流式：完整读取
         let text = resp.text().await?;
         let body = serde_json::from_str::<Value>(&text)
-            .unwrap_or_else(|_| serde_json::json!({ "raw": text }));
+            .unwrap_or_else(|_| serde_json::json!({ "raw": text.clone() }));
+        let body_text = if status.is_success() { None } else { Some(text) };
         Ok(UpstreamResponse::NonStreaming {
             status,
             headers: resp_headers,
             body,
+            body_text,
         })
     }
 }

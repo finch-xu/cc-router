@@ -14,11 +14,12 @@ use std::time::Duration;
 use chrono::Utc;
 use sqlx::SqlitePool;
 use tauri::{AppHandle, Emitter};
-use tokio::sync::RwLock;
+use tokio::sync::{mpsc, RwLock};
 use tracing::{info, warn};
 use uuid::Uuid;
 
 use crate::error::AppResult;
+use crate::observability::events::{self, EventEntry};
 use crate::subscription::model::{SubscriptionRuntime, SubscriptionState};
 use crate::subscription::store;
 
@@ -48,16 +49,18 @@ pub struct Transition {
 pub fn apply<'a>(
     pool: &'a SqlitePool,
     app: &'a AppHandle,
+    event_tx: &'a mpsc::Sender<EventEntry>,
     rt: Arc<RwLock<SubscriptionRuntime>>,
     event: Event,
 ) -> Pin<Box<dyn Future<Output = AppResult<Transition>> + Send + 'a>> {
     Box::pin(async move {
+        let prev_state;
         let (transition, id, error_message_update) = {
             let mut guard = rt.write().await;
+            prev_state = guard.state;
             transition(&mut guard, &event)
         };
 
-        // 持久化（§6.5）
         if transition.state_changed {
             let is_auth_failed = transition.new_state == SubscriptionState::AuthFailed;
             store::update_auth_failed(
@@ -69,16 +72,37 @@ pub fn apply<'a>(
             .await?;
 
             let _ = app.emit("subscription_state_changed", &id.to_string());
+
+            let display_name = rt.read().await.row.display_name.clone();
+            let from_str = serde_json::to_value(prev_state)
+                .ok()
+                .and_then(|v| v.as_str().map(str::to_string))
+                .unwrap_or_default();
+            let to_str = serde_json::to_value(transition.new_state)
+                .ok()
+                .and_then(|v| v.as_str().map(str::to_string))
+                .unwrap_or_default();
+            events::record_state_change(
+                event_tx,
+                id,
+                format!("{}: {} → {}", display_name, from_str, to_str),
+                serde_json::json!({
+                    "from": prev_state,
+                    "to": transition.new_state,
+                    "reason": describe_event(&event),
+                    "last_error": error_message_update,
+                }),
+            );
         }
 
-        // 冷却定时器
         if let Some(duration) = transition.schedule_cooldown {
             let pool = pool.clone();
             let app = app.clone();
+            let event_tx_clone = event_tx.clone();
             let rt = rt.clone();
             tokio::spawn(async move {
                 tokio::time::sleep(duration).await;
-                if let Err(e) = apply(&pool, &app, rt, Event::CooldownExpired).await {
+                if let Err(e) = apply(&pool, &app, &event_tx_clone, rt, Event::CooldownExpired).await {
                     warn!(?e, "cooldown apply 失败");
                 }
             });
@@ -86,6 +110,19 @@ pub fn apply<'a>(
 
         Ok(transition)
     })
+}
+
+fn describe_event(e: &Event) -> &'static str {
+    match e {
+        Event::RequestSucceeded => "request_succeeded",
+        Event::HttpStatus(_) => "http_status",
+        Event::NetworkError => "network_error",
+        Event::CooldownExpired => "cooldown_expired",
+        Event::UserEnable => "user_enable",
+        Event::UserDisable => "user_disable",
+        Event::UserUpdateKey => "user_update_key",
+        Event::UserManualReset => "user_manual_reset",
+    }
 }
 
 fn transition(

@@ -102,6 +102,7 @@ async fn scan_and_recheck(state: &AppState) {
             match state_machine::apply(
                 &state.db,
                 &state.app_handle,
+                &state.event_log_tx,
                 rt.clone(),
                 state_machine::Event::UserManualReset,
             )

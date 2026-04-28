@@ -5,6 +5,7 @@ use tauri::AppHandle;
 use tokio::sync::{mpsc, RwLock};
 use uuid::Uuid;
 
+use crate::observability::events::EventEntry;
 use crate::observability::request_log::RequestLogEntry;
 use crate::provider::model::Provider;
 use crate::settings::model::Settings;
@@ -21,6 +22,7 @@ pub struct AppState {
     pub settings: Arc<RwLock<Settings>>,
     pub proxy_port: Arc<RwLock<u16>>,
     pub request_log_tx: mpsc::Sender<RequestLogEntry>,
+    pub event_log_tx: mpsc::Sender<EventEntry>,
     pub http_client: reqwest::Client,
     /// 短超时(30s) 单例, 仅用于订阅可达性探测(测试连接 + 后台巡检)。
     /// 与 `http_client` 的 600s 上限分离: 探测期望快速判定, 慢响应等同失败。

@@ -1,6 +1,8 @@
 import { invoke } from "@tauri-apps/api/core";
 import type {
   CreateSubscriptionInput,
+  EventFilters,
+  ListEventsResult,
   ListRequestsResult,
   OnboardingState,
   ProviderInfo,
@@ -52,6 +54,14 @@ export const api = {
     filters?: RequestLogFilters,
   ) =>
     invoke<ListRequestsResult>("list_requests", { page, pageSize, filters }),
+
+  // event stream (kind=request / subscription_state_change / system_error)
+  listEvents: (
+    page: number,
+    pageSize: number,
+    filters?: EventFilters,
+  ) =>
+    invoke<ListEventsResult>("list_events", { page, pageSize, filters }),
 
   // settings / proxy
   getSettings: () => invoke<Settings>("get_settings"),

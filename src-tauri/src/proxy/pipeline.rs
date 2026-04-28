@@ -13,6 +13,7 @@ use tracing::{info, warn};
 use uuid::Uuid;
 
 use crate::error::AppResult;
+use crate::observability::events::{self, Severity};
 use crate::observability::request_log::{RequestLogEntry, RequestStatus};
 use crate::proxy::handler::error_body;
 use crate::proxy::overloaded;
@@ -23,6 +24,24 @@ use crate::state::AppState;
 use crate::subscription::state_machine;
 use crate::virtual_model::scheduler::build_candidate_order;
 use crate::virtual_model::VirtualModelName;
+
+const ERROR_BODY_LIMIT: usize = 4096;
+
+/// 按 char_indices 找 UTF-8 边界, 避免切坏多字节字符
+fn truncate_body(text: &str, limit: usize) -> String {
+    if text.len() <= limit {
+        return text.to_string();
+    }
+    let cut = text
+        .char_indices()
+        .take_while(|(idx, _)| *idx <= limit)
+        .last()
+        .map(|(idx, _)| idx)
+        .unwrap_or(0);
+    let mut out = text[..cut].to_string();
+    out.push_str("...[truncated]");
+    out
+}
 
 fn emit_attempt_started(state: &AppState, sub_id: Uuid, vm_name: VirtualModelName) {
     let _ = state.app_handle.emit(
@@ -100,9 +119,12 @@ pub async fn dispatch(
 
     let mut retry_count: u32 = 0;
     let start = Instant::now();
-    let request_id = Uuid::new_v4();
+    // 一次 dispatch 可能产生多个 attempt(每次 retry 一行日志)。每个 attempt 用独立 id,
+    // 避免 PRIMARY KEY 冲突 + 让用户在 Logs 页能看到每次 retry 的具体错误。
+    let dispatch_id = Uuid::new_v4();
 
     for sub_id in order.candidate_ids {
+        let attempt_id = Uuid::new_v4();
         let rt = {
             let subs_map = state.subscriptions.read().await;
             subs_map.get(&sub_id).cloned()
@@ -190,7 +212,8 @@ pub async fn dispatch(
         );
 
         info!(
-            %request_id,
+            %dispatch_id,
+            %attempt_id,
             %sub_id,
             %display_name,
             %real_model,
@@ -214,6 +237,7 @@ pub async fn dispatch(
                 status,
                 headers: resp_headers,
                 body: resp_body,
+                body_text,
             }) => {
                 emit_attempt_finished(state, sub_id, vm_name, status.is_success());
                 let should_retry = classify_response(status.as_u16(), None);
@@ -228,28 +252,40 @@ pub async fn dispatch(
                         }
                     }
                 };
-                let _ = state_machine::apply(&state.db, &state.app_handle, rt.clone(), event).await;
+                let _ = state_machine::apply(
+                    &state.db,
+                    &state.app_handle,
+                    &state.event_log_tx,
+                    rt.clone(),
+                    event,
+                )
+                .await;
 
-                if let ShouldRetry::Yes(_) = should_retry {
-                    retry_count += 1;
-                    continue;
-                }
-
+                let is_success = status.is_success();
                 let response_model_name = resp_body
                     .get("model")
                     .and_then(|v| v.as_str())
                     .map(|s| s.to_string());
 
-                // 改写响应 model 字段：真实名 → 虚拟名（§5.4）；fallback 透传不改写
-                let final_body = if is_fallback {
-                    resp_body
+                let (req_status, error_message, upstream_body_log) = if is_success {
+                    (RequestStatus::Success, None, None)
                 } else {
-                    rewrite_response_model(resp_body, vm_name.as_str())
+                    (
+                        RequestStatus::Error,
+                        Some(format!("HTTP {}", status.as_u16())),
+                        body_text.as_deref().map(|s| truncate_body(s, ERROR_BODY_LIMIT)),
+                    )
                 };
 
-                // 日志
+                // 改写响应 model 字段：真实名 → 虚拟名（§5.4）；fallback 透传不改写
+                let final_body = if is_success && !is_fallback {
+                    rewrite_response_model(resp_body, vm_name.as_str())
+                } else {
+                    resp_body
+                };
+
                 let entry = RequestLogEntry {
-                    id: request_id,
+                    id: attempt_id,
                     timestamp_ms: chrono::Utc::now().timestamp_millis(),
                     virtual_model_name: vm_name,
                     subscription_id: sub_id,
@@ -258,11 +294,7 @@ pub async fn dispatch(
                     real_model_name: real_model.clone(),
                     response_model_name,
                     is_streaming: false,
-                    status: if status.is_success() {
-                        RequestStatus::Success
-                    } else {
-                        RequestStatus::Error
-                    },
+                    status: req_status,
                     http_status: Some(status.as_u16()),
                     ttft_ms: None,
                     total_latency_ms: Some(start.elapsed().as_millis() as u64),
@@ -271,9 +303,39 @@ pub async fn dispatch(
                     upstream_cache_creation: extract_usage(&final_body, "cache_creation_input_tokens"),
                     upstream_cache_read: extract_usage(&final_body, "cache_read_input_tokens"),
                     retry_count,
-                    error_message: None,
+                    error_message: error_message.clone(),
+                    upstream_response_body: upstream_body_log,
                 };
                 let _ = state.request_log_tx.try_send(entry);
+
+                let event_summary = if is_success {
+                    format!("{} · {} · {}", vm_name.as_str(), display_name, real_model)
+                } else {
+                    format!(
+                        "{} · {} · {} HTTP {}",
+                        vm_name.as_str(),
+                        display_name,
+                        real_model,
+                        status.as_u16()
+                    )
+                };
+                let event_severity = if is_success {
+                    Severity::Info
+                } else {
+                    Severity::Error
+                };
+                events::record_request(
+                    &state.event_log_tx,
+                    attempt_id,
+                    sub_id,
+                    event_severity,
+                    event_summary,
+                );
+
+                if let ShouldRetry::Yes(_) = should_retry {
+                    retry_count += 1;
+                    continue;
+                }
 
                 return Ok(build_non_streaming_response(status, resp_headers, final_body));
             }
@@ -286,8 +348,14 @@ pub async fn dispatch(
                 // 流式：若非 2xx 按非流式错误处理
                 if !status.is_success() {
                     let event = state_machine::Event::HttpStatus(status.as_u16());
-                    let _ =
-                        state_machine::apply(&state.db, &state.app_handle, rt.clone(), event).await;
+                    let _ = state_machine::apply(
+                        &state.db,
+                        &state.app_handle,
+                        &state.event_log_tx,
+                        rt.clone(),
+                        event,
+                    )
+                    .await;
                     if matches!(
                         classify_response(status.as_u16(), None),
                         ShouldRetry::Yes(_)
@@ -302,24 +370,31 @@ pub async fn dispatch(
                 let _ = state_machine::apply(
                     &state.db,
                     &state.app_handle,
+                    &state.event_log_tx,
                     rt.clone(),
                     state_machine::Event::RequestSucceeded,
                 )
                 .await;
 
                 let log_tx = state.request_log_tx.clone();
+                let event_tx = state.event_log_tx.clone();
                 let response = sse::stream_response(
                     resp_headers,
                     stream,
                     vm_name,
-                    request_id,
+                    attempt_id,
                     sub_id,
                     provider_id,
                     endpoint_id,
                     real_model,
+                    display_name,
                     retry_count,
                     start,
                     log_tx,
+                    event_tx,
+                    state.db.clone(),
+                    state.app_handle.clone(),
+                    rt.clone(),
                 );
                 return Ok(response);
             }
@@ -329,10 +404,51 @@ pub async fn dispatch(
                 let _ = state_machine::apply(
                     &state.db,
                     &state.app_handle,
+                    &state.event_log_tx,
                     rt.clone(),
                     state_machine::Event::NetworkError,
                 )
                 .await;
+
+                let err_msg = format!("网络错误: {}", e);
+                let entry = RequestLogEntry {
+                    id: attempt_id,
+                    timestamp_ms: chrono::Utc::now().timestamp_millis(),
+                    virtual_model_name: vm_name,
+                    subscription_id: sub_id,
+                    provider_id: provider_id.clone(),
+                    endpoint_id: endpoint_id.clone(),
+                    real_model_name: real_model.clone(),
+                    response_model_name: None,
+                    is_streaming,
+                    status: RequestStatus::Error,
+                    http_status: None,
+                    ttft_ms: None,
+                    total_latency_ms: Some(start.elapsed().as_millis() as u64),
+                    upstream_input_tokens: None,
+                    upstream_output_tokens: None,
+                    upstream_cache_creation: None,
+                    upstream_cache_read: None,
+                    retry_count,
+                    error_message: Some(err_msg.clone()),
+                    upstream_response_body: None,
+                };
+                let _ = state.request_log_tx.try_send(entry);
+
+                events::record_request(
+                    &state.event_log_tx,
+                    attempt_id,
+                    sub_id,
+                    Severity::Error,
+                    format!(
+                        "{} · {} · {} {}",
+                        vm_name.as_str(),
+                        display_name,
+                        real_model,
+                        err_msg
+                    ),
+                );
+
                 retry_count += 1;
                 continue;
             }
@@ -348,6 +464,18 @@ pub async fn dispatch(
             summary.push(format!("- {}: {:?}", g.row.display_name, g.state));
         }
     }
+    drop(subs_map);
+
+    events::record_system_error(
+        &state.event_log_tx,
+        format!("虚拟模型 {} 全部候选不可用", vm_name.as_str()),
+        Some(serde_json::json!({
+            "virtual_model": vm_name.as_str(),
+            "dispatch_id": dispatch_id.to_string(),
+            "candidates": summary,
+        })),
+    );
+
     Ok(overloaded::response_with_summary(vm_name, &summary))
 }
 

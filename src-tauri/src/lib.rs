@@ -81,6 +81,7 @@ pub fn run() {
             commands::virtual_models::list_virtual_models,
             commands::virtual_models::update_virtual_model,
             commands::requests::list_requests,
+            commands::events::list_events,
             commands::settings::get_settings,
             commands::settings::update_settings,
             commands::settings::generate_new_token,
@@ -129,6 +130,14 @@ async fn bootstrap(
         observability::request_log::run_consumer(log_pool, log_rx, log_handle).await;
     });
 
+    // 6b. 事件流 channel (kind=request/subscription_state_change/system_error)
+    let (event_tx, event_rx) = mpsc::channel(1024);
+    let event_pool = pool.clone();
+    let event_handle = handle.clone();
+    tauri::async_runtime::spawn(async move {
+        observability::events::run_consumer(event_pool, event_rx, event_handle).await;
+    });
+
     // 7. HTTP client 单例
     // timeout(600s) 是整个 request 生命周期上限(含流式 body),与 Anthropic server-side 上限对齐;
     // 主要在真 hang 时兜底,正常 SSE 客户端断开会通过 client_tx 失败立即释放(见 sse.rs)。
@@ -153,6 +162,7 @@ async fn bootstrap(
         settings: Arc::new(RwLock::new(settings)),
         proxy_port: Arc::new(RwLock::new(0)),
         request_log_tx: log_tx,
+        event_log_tx: event_tx,
         http_client,
         probe_client,
         app_handle: handle.clone(),

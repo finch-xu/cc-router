@@ -244,6 +244,8 @@ export interface RequestLogDto {
   cache_creation_tokens?: number;
   cache_read_tokens?: number;
   error_message?: string;
+  /** 上游错误响应 body 截断(最多 4KB), 仅错误路径有值 */
+  upstream_response_body?: string;
 }
 
 export interface ListRequestsResult {
@@ -255,6 +257,40 @@ export interface RequestLogFilters {
   virtual_model_name?: VirtualModelName;
   provider_id?: string;
   status?: RequestStatus;
+}
+
+export type EventKind = "request" | "subscription_state_change" | "system_error";
+export type EventSeverity = "info" | "warn" | "error";
+
+export interface EventDto {
+  id: string;
+  timestamp: number;
+  kind: EventKind;
+  severity: EventSeverity;
+  subscription_id?: string;
+  request_id?: string;
+  summary: string;
+  /** 解析后的结构化对象, 后端已 JSON.parse */
+  payload?: unknown;
+}
+
+export interface ListEventsResult {
+  items: EventDto[];
+  total: number;
+}
+
+export interface EventFilters {
+  kind?: EventKind;
+  subscription_id?: string;
+  severity?: EventSeverity;
+}
+
+/** subscription_state_change 事件的 payload 反序列化形态 */
+export interface StateChangePayload {
+  from: SubscriptionState;
+  to: SubscriptionState;
+  reason: string;
+  last_error?: string | null;
 }
 
 // 路由实时事件(对应 proxy/pipeline.rs 里 emit 的 payload)

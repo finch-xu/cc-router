@@ -66,6 +66,7 @@
       "providers/ucloud.yaml",
       "migrations/001_init.sql",
       "migrations/002_add_supports_thinking_blocks.sql",
+      "migrations/003_add_events_and_diagnostics.sql",
       "../LICENSE"
     ],
     "category": "DeveloperTool",

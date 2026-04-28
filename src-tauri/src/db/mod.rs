@@ -17,6 +17,10 @@ const MIGRATIONS: &[(u32, &str)] = &[
         2,
         include_str!("../../migrations/002_add_supports_thinking_blocks.sql"),
     ),
+    (
+        3,
+        include_str!("../../migrations/003_add_events_and_diagnostics.sql"),
+    ),
 ];
 
 pub async fn init_pool(db_path: &Path) -> AppResult<SqlitePool> {
@@ -233,6 +237,17 @@ mod tests {
             .any(|r| r.try_get::<String, _>("name").map(|n| n == column).unwrap_or(false))
     }
 
+    async fn has_table(pool: &SqlitePool, table: &str) -> bool {
+        let row: (i64,) = sqlx::query_as(
+            "SELECT count(*) FROM sqlite_master WHERE type='table' AND name=?",
+        )
+        .bind(table)
+        .fetch_one(pool)
+        .await
+        .unwrap();
+        row.0 > 0
+    }
+
     #[tokio::test]
     async fn fresh_db_applies_all_migrations() {
         let pool = in_memory_pool().await;
@@ -240,12 +255,14 @@ mod tests {
         run_migrations(&pool, &dir).await.expect("migrate fresh");
 
         let versions = applied_versions(&pool).await;
-        assert_eq!(versions, vec![1, 2]);
+        assert_eq!(versions, vec![1, 2, 3]);
         assert!(has_column(&pool, "subscriptions", "supports_thinking_blocks").await);
+        assert!(has_column(&pool, "requests", "upstream_response_body").await);
+        assert!(has_table(&pool, "events").await);
     }
 
     #[tokio::test]
-    async fn legacy_v1_db_baselines_then_applies_v2() {
+    async fn legacy_v1_db_baselines_then_applies_increments() {
         let pool = in_memory_pool().await;
         // 模拟 v1 老 DB: 只跑 001, 不写 _schema_version
         for stmt in split_sql_statements(MIGRATIONS[0].1) {
@@ -257,8 +274,10 @@ mod tests {
         run_migrations(&pool, &dir).await.expect("migrate legacy");
 
         let versions = applied_versions(&pool).await;
-        assert_eq!(versions, vec![1, 2]); // baseline 写 v=1, 然后跑 v=2
+        assert_eq!(versions, vec![1, 2, 3]); // baseline v=1, 然后跑 v=2/v=3
         assert!(has_column(&pool, "subscriptions", "supports_thinking_blocks").await);
+        assert!(has_column(&pool, "requests", "upstream_response_body").await);
+        assert!(has_table(&pool, "events").await);
     }
 
     #[tokio::test]
@@ -270,7 +289,7 @@ mod tests {
         run_migrations(&pool, &dir).await.expect("third run");
 
         let versions = applied_versions(&pool).await;
-        assert_eq!(versions, vec![1, 2]); // 没有重复写
+        assert_eq!(versions, vec![1, 2, 3]); // 没有重复写
     }
 }
 

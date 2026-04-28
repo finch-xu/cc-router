@@ -6,6 +6,7 @@
 //! - 其他事件：原字节透传
 //! - 解析失败：warning + 原字节透传（§9.7）
 
+use std::sync::Arc;
 use std::time::Instant;
 
 use axum::body::Body;
@@ -15,11 +16,16 @@ use bytes::{Bytes, BytesMut};
 use futures::stream::BoxStream;
 use futures::{Stream, StreamExt};
 use reqwest::header::HeaderMap as ReqHeaderMap;
-use tokio::sync::mpsc;
+use sqlx::SqlitePool;
+use tauri::AppHandle;
+use tokio::sync::{mpsc, RwLock};
 use tracing::warn;
 use uuid::Uuid;
 
+use crate::observability::events::{self, EventEntry, Severity};
 use crate::observability::request_log::{RequestLogEntry, RequestStatus};
+use crate::subscription::model::SubscriptionRuntime;
+use crate::subscription::state_machine;
 use crate::virtual_model::VirtualModelName;
 
 #[allow(clippy::too_many_arguments)]
@@ -32,9 +38,14 @@ pub fn stream_response(
     provider_id: String,
     endpoint_id: String,
     real_model: String,
+    display_name: String,
     retry_count: u32,
     start: Instant,
     log_tx: mpsc::Sender<RequestLogEntry>,
+    event_log_tx: mpsc::Sender<EventEntry>,
+    pool: SqlitePool,
+    app: AppHandle,
+    sub_rt: Arc<RwLock<SubscriptionRuntime>>,
 ) -> Response {
     let (client_tx, client_rx) = mpsc::channel::<Result<Bytes, std::io::Error>>(64);
 
@@ -56,6 +67,7 @@ pub fn stream_response(
         let mut cache_read: Option<u32> = None;
         let mut response_model: Option<String> = None;
         let mut had_error = false;
+        let mut error_text: Option<String> = None;
 
         while let Some(chunk) = upstream.next().await {
             let chunk = match chunk {
@@ -63,6 +75,7 @@ pub fn stream_response(
                 Err(e) => {
                     warn!(?e, "upstream stream error");
                     had_error = true;
+                    error_text = Some(e.to_string());
                     if !wrote_any_event {
                         let _ = client_tx
                             .send(Ok(Bytes::from(format_error_event(&e.to_string()))))
@@ -121,18 +134,38 @@ pub fn stream_response(
             let _ = client_tx.send(Ok(buffer.freeze())).await;
         }
 
+        // 客户端断开走 client_tx send error 提前 return, 不会到此, 避免 ctrl+c 触发 transient
+        if had_error {
+            let _ = state_machine::apply(
+                &pool,
+                &app,
+                &event_log_tx,
+                sub_rt.clone(),
+                state_machine::Event::NetworkError,
+            )
+            .await;
+        }
+
         // 日志
         let total_ms = start.elapsed().as_millis() as u64;
         let ttft_ms = first_byte_at.map(|t| t.duration_since(start).as_millis() as u64);
+        let error_message = if had_error {
+            Some(format!(
+                "流式中断: {}",
+                error_text.as_deref().unwrap_or("upstream stream error")
+            ))
+        } else {
+            None
+        };
         let entry = RequestLogEntry {
             id: request_id,
             timestamp_ms: chrono::Utc::now().timestamp_millis(),
             virtual_model_name: vm_name,
             subscription_id,
-            provider_id,
+            provider_id: provider_id.clone(),
             endpoint_id,
-            real_model_name: real_model,
-            response_model_name: response_model,
+            real_model_name: real_model.clone(),
+            response_model_name: response_model.clone(),
             is_streaming: true,
             status: if had_error {
                 RequestStatus::Error
@@ -147,9 +180,35 @@ pub fn stream_response(
             upstream_cache_creation: cache_creation,
             upstream_cache_read: cache_read,
             retry_count,
-            error_message: None,
+            error_message: error_message.clone(),
+            upstream_response_body: None,
         };
         let _ = log_tx.try_send(entry);
+
+        // emit kind=request event 用于事件流时间线
+        let event_severity = if had_error {
+            Severity::Error
+        } else {
+            Severity::Info
+        };
+        let event_summary = if had_error {
+            format!(
+                "{} · {} · {} {}",
+                vm_name.as_str(),
+                display_name,
+                real_model,
+                error_message.as_deref().unwrap_or("流式中断")
+            )
+        } else {
+            format!("{} · {} · {} (SSE)", vm_name.as_str(), display_name, real_model)
+        };
+        events::record_request(
+            &event_log_tx,
+            request_id,
+            subscription_id,
+            event_severity,
+            event_summary,
+        );
     });
 
     let body_stream = stream_from_receiver(client_rx);

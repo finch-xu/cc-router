@@ -365,6 +365,7 @@ pub async fn update_subscription_key(
         let _ = state_machine::apply(
             &state.db,
             &state.app_handle,
+            &state.event_log_tx,
             rt,
             state_machine::Event::UserUpdateKey,
         )
@@ -417,7 +418,7 @@ pub async fn set_subscription_enabled(
     } else {
         state_machine::Event::UserDisable
     };
-    let _ = state_machine::apply(&state.db, &state.app_handle, rt, event).await;
+    let _ = state_machine::apply(&state.db, &state.app_handle, &state.event_log_tx, rt, event).await;
     Ok(())
 }
 
@@ -461,6 +462,7 @@ pub async fn test_connection(
         match state_machine::apply(
             &state.db,
             &state.app_handle,
+            &state.event_log_tx,
             rt.clone(),
             state_machine::Event::UserManualReset,
         )

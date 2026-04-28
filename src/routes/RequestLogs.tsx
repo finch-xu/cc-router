@@ -1,7 +1,9 @@
 import { useEffect, useMemo, useState } from "react";
 import { RefreshCw, ScrollText } from "lucide-react";
 import { EmptyState } from "@/components/EmptyState";
+import { Pagination } from "@/components/Pagination";
 import { ProviderLogo } from "@/components/ProviderLogo";
+import { RequestDetailDialog } from "@/components/RequestDetailDialog";
 import { useRequests } from "@/hooks/useRequests";
 import { useProviders } from "@/hooks/useProviders";
 import { useT } from "@/i18n";
@@ -56,6 +58,7 @@ export function RequestLogsPage() {
   const [vmFilter, setVmFilter] = useState<VirtualModelName | undefined>();
   const [providerFilter, setProviderFilter] = useState<string | undefined>();
   const [statusFilter, setStatusFilter] = useState<RequestStatus | undefined>();
+  const [activeRequest, setActiveRequest] = useState<RequestLogDto | null>(null);
 
   const filters = useMemo<RequestLogFilters | undefined>(() => {
     if (!vmFilter && !providerFilter && !statusFilter) return undefined;
@@ -263,8 +266,13 @@ export function RequestLogsPage() {
                 const lat = (row.total_latency_ms ?? 0) / 1000;
                 const provider = providerOf(row.provider_id);
                 const status = STATUS_TONE[row.status];
+                const isError = row.status !== "success";
                 return (
-                  <tr key={row.id}>
+                  <tr
+                    key={row.id}
+                    onClick={() => setActiveRequest(row)}
+                    style={{ cursor: "pointer" }}
+                  >
                     <td className="mono muted">{fmtTime(row.timestamp)}</td>
                     <td>
                       <div style={{ display: "inline-flex", alignItems: "center", gap: 4 }}>
@@ -272,6 +280,9 @@ export function RequestLogsPage() {
                           <span className="dot" />
                           {t(status.labelKey)}
                         </span>
+                        {isError && row.http_status != null && (
+                          <span className="pill tag mono">{row.http_status}</span>
+                        )}
                         {row.is_streaming && (
                           <span className="pill tag mono" title={t("requestLogs.sse")}>
                             SSE
@@ -307,17 +318,13 @@ export function RequestLogsPage() {
         </div>
       )}
 
-      {query.data && total > 0 && (
-        <div
-          style={{
-            display: "flex",
-            justifyContent: "flex-end",
-            gap: 8,
-            marginTop: 16,
-            alignItems: "center",
-          }}
-        >
-          {hasActiveFilter && (
+      <Pagination
+        total={total}
+        page={page}
+        totalPages={totalPages}
+        onChange={setPage}
+        trailing={
+          hasActiveFilter ? (
             <button
               className="btn sm"
               onClick={clearFilters}
@@ -326,25 +333,14 @@ export function RequestLogsPage() {
             >
               {t("requestLogs.clearFilter")}
             </button>
-          )}
-          <button
-            className="btn sm"
-            disabled={page <= 1}
-            onClick={() => setPage((p) => Math.max(1, p - 1))}
-            type="button"
-          >
-            {t("requestLogs.prevPage")}
-          </button>
-          <button
-            className="btn sm"
-            disabled={page >= totalPages}
-            onClick={() => setPage((p) => p + 1)}
-            type="button"
-          >
-            {t("requestLogs.nextPage")}
-          </button>
-        </div>
-      )}
+          ) : undefined
+        }
+      />
+
+      <RequestDetailDialog
+        request={activeRequest}
+        onClose={() => setActiveRequest(null)}
+      />
     </>
   );
 }

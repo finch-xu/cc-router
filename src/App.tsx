@@ -5,7 +5,7 @@ import { SubscriptionsPage } from "@/routes/Subscriptions";
 import { SubscriptionNewPage } from "@/routes/SubscriptionNew";
 import { SubscriptionEditPage } from "@/routes/SubscriptionEdit";
 import { SettingsPage } from "@/routes/Settings";
-import { RequestLogsPage } from "@/routes/RequestLogs";
+import { LogsPage } from "@/routes/Logs";
 import { AboutPage } from "@/routes/About";
 import { GuidePage } from "@/routes/Guide";
 import { OnboardingDisclaimerPage } from "@/routes/OnboardingDisclaimer";
@@ -47,7 +47,7 @@ function AppInner() {
         <Route path="/subscriptions" element={<SubscriptionsPage />} />
         <Route path="/subscriptions/new" element={<SubscriptionNewPage />} />
         <Route path="/subscriptions/:id" element={<SubscriptionEditPage />} />
-        <Route path="/request-logs" element={<RequestLogsPage />} />
+        <Route path="/request-logs" element={<LogsPage />} />
         <Route path="/guide" element={<GuidePage />} />
         <Route path="/settings" element={<SettingsPage />} />
         <Route path="/about" element={<AboutPage />} />

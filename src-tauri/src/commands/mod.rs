@@ -1,4 +1,5 @@
 pub mod app;
+pub mod events;
 pub mod onboarding;
 pub mod providers;
 pub mod proxy;
