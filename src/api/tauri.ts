@@ -14,6 +14,7 @@ import type {
   SubscriptionDto,
   SubscriptionPatch,
   TestConnectionResult,
+  UpdateInfo,
   UpdateVirtualModelInput,
   VirtualModelDto,
   VirtualModelName,
@@ -77,4 +78,8 @@ export const api = {
 
   // app
   factoryReset: () => invoke<void>("factory_reset"),
+
+  // updater (运行时按 settings.update_source 切换 manifest 源)
+  checkForUpdate: () => invoke<UpdateInfo | null>("check_for_update"),
+  downloadInstallUpdate: () => invoke<void>("download_install_update"),
 };

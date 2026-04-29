@@ -1,19 +1,22 @@
-import { check, type Update } from "@tauri-apps/plugin-updater";
 import { invoke } from "@tauri-apps/api/core";
 import { open as openShell } from "@tauri-apps/plugin-shell";
+import type { UpdateSource } from "@/types";
 
-const RELEASE_PAGE_URL = "https://github.com/finch-xu/cc-router/releases/latest";
+// 与 Rust 侧 src-tauri/src/updater_source.rs 的两个常量保持文本一致。
+// 改这里时记得同步那边。
+export const INTERNATIONAL_MANIFEST_URL =
+  "https://github.com/finch-xu/cc-router/releases/latest/download/latest.json";
+// 阿里云 OSS bucket=cc-router (oss-cn-shanghai),bucket 直访 URL,公共读 ACL。
+export const CHINA_MANIFEST_URL =
+  "https://cc-router.oss-cn-shanghai.aliyuncs.com/latest.json";
 
-export type { Update };
+const INTERNATIONAL_RELEASE_PAGE = "https://github.com/finch-xu/cc-router/releases/latest";
+// TODO(oss): OSS 部署后给国内用户一个对应的下载列表页(可以是 GitHub Pages 或 OSS 静态站)
+const CHINA_RELEASE_PAGE = INTERNATIONAL_RELEASE_PAGE;
 
-export async function checkForUpdate(): Promise<Update | null> {
-  try {
-    const update = await check();
-    return update ?? null;
-  } catch (e) {
-    console.warn("[updater] check failed", e);
-    return null;
-  }
+/** 把 settings.update_source 映射到 manifest URL。null/未知 → 国际(GitHub) */
+export function manifestUrlForSource(source: UpdateSource | null): string {
+  return source === "china" ? CHINA_MANIFEST_URL : INTERNATIONAL_MANIFEST_URL;
 }
 
 export async function isAppImageRuntime(): Promise<boolean> {
@@ -28,8 +31,9 @@ export async function relaunchApp(): Promise<void> {
   await invoke("relaunch_app");
 }
 
-export async function openReleasePage(): Promise<void> {
-  await openShell(RELEASE_PAGE_URL).catch(() => {});
+export async function openReleasePage(source: UpdateSource | null): Promise<void> {
+  const url = source === "china" ? CHINA_RELEASE_PAGE : INTERNATIONAL_RELEASE_PAGE;
+  await openShell(url).catch(() => {});
 }
 
 export function isLinuxPlatform(): boolean {

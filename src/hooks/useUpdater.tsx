@@ -8,13 +8,16 @@ import {
   useState,
   type ReactNode,
 } from "react";
+import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import {
-  checkForUpdate,
   isAppImageRuntime,
   isLinuxPlatform,
+  manifestUrlForSource,
   relaunchApp,
-  type Update,
 } from "@/lib/updater";
+import { api } from "@/api/tauri";
+import { useSettings } from "@/hooks/useSettings";
+import type { UpdaterProgressEvent } from "@/types";
 import { version as PKG_VERSION } from "../../package.json";
 
 export type UpdaterStatus =
@@ -33,11 +36,11 @@ export interface UpdaterProgress {
 
 /**
  * 区分两种检测结果:
- * - auto: 走 Tauri plugin-updater 完整流程 (下载 + 验签 + 安装)
+ * - auto: Rust 自定义 command 完整流程 (下载 + 验签 + 安装)
  * - manual: 仅检测到新版,需用户手动下载 (Linux deb 唯一情况)
  */
 export type DetectedUpdate =
-  | { kind: "auto"; update: Update; version: string; body?: string }
+  | { kind: "auto"; version: string; body?: string }
   | { kind: "manual"; version: string; body?: string };
 
 export interface UpdaterState {
@@ -53,10 +56,10 @@ export interface UpdaterState {
 
 const UpdaterContext = createContext<UpdaterState | null>(null);
 
-const MANIFEST_URL =
-  "https://github.com/finch-xu/cc-router/releases/latest/download/latest.json";
+const PROGRESS_EVENT = "updater://progress";
 
 export function UpdaterProvider({ children }: { children: ReactNode }) {
+  const { data: settings } = useSettings();
   const [status, setStatus] = useState<UpdaterStatus>("idle");
   const [detected, setDetected] = useState<DetectedUpdate | null>(null);
   const [progress, setProgress] = useState<UpdaterProgress | null>(null);
@@ -77,59 +80,21 @@ export function UpdaterProvider({ children }: { children: ReactNode }) {
     }
   }, [flushProgress]);
 
-  const check = useCallback(async () => {
-    setStatus("checking");
-    setErrorMessage(null);
-    try {
-      const linux = isLinuxPlatform();
-      if (linux && !(await isAppImageRuntime())) {
-        const manual = await fetchManifestForManualCompare();
-        if (manual) {
-          setDetected(manual);
-          setStatus("available");
-        } else {
-          setDetected(null);
-          setStatus("up_to_date");
-        }
-        return;
-      }
-
-      const update = await checkForUpdate();
-      if (!update) {
-        setDetected(null);
-        setStatus("up_to_date");
-        return;
-      }
-      setDetected({
-        kind: "auto",
-        update,
-        version: update.version,
-        body: update.body,
-      });
-      setStatus("available");
-    } catch (e) {
-      console.warn("[updater] check failed", e);
-      setErrorMessage(e instanceof Error ? e.message : String(e));
-      setStatus("error");
-    }
-  }, []);
-
-  const install = useCallback(async () => {
-    if (!detected || detected.kind !== "auto") return;
-    setStatus("downloading");
-    downloadedRef.current = 0;
-    totalRef.current = null;
-    setProgress({ downloaded: 0, total: null });
-    try {
-      await detected.update.download((event) => {
-        if (event.event === "Started") {
-          totalRef.current = event.data.contentLength ?? null;
+  // 监听 Rust 推送的下载进度
+  useEffect(() => {
+    let unlisten: UnlistenFn | null = null;
+    let cancelled = false;
+    void (async () => {
+      const fn = await listen<UpdaterProgressEvent>(PROGRESS_EVENT, (e) => {
+        const payload = e.payload;
+        if (payload.phase === "started") {
+          totalRef.current = payload.content_length ?? null;
           downloadedRef.current = 0;
           scheduleProgressFlush();
-        } else if (event.event === "Progress") {
-          downloadedRef.current += event.data.chunkLength;
+        } else if (payload.phase === "progress") {
+          downloadedRef.current += payload.chunk_length;
           scheduleProgressFlush();
-        } else if (event.event === "Finished") {
+        } else if (payload.phase === "finished") {
           if (rafIdRef.current !== null) {
             cancelAnimationFrame(rafIdRef.current);
             rafIdRef.current = null;
@@ -140,15 +105,73 @@ export function UpdaterProvider({ children }: { children: ReactNode }) {
           });
         }
       });
+      if (cancelled) {
+        fn();
+      } else {
+        unlisten = fn;
+      }
+    })();
+    return () => {
+      cancelled = true;
+      unlisten?.();
+    };
+  }, [scheduleProgressFlush]);
+
+  const check = useCallback(async () => {
+    setStatus("checking");
+    setErrorMessage(null);
+    try {
+      const linux = isLinuxPlatform();
+      if (linux && !(await isAppImageRuntime())) {
+        const manual = await fetchManifestForManualCompare(
+          manifestUrlForSource(settings?.update_source ?? null),
+        );
+        if (manual) {
+          setDetected(manual);
+          setStatus("available");
+        } else {
+          setDetected(null);
+          setStatus("up_to_date");
+        }
+        return;
+      }
+
+      const info = await api.checkForUpdate();
+      if (!info) {
+        setDetected(null);
+        setStatus("up_to_date");
+        return;
+      }
+      setDetected({
+        kind: "auto",
+        version: info.version,
+        body: info.body,
+      });
+      setStatus("available");
+    } catch (e) {
+      console.warn("[updater] check failed", e);
+      setErrorMessage(e instanceof Error ? e.message : String(e));
+      setStatus("error");
+    }
+  }, [settings?.update_source]);
+
+  const install = useCallback(async () => {
+    if (!detected || detected.kind !== "auto") return;
+    setStatus("downloading");
+    downloadedRef.current = 0;
+    totalRef.current = null;
+    setProgress({ downloaded: 0, total: null });
+    try {
+      // Rust 端跑 download_and_install,进度通过 PROGRESS_EVENT 推送(上面 useEffect 监听)
       // 解压安装但 *不* 自动重启,留给用户决定时机 (cc-router 是常驻代理)
-      await detected.update.install();
+      await api.downloadInstallUpdate();
       setStatus("ready");
     } catch (e) {
       console.warn("[updater] install failed", e);
       setErrorMessage(e instanceof Error ? e.message : String(e));
       setStatus("error");
     }
-  }, [detected, scheduleProgressFlush]);
+  }, [detected]);
 
   const restart = useCallback(async () => {
     try {
@@ -206,9 +229,11 @@ export function useUpdaterAutoCheck() {
   }, []);
 }
 
-async function fetchManifestForManualCompare(): Promise<DetectedUpdate | null> {
+async function fetchManifestForManualCompare(
+  manifestUrl: string,
+): Promise<DetectedUpdate | null> {
   try {
-    const resp = await fetch(MANIFEST_URL, { cache: "no-store" });
+    const resp = await fetch(manifestUrl, { cache: "no-store" });
     if (!resp.ok) return null;
     const manifest = (await resp.json()) as { version: string; notes?: string };
     if (!isNewer(manifest.version, PKG_VERSION)) return null;

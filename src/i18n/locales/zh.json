@@ -23,6 +23,11 @@
 
   "settings.title": "设置",
   "settings.subtitle": "代理服务、客户端配置、鉴权与数据保留期。",
+  "settings.section.update": "应用更新",
+  "settings.update.source.label": "更新源",
+  "settings.update.source.desc": "国际源走 GitHub Releases 直连;中国大陆源走阿里云 OSS 镜像,二进制和签名都同步。切换后下次检查更新立即生效,无需重启。",
+  "settings.update.source.international": "国际(GitHub Releases)",
+  "settings.update.source.china": "中国大陆(阿里云 OSS)",
   "settings.section.proxy": "代理服务",
   "settings.proxy.statusRunning": "运行中",
   "settings.proxy.statusStopped": "未运行",

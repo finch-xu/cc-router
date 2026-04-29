@@ -18,6 +18,7 @@ import {
   useGenerateNewToken,
 } from "@/hooks/useSettings";
 import { useT, type LanguagePref } from "@/i18n";
+import type { UpdateSource } from "@/types";
 
 export function SettingsPage() {
   const { t } = useT();
@@ -89,6 +90,11 @@ export function SettingsPage() {
     await updateMut.mutateAsync({ preferred_language: next });
   }
 
+  // 更新源同样即时保存:运行时一次性 builder 下次 check 自动按新源走
+  async function changeUpdateSource(next: UpdateSource) {
+    await updateMut.mutateAsync({ update_source: next });
+  }
+
   async function regenerateToken() {
     try {
       await generateTokenMut.mutateAsync();
@@ -143,6 +149,32 @@ export function SettingsPage() {
               <option value="zh">中文</option>
               <option value="en">English</option>
               <option value="ja">日本語</option>
+            </select>
+          </div>
+        </div>
+      </div>
+
+      {/* 更新设置 */}
+      <div className="card section">
+        <div className="card-head">
+          <div className="card-title">{t("settings.section.update")}</div>
+        </div>
+        <div className="card-body">
+          <div className="setting-row">
+            <div className="label-col">
+              {t("settings.update.source.label")}
+              <div className="desc">{t("settings.update.source.desc")}</div>
+            </div>
+            <select
+              className="select"
+              style={{ maxWidth: 240 }}
+              value={settings.data?.update_source ?? "international"}
+              onChange={(e) => void changeUpdateSource(e.target.value as UpdateSource)}
+            >
+              <option value="international">
+                {t("settings.update.source.international")}
+              </option>
+              <option value="china">{t("settings.update.source.china")}</option>
             </select>
           </div>
         </div>

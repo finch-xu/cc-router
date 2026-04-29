@@ -13,6 +13,7 @@ pub mod settings;
 pub mod state;
 pub mod subscription;
 pub mod tray;
+pub mod updater_source;
 pub mod virtual_model;
 
 use std::sync::Arc;
@@ -92,6 +93,8 @@ pub fn run() {
             commands::app::factory_reset,
             commands::app::is_appimage_runtime,
             commands::app::relaunch_app,
+            commands::updater::check_for_update,
+            commands::updater::download_install_update,
         ])
         .run(tauri::generate_context!())
         .expect("运行 cc-router 时发生错误");

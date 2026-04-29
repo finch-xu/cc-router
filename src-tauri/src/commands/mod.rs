@@ -6,4 +6,5 @@ pub mod proxy;
 pub mod requests;
 pub mod settings;
 pub mod subscriptions;
+pub mod updater;
 pub mod virtual_models;

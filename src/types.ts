@@ -199,7 +199,15 @@ export interface Settings {
   cors_allow_origin: string;
   /** 前端 UI 语言偏好: "system" 跟随系统 / "zh" / "en" / "ja"。默认 system */
   preferred_language: "system" | "zh" | "en" | "ja";
+  /**
+   * 更新源选择: null=未设置(走 tauri.conf.json 默认 GitHub),
+   * "international"=国际(GitHub) / "china"=中国大陆(阿里云 OSS)。
+   * 首次启动后前端按 navigator.language 自动写入。
+   */
+  update_source: UpdateSource | null;
 }
+
+export type UpdateSource = "international" | "china";
 
 export interface SettingsPatch {
   proxy_port?: number;
@@ -211,8 +219,22 @@ export interface SettingsPatch {
   cors_enabled?: boolean;
   cors_allow_origin?: string;
   preferred_language?: "system" | "zh" | "en" | "ja";
+  update_source?: UpdateSource;
   // 注意: auth_token 不在 patch 里,必须通过 generateNewToken() 改
 }
+
+/** Rust 侧 commands::updater::UpdateInfo */
+export interface UpdateInfo {
+  version: string;
+  current_version: string;
+  body?: string;
+}
+
+/** updater://progress 事件 payload */
+export type UpdaterProgressEvent =
+  | { phase: "started"; content_length: number | null }
+  | { phase: "progress"; chunk_length: number }
+  | { phase: "finished" };
 
 export interface ProxyStatus {
   port: number;

@@ -30,6 +30,11 @@ pub struct Settings {
     /// system 模式下前端用 navigator.language 决定 zh 或 en。
     #[serde(default = "default_preferred_language")]
     pub preferred_language: String,
+    /// 更新源选择: None=未设置(走 tauri.conf.json 默认 GitHub),
+    /// Some("international")=国际(GitHub) / Some("china")=中国大陆(阿里云 OSS)。
+    /// 首次启动后前端按 navigator.language 自动写入,之后用户 Settings 切换覆盖。
+    #[serde(default)]
+    pub update_source: Option<String>,
 }
 
 fn default_port() -> u16 {
@@ -67,6 +72,7 @@ impl Default for Settings {
             cors_enabled: default_cors_enabled(),
             cors_allow_origin: default_cors_origin(),
             preferred_language: default_preferred_language(),
+            update_source: None,
         }
     }
 }
@@ -82,6 +88,7 @@ pub struct SettingsPatch {
     pub cors_enabled: Option<bool>,
     pub cors_allow_origin: Option<String>,
     pub preferred_language: Option<String>,
+    pub update_source: Option<String>,
 }
 
 impl Settings {
@@ -113,5 +120,55 @@ impl Settings {
         if let Some(p) = patch.preferred_language {
             self.preferred_language = p;
         }
+        if let Some(p) = patch.update_source {
+            self.update_source = Some(p);
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn default_update_source_is_none() {
+        assert!(Settings::default().update_source.is_none());
+    }
+
+    #[test]
+    fn legacy_settings_json_without_update_source_deserializes_to_none() {
+        // 老版本 settings.json 里没有 update_source 字段,#[serde(default)] 应该填 None
+        let raw = r#"{
+            "proxy_port": 23456,
+            "listen_all": false,
+            "autostart": false,
+            "log_retention_days": 30,
+            "db_size_limit_mb": 500,
+            "auth_enabled": true,
+            "auth_token": "abc",
+            "cors_enabled": true,
+            "cors_allow_origin": "*",
+            "preferred_language": "system"
+        }"#;
+        let s: Settings = serde_json::from_str(raw).unwrap();
+        assert!(s.update_source.is_none());
+    }
+
+    #[test]
+    fn apply_patch_sets_update_source() {
+        let mut s = Settings::default();
+        s.apply_patch(SettingsPatch {
+            update_source: Some("china".into()),
+            ..Default::default()
+        });
+        assert_eq!(s.update_source.as_deref(), Some("china"));
+    }
+
+    #[test]
+    fn apply_patch_none_does_not_clear_update_source() {
+        let mut s = Settings::default();
+        s.update_source = Some("china".into());
+        s.apply_patch(SettingsPatch::default()); // 全 None patch
+        assert_eq!(s.update_source.as_deref(), Some("china"));
     }
 }

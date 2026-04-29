@@ -23,6 +23,11 @@
 
   "settings.title": "Settings",
   "settings.subtitle": "Proxy service, client config, authentication and data retention.",
+  "settings.section.update": "App updates",
+  "settings.update.source.label": "Update source",
+  "settings.update.source.desc": "International route fetches GitHub Releases directly; mainland China route uses an Aliyun OSS mirror that holds the same binaries and signatures. Switching takes effect on the next check — no restart needed.",
+  "settings.update.source.international": "International (GitHub Releases)",
+  "settings.update.source.china": "Mainland China (Aliyun OSS)",
   "settings.section.proxy": "Proxy service",
   "settings.proxy.statusRunning": "Running",
   "settings.proxy.statusStopped": "Stopped",

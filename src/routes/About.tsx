@@ -12,6 +12,7 @@ import { open as openShell } from "@tauri-apps/plugin-shell";
 import { version as VERSION } from "../../package.json";
 import logoUrl from "@/assets/logo.png";
 import { useUpdater } from "@/hooks/useUpdater";
+import { useSettings } from "@/hooks/useSettings";
 import { useT } from "@/i18n";
 import { openReleasePage } from "@/lib/updater";
 import { fmtBytes } from "@/lib/format";
@@ -108,6 +109,7 @@ const NOTES_STYLE: React.CSSProperties = {
 function UpdaterBlock() {
   const { t } = useT();
   const { status, detected, progress, errorMessage, check, install, restart } = useUpdater();
+  const { data: settings } = useSettings();
 
   if (status === "idle" || status === "checking" || status === "up_to_date") {
     return (
@@ -152,7 +154,11 @@ function UpdaterBlock() {
         {detected.body && <div style={NOTES_STYLE}>{detected.body}</div>}
         <div style={{ display: "flex", gap: 8, justifyContent: "flex-end", marginTop: 6 }}>
           {isManual ? (
-            <button className="btn btn-primary" type="button" onClick={() => void openReleasePage()}>
+            <button
+              className="btn btn-primary"
+              type="button"
+              onClick={() => void openReleasePage(settings?.update_source ?? null)}
+            >
               <ExternalLink size={12} /> {t("about.updater.openDownload")}
             </button>
           ) : (

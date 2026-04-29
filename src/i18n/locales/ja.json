@@ -23,6 +23,11 @@
 
   "settings.title": "設定",
   "settings.subtitle": "プロキシサービス、クライアント設定、認証、データ保持期間。",
+  "settings.section.update": "アプリ更新",
+  "settings.update.source.label": "更新ソース",
+  "settings.update.source.desc": "インターナショナルは GitHub Releases から直接取得、中国本土は Aliyun OSS ミラーを利用します。同じバイナリと署名を配布。切り替えは次回チェックから有効、再起動不要です。",
+  "settings.update.source.international": "インターナショナル(GitHub Releases)",
+  "settings.update.source.china": "中国本土(Aliyun OSS)",
   "settings.section.proxy": "プロキシサービス",
   "settings.proxy.statusRunning": "実行中",
   "settings.proxy.statusStopped": "停止中",

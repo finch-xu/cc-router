@@ -432,3 +432,109 @@ jobs:
               draft: false,
             });
             core.info(`Published release ${tag} (id=${release.id})`);
+
+  # 把已发布的 release 资产镜像到阿里云 OSS,给国内用户提供加速更新源。
+  # 整个 job 加 continue-on-error,即使 OSS 故障也不影响国际源 release 已经成功的事实。
+  mirror-to-oss:
+    name: Mirror release assets to Aliyun OSS
+    needs: [publish]
+    runs-on: ubuntu-latest
+    environment: APPLE_CERTIFICATE
+    continue-on-error: true
+    env:
+      RELEASE_TAG: ${{ github.ref_name }}
+      REPO: ${{ github.repository }}
+      OSS_BUCKET: cc-router
+      OSS_ENDPOINT: oss-cn-shanghai.aliyuncs.com
+    steps:
+      - name: Verify OSS secrets are present
+        env:
+          OSS_ACCESS_KEY_ID: ${{ secrets.OSS_ACCESS_KEY_ID }}
+          OSS_ACCESS_KEY_SECRET: ${{ secrets.OSS_ACCESS_KEY_SECRET }}
+        run: |
+          if [ -z "${OSS_ACCESS_KEY_ID:-}" ] || [ -z "${OSS_ACCESS_KEY_SECRET:-}" ]; then
+            echo "::warning::OSS_ACCESS_KEY_ID/OSS_ACCESS_KEY_SECRET 缺失,跳过国内源镜像。"
+            echo "::warning::Settings > Environments > APPLE_CERTIFICATE 里加这两个 secret 才能启用。"
+            echo "OSS_SKIP=1" >> "$GITHUB_ENV"
+          else
+            echo "OSS secrets present."
+          fi
+
+      - name: Install ossutil
+        if: env.OSS_SKIP != '1'
+        run: |
+          curl -fsSL https://gosspublic.alicdn.com/ossutil/1.7.20/ossutil64 -o /tmp/ossutil
+          chmod +x /tmp/ossutil
+          sudo mv /tmp/ossutil /usr/local/bin/ossutil
+          ossutil --version
+
+      - name: Download release assets from GitHub
+        if: env.OSS_SKIP != '1'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          mkdir -p assets
+          gh release download "$RELEASE_TAG" \
+            --repo "$REPO" \
+            --dir assets \
+            --pattern '*'
+          ls -la assets
+
+      - name: Generate latest-cn.json (rewrite URLs to OSS)
+        if: env.OSS_SKIP != '1'
+        run: |
+          set -euo pipefail
+          src="assets/latest.json"
+          if [ ! -f "$src" ]; then
+            echo "::error::latest.json not found in release assets"
+            exit 1
+          fi
+          # latest.json 里 platforms.{plat}.url 是绝对 GitHub URL,
+          # 国内版必须把前缀改成 OSS,否则客户端拿到 manifest 后还是回 GitHub 拉二进制。
+          gh_prefix="https://github.com/${REPO}/releases/download/${RELEASE_TAG}/"
+          oss_prefix="https://${OSS_BUCKET}.${OSS_ENDPOINT}/${RELEASE_TAG}/"
+          # 用 # 作 sed 分隔符,避免 URL 里的 / 干扰
+          sed "s#${gh_prefix}#${oss_prefix}#g" "$src" > latest-cn.json
+          echo "--- latest-cn.json (rewritten) ---"
+          cat latest-cn.json
+
+      - name: Upload binaries + sigs to OSS
+        if: env.OSS_SKIP != '1'
+        env:
+          OSS_ACCESS_KEY_ID: ${{ secrets.OSS_ACCESS_KEY_ID }}
+          OSS_ACCESS_KEY_SECRET: ${{ secrets.OSS_ACCESS_KEY_SECRET }}
+        run: |
+          set -euo pipefail
+          # 上传所有 release 资产 (binary + .sig + .dmg + .deb 等) 到 oss://cc-router/<tag>/
+          # latest.json 不直接传 (用 latest-cn.json 替代,放根目录)
+          # ossutil cp -u: update,相同对象不重传(校验 ETag)
+          for f in assets/*; do
+            name="$(basename "$f")"
+            if [ "$name" = "latest.json" ]; then
+              continue
+            fi
+            ossutil cp -u "$f" "oss://${OSS_BUCKET}/${RELEASE_TAG}/${name}" \
+              -e "$OSS_ENDPOINT" \
+              -i "$OSS_ACCESS_KEY_ID" \
+              -k "$OSS_ACCESS_KEY_SECRET"
+          done
+
+      - name: Upload latest-cn.json to OSS root (覆盖)
+        if: env.OSS_SKIP != '1'
+        env:
+          OSS_ACCESS_KEY_ID: ${{ secrets.OSS_ACCESS_KEY_ID }}
+          OSS_ACCESS_KEY_SECRET: ${{ secrets.OSS_ACCESS_KEY_SECRET }}
+        run: |
+          # 客户端 CHINA_MANIFEST_URL 指向 oss://cc-router/latest.json,
+          # 每次发版用最新的 latest-cn.json 覆盖根目录的 latest.json
+          ossutil cp -f latest-cn.json "oss://${OSS_BUCKET}/latest.json" \
+            -e "$OSS_ENDPOINT" \
+            -i "$OSS_ACCESS_KEY_ID" \
+            -k "$OSS_ACCESS_KEY_SECRET"
+
+      - name: Summary
+        if: env.OSS_SKIP != '1'
+        run: |
+          echo "✅ 已镜像到 OSS:"
+          echo "  manifest: https://${OSS_BUCKET}.${OSS_ENDPOINT}/latest.json"
+          echo "  binaries: https://${OSS_BUCKET}.${OSS_ENDPOINT}/${RELEASE_TAG}/<file>"
