@@ -463,10 +463,13 @@ jobs:
       - name: Install ossutil
         if: env.OSS_SKIP != '1'
         run: |
-          curl -fsSL https://gosspublic.alicdn.com/ossutil/1.7.20/ossutil64 -o /tmp/ossutil
-          chmod +x /tmp/ossutil
-          sudo mv /tmp/ossutil /usr/local/bin/ossutil
-          ossutil --version
+          set -euo pipefail
+          OSSUTIL_VERSION="2.2.2"
+          curl -fsSL "https://gosspublic.alicdn.com/ossutil/v2/${OSSUTIL_VERSION}/ossutil-${OSSUTIL_VERSION}-linux-amd64.zip" -o /tmp/ossutil.zip
+          unzip -q /tmp/ossutil.zip -d /tmp/
+          sudo mv "/tmp/ossutil-${OSSUTIL_VERSION}-linux-amd64/ossutil" /usr/local/bin/ossutil
+          sudo chmod +x /usr/local/bin/ossutil
+          ossutil version
 
       - name: Download release assets from GitHub
         if: env.OSS_SKIP != '1'
@@ -507,16 +510,14 @@ jobs:
           set -euo pipefail
           # 上传所有 release 资产 (binary + .sig + .dmg + .deb 等) 到 oss://cc-router/<tag>/
           # latest.json 不直接传 (用 latest-cn.json 替代,放根目录)
-          # ossutil cp -u: update,相同对象不重传(校验 ETag)
+          # --update: 相同对象不重传(校验 ETag)
+          # ossutil v2 自动从 OSS_ACCESS_KEY_ID/SECRET/ENDPOINT 环境变量读认证, 无需 -e/-i/-k
           for f in assets/*; do
             name="$(basename "$f")"
             if [ "$name" = "latest.json" ]; then
               continue
             fi
-            ossutil cp -u "$f" "oss://${OSS_BUCKET}/${RELEASE_TAG}/${name}" \
-              -e "$OSS_ENDPOINT" \
-              -i "$OSS_ACCESS_KEY_ID" \
-              -k "$OSS_ACCESS_KEY_SECRET"
+            ossutil cp --update "$f" "oss://${OSS_BUCKET}/${RELEASE_TAG}/${name}"
           done
 
       - name: Upload latest-cn.json to OSS root (覆盖)
@@ -527,10 +528,7 @@ jobs:
         run: |
           # 客户端 CHINA_MANIFEST_URL 指向 oss://cc-router/latest.json,
           # 每次发版用最新的 latest-cn.json 覆盖根目录的 latest.json
-          ossutil cp -f latest-cn.json "oss://${OSS_BUCKET}/latest.json" \
-            -e "$OSS_ENDPOINT" \
-            -i "$OSS_ACCESS_KEY_ID" \
-            -k "$OSS_ACCESS_KEY_SECRET"
+          ossutil cp -f latest-cn.json "oss://${OSS_BUCKET}/latest.json"
 
       - name: Summary
         if: env.OSS_SKIP != '1'
