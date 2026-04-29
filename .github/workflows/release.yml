@@ -446,6 +446,8 @@ jobs:
       REPO: ${{ github.repository }}
       OSS_BUCKET: cc-router
       OSS_ENDPOINT: oss-cn-shanghai.aliyuncs.com
+      # ossutil v2 默认 sign v4 需要 region (endpoint 单独不够); 与 OSS_ENDPOINT 配套
+      OSS_REGION: cn-shanghai
     steps:
       - name: Verify OSS secrets are present
         env:
