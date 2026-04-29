@@ -14,11 +14,19 @@ compatibility_notes: |
 endpoints:
   - id: coding_plan
     label: "国内版 · Coding Plan"
-    description: "百度智能云千帆 Coding Plan, 订阅制, 适配 Claude Code"
+    description: "百度智能云千帆 Coding Plan, 订阅制"
     base_url: "https://qianfan.baidubce.com/anthropic/coding"
     messages_path: "/v1/messages"
     region: china
     billing: subscription
+  
+  - id: pay_as_you_go_baidu
+    label: "国内版 · 按量付费 API"
+    description: "百度智能云千帆"
+    base_url: "https://qianfan.baidubce.com/anthropic"
+    messages_path: "/v1/messages"
+    region: china
+    billing: pay_as_you_go
 
 default_endpoint: coding_plan
 

@@ -1,3 +1,6 @@
+# 
+# 海外coding plan https://platform.stepfun.ai/docs/en/step-plan/integrations/claude-code
+
 id: stepfun
 display_name: "阶跃星辰 Stepfun"
 icon: stepfun
@@ -10,7 +13,7 @@ compatibility: untested
 
 endpoints:
   - id: step_plan
-    label: "Step Plan · 订阅套餐"
+    label: "国内版 · Step Plan · 订阅套餐"
     description: "阶跃星辰订阅套餐, 推荐配合 step-3.5-flash 系列"
     base_url: "https://api.stepfun.com/step_plan"
     messages_path: "/v1/messages"
@@ -24,6 +27,15 @@ endpoints:
     messages_path: "/v1/messages"
     region: china
     billing: pay_as_you_go
+
+  - id: step_plan_global
+    label: "国际版 · Step Plan · 订阅套餐"
+    description: "阶跃星辰官方按量付费 Anthropic 兼容端点"
+    base_url: "https://api.stepfun.ai/step_plan"
+    messages_path: "/v1/messages"
+    region: global
+    billing: subscription
+
 
 default_endpoint: step_plan
 
