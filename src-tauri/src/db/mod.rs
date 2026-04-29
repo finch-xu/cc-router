@@ -57,26 +57,33 @@ pub async fn init_pool(db_path: &Path) -> AppResult<SqlitePool> {
 /// 流程:
 /// 1. 确保 `_schema_version` 表存在 (始终幂等)
 /// 2. 检测老 DB (subscriptions 已存在但 `_schema_version` 为空) → 标定为 v=1 baseline
-/// 3. 读取当前版本号
-/// 4. 按顺序应用版本号 > 当前版本的 migration, 每跑完一项写一行版本记录
-/// 5. seed 默认数据 (始终幂等)
+/// 3. 检测 v5 half-finished 残留 (subscriptions_new 存在但 subscriptions 缺失) → 自动完成 RENAME
+/// 4. 读取当前版本号
+/// 5. 按顺序应用版本号 > 当前版本的 migration, 每跑完一项写一行版本记录
+/// 6. seed 默认数据 (始终幂等)
+///
+/// migration 跑在单一 acquired connection 上, 让 v5 里的 `PRAGMA foreign_keys=OFF` 能贯穿整段 SQL —
+/// 用 pool.execute 时连接池可能切换连接导致 PRAGMA 失效, 进而触发 ALTER TABLE RENAME 在 FK=ON
+/// 下与 virtual_model_bindings 引用冲突, 形成"DROP 已 commit, RENAME 失败"的半成品状态。
 pub async fn run_migrations(pool: &SqlitePool, _resource_dir: &Path) -> AppResult<()> {
+    let mut conn = pool.acquire().await?;
+
     sqlx::query(
         "CREATE TABLE IF NOT EXISTS _schema_version (
             version INTEGER PRIMARY KEY,
             applied_at INTEGER NOT NULL
         )",
     )
-    .execute(pool)
+    .execute(&mut *conn)
     .await?;
 
     let has_subscriptions: (i64,) = sqlx::query_as(
         "SELECT count(*) FROM sqlite_master WHERE type='table' AND name='subscriptions'",
     )
-    .fetch_one(pool)
+    .fetch_one(&mut *conn)
     .await?;
     let already_versioned: (i64,) = sqlx::query_as("SELECT count(*) FROM _schema_version")
-        .fetch_one(pool)
+        .fetch_one(&mut *conn)
         .await?;
 
     if has_subscriptions.0 > 0 && already_versioned.0 == 0 {
@@ -86,12 +93,39 @@ pub async fn run_migrations(pool: &SqlitePool, _resource_dir: &Path) -> AppResul
         sqlx::query("INSERT OR IGNORE INTO _schema_version (version, applied_at) VALUES (?, ?)")
             .bind(1_i64)
             .bind(chrono::Utc::now().timestamp_millis())
-            .execute(pool)
+            .execute(&mut *conn)
+            .await?;
+    }
+
+    let has_subscriptions_new: (i64,) = sqlx::query_as(
+        "SELECT count(*) FROM sqlite_master WHERE type='table' AND name='subscriptions_new'",
+    )
+    .fetch_one(&mut *conn)
+    .await?;
+    if has_subscriptions_new.0 > 0 && has_subscriptions.0 == 0 {
+        // v5 half-finished: 上次启动跑到 DROP TABLE subscriptions 已 commit,
+        // 但 ALTER TABLE subscriptions_new RENAME TO subscriptions 失败 (sqlx 连接池切换 +
+        // PRAGMA foreign_keys=OFF 失效)。subscriptions_new 里是用户的真实订阅数据,
+        // 不能丢; 我们在这里自动完成 RENAME 并记录 v=5。
+        info!("detected v5 half-finished migration, completing rename");
+        sqlx::query("PRAGMA foreign_keys=OFF")
+            .execute(&mut *conn)
+            .await?;
+        sqlx::query("ALTER TABLE subscriptions_new RENAME TO subscriptions")
+            .execute(&mut *conn)
+            .await?;
+        sqlx::query("INSERT OR IGNORE INTO _schema_version (version, applied_at) VALUES (?, ?)")
+            .bind(5_i64)
+            .bind(chrono::Utc::now().timestamp_millis())
+            .execute(&mut *conn)
+            .await?;
+        sqlx::query("PRAGMA foreign_keys=ON")
+            .execute(&mut *conn)
             .await?;
     }
 
     let current: (Option<i64>,) = sqlx::query_as("SELECT MAX(version) FROM _schema_version")
-        .fetch_one(pool)
+        .fetch_one(&mut *conn)
         .await?;
     let current_version = current.0.unwrap_or(0) as u32;
 
@@ -101,14 +135,16 @@ pub async fn run_migrations(pool: &SqlitePool, _resource_dir: &Path) -> AppResul
         }
         info!(version = v, "applying migration");
         for stmt in split_sql_statements(sql) {
-            sqlx::query(&stmt).execute(pool).await?;
+            sqlx::query(&stmt).execute(&mut *conn).await?;
         }
         sqlx::query("INSERT OR IGNORE INTO _schema_version (version, applied_at) VALUES (?, ?)")
             .bind(*v as i64)
             .bind(chrono::Utc::now().timestamp_millis())
-            .execute(pool)
+            .execute(&mut *conn)
             .await?;
     }
+
+    drop(conn);
 
     seed_virtual_model_config(pool).await?;
     seed_onboarding(pool).await?;
@@ -388,6 +424,53 @@ mod tests {
         .unwrap();
         let supports: i64 = row.try_get("supports_thinking_blocks").unwrap();
         assert_eq!(supports, 0, "非 deepseek 订阅不应被回填");
+    }
+
+    #[tokio::test]
+    async fn detects_v5_half_finished_and_completes_rename() {
+        let pool = in_memory_pool().await;
+        sqlx::query(
+            "CREATE TABLE _schema_version (version INTEGER PRIMARY KEY, applied_at INTEGER NOT NULL)",
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+
+        for (v, sql) in &MIGRATIONS[..4] {
+            for stmt in split_sql_statements(sql) {
+                sqlx::query(&stmt).execute(&pool).await.unwrap();
+            }
+            sqlx::query("INSERT INTO _schema_version (version, applied_at) VALUES (?, 0)")
+                .bind(*v as i64)
+                .execute(&pool)
+                .await
+                .unwrap();
+        }
+        insert_pre_v4_subscription(&pool, "deepseek").await;
+
+        // 模拟 v5 跑到 DROP TABLE 已 commit、ALTER RENAME 失败的半成品状态:
+        // 拿 v5 SQL 的前 4 条 (PRAGMA off, CREATE _new, INSERT, DROP), 跳过 ALTER + PRAGMA on。
+        let v5_stmts = split_sql_statements(MIGRATIONS[4].1);
+        for stmt in &v5_stmts[..4] {
+            sqlx::query(stmt).execute(&pool).await.unwrap();
+        }
+        assert!(has_table(&pool, "subscriptions_new").await);
+        assert!(!has_table(&pool, "subscriptions").await);
+
+        run_migrations(&pool, &std::path::PathBuf::from("."))
+            .await
+            .expect("migrate from half-finished v5");
+
+        assert!(has_table(&pool, "subscriptions").await);
+        assert!(!has_table(&pool, "subscriptions_new").await);
+        assert_eq!(applied_versions(&pool).await, vec![1, 2, 3, 4, 5]);
+
+        let count: (i64,) =
+            sqlx::query_as("SELECT count(*) FROM subscriptions WHERE provider_id='deepseek'")
+                .fetch_one(&pool)
+                .await
+                .unwrap();
+        assert_eq!(count.0, 1, "subscriptions_new 里的订阅数据应在自动 RENAME 后保留");
     }
 }
 
