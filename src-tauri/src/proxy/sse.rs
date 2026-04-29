@@ -3,10 +3,6 @@
 //! 维护 buffer，按 `\n\n` 切事件。
 //! - 第一个 `event: message_start`：解析 JSON → 改 `message.model` → 重序列化 → 写出
 //! - `event: message_delta`：解析抽取 `output_tokens`，**原字节透传**
-//! - `event: content_block_start` / `content_block_delta`：**仅当订阅声明 thinking 字段方言**
-//!   (例 DeepSeek 用 "think" 而非 Anthropic 标准 "thinking") 时, 解析 JSON →
-//!   把方言字段重命名回 "thinking" → 重序列化 → 写出, 让 CC 始终以 Anthropic 标准接收。
-//!   未声明方言的订阅 (绝大多数) 直接原字节透传, 不解析这两个事件。
 //! - 其他事件：原字节透传
 //! - 解析失败：warning + 原字节透传（§9.7）
 
@@ -28,7 +24,6 @@ use uuid::Uuid;
 
 use crate::observability::events::{self, EventEntry, Severity};
 use crate::observability::request_log::{RequestLogEntry, RequestStatus};
-use crate::provider::model::ANTHROPIC_THINKING_FIELD;
 use crate::subscription::model::SubscriptionRuntime;
 use crate::subscription::state_machine;
 use crate::virtual_model::VirtualModelName;
@@ -51,7 +46,6 @@ pub fn stream_response(
     pool: SqlitePool,
     app: AppHandle,
     sub_rt: Arc<RwLock<SubscriptionRuntime>>,
-    thinking_block_field_name: String,
 ) -> Response {
     let (client_tx, client_rx) = mpsc::channel::<Result<Bytes, std::io::Error>>(64);
 
@@ -61,15 +55,6 @@ pub fn stream_response(
     } else {
         Some(vm_name.as_str().to_string())
     };
-
-    // 上游用方言字段名 (例: DeepSeek 用 "think") 时, 在响应侧把它重命名回 Anthropic 标准,
-    // 让 CC 端永远只看到标准格式。值已是标准时跳过翻译 (性能优化)。
-    let response_thinking_alias: Option<String> =
-        if thinking_block_field_name != ANTHROPIC_THINKING_FIELD {
-            Some(thinking_block_field_name)
-        } else {
-            None
-        };
 
     tokio::spawn(async move {
         let mut upstream = upstream_stream;
@@ -112,11 +97,8 @@ pub fn stream_response(
             // 尝试按 "\n\n" 切出完整事件
             while let Some(pos) = find_sequence(&buffer, b"\n\n") {
                 let event_bytes = buffer.split_to(pos + 2);
-                let (processed, parsed_meta) = process_event(
-                    &event_bytes,
-                    virtual_name_override.as_deref(),
-                    response_thinking_alias.as_deref(),
-                );
+                let (processed, parsed_meta) =
+                    process_event(&event_bytes, virtual_name_override.as_deref());
 
                 if let Some(meta) = parsed_meta {
                     if let Some(v) = meta.input_tokens {
@@ -253,13 +235,9 @@ struct ParsedMeta {
 
 /// 对单个 SSE 事件（以 `\n\n` 结尾）做改写并提取 tokens。
 /// - `virtual_name_override` 为 None 时不改写 message.model（fallback 透传模式）。
-/// - `response_thinking_alias` 为 Some(alias) 时, 把 content_block_start.content_block.<alias>
-///   和 content_block_delta.delta.<alias> 重命名回 "thinking" (例: DeepSeek 用 "think");
-///   None 表示原字节透传, 不解析 content_block_* 事件 (性能优化)。
 fn process_event(
     raw: &[u8],
     virtual_name_override: Option<&str>,
-    response_thinking_alias: Option<&str>,
 ) -> (Bytes, Option<ParsedMeta>) {
     let text = match std::str::from_utf8(raw) {
         Ok(s) => s,
@@ -271,12 +249,8 @@ fn process_event(
     let event_name = sse_event_name(text);
     let is_message_start = event_name == Some("message_start");
     let is_message_delta = event_name == Some("message_delta");
-    let is_content_block_start = event_name == Some("content_block_start");
-    let is_content_block_delta = event_name == Some("content_block_delta");
-    let needs_response_translation =
-        response_thinking_alias.is_some() && (is_content_block_start || is_content_block_delta);
 
-    if !is_message_start && !is_message_delta && !needs_response_translation {
+    if !is_message_start && !is_message_delta {
         return (Bytes::copy_from_slice(raw), None);
     }
 
@@ -311,21 +285,6 @@ fn process_event(
             return (Bytes::copy_from_slice(raw), None);
         }
     };
-
-    if needs_response_translation {
-        let alias = response_thinking_alias.expect("checked above");
-        // content_block_start 携带 .content_block.{alias}; content_block_delta 携带 .delta.{alias}
-        let (container, expected_type) = if is_content_block_start {
-            ("content_block", "thinking")
-        } else {
-            ("delta", "thinking_delta")
-        };
-        if !rename_thinking_alias(&mut parsed, container, expected_type, alias) {
-            // 非 thinking 类块 (text/tool_use 等) → 原字节透传, 省一次重序列化
-            return (Bytes::copy_from_slice(raw), None);
-        }
-        return (rebuild_event_with_data(text, start, end, &parsed, raw), None);
-    }
 
     let mut meta = ParsedMeta {
         input_tokens: None,
@@ -389,32 +348,6 @@ fn process_event(
                 .map(|v| v as u32);
         }
         (Bytes::copy_from_slice(raw), Some(meta))
-    }
-}
-
-/// 在 `parsed.<container>` 子对象里把字段名 `alias` 重命名为 "thinking",
-/// 仅当子对象的 `type` 等于 `expected_type` 时执行。返回 true 表示发生了改写。
-///
-/// 用于响应侧 SSE 事件: content_block_start 用 ("content_block", "thinking"),
-/// content_block_delta 用 ("delta", "thinking_delta")。
-fn rename_thinking_alias(
-    parsed: &mut serde_json::Value,
-    container: &str,
-    expected_type: &str,
-    alias: &str,
-) -> bool {
-    let Some(obj) = parsed.get_mut(container).and_then(|v| v.as_object_mut()) else {
-        return false;
-    };
-    if obj.get("type").and_then(|t| t.as_str()) != Some(expected_type) {
-        return false;
-    }
-    match obj.remove(alias) {
-        Some(val) => {
-            obj.insert(ANTHROPIC_THINKING_FIELD.to_string(), val);
-            true
-        }
-        None => false,
     }
 }
 
@@ -525,7 +458,7 @@ mod tests {
     #[test]
     fn process_event_alibaba_style_message_start_no_space() {
         let raw = b"event:message_start\ndata:{\"type\":\"message_start\",\"message\":{\"id\":\"m1\",\"model\":\"qwen-flash\",\"role\":\"assistant\",\"type\":\"message\",\"content\":[],\"usage\":{\"input_tokens\":7,\"output_tokens\":0}}}\n\n";
-        let (_bytes, meta) = process_event(raw, Some("model-sonnet"),None);
+        let (_bytes, meta) = process_event(raw, Some("model-sonnet"));
         let meta = meta.expect("alibaba message_start 应被识别");
         assert_eq!(meta.input_tokens, Some(7));
         // message_start 没有 cache_* 字段 → None
@@ -537,7 +470,7 @@ mod tests {
     #[test]
     fn process_event_alibaba_style_message_delta_full_usage() {
         let raw = b"event:message_delta\ndata:{\"type\":\"message_delta\",\"delta\":{\"stop_reason\":\"end_turn\"},\"usage\":{\"output_tokens\":4,\"input_tokens\":15,\"cache_creation_input_tokens\":0,\"cache_read_input_tokens\":0}}\n\n";
-        let (_bytes, meta) = process_event(raw, Some("model-sonnet"),None);
+        let (_bytes, meta) = process_event(raw, Some("model-sonnet"));
         let meta = meta.expect("alibaba message_delta 应被识别");
         assert_eq!(meta.input_tokens, Some(15));
         assert_eq!(meta.output_tokens, Some(4));
@@ -549,7 +482,7 @@ mod tests {
     #[test]
     fn process_event_anthropic_style_message_delta_output_only() {
         let raw = b"event: message_delta\ndata: {\"type\":\"message_delta\",\"delta\":{\"stop_reason\":\"end_turn\"},\"usage\":{\"output_tokens\":42}}\n\n";
-        let (_bytes, meta) = process_event(raw, Some("model-sonnet"),None);
+        let (_bytes, meta) = process_event(raw, Some("model-sonnet"));
         let meta = meta.expect("anthropic message_delta 应被识别");
         assert_eq!(meta.output_tokens, Some(42));
         assert_eq!(meta.input_tokens, None);
@@ -561,75 +494,22 @@ mod tests {
     #[test]
     fn process_event_other_events_passthrough() {
         let raw = b"event: ping\ndata: {\"type\":\"ping\"}\n\n";
-        let (bytes, meta) = process_event(raw, Some("model-sonnet"),None);
+        let (bytes, meta) = process_event(raw, Some("model-sonnet"));
         assert!(meta.is_none());
         assert_eq!(&bytes[..], raw);
 
         let raw2 = b"event:content_block_delta\ndata:{\"type\":\"content_block_delta\",\"delta\":{\"type\":\"text_delta\",\"text\":\"hi\"},\"index\":0}\n\n";
-        let (bytes2, meta2) = process_event(raw2, Some("model-sonnet"),None);
+        let (bytes2, meta2) = process_event(raw2, Some("model-sonnet"));
         assert!(meta2.is_none());
         assert_eq!(&bytes2[..], raw2);
     }
 
-    // -- 响应侧 thinking 字段方言反向翻译测试 ---------------------------
-
-    /// alias=Some("think") + content_block_start.content_block.think → 重命名为 thinking。
+    /// content_block_start (含 thinking 块) 应原字节透传, 现已无方言重命名逻辑。
     #[test]
-    fn process_event_translates_content_block_start_think_to_thinking() {
-        let raw = b"event: content_block_start\ndata: {\"type\":\"content_block_start\",\"index\":0,\"content_block\":{\"type\":\"thinking\",\"think\":\"deep reasoning\"}}\n\n";
-        let (bytes, meta) = process_event(raw, Some("model-sonnet"),Some("think"));
-        assert!(meta.is_none(), "翻译路径不产 meta");
-        let out = std::str::from_utf8(&bytes).unwrap();
-        // 重序列化后 think 字段应被改名为 thinking
-        assert!(out.contains("\"thinking\":\"deep reasoning\""), "out = {}", out);
-        assert!(!out.contains("\"think\":\"deep reasoning\""), "原 think 字段应被替换");
-        // event 行原样保留
-        assert!(out.starts_with("event: content_block_start\n"));
-        // 末尾两个换行符保留
-        assert!(out.ends_with("\n\n"));
-    }
-
-    /// alias=Some("think") + content_block_delta.delta.think → 重命名为 thinking。
-    #[test]
-    fn process_event_translates_content_block_delta_think_to_thinking() {
-        let raw = b"event: content_block_delta\ndata: {\"type\":\"content_block_delta\",\"index\":0,\"delta\":{\"type\":\"thinking_delta\",\"think\":\"more thoughts\"}}\n\n";
-        let (bytes, meta) = process_event(raw, Some("model-sonnet"),Some("think"));
+    fn process_event_thinking_block_start_passes_through() {
+        let raw = b"event: content_block_start\ndata: {\"type\":\"content_block_start\",\"index\":0,\"content_block\":{\"type\":\"thinking\",\"thinking\":\"x\",\"signature\":\"\"}}\n\n";
+        let (bytes, meta) = process_event(raw, Some("model-sonnet"));
         assert!(meta.is_none());
-        let out = std::str::from_utf8(&bytes).unwrap();
-        assert!(out.contains("\"thinking\":\"more thoughts\""), "out = {}", out);
-        assert!(!out.contains("\"think\":\"more thoughts\""));
-    }
-
-    /// alias=None (订阅 supports_thinking_blocks=false 或 字段名是 thinking) → 不翻译, 透传。
-    #[test]
-    fn process_event_alias_none_passes_through_content_block_events() {
-        let raw = b"event: content_block_start\ndata: {\"type\":\"content_block_start\",\"index\":0,\"content_block\":{\"type\":\"thinking\",\"thinking\":\"x\"}}\n\n";
-        let (bytes, _) = process_event(raw, Some("model-sonnet"),None);
-        assert_eq!(&bytes[..], raw, "alias=None 时应原字节透传");
-    }
-
-    /// content_block_start 但 type=text → 不翻译, 透传。
-    #[test]
-    fn process_event_alias_some_but_block_is_text_passthrough() {
-        let raw = b"event: content_block_start\ndata: {\"type\":\"content_block_start\",\"index\":0,\"content_block\":{\"type\":\"text\",\"text\":\"hi\"}}\n\n";
-        let (bytes, _) = process_event(raw, Some("model-sonnet"),Some("think"));
-        assert_eq!(&bytes[..], raw, "非 thinking 块应原字节透传");
-    }
-
-    /// content_block_delta 但 type=text_delta → 不翻译, 透传。
-    #[test]
-    fn process_event_alias_some_but_delta_is_text_passthrough() {
-        let raw = b"event: content_block_delta\ndata: {\"type\":\"content_block_delta\",\"index\":0,\"delta\":{\"type\":\"text_delta\",\"text\":\"hi\"}}\n\n";
-        let (bytes, _) = process_event(raw, Some("model-sonnet"),Some("think"));
-        assert_eq!(&bytes[..], raw, "非 thinking_delta 应原字节透传");
-    }
-
-    /// alias=Some("think") + thinking 块字段是 thinking (不是 think) → 找不到 alias, 透传。
-    /// 防御场景: 上游虽然声明用方言, 但偶尔混入标准命名时不破坏数据。
-    #[test]
-    fn process_event_alias_mismatch_passes_through() {
-        let raw = b"event: content_block_start\ndata: {\"type\":\"content_block_start\",\"index\":0,\"content_block\":{\"type\":\"thinking\",\"thinking\":\"already standard\"}}\n\n";
-        let (bytes, _) = process_event(raw, Some("model-sonnet"),Some("think"));
-        assert_eq!(&bytes[..], raw, "alias 字段不在块里时应原字节透传");
+        assert_eq!(&bytes[..], raw, "content_block_start 应原字节透传");
     }
 }

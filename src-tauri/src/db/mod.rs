@@ -25,6 +25,10 @@ const MIGRATIONS: &[(u32, &str)] = &[
         4,
         include_str!("../../migrations/004_add_thinking_block_field_name.sql"),
     ),
+    (
+        5,
+        include_str!("../../migrations/005_drop_thinking_block_field_name.sql"),
+    ),
 ];
 
 pub async fn init_pool(db_path: &Path) -> AppResult<SqlitePool> {
@@ -260,9 +264,9 @@ mod tests {
         run_migrations(&pool, &dir).await.expect("migrate fresh");
 
         let versions = applied_versions(&pool).await;
-        assert_eq!(versions, vec![1, 2, 3, 4]);
+        assert_eq!(versions, vec![1, 2, 3, 4, 5]);
         assert!(has_column(&pool, "subscriptions", "supports_thinking_blocks").await);
-        assert!(has_column(&pool, "subscriptions", "thinking_block_field_name").await);
+        assert!(!has_column(&pool, "subscriptions", "thinking_block_field_name").await);
         assert!(has_column(&pool, "requests", "upstream_response_body").await);
         assert!(has_table(&pool, "events").await);
     }
@@ -280,9 +284,9 @@ mod tests {
         run_migrations(&pool, &dir).await.expect("migrate legacy");
 
         let versions = applied_versions(&pool).await;
-        assert_eq!(versions, vec![1, 2, 3, 4]); // baseline v=1, 然后跑 v=2/v=3/v=4
+        assert_eq!(versions, vec![1, 2, 3, 4, 5]); // baseline v=1, 然后跑 v=2..5
         assert!(has_column(&pool, "subscriptions", "supports_thinking_blocks").await);
-        assert!(has_column(&pool, "subscriptions", "thinking_block_field_name").await);
+        assert!(!has_column(&pool, "subscriptions", "thinking_block_field_name").await);
         assert!(has_column(&pool, "requests", "upstream_response_body").await);
         assert!(has_table(&pool, "events").await);
     }
@@ -296,11 +300,9 @@ mod tests {
         run_migrations(&pool, &dir).await.expect("third run");
 
         let versions = applied_versions(&pool).await;
-        assert_eq!(versions, vec![1, 2, 3, 4]); // 没有重复写
+        assert_eq!(versions, vec![1, 2, 3, 4, 5]); // 没有重复写
     }
 
-    /// 模拟一个跑过 v1+v2+v3 但还没跑 v4 的 DB:
-    /// 建 `_schema_version` 表, 跑前 3 个 migration, 标记版本号。
     async fn setup_pre_v4_pool() -> SqlitePool {
         let pool = in_memory_pool().await;
         sqlx::query(
@@ -347,28 +349,30 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn v4_backfills_existing_deepseek_subscriptions() {
+    async fn legacy_to_v5_keeps_deepseek_supports_thinking_drops_field_name_column() {
         let pool = setup_pre_v4_pool().await;
         insert_pre_v4_subscription(&pool, "deepseek").await;
 
         run_migrations(&pool, &std::path::PathBuf::from("."))
             .await
-            .expect("migrate to v4");
+            .expect("migrate to v5");
 
         let row = sqlx::query(
-            "SELECT supports_thinking_blocks, thinking_block_field_name FROM subscriptions WHERE provider_id='deepseek'",
+            "SELECT supports_thinking_blocks FROM subscriptions WHERE provider_id='deepseek'",
         )
         .fetch_one(&pool)
         .await
         .unwrap();
         let supports: i64 = row.try_get("supports_thinking_blocks").unwrap();
-        let field: String = row.try_get("thinking_block_field_name").unwrap();
-        assert_eq!(supports, 1, "deepseek 订阅 supports_thinking_blocks 应被回填为 1");
-        assert_eq!(field, "think", "deepseek 订阅 thinking_block_field_name 应被回填为 think");
+        assert_eq!(supports, 1, "deepseek 订阅 supports_thinking_blocks 应被回填为 1 (v4 行为保留)");
+        assert!(
+            !has_column(&pool, "subscriptions", "thinking_block_field_name").await,
+            "v5 应该拆掉 thinking_block_field_name 列"
+        );
     }
 
     #[tokio::test]
-    async fn v4_does_not_touch_non_deepseek_subscriptions() {
+    async fn legacy_to_v5_does_not_touch_non_deepseek_subscriptions() {
         let pool = setup_pre_v4_pool().await;
         insert_pre_v4_subscription(&pool, "zhipu").await;
 
@@ -377,15 +381,13 @@ mod tests {
             .unwrap();
 
         let row = sqlx::query(
-            "SELECT supports_thinking_blocks, thinking_block_field_name FROM subscriptions WHERE provider_id='zhipu'",
+            "SELECT supports_thinking_blocks FROM subscriptions WHERE provider_id='zhipu'",
         )
         .fetch_one(&pool)
         .await
         .unwrap();
         let supports: i64 = row.try_get("supports_thinking_blocks").unwrap();
-        let field: String = row.try_get("thinking_block_field_name").unwrap();
         assert_eq!(supports, 0, "非 deepseek 订阅不应被回填");
-        assert_eq!(field, "thinking", "非 deepseek 订阅应保留默认 'thinking'");
     }
 }
 

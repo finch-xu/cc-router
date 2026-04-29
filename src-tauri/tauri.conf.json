@@ -68,6 +68,7 @@
       "migrations/002_add_supports_thinking_blocks.sql",
       "migrations/003_add_events_and_diagnostics.sql",
       "migrations/004_add_thinking_block_field_name.sql",
+      "migrations/005_drop_thinking_block_field_name.sql",
       "../LICENSE"
     ],
     "category": "DeveloperTool",

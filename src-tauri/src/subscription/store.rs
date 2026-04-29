@@ -26,7 +26,7 @@ pub async fn load_runtime(
                 base_url, messages_path, auth_header_name, auth_header_format,
                 required_headers, forward_headers, model_discovery,
                 provider_display_name, provider_icon, is_user_defined,
-                supports_thinking_blocks, thinking_block_field_name
+                supports_thinking_blocks
          FROM subscriptions",
     )
     .fetch_all(pool)
@@ -98,7 +98,6 @@ fn row_to_row(row: &sqlx::sqlite::SqliteRow) -> AppResult<SubscriptionRow> {
             let v: i64 = row.try_get("supports_thinking_blocks")?;
             v != 0
         },
-        thinking_block_field_name: row.try_get("thinking_block_field_name")?,
     })
 }
 
@@ -117,12 +116,12 @@ pub async fn insert(pool: &SqlitePool, sub: &SubscriptionRow) -> AppResult<()> {
             base_url, messages_path, auth_header_name, auth_header_format,
             required_headers, forward_headers, model_discovery,
             provider_display_name, provider_icon, is_user_defined,
-            supports_thinking_blocks, thinking_block_field_name)
+            supports_thinking_blocks)
          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
                  ?, ?, ?, ?,
                  ?, ?, ?,
                  ?, ?, ?,
-                 ?, ?)",
+                 ?)",
     )
     .bind(sub.id.to_string())
     .bind(&sub.provider_id)
@@ -148,7 +147,6 @@ pub async fn insert(pool: &SqlitePool, sub: &SubscriptionRow) -> AppResult<()> {
     .bind(&sub.provider_icon)
     .bind(sub.is_user_defined as i64)
     .bind(sub.supports_thinking_blocks as i64)
-    .bind(&sub.thinking_block_field_name)
     .execute(pool)
     .await?;
     Ok(())
@@ -178,7 +176,7 @@ pub async fn update_row(pool: &SqlitePool, sub: &SubscriptionRow) -> AppResult<(
             base_url = ?, messages_path = ?, auth_header_name = ?, auth_header_format = ?,
             required_headers = ?, forward_headers = ?, model_discovery = ?,
             provider_display_name = ?, provider_icon = ?, is_user_defined = ?,
-            supports_thinking_blocks = ?, thinking_block_field_name = ?
+            supports_thinking_blocks = ?
          WHERE id = ?",
     )
     .bind(&sub.endpoint_id)
@@ -201,7 +199,6 @@ pub async fn update_row(pool: &SqlitePool, sub: &SubscriptionRow) -> AppResult<(
     .bind(&sub.provider_icon)
     .bind(sub.is_user_defined as i64)
     .bind(sub.supports_thinking_blocks as i64)
-    .bind(&sub.thinking_block_field_name)
     .bind(sub.id.to_string())
     .execute(pool)
     .await?;

@@ -5,8 +5,6 @@ use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 use crate::provider::model::{join_base_path, AuthHeaderFormat, ModelDiscovery};
-#[cfg(test)]
-use crate::provider::model::ANTHROPIC_THINKING_FIELD;
 use crate::virtual_model::model::SubscriptionSlot;
 
 /// 自定义订阅的来源标记常量。
@@ -72,11 +70,6 @@ pub struct SubscriptionRow {
     /// 创建订阅时从 provider yaml 的 capabilities.supports_thinking_blocks 拷贝默认值,
     /// 用户可在 UI 上覆盖。pipeline 转发前如果为 false,会剥离请求体里的 thinking 字段和块。
     pub supports_thinking_blocks: bool,
-    /// thinking 块内部承载字段名 (Anthropic 标准 "thinking"; DeepSeek 兼容层用 "think")。
-    /// 创建订阅时从 provider yaml 的 capabilities.thinking_block_field_name 拷贝。
-    /// 仅当 supports_thinking_blocks=true 且值非 "thinking" 时, pipeline 在请求侧
-    /// 把 thinking→自定义、响应侧把自定义→thinking 翻译, 让 CC 始终以 Anthropic 标准收发。
-    pub thinking_block_field_name: String,
 }
 
 impl SubscriptionRow {
@@ -234,7 +227,6 @@ impl SubscriptionRow {
             provider_icon: String::new(),
             is_user_defined: false,
             supports_thinking_blocks: false,
-            thinking_block_field_name: ANTHROPIC_THINKING_FIELD.to_string(),
         }
     }
 }
