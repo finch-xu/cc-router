@@ -7,11 +7,11 @@ import { useT } from "@/i18n";
 interface Props {
   text: string;
   className?: string;
-  /** 是否对 env 片段做轻量语法着色 */
+  /** 是否对 env 片段做轻量语法着色,只对 shell env 行有意义 */
   highlight?: boolean;
 }
 
-export function CopyableBlock({ text, className, highlight = true }: Props) {
+export function CopyableBlock({ text, className, highlight = false }: Props) {
   const { t } = useT();
   const [copied, setCopied] = useState(false);
   const content = useMemo(

@@ -163,7 +163,6 @@ export function SettingsPage() {
           <div className="setting-row">
             <div className="label-col">
               {t("settings.update.source.label")}
-              <div className="desc">{t("settings.update.source.desc")}</div>
             </div>
             <select
               className="select"

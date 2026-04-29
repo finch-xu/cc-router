@@ -49,6 +49,16 @@ export function useEnvSnippet() {
   });
 }
 
+export function useProxyEndpoint() {
+  const proxy = useProxyStatus();
+  const settings = useSettings();
+  return {
+    port: proxy.data?.port ?? 23456,
+    token: settings.data?.auth_token ?? "",
+    running: proxy.data?.running ?? false,
+  };
+}
+
 /**
  * 首次启动按 navigator.language 推断默认更新源,只在 update_source 为 null 时触发一次。
  * zh-* → china,其他 → international。用户后续手动改不会被覆盖(因为 != null 即跳过)。

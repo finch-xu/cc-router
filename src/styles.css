@@ -1111,6 +1111,7 @@ input, select, textarea { font: inherit; color: inherit; }
 /* === Tabs === */
 .tabs {
   display: flex;
+  flex-wrap: wrap;
   gap: 4px;
   border-bottom: 1px solid var(--line);
   margin-bottom: 20px;
@@ -1126,11 +1127,31 @@ input, select, textarea { font: inherit; color: inherit; }
   font-size: 13px;
   font-weight: 500;
   transition: color 0.12s, border-color 0.12s;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
 }
 .tab:hover:not(.active) { color: var(--ink-2); }
 .tab.active {
   color: var(--ink);
   border-bottom-color: var(--ink);
+}
+
+.brand-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
+  gap: 10px;
+}
+.brand-card {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 14px 16px;
+  border: 1px solid var(--line);
+  border-radius: var(--r-md);
+  color: var(--ink-2);
+  font-size: 13px;
+  font-weight: 500;
 }
 
 /* === Tailwind base override 兼容: 让原 ui/* shadcn 组件颜色仍可读 === */
