@@ -25,6 +25,8 @@ impl VirtualModelName {
     }
 
     pub fn parse(s: &str) -> Option<Self> {
+        // Accept LiteLLM-style `anthropic/<model-name>` prefix (issue #5).
+        let s = s.strip_prefix("anthropic/").unwrap_or(s);
         match s {
             "model-opus" => Some(Self::Opus),
             "model-sonnet" => Some(Self::Sonnet),
@@ -74,4 +76,33 @@ pub struct VirtualModelConfig {
     pub subscription_ids: Vec<Uuid>,
     /// 轮询模式专用，不持久化（§7.1）
     pub last_used_index: usize,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn parse_strips_anthropic_prefix() {
+        assert_eq!(VirtualModelName::parse("anthropic/model-opus"), Some(VirtualModelName::Opus));
+        assert_eq!(VirtualModelName::parse("anthropic/model-sonnet"), Some(VirtualModelName::Sonnet));
+        assert_eq!(VirtualModelName::parse("anthropic/model-haiku"), Some(VirtualModelName::Haiku));
+        assert_eq!(VirtualModelName::parse("anthropic/model-fallback"), Some(VirtualModelName::Fallback));
+    }
+
+    #[test]
+    fn parse_without_prefix_still_works() {
+        assert_eq!(VirtualModelName::parse("model-opus"), Some(VirtualModelName::Opus));
+        assert_eq!(VirtualModelName::parse("model-sonnet"), Some(VirtualModelName::Sonnet));
+        assert_eq!(VirtualModelName::parse("model-haiku"), Some(VirtualModelName::Haiku));
+        assert_eq!(VirtualModelName::parse("model-fallback"), Some(VirtualModelName::Fallback));
+    }
+
+    #[test]
+    fn parse_unknown_returns_none() {
+        assert_eq!(VirtualModelName::parse("anthropic/unknown"), None);
+        // Only `anthropic/` is stripped; other vendor prefixes pass through unchanged.
+        assert_eq!(VirtualModelName::parse("openai/model-opus"), None);
+        assert_eq!(VirtualModelName::parse("model-unknown"), None);
+    }
 }
