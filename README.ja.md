@@ -40,12 +40,12 @@
 
 | id | 名称 | Token Plan | API | 動作確認 |
 |---|---|---|---|---|
-| `anthropic` | Anthropic 公式 API（従量課金のみ、Max Plan は非対応） | ❌ | ✅ | verified |
-| `zhipu` | 智譜 GLM | ✅ | ✅ | verified |
-| `deepseek` | DeepSeek | ❌ | ✅ | verified |
-| `moonshot` | Moonshot Kimi | ✅ | ✅ | untested |
-| `minimax` | MiniMax（3 エンドポイント） | ✅ | ✅ | partial |
-| `xiaomi` | Xiaomi MiMo（従量課金 + 3 クラスタサブスクリプション） | ✅ | ✅ | untested |
+| `anthropic` | Anthropic 公式 API（従量課金のみ、サブスクリプションプラン非対応） | ❌ | ✅ | verified |
+| `zhipu` | 智譜 GLM（従量課金 / 中国サブスク） | ✅ | ✅ | verified |
+| `deepseek` | DeepSeek（従量課金） | ❌ | ✅ | verified |
+| `moonshot` | Moonshot Kimi（従量課金 / 中国サブスク / グローバルサブスク） | ✅ | ✅ | untested |
+| `minimax` | MiniMax（従量課金 / 中国サブスク / グローバルサブスク） | ✅ | ✅ | verified |
+| `xiaomi` | Xiaomi MiMo（従量課金 / 中国サブスク / グローバルサブスク） | ✅ | ✅ | untested |
 | `alibaba` | Alibaba Cloud Bailian（チーム版 Token Plan + 2 リージョン従量課金 + 販売終了の Coding Plan） | ✅ | ✅ | verified |
 | `volcengine` | 火山方舟 Volcengine Ark（Coding Plan サブスクリプション + 従量課金） | ✅ | ✅ | untested |
 | `openrouter` | OpenRouter アグリゲーター（500+ モデルをルーティング） | ❌ | ✅ | untested |
@@ -53,11 +53,11 @@
 | `aiberm` | Aiberm（従量課金 API、token group ごとに動的にモデル返却） | ❌ | ✅ | untested |
 | `whatai` | 神馬中継 API（従量課金、OpenAI/Anthropic デュアルプロトコル中継、Anthropic 経路のみ使用） | ❌ | ✅ | untested |
 | `ollama` | Ollama ローカル推論（localhost:11434 のみ、`glm-4.7:cloud` のようなクラウドタグも含む） | ❌ | ✅ | partial |
-| `fireworks` | Fireworks AI（従量課金、DeepSeek / Qwen / Llama / Kimi 等の OSS モデルを網羅）、Fire Pass サブスクリプション対応 | ✅ | ✅ | verified |
-| `stepfun` | 階躍星辰 Stepfun（Step Plan サブスクリプション + 従量課金 API） | ✅ | ✅ | untested |
-| `baidu` | 百度千帆（Coding Plan サブスクリプション、モデルは手動入力） | ✅ | ❌ | untested |
-| `modelscope` | ModelScope 魔搭（従量課金、OpenAI/Anthropic デュアルプロトコル、Anthropic 経路のみ、Qwen / DeepSeek / Kimi / MiniMax 等の OSS モデルを網羅） | ❌ | ✅ | partial |
-| `ucloud` | 優雲智算 UCloud Modelverse（Coding Plan サブスクリプション + 従量課金 API、中国国内/海外、Claude / Qwen / GLM / Kimi 等を集約） | ✅ | ✅ | untested |
+| `fireworks` | Fireworks AI（従量課金 / Fire Pass グローバルサブスク） | ✅ | ✅ | verified |
+| `stepfun` | 階躍星辰 Stepfun（従量課金 / 中国サブスク / グローバルサブスク） | ✅ | ✅ | untested |
+| `baidu` | 百度千帆（従量課金 / 中国サブスク） | ✅ | ✅ | untested |
+| `modelscope` | ModelScope 魔搭（従量課金） | ❌ | ✅ | partial |
+| `ucloud` | 優雲智算 UCloud Modelverse（Coding Plan サブスク + 従量課金 API、中国国内/海外） | ✅ | ✅ | untested |
 | `カスタム` | Anthropic プロトコル準拠の任意の API を自前で追加 | ✅ | ✅ | verified |
 
 > 「Token Plan」列はサブスクリプション形式のクォータ全般（Token Plan / Coding Plan 等）を指し、「API」列は従量課金の Anthropic Messages 互換エンドポイントを指します。
@@ -99,6 +99,8 @@
 ```
 
 `OPUS_MODEL` が `1m` コンテキストに対応している場合、`model-opus[1m]` に設定すると Claude Code のロングコンテキストをフルに活用できます。
+
+LiteLLM 形式の `anthropic/` プレフィックスにも対応しています: `anthropic/model-opus` / `anthropic/model-sonnet` / `anthropic/model-haiku` はプレフィックスなしの記法と等価で、Anthropic プロトコルを認識させるためにプロバイダプレフィックスが必要なツールとの連携が容易になります。
 
 ## 開発
 

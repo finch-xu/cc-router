@@ -40,12 +40,12 @@ Stacked subscriptions across multiple LLM vendors, but Claude Code can only poin
 
 | id | Name | Token Plan | API | Status |
 |---|---|---|---|---|
-| `anthropic` | Anthropic official API (pay-as-you-go only, no Max Plan) | ❌ | ✅ | verified |
-| `zhipu` | Zhipu GLM | ✅ | ✅ | verified |
-| `deepseek` | DeepSeek | ❌ | ✅ | verified |
-| `moonshot` | Moonshot Kimi | ✅ | ✅ | untested |
-| `minimax` | MiniMax (3 endpoints) | ✅ | ✅ | partial |
-| `xiaomi` | Xiaomi MiMo (pay-as-you-go + 3-cluster plans) | ✅ | ✅ | untested |
+| `anthropic` | Anthropic official API (pay-as-you-go only, no subscription plan) | ❌ | ✅ | verified |
+| `zhipu` | Zhipu GLM (pay-as-you-go / China subscription) | ✅ | ✅ | verified |
+| `deepseek` | DeepSeek (pay-as-you-go) | ❌ | ✅ | verified |
+| `moonshot` | Moonshot Kimi (pay-as-you-go / China subscription / global subscription) | ✅ | ✅ | untested |
+| `minimax` | MiniMax (pay-as-you-go / China subscription / global subscription) | ✅ | ✅ | verified |
+| `xiaomi` | Xiaomi MiMo (pay-as-you-go / China subscription / global subscription) | ✅ | ✅ | untested |
 | `alibaba` | Alibaba Cloud Bailian (team Token Plan + 2-region pay-as-you-go + discontinued Coding Plan) | ✅ | ✅ | verified |
 | `volcengine` | Volcengine Ark (Coding Plan subscription + pay-as-you-go) | ✅ | ✅ | untested |
 | `openrouter` | OpenRouter aggregator (500+ models routed) | ❌ | ✅ | untested |
@@ -53,11 +53,11 @@ Stacked subscriptions across multiple LLM vendors, but Claude Code can only poin
 | `aiberm` | Aiberm (pay-as-you-go API, models returned dynamically by token group) | ❌ | ✅ | untested |
 | `whatai` | Shenma relay API (pay-as-you-go, OpenAI/Anthropic dual-protocol relay, Anthropic path only) | ❌ | ✅ | untested |
 | `ollama` | Ollama local inference (localhost:11434 only, includes cloud tags like `glm-4.7:cloud`) | ❌ | ✅ | partial |
-| `fireworks` | Fireworks AI (pay-as-you-go, covers DeepSeek / Qwen / Llama / Kimi and other open-source models), Fire Pass | ✅ | ✅ | verified |
-| `stepfun` | Stepfun (Step Plan subscription + pay-as-you-go API) | ✅ | ✅ | untested |
-| `baidu` | Baidu Qianfan (Coding Plan subscription, manual model entry) | ✅ | ❌ | untested |
-| `modelscope` | ModelScope (pay-as-you-go, OpenAI/Anthropic dual-protocol, Anthropic path only, covers Qwen / DeepSeek / Kimi / MiniMax and other open-source models) | ❌ | ✅ | partial |
-| `ucloud` | UCloud Modelverse (Coding Plan subscription + pay-as-you-go API in CN/global, aggregates Claude / Qwen / GLM / Kimi and more) | ✅ | ✅ | untested |
+| `fireworks` | Fireworks AI (pay-as-you-go / Fire Pass global subscription) | ✅ | ✅ | verified |
+| `stepfun` | Stepfun (pay-as-you-go / China subscription / global subscription) | ✅ | ✅ | untested |
+| `baidu` | Baidu Qianfan (pay-as-you-go / China subscription) | ✅ | ✅ | untested |
+| `modelscope` | ModelScope (pay-as-you-go) | ❌ | ✅ | partial |
+| `ucloud` | UCloud Modelverse (Coding Plan subscription + pay-as-you-go API in CN/global) | ✅ | ✅ | untested |
 | `Custom` | Bring your own Anthropic-compatible endpoint | ✅ | ✅ | verified |
 
 > The "Token Plan" column covers any subscription-style quota (Token Plan / Coding Plan, etc.); "API" denotes pay-as-you-go Anthropic Messages-compatible endpoints.
@@ -99,6 +99,8 @@ The **Settings** page renders the full env snippet dynamically — if the defaul
 ```
 
 When the `OPUS_MODEL` supports a `1m` context window, set it to `model-opus[1m]` to get Claude Code's full long-context support.
+
+The LiteLLM-style `anthropic/` prefix is also accepted: `anthropic/model-opus` / `anthropic/model-sonnet` / `anthropic/model-haiku` are equivalent to the prefix-less forms, making it easy to integrate with tools that require a provider prefix to recognize the Anthropic protocol.
 
 ## Development
 

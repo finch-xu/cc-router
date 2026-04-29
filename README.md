@@ -40,12 +40,12 @@
 
 | id | 名称 | Token Plan | API | 兼容性 |
 |---|---|---|---|---|
-| `anthropic` | Anthropic 官方 API（仅按量付费，不含 Max Plan） | ❌ | ✅ | verified |
-| `zhipu` | 智谱 GLM | ✅ | ✅ | verified |
-| `deepseek` | DeepSeek | ❌ | ✅ | verified |
-| `moonshot` | Moonshot Kimi | ✅ | ✅ | untested |
-| `minimax` | MiniMax（3 个 endpoint） | ✅ | ✅ | partial |
-| `xiaomi` | 小米 MiMo（按量付费 + 3 集群订阅） | ✅ | ✅ | untested |
+| `anthropic` | Anthropic 官方 API（仅按量付费，不含 Plan） | ❌ | ✅ | verified |
+| `zhipu` | 智谱 GLM（按量付费/中国订阅） | ✅ | ✅ | verified |
+| `deepseek` | DeepSeek（按量付费） | ❌ | ✅ | verified |
+| `moonshot` | Moonshot Kimi（按量付费/中国订阅/国际订阅） | ✅ | ✅ | untested |
+| `minimax` | MiniMax（按量付费/中国订阅/国际订阅） | ✅ | ✅ | verified |
+| `xiaomi` | 小米 MiMo（按量付费/中国订阅/国际订阅） | ✅ | ✅ | untested |
 | `alibaba` | 阿里云百炼（Token Plan 团队版 + 按量付费 2 地域 + 停售的 Coding Plan） | ✅ | ✅ | verified |
 | `volcengine` | 火山方舟（Coding Plan 订阅 + 按量付费） | ✅ | ✅ | untested |
 | `openrouter` | OpenRouter 聚合平台（500+ 模型路由） | ❌ | ✅ | untested |
@@ -53,11 +53,11 @@
 | `aiberm` | Aiberm（按量付费 API，模型按 token group 动态返回） | ❌ | ✅ | untested |
 | `whatai` | 神马中转 API（按量付费，OpenAI/Anthropic 双协议中转，仅用 Anthropic 路径） | ❌ | ✅ | untested |
 | `ollama` | Ollama 本地推理（仅 localhost:11434，含云端模型 tag 如 `glm-4.7:cloud`） | ❌ | ✅| partial |
-| `fireworks` | Fireworks AI（按量付费，覆盖 DeepSeek / Qwen / Llama / Kimi 等开源模型），支持Fire Pass订阅 | ✅ | ✅ | verified |
-| `stepfun` | 阶跃星辰（Step Plan 订阅 + 按量付费 API） | ✅ | ✅ | untested |
-| `baidu` | 百度千帆（Coding Plan 订阅，模型手动填写） | ✅ | ❌ | untested |
-| `modelscope` | 魔搭 ModelScope（按量付费，OpenAI/Anthropic 双协议，仅用 Anthropic 路径，覆盖 Qwen / DeepSeek / Kimi / MiniMax 等开源模型） | ❌ | ✅ | partial |
-| `ucloud` | 优云智算 UCloud Modelverse（Coding Plan 订阅 + 按量付费 API 国内/海外，聚合 Claude / Qwen / GLM / Kimi 等多家模型） | ✅ | ✅ | untested |
+| `fireworks` | Fireworks AI（按量付费/国际订阅Fire Pass） | ✅ | ✅ | verified |
+| `stepfun` | 阶跃星辰（按量付费/中国订阅/国际订阅） | ✅ | ✅ | untested |
+| `baidu` | 百度千帆（按量付费/中国订阅） | ✅ | ✅ | untested |
+| `modelscope` | 魔搭 ModelScope（按量付费） | ❌ | ✅ | partial |
+| `ucloud` | 优云智算 UCloud Modelverse（Coding Plan 订阅 + 按量付费 API 国内/海外） | ✅ | ✅ | untested |
 | `自定义` | 自定义任意Anthropic协议API | ✅ | ✅ | verified |
 
 > Token Plan 列包含各厂商的套餐订阅形态（Token Plan / Coding Plan 等）；API 列指按量付费的 Anthropic Messages 兼容端点。
