@@ -69,6 +69,7 @@
       "migrations/003_add_events_and_diagnostics.sql",
       "migrations/004_add_thinking_block_field_name.sql",
       "migrations/005_drop_thinking_block_field_name.sql",
+      "migrations/006_add_request_stats_daily.sql",
       "../LICENSE"
     ],
     "category": "DeveloperTool",

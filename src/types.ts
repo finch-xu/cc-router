@@ -279,6 +279,67 @@ export interface RequestLogFilters {
   virtual_model_name?: VirtualModelName;
   provider_id?: string;
   status?: RequestStatus;
+  subscription_id?: string;
+}
+
+// ===== 统计聚合 (commands/statistics.rs) =====
+
+export type StatsRange =
+  | "today"
+  | "last7_days"
+  | "last30_days"
+  | "last90_days"
+  | "all_time";
+
+export type BreakdownBy = "virtual_model" | "subscription";
+
+export interface OverallStatsDto {
+  total_requests: number;
+  success_count: number;
+  error_count: number;
+  timeout_count: number;
+  /** 0–100 */
+  success_rate_pct: number;
+  avg_duration_ms?: number;
+  p95_duration_ms?: number;
+  total_input_tokens: number;
+  total_output_tokens: number;
+  total_cache_creation_tokens: number;
+  total_cache_read_tokens: number;
+}
+
+export interface DailySeriesPointDto {
+  /** UTC 0 点 ms */
+  date_utc: number;
+  request_count: number;
+  success_count: number;
+  error_count: number;
+  timeout_count: number;
+  total_input_tokens: number;
+  total_output_tokens: number;
+  avg_duration_ms?: number;
+}
+
+export interface BreakdownDto {
+  /** virtual_model_name 或 subscription_id (UUID 字符串) */
+  key: string;
+  /** 显示名 (虚拟模型字面量 / 订阅 alias / "(已删除订阅)") */
+  label: string;
+  request_count: number;
+  success_count: number;
+  error_count: number;
+  timeout_count: number;
+  total_input_tokens: number;
+  total_output_tokens: number;
+  avg_duration_ms?: number;
+}
+
+export interface HeatmapDayDto {
+  /** UTC 0 点 ms */
+  date_utc: number;
+  /** input + output tokens */
+  total_tokens: number;
+  request_count: number;
 }
 
 export type EventKind = "request" | "subscription_state_change" | "system_error";

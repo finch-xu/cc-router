@@ -1,13 +1,15 @@
 import { useEffect, useMemo, useState } from "react";
-import { RefreshCw, ScrollText } from "lucide-react";
+import { useSearchParams } from "react-router-dom";
+import { RefreshCw, ScrollText, X } from "lucide-react";
 import { EmptyState } from "@/components/EmptyState";
 import { Pagination } from "@/components/Pagination";
 import { ProviderLogo } from "@/components/ProviderLogo";
 import { RequestDetailDialog } from "@/components/RequestDetailDialog";
 import { useRequests } from "@/hooks/useRequests";
 import { useProviders } from "@/hooks/useProviders";
+import { useSubscriptions } from "@/hooks/useSubscriptions";
 import { useT } from "@/i18n";
-import { fmtNum, fmtKilo, fmtTime } from "@/lib/format";
+import { fmtNum, fmtTime } from "@/lib/format";
 import { VM_META } from "@/lib/virtualModels";
 import type {
   RequestLogDto,
@@ -18,7 +20,6 @@ import type {
 
 const PAGE_SIZE = 10;
 const ALL = "__all__";
-const SPARK_BUCKETS = 14;
 const EMPTY_ITEMS: RequestLogDto[] = [];
 
 const STATUS_TONE: Record<RequestStatus, { tone: "ok" | "warn" | "err"; labelKey: string }> = {
@@ -27,47 +28,29 @@ const STATUS_TONE: Record<RequestStatus, { tone: "ok" | "warn" | "err"; labelKey
   error:   { tone: "err",  labelKey: "requestLogs.status.error" },
 };
 
-/** 把最近 N 条延迟样本均匀分桶,产出 SPARK_BUCKETS 高度数组(0-1) */
-function buildSparkline(items: RequestLogDto[]): number[] {
-  const lats = items
-    .filter((r) => r.total_latency_ms != null)
-    .slice(0, 60)
-    .map((r) => r.total_latency_ms! / 1000)
-    .reverse();
-  if (lats.length === 0) return new Array(SPARK_BUCKETS).fill(0);
-  if (lats.length <= SPARK_BUCKETS) {
-    const max = Math.max(...lats, 0.001);
-    return lats.map((v) => v / max);
-  }
-  const bucketSize = lats.length / SPARK_BUCKETS;
-  const buckets: number[] = [];
-  for (let i = 0; i < SPARK_BUCKETS; i++) {
-    const start = Math.floor(i * bucketSize);
-    const end = Math.floor((i + 1) * bucketSize);
-    const slice = lats.slice(start, end);
-    const avg = slice.reduce((a, b) => a + b, 0) / Math.max(1, slice.length);
-    buckets.push(avg);
-  }
-  const max = Math.max(...buckets, 0.001);
-  return buckets.map((v) => v / max);
-}
-
 export function RequestLogsPage() {
   const { t } = useT();
+  const [searchParams, setSearchParams] = useSearchParams();
   const [page, setPage] = useState(1);
   const [vmFilter, setVmFilter] = useState<VirtualModelName | undefined>();
   const [providerFilter, setProviderFilter] = useState<string | undefined>();
   const [statusFilter, setStatusFilter] = useState<RequestStatus | undefined>();
+  const subscriptionFilter = searchParams.get("subscription_id") ?? undefined;
   const [activeRequest, setActiveRequest] = useState<RequestLogDto | null>(null);
+  const subs = useSubscriptions();
+  const subFilterLabel = subscriptionFilter
+    ? subs.data?.find((s) => s.id === subscriptionFilter)?.display_name ?? subscriptionFilter
+    : undefined;
 
   const filters = useMemo<RequestLogFilters | undefined>(() => {
-    if (!vmFilter && !providerFilter && !statusFilter) return undefined;
+    if (!vmFilter && !providerFilter && !statusFilter && !subscriptionFilter) return undefined;
     return {
       virtual_model_name: vmFilter,
       provider_id: providerFilter,
       status: statusFilter,
+      subscription_id: subscriptionFilter,
     };
-  }, [vmFilter, providerFilter, statusFilter]);
+  }, [vmFilter, providerFilter, statusFilter, subscriptionFilter]);
 
   const query = useRequests(page, PAGE_SIZE, filters);
   const providers = useProviders();
@@ -86,22 +69,16 @@ export function RequestLogsPage() {
     setVmFilter(undefined);
     setProviderFilter(undefined);
     setStatusFilter(undefined);
+    setSearchParams({});
     setPage(1);
   }
 
-  // 4 个 stat 是当前页的本地估算(不是后端聚合) —— 切页/筛选会变
-  const pageStats = useMemo(() => {
-    const successCount = items.filter((i) => i.status === "success").length;
-    const failCount = items.length - successCount;
-    const successRate = items.length > 0 ? (successCount / items.length) * 100 : 0;
-    const lats = items.filter((i) => i.total_latency_ms != null).map((i) => i.total_latency_ms!);
-    const avgLat = lats.length > 0 ? lats.reduce((a, b) => a + b, 0) / lats.length / 1000 : 0;
-    const totalOut = items.reduce((sum, i) => sum + (i.output_tokens ?? 0), 0);
-    const totalIn = items.reduce((sum, i) => sum + (i.input_tokens ?? 0), 0);
-    return { successRate, failCount, avgLat, totalIn, totalOut };
-  }, [items]);
-
-  const spark = useMemo(() => buildSparkline(items), [items]);
+  function clearSubFilter() {
+    const next = new URLSearchParams(searchParams);
+    next.delete("subscription_id");
+    setSearchParams(next);
+    setPage(1);
+  }
 
   return (
     <>
@@ -119,48 +96,6 @@ export function RequestLogsPage() {
           <RefreshCw size={12} className={query.isFetching ? "spin" : undefined} />
           {t("requestLogs.refresh")}
         </button>
-      </div>
-
-      <div className="log-stats">
-        <div className="stat">
-          <div className="stat-label">{t("requestLogs.stat.totalRequests")}</div>
-          <div className="stat-val tnum">{fmtNum(total)}</div>
-          <div className="stat-delta">
-            {t("requestLogs.stat.thisPagePrefix")}{items.length}{t("requestLogs.stat.thisPageSuffix")}
-          </div>
-        </div>
-        <div className="stat">
-          <div className="stat-label">{t("requestLogs.stat.successRate")}</div>
-          <div className="stat-val tnum">
-            {pageStats.successRate.toFixed(1)}
-            <span style={{ fontSize: 14, color: "var(--ink-3)" }}>%</span>
-          </div>
-          <div className={"stat-delta" + (pageStats.failCount > 0 ? " down" : "")}>
-            {t("requestLogs.stat.failedFormat", {
-              failed: pageStats.failCount,
-              total: items.length,
-            })}
-          </div>
-        </div>
-        <div className="stat">
-          <div className="stat-label">{t("requestLogs.stat.avgLatency")}</div>
-          <div className="stat-val tnum">
-            {pageStats.avgLat > 0 ? pageStats.avgLat.toFixed(2) : "-"}
-            <span style={{ fontSize: 14, color: "var(--ink-3)" }}>s</span>
-          </div>
-          <div className="spark">
-            {spark.map((v, i) => (
-              <span key={i} style={{ height: `${Math.max(8, v * 100)}%` }} />
-            ))}
-          </div>
-        </div>
-        <div className="stat">
-          <div className="stat-label">{t("requestLogs.stat.totalTokensOut")}</div>
-          <div className="stat-val tnum">{fmtKilo(pageStats.totalOut)}</div>
-          <div className="stat-delta">
-            {t("requestLogs.stat.tokensInPrefix")}{fmtKilo(pageStats.totalIn)}{t("requestLogs.stat.tokensInSuffix")}
-          </div>
-        </div>
       </div>
 
       <div className="log-filters">
@@ -214,6 +149,21 @@ export function RequestLogsPage() {
             </option>
           ))}
         </select>
+
+        {subscriptionFilter && (
+          <span className="pill accent" style={{ display: "inline-flex", alignItems: "center", gap: 4 }}>
+            <span className="dot" />
+            {subFilterLabel}
+            <button
+              type="button"
+              onClick={clearSubFilter}
+              style={{ background: "none", border: "none", color: "inherit", cursor: "pointer", padding: 0, marginLeft: 2, display: "inline-flex" }}
+              aria-label="clear subscription filter"
+            >
+              <X size={12} />
+            </button>
+          </span>
+        )}
 
         <span
           className="mono"

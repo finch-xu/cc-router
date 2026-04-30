@@ -82,6 +82,10 @@ pub fn run() {
             commands::virtual_models::list_virtual_models,
             commands::virtual_models::update_virtual_model,
             commands::requests::list_requests,
+            commands::statistics::get_overall_stats,
+            commands::statistics::get_daily_series,
+            commands::statistics::get_breakdown,
+            commands::statistics::get_token_heatmap,
             commands::events::list_events,
             commands::settings::get_settings,
             commands::settings::update_settings,
@@ -183,6 +187,12 @@ async fn bootstrap(
     let recheck_state = state.clone();
     tauri::async_runtime::spawn(async move {
         subscription::recheck_worker::run(recheck_state).await;
+    });
+
+    let cleanup_pool = state.db.clone();
+    let cleanup_settings = state.settings.clone();
+    tauri::async_runtime::spawn(async move {
+        observability::cleanup::run(cleanup_pool, cleanup_settings).await;
     });
 
     Ok(state)

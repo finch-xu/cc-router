@@ -818,8 +818,162 @@ input, select, textarea { font: inherit; color: inherit; }
 .stat-delta.up { color: oklch(0.45 0.13 150); }
 .stat-delta.down { color: var(--err); }
 
-.spark { display: flex; align-items: flex-end; gap: 2px; height: 20px; margin-top: 8px; }
-.spark span { flex: 1; background: var(--accent); border-radius: 1px; opacity: 0.85; min-height: 2px; }
+/* === Statistics page === */
+.range-tabs {
+  display: inline-flex;
+  background: var(--surface-2);
+  border: 1px solid var(--line);
+  border-radius: var(--r-md);
+  padding: 3px;
+  gap: 2px;
+  margin-bottom: 16px;
+}
+.range-tab {
+  padding: 5px 12px;
+  font-size: 12px;
+  border: none;
+  background: transparent;
+  border-radius: 4px;
+  color: var(--ink-3);
+  cursor: pointer;
+}
+.range-tab:hover { color: var(--ink); }
+.range-tab.active {
+  background: var(--surface);
+  color: var(--ink);
+  font-weight: 500;
+  box-shadow: 0 1px 2px rgba(0,0,0,0.04);
+}
+
+.stats-section {
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: var(--r-md);
+  padding: 18px 20px;
+  margin-bottom: 16px;
+}
+.stats-section-header {
+  margin-bottom: 14px;
+}
+.stats-section-title {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--ink);
+}
+.stats-section-subtitle {
+  font-size: 11px;
+  color: var(--ink-4);
+  margin-top: 2px;
+}
+.stat-unit { font-size: 14px; color: var(--ink-3); }
+.cell-with-icon { display: flex; align-items: center; gap: 8px; }
+.cell-with-icon-label { font-size: 12.5px; }
+.bar-row-label { font-size: 12.5px; }
+.bar-meta-sub { color: var(--ink-4); margin-left: 6px; }
+
+/* Heatmap (GitHub-style) */
+.heatmap-wrap {
+  display: flex;
+  gap: 8px;
+  overflow-x: auto;
+  padding-bottom: 4px;
+}
+.heatmap-day-labels {
+  display: grid;
+  grid-template-rows: repeat(7, 11px);
+  gap: 3px;
+  font-size: 9px;
+  color: var(--ink-4);
+  padding-top: 16px;
+}
+.heatmap-day-labels span {
+  height: 11px;
+  line-height: 11px;
+  white-space: nowrap;
+}
+.heatmap-grid-wrap { flex: 1; }
+.heatmap-month-row {
+  display: flex;
+  font-size: 10px;
+  color: var(--ink-3);
+  margin-bottom: 4px;
+  position: relative;
+  height: 12px;
+}
+.heatmap-month-label {
+  position: absolute;
+  white-space: nowrap;
+}
+.heatmap-grid {
+  display: grid;
+  grid-template-rows: repeat(7, 11px);
+  grid-auto-flow: column;
+  grid-auto-columns: 11px;
+  gap: 3px;
+}
+.heatmap-cell {
+  border-radius: 2px;
+  background: var(--surface-3);
+}
+.heatmap-cell.l1 { background: oklch(0.92 0.06 150); }
+.heatmap-cell.l2 { background: oklch(0.82 0.10 150); }
+.heatmap-cell.l3 { background: oklch(0.70 0.13 150); }
+.heatmap-cell.l4 { background: oklch(0.56 0.16 150); }
+.heatmap-legend {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 11px;
+  color: var(--ink-3);
+  margin-top: 8px;
+  justify-content: flex-end;
+}
+.heatmap-legend .heatmap-cell { width: 11px; height: 11px; }
+
+.recharts-tooltip-wrapper { outline: none; }
+.stats-tooltip {
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: var(--r-sm);
+  padding: 8px 10px;
+  font-size: 11px;
+  box-shadow: 0 2px 8px rgba(0,0,0,0.06);
+}
+.stats-tooltip .tt-row {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+}
+.stats-tooltip .tt-label { color: var(--ink-3); }
+.stats-tooltip .tt-val { font-family: var(--font-mono); color: var(--ink); }
+
+.bar-row {
+  display: grid;
+  grid-template-columns: 100px 1fr 80px;
+  gap: 12px;
+  align-items: center;
+  padding: 8px 0;
+  font-size: 12.5px;
+}
+.bar-row + .bar-row { border-top: 1px solid var(--line); }
+.bar-track {
+  position: relative;
+  height: 18px;
+  background: var(--surface-2);
+  border-radius: 3px;
+  overflow: hidden;
+}
+.bar-fill {
+  position: absolute;
+  left: 0; top: 0; bottom: 0;
+  background: var(--accent);
+  opacity: 0.85;
+}
+.bar-row .bar-meta {
+  text-align: right;
+  font-family: var(--font-mono);
+  color: var(--ink-3);
+}
 
 /* === Add subscription wizard === */
 .wizard {

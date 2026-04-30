@@ -1,16 +1,22 @@
 import { invoke } from "@tauri-apps/api/core";
 import type {
+  BreakdownBy,
+  BreakdownDto,
   CreateSubscriptionInput,
+  DailySeriesPointDto,
   EventFilters,
+  HeatmapDayDto,
   ListEventsResult,
   ListRequestsResult,
   OnboardingState,
+  OverallStatsDto,
   ProviderInfo,
   ProxyStatus,
   RefreshModelListResult,
   RequestLogFilters,
   Settings,
   SettingsPatch,
+  StatsRange,
   SubscriptionDto,
   SubscriptionPatch,
   TestConnectionResult,
@@ -55,6 +61,16 @@ export const api = {
     filters?: RequestLogFilters,
   ) =>
     invoke<ListRequestsResult>("list_requests", { page, pageSize, filters }),
+
+  // statistics (聚合表查询, 跨范围全局)
+  getOverallStats: (range: StatsRange) =>
+    invoke<OverallStatsDto>("get_overall_stats", { range }),
+  getDailySeries: (range: StatsRange) =>
+    invoke<DailySeriesPointDto[]>("get_daily_series", { range }),
+  getBreakdown: (range: StatsRange, by: BreakdownBy) =>
+    invoke<BreakdownDto[]>("get_breakdown", { range, by }),
+  getTokenHeatmap: (days: number) =>
+    invoke<HeatmapDayDto[]>("get_token_heatmap", { days }),
 
   // event stream (kind=request / subscription_state_change / system_error)
   listEvents: (

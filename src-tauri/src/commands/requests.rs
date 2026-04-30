@@ -43,6 +43,7 @@ pub struct RequestLogFilters {
     pub virtual_model_name: Option<String>,
     pub provider_id: Option<String>,
     pub status: Option<String>,
+    pub subscription_id: Option<String>,
 }
 
 #[tauri::command]
@@ -57,33 +58,29 @@ pub async fn list_requests(
     let offset = (page - 1) as i64 * page_size as i64;
     let filters = filters.unwrap_or_default();
 
-    // 动态构建 WHERE 子句。列名是白名单字面量，值走 bind，无注入风险。
-    let mut conditions: Vec<&'static str> = Vec::new();
-    if filters.virtual_model_name.is_some() {
-        conditions.push("virtual_model_name = ?");
-    }
-    if filters.provider_id.is_some() {
-        conditions.push("provider_id = ?");
-    }
-    if filters.status.is_some() {
-        conditions.push("status = ?");
-    }
-    let where_clause = if conditions.is_empty() {
+    // 动态构建 WHERE 子句。列名是白名单字面量, 值走 bind, 无注入风险。
+    // 一次构造 active filters, conditions / count / select 共用同一份 iterate, 加列只动一处。
+    let active: Vec<(&'static str, &str)> = [
+        ("virtual_model_name", filters.virtual_model_name.as_deref()),
+        ("provider_id", filters.provider_id.as_deref()),
+        ("status", filters.status.as_deref()),
+        ("subscription_id", filters.subscription_id.as_deref()),
+    ]
+    .into_iter()
+    .filter_map(|(col, val)| val.map(|v| (col, v)))
+    .collect();
+
+    let where_clause = if active.is_empty() {
         String::new()
     } else {
-        format!(" WHERE {}", conditions.join(" AND "))
+        let conds: Vec<String> = active.iter().map(|(c, _)| format!("{} = ?", c)).collect();
+        format!(" WHERE {}", conds.join(" AND "))
     };
 
     let count_sql = format!("SELECT COUNT(*) AS c FROM requests{}", where_clause);
     let mut count_q = sqlx::query(&count_sql);
-    if let Some(v) = &filters.virtual_model_name {
-        count_q = count_q.bind(v);
-    }
-    if let Some(v) = &filters.provider_id {
-        count_q = count_q.bind(v);
-    }
-    if let Some(v) = &filters.status {
-        count_q = count_q.bind(v);
+    for (_, v) in &active {
+        count_q = count_q.bind(*v);
     }
     let total: i64 = count_q.fetch_one(&state.db).await?.try_get("c")?;
 
@@ -100,14 +97,8 @@ pub async fn list_requests(
         where_clause
     );
     let mut select_q = sqlx::query(&select_sql);
-    if let Some(v) = &filters.virtual_model_name {
-        select_q = select_q.bind(v);
-    }
-    if let Some(v) = &filters.provider_id {
-        select_q = select_q.bind(v);
-    }
-    if let Some(v) = &filters.status {
-        select_q = select_q.bind(v);
+    for (_, v) in &active {
+        select_q = select_q.bind(*v);
     }
     let rows = select_q
         .bind(page_size as i64)

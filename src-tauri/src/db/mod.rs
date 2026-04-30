@@ -29,6 +29,10 @@ const MIGRATIONS: &[(u32, &str)] = &[
         5,
         include_str!("../../migrations/005_drop_thinking_block_field_name.sql"),
     ),
+    (
+        6,
+        include_str!("../../migrations/006_add_request_stats_daily.sql"),
+    ),
 ];
 
 pub async fn init_pool(db_path: &Path) -> AppResult<SqlitePool> {
@@ -300,11 +304,12 @@ mod tests {
         run_migrations(&pool, &dir).await.expect("migrate fresh");
 
         let versions = applied_versions(&pool).await;
-        assert_eq!(versions, vec![1, 2, 3, 4, 5]);
+        assert_eq!(versions, vec![1, 2, 3, 4, 5, 6]);
         assert!(has_column(&pool, "subscriptions", "supports_thinking_blocks").await);
         assert!(!has_column(&pool, "subscriptions", "thinking_block_field_name").await);
         assert!(has_column(&pool, "requests", "upstream_response_body").await);
         assert!(has_table(&pool, "events").await);
+        assert!(has_table(&pool, "request_stats_daily").await);
     }
 
     #[tokio::test]
@@ -320,11 +325,12 @@ mod tests {
         run_migrations(&pool, &dir).await.expect("migrate legacy");
 
         let versions = applied_versions(&pool).await;
-        assert_eq!(versions, vec![1, 2, 3, 4, 5]); // baseline v=1, 然后跑 v=2..5
+        assert_eq!(versions, vec![1, 2, 3, 4, 5, 6]); // baseline v=1, 然后跑 v=2..5
         assert!(has_column(&pool, "subscriptions", "supports_thinking_blocks").await);
         assert!(!has_column(&pool, "subscriptions", "thinking_block_field_name").await);
         assert!(has_column(&pool, "requests", "upstream_response_body").await);
         assert!(has_table(&pool, "events").await);
+        assert!(has_table(&pool, "request_stats_daily").await);
     }
 
     #[tokio::test]
@@ -336,7 +342,7 @@ mod tests {
         run_migrations(&pool, &dir).await.expect("third run");
 
         let versions = applied_versions(&pool).await;
-        assert_eq!(versions, vec![1, 2, 3, 4, 5]); // 没有重复写
+        assert_eq!(versions, vec![1, 2, 3, 4, 5, 6]); // 没有重复写
     }
 
     async fn setup_pre_v4_pool() -> SqlitePool {
@@ -463,7 +469,7 @@ mod tests {
 
         assert!(has_table(&pool, "subscriptions").await);
         assert!(!has_table(&pool, "subscriptions_new").await);
-        assert_eq!(applied_versions(&pool).await, vec![1, 2, 3, 4, 5]);
+        assert_eq!(applied_versions(&pool).await, vec![1, 2, 3, 4, 5, 6]);
 
         let count: (i64,) =
             sqlx::query_as("SELECT count(*) FROM subscriptions WHERE provider_id='deepseek'")
