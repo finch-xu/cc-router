@@ -7,7 +7,7 @@ use axum::response::{IntoResponse, Response};
 use axum::Json;
 use chrono::Utc;
 use reqwest::header::{HeaderMap as ReqHeaderMap, HeaderName as ReqHeaderName, HeaderValue as ReqHeaderValue};
-use serde_json::Value;
+use serde_json::{json, Value};
 use tauri::Emitter;
 use tracing::{info, warn};
 use uuid::Uuid;
@@ -175,6 +175,28 @@ pub async fn dispatch(
         // 避免历史中残留的 thinking 块被发到不识别的上游导致 400。
         if !supports_thinking {
             strip_thinking(&mut upstream_body);
+        }
+        // DeepSeek anthropic 兼容层硬性约束（实测 2026-04-30）:
+        //
+        // deepseek-v4-pro 默认开启 thinking 模式. 在多轮 + tool_use 场景下,
+        // 上游严格要求 assistant 历史必须保留之前模型自己产生的 thinking 块,
+        // 否则返回 400: "The `content[].thinking` in the thinking mode must be
+        // passed back to the API."（与 Anthropic 官方协议一致, 见官方 extended-thinking 文档）.
+        //
+        // 这在 cc-router round_robin 跨订阅场景被天然破坏: 如上一轮路由到不返
+        // thinking 块的家（如某些中转网关上的 claude-opus-4-6 实测不返 thinking）,
+        // 客户端拿到的 assistant 历史就缺 thinking 块. 下一轮 round_robin 路由到
+        // deepseek 时, deepseek 看不到历史 thinking 块即触发 400, cc-router 内部
+        // 重试切下一家成功, 但 UI 历史里会留 deepseek 失败 attempt 记录.
+        //
+        // Fix: 历史无 thinking 块时主动注入 `thinking: {type:"disabled"}` 让 deepseek
+        // 跳过 thinking 模式严格校验. 不动客户端已显式设置的 thinking 字段.
+        // 详见 apply_deepseek_thinking_quirk 函数注释 + tests/proxy_e2e.rs 的两个 e2e.
+        //
+        // 为什么硬编码 provider_id=="deepseek" 而非新增 capability: 当前只一家有此 quirk,
+        // 抽象会重蹈 v4 `thinking_block_field_name` 覆辙（issue #3 教训, 第一个使用者就错）.
+        if provider_id == "deepseek" {
+            apply_deepseek_thinking_quirk(&mut upstream_body);
         }
         let serialized_body = serde_json::to_vec(&upstream_body)?;
 
@@ -571,9 +593,84 @@ fn strip_thinking(body: &mut Value) {
     }
 }
 
+/// DeepSeek anthropic 兼容层 thinking 模式严格性 quirk 修复.
+///
+/// # 现象（实测 2026-04-30, 8 个 curl 实验交叉验证）
+///
+/// | 场景 | 不加 thinking 开关 | 加 `thinking:{type:disabled}` |
+/// |---|---|---|
+/// | 单轮 user message | 200, 默认返 thinking+text | 200, 只返 text |
+/// | 多轮纯文本（assistant 无 thinking 块） | **200**（deepseek 宽容） | 200 |
+/// | 多轮 + tool_use（assistant 无 thinking 块） | **400** ★ | **200** |
+/// | 多轮 + tool_use（assistant 含原样 thinking 块） | 200 | 200 |
+///
+/// 400 错误体:
+/// ```json
+/// {"error":{"message":"The `content[].thinking` in the thinking mode must be passed back to the API.","type":"invalid_request_error"}}
+/// ```
+///
+/// # 为什么 cc-router 会触发
+///
+/// deepseek 默认开启 thinking 模式. round_robin 跨订阅时, 上一轮路由到不返 thinking
+/// 的家（如某些中转网关上的 claude-opus-4-6）, 客户端拿到的 assistant 历史就缺
+/// thinking 块. 下一轮路由到 deepseek 时, deepseek 严格校验 → 400.
+///
+/// # 修复策略
+///
+/// 主动注入 `thinking: {"type": "disabled"}` 让 deepseek 跳过 thinking 模式严格校验.
+/// 这是 deepseek 协议官方支持的开关（注意: `"thinking": false` 会被 schema 拒为
+/// `invalid type: boolean, expected ThinkingOptions`, 必须用对象形式）.
+///
+/// # 触发条件
+///
+/// - messages 历史的 assistant 消息中**全部不含** thinking 块
+/// - **且**客户端**未显式设置**顶层 `thinking` 字段（尊重客户端选择, 不覆盖）
+///
+/// # 不影响项
+///
+/// - 单轮请求 → 默认进入: 没 assistant 历史 → 注入 disable. 想要 thinking 的客户端
+///   自己设 `thinking:{type:enabled}` 即可（被尊重不覆盖）.
+/// - 多轮纯文本无 thinking → 也注入 disable, 无副作用（实测 deepseek 接受）.
+/// - 多轮历史含 thinking 块（即用户连续打 deepseek 拿到的 thinking 原样回传）→
+///   不注入 disable, deepseek 正常 thinking 模式继续.
+pub fn apply_deepseek_thinking_quirk(body: &mut Value) {
+    if body.get("thinking").is_some() {
+        return;
+    }
+    if !history_lacks_thinking_block(body) {
+        return;
+    }
+    if let Some(obj) = body.as_object_mut() {
+        obj.insert("thinking".to_string(), json!({"type": "disabled"}));
+    }
+}
+
+/// 判断 messages 历史里 assistant 消息是否完全不含 thinking 块。
+/// - 任何 assistant 消息 content 数组里有 type=="thinking" 块 → false
+/// - 所有 assistant 消息都不含 thinking 块（含空 messages 数组）→ true
+fn history_lacks_thinking_block(body: &Value) -> bool {
+    let Some(messages) = body.get("messages").and_then(|v| v.as_array()) else {
+        return true;
+    };
+    for msg in messages {
+        if msg.get("role").and_then(|r| r.as_str()) != Some("assistant") {
+            continue;
+        }
+        let Some(content) = msg.get("content").and_then(|c| c.as_array()) else {
+            continue;
+        };
+        for block in content {
+            if block.get("type").and_then(|t| t.as_str()) == Some("thinking") {
+                return false;
+            }
+        }
+    }
+    true
+}
+
 #[cfg(test)]
 mod tests {
-    use super::strip_thinking;
+    use super::{apply_deepseek_thinking_quirk, history_lacks_thinking_block, strip_thinking};
     use serde_json::json;
 
     #[test]
@@ -646,5 +743,100 @@ mod tests {
         let mut body2 = json!({ "messages": [] });
         strip_thinking(&mut body2);
         assert_eq!(body2["messages"].as_array().unwrap().len(), 0);
+    }
+
+    #[test]
+    fn deepseek_quirk_injects_disable_when_no_thinking_history() {
+        let mut body = json!({
+            "messages": [
+                {"role": "user", "content": "hi"},
+                {"role": "assistant", "content": [
+                    {"type": "text", "text": "hello"},
+                    {"type": "tool_use", "id": "1", "name": "x", "input": {}}
+                ]},
+                {"role": "user", "content": [
+                    {"type": "tool_result", "tool_use_id": "1", "content": "ok"}
+                ]}
+            ]
+        });
+        apply_deepseek_thinking_quirk(&mut body);
+        assert_eq!(body["thinking"], json!({"type": "disabled"}));
+    }
+
+    #[test]
+    fn deepseek_quirk_skips_when_history_has_thinking() {
+        let mut body = json!({
+            "messages": [
+                {"role": "user", "content": "hi"},
+                {"role": "assistant", "content": [
+                    {"type": "thinking", "thinking": "...", "signature": "abc"},
+                    {"type": "text", "text": "hello"}
+                ]}
+            ]
+        });
+        apply_deepseek_thinking_quirk(&mut body);
+        assert!(
+            body.get("thinking").is_none(),
+            "客户端没设 thinking 且历史有 thinking 块时不应注入"
+        );
+    }
+
+    #[test]
+    fn deepseek_quirk_respects_client_provided_thinking() {
+        let mut body = json!({
+            "thinking": {"type": "enabled", "budget_tokens": 1024},
+            "messages": [{"role": "user", "content": "hi"}]
+        });
+        apply_deepseek_thinking_quirk(&mut body);
+        assert_eq!(
+            body["thinking"],
+            json!({"type": "enabled", "budget_tokens": 1024}),
+            "客户端显式设了 thinking 字段不应被覆盖"
+        );
+    }
+
+    #[test]
+    fn deepseek_quirk_handles_single_user_message() {
+        let mut body = json!({
+            "messages": [{"role": "user", "content": "hi"}]
+        });
+        apply_deepseek_thinking_quirk(&mut body);
+        assert_eq!(body["thinking"], json!({"type": "disabled"}));
+    }
+
+    #[test]
+    fn history_lacks_thinking_block_detects_present_thinking() {
+        let body = json!({
+            "messages": [
+                {"role": "assistant", "content": [
+                    {"type": "thinking", "thinking": "x", "signature": "s"}
+                ]}
+            ]
+        });
+        assert!(!history_lacks_thinking_block(&body));
+    }
+
+    #[test]
+    fn history_lacks_thinking_block_ignores_string_content() {
+        let body = json!({
+            "messages": [
+                {"role": "assistant", "content": "hi"},
+                {"role": "user", "content": "ok"}
+            ]
+        });
+        assert!(history_lacks_thinking_block(&body));
+    }
+
+    #[test]
+    fn history_lacks_thinking_block_ignores_user_messages() {
+        // user 消息里出现 thinking 块（违反协议但要稳健）, 不应影响判定
+        let body = json!({
+            "messages": [
+                {"role": "user", "content": [
+                    {"type": "thinking", "thinking": "stray", "signature": "x"}
+                ]}
+            ]
+        });
+        assert!(history_lacks_thinking_block(&body));
     }
 }

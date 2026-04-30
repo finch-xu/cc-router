@@ -42,3 +42,38 @@ model_discovery:
 
 capabilities:
   supports_thinking_blocks: true
+
+# ----------------------------------------------------------------------------
+# DeepSeek 兼容层 thinking 模式严格性 quirk（实测 2026-04-30）
+# ----------------------------------------------------------------------------
+#
+# DeepSeek anthropic 兼容端点的 thinking 模式默认开启. 在 *多轮 + tool_use*
+# 场景下, 上游严格要求 assistant 历史必须保留之前模型自己产生的 thinking 块,
+# 否则返回 400:
+#
+#     {"error":{"message":"The `content[].thinking` in the thinking mode must
+#       be passed back to the API.","type":"invalid_request_error"}}
+#
+# 这与 Anthropic 官方协议一致（"During tool use, you must pass thinking blocks
+# back"）, 不是 deepseek 的方言.
+#
+# 但在 cc-router round_robin 跨订阅场景被天然破坏: 上一轮可能路由到不返
+# thinking 块的家（如某些网关上的 claude-opus-4-6 实测不返 thinking 块）,
+# 下一轮路由到 deepseek 时历史缺 thinking 块即触发 400, cc-router 内部重试切
+# 下一家虽能成功, 但 UI 历史会留 deepseek 失败 attempt 记录.
+#
+# 修复: src/proxy/pipeline.rs::apply_deepseek_thinking_quirk
+#   - 当 messages 历史的 assistant 消息全部不含 thinking 块, 且客户端未显式
+#     设置顶层 thinking 字段时, 主动注入 `thinking: {"type": "disabled"}`,
+#     让 deepseek 跳过严格校验.
+#   - 客户端已设的 thinking 字段不覆盖.
+#
+# 注意:
+#   - `thinking: false` 不行, deepseek schema 拒为 invalid type, 必须用对象形式.
+#   - 此 quirk 是基于 provider_id == "deepseek" 硬编码的, 不通过 yaml capability
+#     字段控制. 这是有意为之: 当前只 deepseek 一家有此严格性, 抽象 capability
+#     字段会重蹈 v4 `thinking_block_field_name` 覆辙（issue #3 教训）. 未来若
+#     第二家出现同类 quirk, 再考虑抽象.
+#   - 历史教训: v4 曾错误假设 deepseek 字段名是 `think`（实际是 `thinking`）,
+#     加双向翻译机制制造 400; v5 已下线该机制. 真正的 deepseek 兼容层 quirk
+#     不是字段名而是 thinking 模式严格性, 本次（v1.5.4 起）才精准定位 + 修复.

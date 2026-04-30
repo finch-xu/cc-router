@@ -22,6 +22,10 @@ target
 
 mydata/
 
+# scripts/probe-out/ 是 probe_anthropic_compat.py 的调试产物
+# (req/resp/meta JSON 抓包), 包含真实多轮对话内容, 不进 git.
+scripts/probe-out/
+
 # Node
 node_modules/
 dist/
