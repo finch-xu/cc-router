@@ -4,6 +4,7 @@ import {
   Key,
   ScrollText,
   BarChart3,
+  Receipt,
   Settings as SettingsIcon,
   Info,
   BookOpen,
@@ -42,6 +43,7 @@ export function Sidebar() {
     { to: "/subscriptions", label: t("sidebar.nav.subscriptions"), icon: Key, badge: subsCount > 0 ? String(subsCount) : undefined },
     { to: "/request-logs", label: t("sidebar.nav.logs"), icon: ScrollText },
     { to: "/statistics", label: t("sidebar.nav.statistics"), icon: BarChart3 },
+    { to: "/receipts", label: t("sidebar.nav.receipts"), icon: Receipt },
     { to: "/settings", label: t("sidebar.nav.settings"), icon: SettingsIcon },
     { to: "/about", label: t("sidebar.nav.about"), icon: Info, dot: hasUpdate },
   ];

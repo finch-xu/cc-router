@@ -342,6 +342,53 @@ export interface HeatmapDayDto {
   request_count: number;
 }
 
+// ===== Receipts (commands/receipts.rs) =====
+// 与 StatsRange 故意分开: Receipts 直接查 requests 原始表, 支持 24h 滚动窗口
+
+export type ReceiptRange =
+  | "last_24_hours"
+  | "last7_days"
+  | "last30_days"
+  | "last_year"
+  | "all_time";
+
+export interface ReceiptTotalsDto {
+  request_count: number;
+  input_tokens: number;
+  output_tokens: number;
+  cache_creation_tokens: number;
+  cache_read_tokens: number;
+}
+
+export interface ReceiptSubItemDto {
+  subscription_id: string;
+  /** undefined 表示订阅已被删除; 前端按 i18n 显示兜底文案 */
+  subscription_display_name?: string;
+  provider_id: string;
+  provider_display_name: string;
+  real_model_name: string;
+  totals: ReceiptTotalsDto;
+}
+
+export interface ReceiptVirtualModelItemDto {
+  /** "model-opus" | "model-sonnet" | "model-haiku" — fallback 不出现 */
+  virtual_model_name: string;
+  subtotal: ReceiptTotalsDto;
+  sub_items: ReceiptSubItemDto[];
+}
+
+export interface ReceiptDto {
+  range: ReceiptRange;
+  range_start_ms: number;
+  range_end_ms: number;
+  generated_at_ms: number;
+  /** 8 位大写 hex 单号 */
+  slip_no: string;
+  /** 始终 3 项: opus / sonnet / haiku, 顺序固定 */
+  items: ReceiptVirtualModelItemDto[];
+  grand_total: ReceiptTotalsDto;
+}
+
 export type EventKind = "request" | "subscription_state_change" | "system_error";
 export type EventSeverity = "info" | "warn" | "error";
 

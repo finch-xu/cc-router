@@ -46,9 +46,11 @@ interface Props {
   iconId?: string | null;
   size?: number;
   className?: string;
+  /** true 时跳过 .Color 变体使用单色 currentColor 形态; 默认 false 保持现有行为 */
+  monochrome?: boolean;
 }
 
-export function ProviderIcon({ iconId, size = 20, className }: Props) {
+export function ProviderIcon({ iconId, size = 20, className, monochrome = false }: Props) {
   // 自定义订阅: 不属于 BRAND_MAP 的任何品牌, 用一个通用图标区分于"未知"
   if (iconId === "custom") {
     return (
@@ -67,7 +69,7 @@ export function ProviderIcon({ iconId, size = 20, className }: Props) {
       />
     );
   }
-  if (Brand.Color) {
+  if (Brand.Color && !monochrome) {
     return (
       <span className={cn("inline-flex shrink-0", className)} aria-hidden>
         <Brand.Color size={size} />

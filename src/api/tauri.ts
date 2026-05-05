@@ -12,6 +12,8 @@ import type {
   OverallStatsDto,
   ProviderInfo,
   ProxyStatus,
+  ReceiptDto,
+  ReceiptRange,
   RefreshModelListResult,
   RequestLogFilters,
   Settings,
@@ -71,6 +73,9 @@ export const api = {
     invoke<BreakdownDto[]>("get_breakdown", { range, by }),
   getTokenHeatmap: (days: number) =>
     invoke<HeatmapDayDto[]>("get_token_heatmap", { days }),
+
+  getReceiptSummary: (range: ReceiptRange) =>
+    invoke<ReceiptDto>("get_receipt_summary", { range }),
 
   // event stream (kind=request / subscription_state_change / system_error)
   listEvents: (

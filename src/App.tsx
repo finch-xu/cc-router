@@ -7,6 +7,7 @@ import { SubscriptionEditPage } from "@/routes/SubscriptionEdit";
 import { SettingsPage } from "@/routes/Settings";
 import { LogsPage } from "@/routes/Logs";
 import { StatisticsPage } from "@/routes/Statistics";
+import { ReceiptsPage } from "@/routes/Receipts";
 import { AboutPage } from "@/routes/About";
 import { GuidePage } from "@/routes/Guide";
 import { OnboardingDisclaimerPage } from "@/routes/OnboardingDisclaimer";
@@ -52,6 +53,7 @@ function AppInner() {
         <Route path="/subscriptions/:id" element={<SubscriptionEditPage />} />
         <Route path="/request-logs" element={<LogsPage />} />
         <Route path="/statistics" element={<StatisticsPage />} />
+        <Route path="/receipts" element={<ReceiptsPage />} />
         <Route path="/guide" element={<GuidePage />} />
         <Route path="/settings" element={<SettingsPage />} />
         <Route path="/about" element={<AboutPage />} />

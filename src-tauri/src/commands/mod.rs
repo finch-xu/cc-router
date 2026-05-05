@@ -4,6 +4,7 @@ pub mod events;
 pub mod onboarding;
 pub mod providers;
 pub mod proxy;
+pub mod receipts;
 pub mod requests;
 pub mod settings;
 pub mod statistics;
