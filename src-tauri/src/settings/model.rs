@@ -35,6 +35,11 @@ pub struct Settings {
     /// 首次启动后前端按 navigator.language 自动写入,之后用户 Settings 切换覆盖。
     #[serde(default)]
     pub update_source: Option<String>,
+    /// 调试模式: 开启后每次出站 attempt 把客户端请求体 / cc-router 出站请求体 /
+    /// 上游响应体三段写入 `<app_data_dir>/debug-dumps/` 下 .txt 文件,
+    /// 用于排查协议适配类问题. 默认关闭(file IO 与磁盘占用代价).
+    #[serde(default)]
+    pub debug_mode: bool,
 }
 
 fn default_port() -> u16 {
@@ -73,6 +78,7 @@ impl Default for Settings {
             cors_allow_origin: default_cors_origin(),
             preferred_language: default_preferred_language(),
             update_source: None,
+            debug_mode: false,
         }
     }
 }
@@ -89,6 +95,7 @@ pub struct SettingsPatch {
     pub cors_allow_origin: Option<String>,
     pub preferred_language: Option<String>,
     pub update_source: Option<String>,
+    pub debug_mode: Option<bool>,
 }
 
 impl Settings {
@@ -122,6 +129,9 @@ impl Settings {
         }
         if let Some(p) = patch.update_source {
             self.update_source = Some(p);
+        }
+        if let Some(p) = patch.debug_mode {
+            self.debug_mode = p;
         }
     }
 }

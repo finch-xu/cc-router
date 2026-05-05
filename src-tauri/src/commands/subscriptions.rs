@@ -55,9 +55,6 @@ pub struct SubscriptionPatch {
     pub endpoint_id: Option<String>,
     /// 自定义订阅: 改连接信息。内置订阅传该字段会被拒绝。
     pub connection: Option<ConnectionPatch>,
-    /// 覆盖 provider 默认的 thinking 块支持开关。
-    /// 关闭后 pipeline 转发到这个订阅时会剥离请求体里的 thinking 字段和块。
-    pub supports_thinking_blocks: Option<bool>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -181,7 +178,6 @@ pub async fn create_subscription(
                 provider_display_name: provider.display_name.clone(),
                 provider_icon: provider.icon.clone().unwrap_or_default(),
                 is_user_defined: false,
-                supports_thinking_blocks: provider.capabilities.supports_thinking_blocks,
             }
         }
         CreateSource::Custom {
@@ -219,8 +215,6 @@ pub async fn create_subscription(
                 provider_display_name,
                 provider_icon: "custom".to_string(),
                 is_user_defined: true,
-                // 自定义订阅默认 false; 用户在 UI 上按需开启。
-                supports_thinking_blocks: false,
             }
         }
     };
@@ -324,9 +318,6 @@ pub async fn update_subscription(
             if let Some(v) = conn.provider_display_name {
                 guard.row.provider_display_name = v;
             }
-        }
-        if let Some(v) = patch.supports_thinking_blocks {
-            guard.row.supports_thinking_blocks = v;
         }
 
         guard.row.updated_at = Utc::now();

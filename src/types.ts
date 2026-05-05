@@ -106,11 +106,6 @@ export interface SubscriptionDto {
   provider_display_name: string;
   provider_icon: string;
   is_user_defined: boolean;
-  /**
-   * 上游是否支持 Anthropic extended thinking 块。
-   * 创建订阅时从 provider yaml 拷贝默认值,关闭后 pipeline 转发前会剥离请求体里的 thinking 字段和块。
-   */
-  supports_thinking_blocks: boolean;
 }
 
 /** 创建订阅时的 source: 内置 yaml 模板 vs 用户自定义 */
@@ -152,8 +147,6 @@ export interface SubscriptionPatch {
   endpoint_id?: string;
   /** 自定义订阅: 改连接信息 */
   connection?: ConnectionPatch;
-  /** 覆盖 provider 默认的 thinking 块支持开关 */
-  supports_thinking_blocks?: boolean;
 }
 
 export interface TestConnectionResult {
@@ -205,6 +198,12 @@ export interface Settings {
    * 首次启动后前端按 navigator.language 自动写入。
    */
   update_source: UpdateSource | null;
+  /**
+   * 调试模式: 开启后每次出站 attempt 把客户端请求体 / cc-router 出站请求体 /
+   * 上游响应体三段写入 app_data_dir/debug-dumps/ 下 .txt 文件,排查协议适配类问题.
+   * 默认关闭。
+   */
+  debug_mode: boolean;
 }
 
 export type UpdateSource = "international" | "china";
@@ -220,6 +219,7 @@ export interface SettingsPatch {
   cors_allow_origin?: string;
   preferred_language?: "system" | "zh" | "en" | "ja";
   update_source?: UpdateSource;
+  debug_mode?: boolean;
   // 注意: auth_token 不在 patch 里,必须通过 generateNewToken() 改
 }
 

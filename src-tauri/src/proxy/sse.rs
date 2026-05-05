@@ -22,6 +22,7 @@ use tokio::sync::{mpsc, RwLock};
 use tracing::warn;
 use uuid::Uuid;
 
+use crate::observability::body_dump::{BodyDumpEntry, BodyDumpKind};
 use crate::observability::events::{self, EventEntry, Severity};
 use crate::observability::request_log::{RequestLogEntry, RequestStatus};
 use crate::subscription::model::SubscriptionRuntime;
@@ -46,6 +47,8 @@ pub fn stream_response(
     pool: SqlitePool,
     app: AppHandle,
     sub_rt: Arc<RwLock<SubscriptionRuntime>>,
+    // 调试模式下的 body dump channel. None 表示 debug_mode=false, 跳过累积与投递.
+    body_dump_tx: Option<mpsc::Sender<BodyDumpEntry>>,
 ) -> Response {
     let (client_tx, client_rx) = mpsc::channel::<Result<Bytes, std::io::Error>>(64);
 
@@ -59,6 +62,10 @@ pub fn stream_response(
     tokio::spawn(async move {
         let mut upstream = upstream_stream;
         let mut buffer = BytesMut::with_capacity(8 * 1024);
+        // 调试模式累积上游 raw SSE 字节流, 流结束时 try_send. None 时全程零成本.
+        let mut raw_dump_buf: Option<BytesMut> = body_dump_tx
+            .as_ref()
+            .map(|_| BytesMut::with_capacity(8 * 1024));
         let mut wrote_any_event = false;
         let mut first_byte_at: Option<Instant> = None;
         let mut input_tokens: Option<u32> = None;
@@ -91,6 +98,9 @@ pub fn stream_response(
             };
             if first_byte_at.is_none() {
                 first_byte_at = Some(Instant::now());
+            }
+            if let Some(dump) = raw_dump_buf.as_mut() {
+                dump.extend_from_slice(&chunk);
             }
             buffer.extend_from_slice(&chunk);
 
@@ -129,6 +139,15 @@ pub fn stream_response(
         // 缓冲区残余
         if !buffer.is_empty() {
             let _ = client_tx.send(Ok(buffer.freeze())).await;
+        }
+
+        // 调试模式: 流结束时(Ok 或 Err 都来到这里之后)投递累积的 raw SSE 字节流.
+        if let (Some(tx), Some(buf)) = (body_dump_tx.as_ref(), raw_dump_buf.take()) {
+            let _ = tx.try_send(BodyDumpEntry::new(
+                request_id,
+                BodyDumpKind::UpstreamResponse,
+                buf.to_vec(),
+            ));
         }
 
         // 客户端断开走 client_tx send error 提前 return, 不会到此, 避免 ctrl+c 触发 transient

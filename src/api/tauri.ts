@@ -95,6 +95,10 @@ export const api = {
   // app
   factoryReset: () => invoke<void>("factory_reset"),
 
+  // 调试模式 dump 目录管理
+  openDebugDumpDir: () => invoke<void>("open_debug_dump_dir"),
+  clearDebugDumps: () => invoke<void>("clear_debug_dumps"),
+
   // updater (运行时按 settings.update_source 切换 manifest 源)
   checkForUpdate: () => invoke<UpdateInfo | null>("check_for_update"),
   downloadInstallUpdate: () => invoke<void>("download_install_update"),

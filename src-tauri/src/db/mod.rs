@@ -33,6 +33,10 @@ const MIGRATIONS: &[(u32, &str)] = &[
         6,
         include_str!("../../migrations/006_add_request_stats_daily.sql"),
     ),
+    (
+        7,
+        include_str!("../../migrations/007_drop_supports_thinking_blocks.sql"),
+    ),
 ];
 
 pub async fn init_pool(db_path: &Path) -> AppResult<SqlitePool> {
@@ -111,6 +115,12 @@ pub async fn run_migrations(pool: &SqlitePool, _resource_dir: &Path) -> AppResul
         // 但 ALTER TABLE subscriptions_new RENAME TO subscriptions 失败 (sqlx 连接池切换 +
         // PRAGMA foreign_keys=OFF 失效)。subscriptions_new 里是用户的真实订阅数据,
         // 不能丢; 我们在这里自动完成 RENAME 并记录 v=5。
+        //
+        // 限制: 此自愈只识别表名 `subscriptions_new`, 写死 v=5。v7 也是重建表 migration 但
+        // 沿用同名临时表, 故 v7 half-finished 也会被当 v5 处理 (rename → v=5), 然后 main
+        // loop 重跑 v6 + v7 (v7 SQL 在 v7-schema 表上重跑是幂等的)。未来再加重建表
+        // migration 时, 临时表请用 `subscriptions_v<N>_new` 之类带版本号的名字, 并扩展此
+        // 处的识别+版本写入逻辑, 否则会与 v5 自愈互相混淆。
         info!("detected v5 half-finished migration, completing rename");
         sqlx::query("PRAGMA foreign_keys=OFF")
             .execute(&mut *conn)
@@ -304,8 +314,8 @@ mod tests {
         run_migrations(&pool, &dir).await.expect("migrate fresh");
 
         let versions = applied_versions(&pool).await;
-        assert_eq!(versions, vec![1, 2, 3, 4, 5, 6]);
-        assert!(has_column(&pool, "subscriptions", "supports_thinking_blocks").await);
+        assert_eq!(versions, vec![1, 2, 3, 4, 5, 6, 7]);
+        assert!(!has_column(&pool, "subscriptions", "supports_thinking_blocks").await);
         assert!(!has_column(&pool, "subscriptions", "thinking_block_field_name").await);
         assert!(has_column(&pool, "requests", "upstream_response_body").await);
         assert!(has_table(&pool, "events").await);
@@ -325,8 +335,8 @@ mod tests {
         run_migrations(&pool, &dir).await.expect("migrate legacy");
 
         let versions = applied_versions(&pool).await;
-        assert_eq!(versions, vec![1, 2, 3, 4, 5, 6]); // baseline v=1, 然后跑 v=2..5
-        assert!(has_column(&pool, "subscriptions", "supports_thinking_blocks").await);
+        assert_eq!(versions, vec![1, 2, 3, 4, 5, 6, 7]); // baseline v=1, 然后跑增量
+        assert!(!has_column(&pool, "subscriptions", "supports_thinking_blocks").await);
         assert!(!has_column(&pool, "subscriptions", "thinking_block_field_name").await);
         assert!(has_column(&pool, "requests", "upstream_response_body").await);
         assert!(has_table(&pool, "events").await);
@@ -342,33 +352,12 @@ mod tests {
         run_migrations(&pool, &dir).await.expect("third run");
 
         let versions = applied_versions(&pool).await;
-        assert_eq!(versions, vec![1, 2, 3, 4, 5, 6]); // 没有重复写
+        assert_eq!(versions, vec![1, 2, 3, 4, 5, 6, 7]); // 没有重复写
     }
 
-    async fn setup_pre_v4_pool() -> SqlitePool {
-        let pool = in_memory_pool().await;
-        sqlx::query(
-            "CREATE TABLE IF NOT EXISTS _schema_version (version INTEGER PRIMARY KEY, applied_at INTEGER NOT NULL)",
-        )
-        .execute(&pool)
-        .await
-        .unwrap();
-        for (v, sql) in &MIGRATIONS[..3] {
-            for stmt in split_sql_statements(sql) {
-                sqlx::query(&stmt).execute(&pool).await.unwrap();
-            }
-            sqlx::query("INSERT INTO _schema_version (version, applied_at) VALUES (?, ?)")
-                .bind(*v as i64)
-                .bind(0_i64)
-                .execute(&pool)
-                .await
-                .unwrap();
-        }
-        pool
-    }
-
-    /// 插入一条 v3-schema 风格的订阅 (supports_thinking_blocks=0, 没有 thinking_block_field_name 列)。
-    /// 用于测试 v4 migration 的回填行为是否按 provider_id 区分。
+    /// 在 v4 schema 状态下插一条订阅 (含已 v7 移除的 supports_thinking_blocks 列)。
+    /// 仅供 `detects_v5_half_finished_and_completes_rename` 在 MIGRATIONS[..4] 应用后调用,
+    /// 不可在 v>=5 schema 上跑——subscriptions 表自 v7 起已无该列, INSERT 会失败。
     async fn insert_pre_v4_subscription(pool: &SqlitePool, provider_id: &str) {
         sqlx::query(
             "INSERT INTO subscriptions (id, provider_id, endpoint_id, display_name, api_key,
@@ -388,48 +377,6 @@ mod tests {
         .execute(pool)
         .await
         .unwrap();
-    }
-
-    #[tokio::test]
-    async fn legacy_to_v5_keeps_deepseek_supports_thinking_drops_field_name_column() {
-        let pool = setup_pre_v4_pool().await;
-        insert_pre_v4_subscription(&pool, "deepseek").await;
-
-        run_migrations(&pool, &std::path::PathBuf::from("."))
-            .await
-            .expect("migrate to v5");
-
-        let row = sqlx::query(
-            "SELECT supports_thinking_blocks FROM subscriptions WHERE provider_id='deepseek'",
-        )
-        .fetch_one(&pool)
-        .await
-        .unwrap();
-        let supports: i64 = row.try_get("supports_thinking_blocks").unwrap();
-        assert_eq!(supports, 1, "deepseek 订阅 supports_thinking_blocks 应被回填为 1 (v4 行为保留)");
-        assert!(
-            !has_column(&pool, "subscriptions", "thinking_block_field_name").await,
-            "v5 应该拆掉 thinking_block_field_name 列"
-        );
-    }
-
-    #[tokio::test]
-    async fn legacy_to_v5_does_not_touch_non_deepseek_subscriptions() {
-        let pool = setup_pre_v4_pool().await;
-        insert_pre_v4_subscription(&pool, "zhipu").await;
-
-        run_migrations(&pool, &std::path::PathBuf::from("."))
-            .await
-            .unwrap();
-
-        let row = sqlx::query(
-            "SELECT supports_thinking_blocks FROM subscriptions WHERE provider_id='zhipu'",
-        )
-        .fetch_one(&pool)
-        .await
-        .unwrap();
-        let supports: i64 = row.try_get("supports_thinking_blocks").unwrap();
-        assert_eq!(supports, 0, "非 deepseek 订阅不应被回填");
     }
 
     #[tokio::test]
@@ -469,7 +416,7 @@ mod tests {
 
         assert!(has_table(&pool, "subscriptions").await);
         assert!(!has_table(&pool, "subscriptions_new").await);
-        assert_eq!(applied_versions(&pool).await, vec![1, 2, 3, 4, 5, 6]);
+        assert_eq!(applied_versions(&pool).await, vec![1, 2, 3, 4, 5, 6, 7]);
 
         let count: (i64,) =
             sqlx::query_as("SELECT count(*) FROM subscriptions WHERE provider_id='deepseek'")

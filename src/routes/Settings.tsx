@@ -35,6 +35,9 @@ export function SettingsPage() {
   const [corsEnabled, setCorsEnabled] = useState(true);
   const [corsAllowOrigin, setCorsAllowOrigin] = useState("*");
   const [preferredLanguage, setPreferredLanguage] = useState<LanguagePref>("system");
+  const [debugMode, setDebugMode] = useState(false);
+  const [clearDumpsDialog, setClearDumpsDialog] = useState(false);
+  const [clearingDumps, setClearingDumps] = useState(false);
   const [resetDialog, setResetDialog] = useState(false);
   const [resetting, setResetting] = useState(false);
   const [tokenJustRegenerated, setTokenJustRegenerated] = useState(false);
@@ -62,6 +65,7 @@ export function SettingsPage() {
       setCorsEnabled(settings.data.cors_enabled);
       setCorsAllowOrigin(settings.data.cors_allow_origin);
       setPreferredLanguage(settings.data.preferred_language ?? "system");
+      setDebugMode(settings.data.debug_mode ?? false);
       initializedRef.current = true;
     }
   }, [settings.data]);
@@ -93,6 +97,32 @@ export function SettingsPage() {
   // 更新源同样即时保存:运行时一次性 builder 下次 check 自动按新源走
   async function changeUpdateSource(next: UpdateSource) {
     await updateMut.mutateAsync({ update_source: next });
+  }
+
+  // 调试模式即时生效:pipeline 每次出站读 settings.debug_mode 决定是否落盘.
+  async function changeDebugMode(next: boolean) {
+    setDebugMode(next);
+    await updateMut.mutateAsync({ debug_mode: next });
+  }
+
+  async function openDumps() {
+    try {
+      await api.openDebugDumpDir();
+    } catch (e) {
+      alert(`${t("settings.debug.open.alertFailed")}: ${e}`);
+    }
+  }
+
+  async function confirmClearDumps() {
+    setClearingDumps(true);
+    try {
+      await api.clearDebugDumps();
+      setClearDumpsDialog(false);
+    } catch (e) {
+      alert(`${t("settings.debug.clear.alertFailed")}: ${e}`);
+    } finally {
+      setClearingDumps(false);
+    }
   }
 
   async function regenerateToken() {
@@ -401,6 +431,44 @@ export function SettingsPage() {
         </div>
       </div>
 
+      {/* 调试 */}
+      <div className="card section">
+        <div className="card-head">
+          <div className="card-title">{t("settings.section.debug")}</div>
+        </div>
+        <div className="card-body">
+          <div className="setting-row">
+            <div className="label-col">
+              {t("settings.debug.mode.label")}
+              <div className="desc">{t("settings.debug.mode.desc")}</div>
+            </div>
+            <Toggle
+              checked={debugMode}
+              onChange={(v) => void changeDebugMode(v)}
+              aria-label={t("settings.debug.mode.label")}
+            />
+          </div>
+          <div className="setting-row">
+            <div className="label-col">
+              {t("settings.debug.dumps.label")}
+              <div className="desc">{t("settings.debug.dumps.desc")}</div>
+            </div>
+            <div style={{ display: "flex", gap: 8 }}>
+              <button className="btn" type="button" onClick={openDumps}>
+                {t("settings.debug.open.button")}
+              </button>
+              <button
+                className="btn"
+                type="button"
+                onClick={() => setClearDumpsDialog(true)}
+              >
+                {t("settings.debug.clear.button")}
+              </button>
+            </div>
+          </div>
+        </div>
+      </div>
+
       {/* 危险区域 */}
       <div className="danger-card section">
         <div>
@@ -425,6 +493,40 @@ export function SettingsPage() {
           {t("settings.danger.button")}
         </button>
       </div>
+
+      {/* 清空 dump 确认弹窗 */}
+      <Dialog
+        open={clearDumpsDialog}
+        onOpenChange={(v) => !clearingDumps && setClearDumpsDialog(v)}
+      >
+        <DialogContent className="cc-dialog">
+          <DialogHeader>
+            <DialogTitle>{t("settings.debug.clear.dialog.title")}</DialogTitle>
+            <DialogDescription>
+              {t("settings.debug.clear.dialog.desc")}
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <button
+              className="btn"
+              onClick={() => setClearDumpsDialog(false)}
+              disabled={clearingDumps}
+              type="button"
+            >
+              {t("common.cancel")}
+            </button>
+            <button
+              className="btn danger"
+              onClick={confirmClearDumps}
+              disabled={clearingDumps}
+              type="button"
+            >
+              {clearingDumps && <Spinner />}
+              {t("settings.debug.clear.dialog.confirm")}
+            </button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       {/* 恢复出厂确认弹窗 */}
       <Dialog open={resetDialog} onOpenChange={(v) => !resetting && setResetDialog(v)}>

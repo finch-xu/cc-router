@@ -25,8 +25,7 @@ pub async fn load_runtime(
                 created_at, updated_at,
                 base_url, messages_path, auth_header_name, auth_header_format,
                 required_headers, forward_headers, model_discovery,
-                provider_display_name, provider_icon, is_user_defined,
-                supports_thinking_blocks
+                provider_display_name, provider_icon, is_user_defined
          FROM subscriptions",
     )
     .fetch_all(pool)
@@ -94,10 +93,6 @@ fn row_to_row(row: &sqlx::sqlite::SqliteRow) -> AppResult<SubscriptionRow> {
             let v: i64 = row.try_get("is_user_defined")?;
             v != 0
         },
-        supports_thinking_blocks: {
-            let v: i64 = row.try_get("supports_thinking_blocks")?;
-            v != 0
-        },
     })
 }
 
@@ -115,13 +110,11 @@ pub async fn insert(pool: &SqlitePool, sub: &SubscriptionRow) -> AppResult<()> {
             enabled, is_auth_failed, last_error_message, created_at, updated_at,
             base_url, messages_path, auth_header_name, auth_header_format,
             required_headers, forward_headers, model_discovery,
-            provider_display_name, provider_icon, is_user_defined,
-            supports_thinking_blocks)
+            provider_display_name, provider_icon, is_user_defined)
          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
                  ?, ?, ?, ?,
                  ?, ?, ?,
-                 ?, ?, ?,
-                 ?)",
+                 ?, ?, ?)",
     )
     .bind(sub.id.to_string())
     .bind(&sub.provider_id)
@@ -146,7 +139,6 @@ pub async fn insert(pool: &SqlitePool, sub: &SubscriptionRow) -> AppResult<()> {
     .bind(&sub.provider_display_name)
     .bind(&sub.provider_icon)
     .bind(sub.is_user_defined as i64)
-    .bind(sub.supports_thinking_blocks as i64)
     .execute(pool)
     .await?;
     Ok(())
@@ -175,8 +167,7 @@ pub async fn update_row(pool: &SqlitePool, sub: &SubscriptionRow) -> AppResult<(
             enabled = ?, is_auth_failed = ?, last_error_message = ?, updated_at = ?,
             base_url = ?, messages_path = ?, auth_header_name = ?, auth_header_format = ?,
             required_headers = ?, forward_headers = ?, model_discovery = ?,
-            provider_display_name = ?, provider_icon = ?, is_user_defined = ?,
-            supports_thinking_blocks = ?
+            provider_display_name = ?, provider_icon = ?, is_user_defined = ?
          WHERE id = ?",
     )
     .bind(&sub.endpoint_id)
@@ -198,7 +189,6 @@ pub async fn update_row(pool: &SqlitePool, sub: &SubscriptionRow) -> AppResult<(
     .bind(&sub.provider_display_name)
     .bind(&sub.provider_icon)
     .bind(sub.is_user_defined as i64)
-    .bind(sub.supports_thinking_blocks as i64)
     .bind(sub.id.to_string())
     .execute(pool)
     .await?;

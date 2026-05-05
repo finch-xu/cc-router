@@ -66,10 +66,6 @@ pub struct SubscriptionRow {
     pub provider_display_name: String,
     pub provider_icon: String,
     pub is_user_defined: bool,
-    /// 是否支持 Anthropic extended thinking 块。
-    /// 创建订阅时从 provider yaml 的 capabilities.supports_thinking_blocks 拷贝默认值,
-    /// 用户可在 UI 上覆盖。pipeline 转发前如果为 false,会剥离请求体里的 thinking 字段和块。
-    pub supports_thinking_blocks: bool,
 }
 
 impl SubscriptionRow {
@@ -187,7 +183,6 @@ pub struct SubscriptionDto {
     pub provider_display_name: String,
     pub provider_icon: String,
     pub is_user_defined: bool,
-    pub supports_thinking_blocks: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -226,7 +221,6 @@ impl SubscriptionRow {
             provider_display_name: String::new(),
             provider_icon: String::new(),
             is_user_defined: false,
-            supports_thinking_blocks: false,
         }
     }
 }
@@ -260,7 +254,6 @@ impl SubscriptionDto {
             provider_display_name: rt.row.provider_display_name.clone(),
             provider_icon: rt.row.provider_icon.clone(),
             is_user_defined: rt.row.is_user_defined,
-            supports_thinking_blocks: rt.row.supports_thinking_blocks,
         }
     }
 }

@@ -99,6 +99,8 @@ pub fn run() {
             commands::app::relaunch_app,
             commands::updater::check_for_update,
             commands::updater::download_install_update,
+            commands::debug::open_debug_dump_dir,
+            commands::debug::clear_debug_dumps,
         ])
         .run(tauri::generate_context!())
         .expect("运行 cc-router 时发生错误");
@@ -145,6 +147,13 @@ async fn bootstrap(
         observability::events::run_consumer(event_pool, event_rx, event_handle).await;
     });
 
+    // 6c. 调试模式 body dump channel (调试模式开启时由 pipeline / sse 插桩点投递)
+    let (body_dump_tx, body_dump_rx) = mpsc::channel(256);
+    let dump_dir = observability::body_dump::dump_dir(&app_data_dir);
+    tauri::async_runtime::spawn(async move {
+        observability::body_dump::run_consumer(body_dump_rx, dump_dir).await;
+    });
+
     // 7. HTTP client 单例
     // timeout(600s) 是整个 request 生命周期上限(含流式 body),与 Anthropic server-side 上限对齐;
     // 主要在真 hang 时兜底,正常 SSE 客户端断开会通过 client_tx 失败立即释放(见 sse.rs)。
@@ -170,6 +179,7 @@ async fn bootstrap(
         proxy_port: Arc::new(RwLock::new(0)),
         request_log_tx: log_tx,
         event_log_tx: event_tx,
+        body_dump_tx,
         http_client,
         probe_client,
         app_handle: handle.clone(),

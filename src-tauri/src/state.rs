@@ -5,6 +5,7 @@ use tauri::AppHandle;
 use tokio::sync::{mpsc, RwLock};
 use uuid::Uuid;
 
+use crate::observability::body_dump::BodyDumpEntry;
 use crate::observability::events::EventEntry;
 use crate::observability::request_log::RequestLogEntry;
 use crate::provider::model::Provider;
@@ -23,6 +24,9 @@ pub struct AppState {
     pub proxy_port: Arc<RwLock<u16>>,
     pub request_log_tx: mpsc::Sender<RequestLogEntry>,
     pub event_log_tx: mpsc::Sender<EventEntry>,
+    /// 调试模式 dump channel. 仅在 settings.debug_mode=true 时被插桩点投递,
+    /// consumer 在 lib.rs::bootstrap 起的后台任务里把每条 entry 写成一个 .txt 文件.
+    pub body_dump_tx: mpsc::Sender<BodyDumpEntry>,
     pub http_client: reqwest::Client,
     /// 短超时(30s) 单例, 仅用于订阅可达性探测(测试连接 + 后台巡检)。
     /// 与 `http_client` 的 600s 上限分离: 探测期望快速判定, 慢响应等同失败。
