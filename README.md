@@ -30,11 +30,22 @@
 >
 > 本软件按 As-Is 提供，不对任何因使用造成的直接或间接损失负责，包括但不限于额度异常消耗、数据丢失、业务中断。
 
-<p align="center">
-  <img src="assets/screenshot-models.png" alt="cc-router 虚拟模型配置页截图" width="900" />
-  <br />
-  <img src="assets/screenshot-logs.png" alt="cc-router 请求日志页截图" width="900" />
-</p>
+功能亮点：
+
+- **18 家 provider 一站调度** —— 内置 DeepSeek、Qwen、Kimi、MiMo、MiniMax、GLM、Claude 等 Token Plan / Coding Plan / API 额度,opus / sonnet / haiku 三槽位任意搭配,顺序或轮询自动切换
+- **任意自定义端点** —— 内置厂商不够时,把任何 Anthropic Messages 兼容的 API 直接配进来,与内置订阅同等调度
+- **用量小票** —— token 消费快照一键导出 PNG / PDF / HTML,黑白 / 彩色双模式,默认不显示价格只展示用量,扫底部二维码即跳仓库
+- **三语完整翻译** —— 简体中文 / English / 日本語,可跟随系统或在设置页手动切换
+
+<table align="center">
+  <tr>
+    <td width="60%"><img src="assets/screenshot-models.png" alt="cc-router 虚拟模型配置页截图" /></td>
+    <td width="40%" rowspan="2"><img src="assets/screenshot-receipts.png" alt="cc-router 用量小票长图" /></td>
+  </tr>
+  <tr>
+    <td width="60%"><img src="assets/screenshot-logs.png" alt="cc-router 请求日志页截图" /></td>
+  </tr>
+</table>
 
 ## 支持的编程套餐和API
 

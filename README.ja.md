@@ -30,11 +30,22 @@
 >
 > 本ソフトウェアは As-Is（現状有姿）で提供され、明示・黙示を問わずいかなる保証もしません。クォータの異常消費、データ損失、業務中断を含む直接・間接の損害について作者は責任を負いません。
 
-<p align="center">
-  <img src="assets/screenshot-models.png" alt="cc-router 仮想モデル設定画面" width="900" />
-  <br />
-  <img src="assets/screenshot-logs.png" alt="cc-router リクエストログ画面" width="900" />
-</p>
+機能ハイライト：
+
+- **18 プロバイダーを 1 つのルーターで** —— DeepSeek・Qwen・Kimi・MiMo・MiniMax・GLM・Claude などの Token Plan / Coding Plan / 従量課金 API を内蔵対応。opus / sonnet / haiku の 3 スロットに自由に割り当て、順次（sequential）またはラウンドロビン（round_robin）で自動切替
+- **任意のエンドポイントを追加可能** —— 内蔵プロバイダーで足りない場合、Anthropic Messages 互換 API なら何でも直接接続でき、内蔵サブスクと同等にディスパッチ
+- **利用レシート** —— トークン消費スナップショットを PNG / PDF / HTML へワンクリックでエクスポート。モノクロ / カラーの 2 モード、既定では料金非表示で利用量のみ、フッターの QR コードからリポジトリへジャンプ
+- **3 言語完全翻訳** —— 简体中文 / English / 日本語、システム言語追従または設定画面で手動切替
+
+<table align="center">
+  <tr>
+    <td width="60%"><img src="assets/screenshot-models.png" alt="cc-router 仮想モデル設定画面" /></td>
+    <td width="40%" rowspan="2"><img src="assets/screenshot-receipts.png" alt="cc-router 利用レシート 縦長スクリーンショット" /></td>
+  </tr>
+  <tr>
+    <td width="60%"><img src="assets/screenshot-logs.png" alt="cc-router リクエストログ画面" /></td>
+  </tr>
+</table>
 
 ## 対応プラン・API 一覧
 

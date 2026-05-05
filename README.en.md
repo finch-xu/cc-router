@@ -30,11 +30,22 @@ Stacked subscriptions across multiple LLM vendors, but Claude Code can only poin
 >
 > This software is provided As-Is, without warranty of any kind. The author is not liable for any direct or indirect damages arising from its use, including but not limited to abnormal quota consumption, data loss, or business interruption.
 
-<p align="center">
-  <img src="assets/screenshot-models.png" alt="cc-router virtual model configuration page" width="900" />
-  <br />
-  <img src="assets/screenshot-logs.png" alt="cc-router request logs page" width="900" />
-</p>
+Highlights:
+
+- **18 providers, one router** — built-in routing for DeepSeek, Qwen, Kimi, MiMo, MiniMax, GLM, Claude, etc., across Token Plans / Coding Plans / pay-as-you-go APIs; mix and match opus / sonnet / haiku slots with sequential or round-robin dispatch
+- **Bring your own endpoint** — when the built-in providers don't cover what you need, plug any Anthropic Messages-compatible API in directly, dispatched alongside the built-in subscriptions
+- **Usage receipts** — export your token-spend snapshot as PNG / PDF / HTML in one click; mono / color modes, no pricing shown by default (usage only), QR code at the bottom links back to the repo
+- **Fully translated UI** — 简体中文 / English / 日本語, follows your system locale or pick manually in Settings
+
+<table align="center">
+  <tr>
+    <td width="60%"><img src="assets/screenshot-models.png" alt="cc-router virtual model configuration page" /></td>
+    <td width="40%" rowspan="2"><img src="assets/screenshot-receipts.png" alt="cc-router usage receipts long screenshot" /></td>
+  </tr>
+  <tr>
+    <td width="60%"><img src="assets/screenshot-logs.png" alt="cc-router request logs page" /></td>
+  </tr>
+</table>
 
 ## Supported Coding Plans and APIs
 
