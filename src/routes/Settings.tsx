@@ -248,11 +248,30 @@ export function SettingsPage() {
             </div>
             <div>
               <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-                <Toggle
-                  checked={listenAll}
-                  onChange={setListenAll}
-                  aria-label={t("settings.proxy.bind.aria")}
-                />
+                <div
+                  className="radio-group"
+                  role="radiogroup"
+                  aria-label={t("settings.proxy.bind.label")}
+                >
+                  <button
+                    type="button"
+                    className={!listenAll ? "on" : ""}
+                    onClick={() => setListenAll(false)}
+                    role="radio"
+                    aria-checked={!listenAll}
+                  >
+                    {t("settings.proxy.bind.local")}
+                  </button>
+                  <button
+                    type="button"
+                    className={listenAll ? "on" : ""}
+                    onClick={() => setListenAll(true)}
+                    role="radio"
+                    aria-checked={listenAll}
+                  >
+                    {t("settings.proxy.bind.lan")}
+                  </button>
+                </div>
                 <span
                   className="mono"
                   style={{
