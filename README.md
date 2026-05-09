@@ -58,7 +58,7 @@
 | `minimax` | MiniMax（按量付费/中国订阅/国际订阅） | ✅ | ✅ | verified |
 | `xiaomi` | 小米 MiMo（按量付费/中国订阅/国际订阅） | ✅ | ✅ | untested |
 | `alibaba` | 阿里云百炼（Token Plan 团队版 + 按量付费 2 地域 + 停售的 Coding Plan） | ✅ | ✅ | verified |
-| `volcengine` | 火山方舟（Coding Plan 订阅 + 按量付费） | ✅ | ✅ | untested |
+| `volcengine` | 字节跳动 火山方舟（Coding Plan 订阅 + Agent Plan 订阅 + 按量付费） | ✅ | ✅ | untested |
 | `openrouter` | OpenRouter 聚合平台（500+ 模型路由） | ❌ | ✅ | untested |
 | `tencent` | 腾讯云大模型（Token Plan 订阅 + TokenHub 按量付费境内/境外） | ✅ | ✅ | untested |
 | `aiberm` | Aiberm（按量付费 API，模型按 token group 动态返回） | ❌ | ✅ | untested |
@@ -71,7 +71,7 @@
 | `ucloud` | 优云智算 UCloud Modelverse（Coding Plan 订阅 + 按量付费 API 国内/海外） | ✅ | ✅ | untested |
 | `自定义` | 自定义任意Anthropic协议API | ✅ | ✅ | verified |
 
-> Token Plan 列包含各厂商的套餐订阅形态（Token Plan / Coding Plan 等）；API 列指按量付费的 Anthropic Messages 兼容端点。
+> Token Plan 列包含各厂商的套餐订阅形态（Token Plan / Coding Plan / Agent Plan 等）；API 列指按量付费的 Anthropic Messages 兼容端点。
 
 社区可 PR 补充。
 

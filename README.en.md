@@ -58,7 +58,7 @@ Highlights:
 | `minimax` | MiniMax (pay-as-you-go / China subscription / global subscription) | ✅ | ✅ | verified |
 | `xiaomi` | Xiaomi MiMo (pay-as-you-go / China subscription / global subscription) | ✅ | ✅ | untested |
 | `alibaba` | Alibaba Cloud Bailian (team Token Plan + 2-region pay-as-you-go + discontinued Coding Plan) | ✅ | ✅ | verified |
-| `volcengine` | Volcengine Ark (Coding Plan subscription + pay-as-you-go) | ✅ | ✅ | untested |
+| `volcengine` | ByteDance Volcengine Ark (Coding Plan subscription + Agent Plan subscription + pay-as-you-go) | ✅ | ✅ | untested |
 | `openrouter` | OpenRouter aggregator (500+ models routed) | ❌ | ✅ | untested |
 | `tencent` | Tencent Cloud LLM (Token Plan subscription + TokenHub pay-as-you-go, mainland / overseas) | ✅ | ✅ | untested |
 | `aiberm` | Aiberm (pay-as-you-go API, models returned dynamically by token group) | ❌ | ✅ | untested |
@@ -71,7 +71,7 @@ Highlights:
 | `ucloud` | UCloud Modelverse (Coding Plan subscription + pay-as-you-go API in CN/global) | ✅ | ✅ | untested |
 | `Custom` | Bring your own Anthropic-compatible endpoint | ✅ | ✅ | verified |
 
-> The "Token Plan" column covers any subscription-style quota (Token Plan / Coding Plan, etc.); "API" denotes pay-as-you-go Anthropic Messages-compatible endpoints.
+> The "Token Plan" column covers any subscription-style quota (Token Plan / Coding Plan / Agent Plan, etc.); "API" denotes pay-as-you-go Anthropic Messages-compatible endpoints.
 
 Community PRs welcome.
 

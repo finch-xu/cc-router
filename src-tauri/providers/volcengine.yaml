@@ -38,6 +38,14 @@ endpoints:
     messages_path: "/v1/messages"
     region: china
     billing: subscription
+  
+  - id: agent_plan
+    label: "国内版 · Agent Plan 订阅"
+    description: "订阅制，套餐额度仅从此端点扣减"
+    base_url: "https://ark.cn-beijing.volces.com/api/plan"
+    messages_path: "/v1/messages"
+    region: china
+    billing: subscription
 
   - id: paygo
     label: "国内版 · 按量付费 API"

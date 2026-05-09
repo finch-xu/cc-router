@@ -58,7 +58,7 @@
 | `minimax` | MiniMax（従量課金 / 中国サブスク / グローバルサブスク） | ✅ | ✅ | verified |
 | `xiaomi` | Xiaomi MiMo（従量課金 / 中国サブスク / グローバルサブスク） | ✅ | ✅ | untested |
 | `alibaba` | Alibaba Cloud Bailian（チーム版 Token Plan + 2 リージョン従量課金 + 販売終了の Coding Plan） | ✅ | ✅ | verified |
-| `volcengine` | 火山方舟 Volcengine Ark（Coding Plan サブスクリプション + 従量課金） | ✅ | ✅ | untested |
+| `volcengine` | バイトダンス 火山方舟 Volcengine Ark（Coding Plan サブスクリプション + Agent Plan サブスクリプション + 従量課金） | ✅ | ✅ | untested |
 | `openrouter` | OpenRouter アグリゲーター（500+ モデルをルーティング） | ❌ | ✅ | untested |
 | `tencent` | Tencent Cloud LLM（Token Plan サブスクリプション + TokenHub 従量課金、中国本土/海外） | ✅ | ✅ | untested |
 | `aiberm` | Aiberm（従量課金 API、token group ごとに動的にモデル返却） | ❌ | ✅ | untested |
@@ -71,7 +71,7 @@
 | `ucloud` | 優雲智算 UCloud Modelverse（Coding Plan サブスク + 従量課金 API、中国国内/海外） | ✅ | ✅ | untested |
 | `カスタム` | Anthropic プロトコル準拠の任意の API を自前で追加 | ✅ | ✅ | verified |
 
-> 「Token Plan」列はサブスクリプション形式のクォータ全般（Token Plan / Coding Plan 等）を指し、「API」列は従量課金の Anthropic Messages 互換エンドポイントを指します。
+> 「Token Plan」列はサブスクリプション形式のクォータ全般（Token Plan / Coding Plan / Agent Plan 等）を指し、「API」列は従量課金の Anthropic Messages 互換エンドポイントを指します。
 
 コミュニティからの PR 歓迎です。
 
