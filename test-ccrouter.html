@@ -1,0 +1,619 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+<meta charset="UTF-8">
+<title>cc-router 调试台</title>
+<style>
+  :root { --b:#e5e7eb; --bg:#fafafa; --fg:#111; --muted:#6b7280; --accent:#0ea5e9; --err:#dc2626; --ok:#16a34a; --user:#dbeafe; --asst:#f1f5f9; --thinking:#fef3c7; --tool:#ede9fe; --tres:#dcfce7; }
+  * { box-sizing:border-box; }
+  body { font:14px/1.5 -apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif; margin:0; padding:20px; color:var(--fg); background:var(--bg); }
+  h1 { margin:0 0 4px 0; font-size:18px; }
+  .hint { color:var(--muted); font-size:12px; margin-bottom:12px; }
+  .grid { display:grid; grid-template-columns:1fr 1fr; gap:16px; }
+  fieldset { border:1px solid var(--b); border-radius:6px; padding:12px 14px; background:#fff; }
+  legend { font-weight:600; padding:0 6px; font-size:13px; }
+  label { display:block; font-size:12px; color:var(--muted); margin:8px 0 2px; }
+  input, select, textarea, button { font:inherit; width:100%; border:1px solid var(--b); border-radius:4px; padding:6px 8px; background:#fff; }
+  textarea { resize:vertical; min-height:80px; font-family:ui-monospace,Menlo,Consolas,monospace; }
+  .row { display:flex; gap:8px; }
+  .row > * { flex:1; }
+  button { background:var(--accent); color:#fff; border:none; cursor:pointer; padding:8px; font-weight:600; }
+  button:hover { filter:brightness(0.95); }
+  button:disabled { opacity:0.5; cursor:not-allowed; }
+  button.secondary { background:#fff; color:var(--fg); border:1px solid var(--b); }
+  button.danger { background:#fff; color:var(--err); border:1px solid var(--b); }
+  .meta { display:flex; gap:12px; font-size:12px; color:var(--muted); margin-top:8px; flex-wrap:wrap; }
+  .meta .ok { color:var(--ok); }
+  .meta .err { color:var(--err); }
+  pre { background:#0f172a; color:#e2e8f0; padding:12px; border-radius:6px; overflow:auto; max-height:400px; font-size:12px; margin:0; white-space:pre-wrap; word-break:break-word; }
+  .tabs { display:flex; gap:4px; margin-bottom:8px; }
+  .tabs button { width:auto; padding:4px 10px; font-size:12px; background:#fff; color:var(--muted); border:1px solid var(--b); }
+  .tabs button.active { background:var(--fg); color:#fff; }
+  .small { font-size:11px; color:var(--muted); }
+  .modebar { display:flex; gap:6px; margin-bottom:12px; }
+  .modebar button { width:auto; padding:6px 14px; font-size:13px; background:#fff; color:var(--muted); border:1px solid var(--b); font-weight:500; }
+  .modebar button.active { background:var(--accent); color:#fff; border-color:var(--accent); }
+  .convo { border:1px solid var(--b); border-radius:6px; padding:8px; background:#fff; max-height:340px; overflow-y:auto; margin-top:6px; }
+  .convo:empty::before { content:"（暂无对话，发送消息开始）"; color:var(--muted); font-size:12px; }
+  .turn { margin-bottom:8px; }
+  .turn .role { font-size:11px; color:var(--muted); margin-bottom:2px; text-transform:uppercase; letter-spacing:0.05em; }
+  .block { padding:6px 10px; border-radius:6px; margin-bottom:4px; font-size:13px; white-space:pre-wrap; word-break:break-word; }
+  .block.user { background:var(--user); }
+  .block.text { background:var(--asst); }
+  .block.thinking { background:var(--thinking); font-style:italic; color:#7c4a03; font-size:12px; }
+  .block.tool_use { background:var(--tool); font-family:ui-monospace,Menlo,Consolas,monospace; font-size:12px; }
+  .block.tool_result { background:var(--tres); font-family:ui-monospace,Menlo,Consolas,monospace; font-size:12px; }
+  .block .tag { font-weight:600; margin-right:6px; }
+  .toolfill { border:1px dashed var(--accent); border-radius:6px; padding:10px; background:#f0f9ff; margin-top:8px; }
+  .toolfill h4 { margin:0 0 6px 0; font-size:13px; }
+  .toolfill .item { margin-bottom:8px; }
+  .toolfill code { background:#e0f2fe; padding:1px 4px; border-radius:3px; font-size:11px; }
+</style>
+</head>
+<body>
+
+<h1>cc-router 调试台</h1>
+<div class="hint">本地调试用 · 直接打 <code>http://127.0.0.1:23456/v1/messages</code></div>
+
+<div class="modebar">
+  <button data-mode="single" class="active">单次</button>
+  <button data-mode="chat">多轮纯文本</button>
+  <button data-mode="tools">多轮 + 工具</button>
+</div>
+
+<div class="grid">
+  <fieldset>
+    <legend>请求</legend>
+
+    <div class="row">
+      <div>
+        <label>Host</label>
+        <input id="host" value="127.0.0.1">
+      </div>
+      <div>
+        <label>Port</label>
+        <input id="port" value="23456">
+      </div>
+    </div>
+
+    <label>API Key / cc-router Token (走 x-api-key header)</label>
+    <input id="apiKey" placeholder="cc-router 启用 token 鉴权时填 Settings 页显示的 token" value="">
+    <div class="small">
+      cc-router 启用 token 鉴权(默认)时,在此填 Settings 页的 token;关闭鉴权时此字段任填或留空。
+    </div>
+
+    <div class="row">
+      <div>
+        <label>Model</label>
+        <select id="modelPreset">
+          <option value="model-sonnet">model-sonnet</option>
+          <option value="model-opus">model-opus</option>
+          <option value="model-haiku">model-haiku</option>
+          <option value="__custom__">自定义(走 fallback 透传)</option>
+        </select>
+      </div>
+      <div>
+        <label>max_tokens</label>
+        <input id="maxTokens" type="number" value="1024">
+      </div>
+    </div>
+
+    <div id="customModelWrap" style="display:none">
+      <label>自定义 model 字符串</label>
+      <input id="customModel" placeholder="claude-sonnet-4-5">
+    </div>
+
+    <label><input type="checkbox" id="stream" style="width:auto"> 流式响应 (stream: true)</label>
+
+    <label>System (可选)</label>
+    <input id="system" placeholder="You are a helpful assistant.">
+
+    <div id="paneSingle">
+      <label>用户消息</label>
+      <textarea id="userMsg">你好,用一句话介绍你自己。</textarea>
+      <div class="row" style="margin-top:12px">
+        <button id="sendSingleBtn">发送</button>
+        <button id="abortBtn" class="secondary" disabled>中止</button>
+      </div>
+    </div>
+
+    <div id="paneMulti" style="display:none">
+      <div id="toolsConfigWrap" style="display:none">
+        <label>tools 定义 (JSON 数组,Anthropic 格式)</label>
+        <textarea id="toolsJson" style="min-height:120px">[
+  {
+    "name": "get_weather",
+    "description": "Get weather for a city.",
+    "input_schema": {
+      "type": "object",
+      "properties": { "city": { "type": "string" } },
+      "required": ["city"]
+    }
+  }
+]</textarea>
+      </div>
+
+      <label>对话历史</label>
+      <div id="convo" class="convo"></div>
+
+      <div id="toolFillArea"></div>
+
+      <label>新消息</label>
+      <textarea id="multiInput" placeholder="输入要发送的内容..."></textarea>
+
+      <div class="row" style="margin-top:12px">
+        <button id="sendMultiBtn">发送</button>
+        <button id="clearConvoBtn" class="danger">清空对话</button>
+        <button id="copyMessagesBtn" class="secondary">复制 messages</button>
+      </div>
+    </div>
+
+    <div class="meta">
+      <span id="statusInfo">就绪</span>
+      <span id="timeInfo"></span>
+      <span id="usageInfo"></span>
+    </div>
+  </fieldset>
+
+  <fieldset>
+    <legend>响应</legend>
+
+    <div class="tabs">
+      <button data-tab="text" class="active">文本</button>
+      <button data-tab="raw">原始流</button>
+      <button data-tab="req">请求体</button>
+      <button data-tab="msgs">messages JSON</button>
+    </div>
+
+    <pre id="paneText"></pre>
+    <pre id="paneRaw" style="display:none"></pre>
+    <pre id="paneReq" style="display:none"></pre>
+    <pre id="paneMsgs" style="display:none"></pre>
+
+    <div class="small" style="margin-top:8px">
+      流式时「文本」实时拼装 <code>content_block_delta</code>;「原始流」记录每行 SSE 事件;「messages JSON」展示当前对话历史(多轮模式下用),与 cc-router debug 模式 dump 的 client_request body 对齐。
+    </div>
+  </fieldset>
+</div>
+
+<script>
+const $ = id => document.getElementById(id);
+const panes = { text:$('paneText'), raw:$('paneRaw'), req:$('paneReq'), msgs:$('paneMsgs') };
+
+const state = {
+  mode: 'single',
+  chatMessages: [],
+  toolMessages: [],
+  pendingToolUses: [],
+  abortCtrl: null,
+};
+
+function clearChildren(el) {
+  while (el.firstChild) el.removeChild(el.firstChild);
+}
+
+document.querySelectorAll('.tabs button').forEach(btn => {
+  btn.addEventListener('click', () => {
+    document.querySelectorAll('.tabs button').forEach(b => b.classList.remove('active'));
+    btn.classList.add('active');
+    Object.entries(panes).forEach(([k, el]) => {
+      el.style.display = k === btn.dataset.tab ? '' : 'none';
+    });
+  });
+});
+
+document.querySelectorAll('.modebar button').forEach(btn => {
+  btn.addEventListener('click', () => switchMode(btn.dataset.mode));
+});
+
+function switchMode(mode) {
+  state.mode = mode;
+  document.querySelectorAll('.modebar button').forEach(b => {
+    b.classList.toggle('active', b.dataset.mode === mode);
+  });
+  $('paneSingle').style.display = mode === 'single' ? '' : 'none';
+  $('paneMulti').style.display = mode === 'single' ? 'none' : '';
+  $('toolsConfigWrap').style.display = mode === 'tools' ? '' : 'none';
+  renderConvo();
+  renderMessagesJson();
+  renderToolFill();
+}
+
+$('modelPreset').addEventListener('change', () => {
+  $('customModelWrap').style.display = $('modelPreset').value === '__custom__' ? '' : 'none';
+});
+
+function currentMessages() {
+  return state.mode === 'tools' ? state.toolMessages : state.chatMessages;
+}
+
+function setCurrentMessages(arr) {
+  if (state.mode === 'tools') state.toolMessages = arr;
+  else state.chatMessages = arr;
+}
+
+function renderConvo() {
+  const el = $('convo');
+  clearChildren(el);
+  if (state.mode === 'single') return;
+  const msgs = currentMessages();
+  for (const m of msgs) {
+    const turn = document.createElement('div');
+    turn.className = 'turn';
+    const role = document.createElement('div');
+    role.className = 'role';
+    role.textContent = m.role;
+    turn.appendChild(role);
+    const blocks = Array.isArray(m.content) ? m.content : [{ type: 'text', text: m.content }];
+    for (const b of blocks) renderBlock(b, turn, m.role);
+    el.appendChild(turn);
+  }
+  el.scrollTop = el.scrollHeight;
+}
+
+// 把单个 content block 渲染为 DOM. 用 textContent 而非 innerHTML, 避免 XSS.
+// 想换可视化方案 (折叠/语法高亮) 改这里.
+function renderBlock(block, container, role) {
+  const el = document.createElement('div');
+  const cls = block.type === 'text' && role === 'user' ? 'user' : (block.type || 'unknown');
+  el.className = 'block ' + cls;
+  const tag = document.createElement('span');
+  tag.className = 'tag';
+  if (block.type === 'thinking') tag.textContent = '💭 thinking ·';
+  else if (block.type === 'tool_use') tag.textContent = '🔧 tool_use ·';
+  else if (block.type === 'tool_result') tag.textContent = '📦 tool_result ·';
+  else if (block.type === 'redacted_thinking') tag.textContent = '🔒 redacted_thinking';
+
+  if (block.type === 'text') {
+    el.textContent = block.text || '';
+  } else if (block.type === 'thinking') {
+    el.appendChild(tag);
+    el.appendChild(document.createTextNode(block.thinking || ''));
+  } else if (block.type === 'tool_use') {
+    el.appendChild(tag);
+    el.appendChild(document.createTextNode(
+      `${block.name}(${JSON.stringify(block.input ?? {}, null, 2)}) [id=${block.id}]`
+    ));
+  } else if (block.type === 'tool_result') {
+    const c = typeof block.content === 'string'
+      ? block.content
+      : JSON.stringify(block.content, null, 2);
+    el.appendChild(tag);
+    el.appendChild(document.createTextNode(`[for ${block.tool_use_id}]\n${c}`));
+  } else if (block.type === 'redacted_thinking') {
+    el.className = 'block thinking';
+    el.appendChild(tag);
+  } else {
+    el.textContent = JSON.stringify(block);
+  }
+  container.appendChild(el);
+}
+
+function renderMessagesJson() {
+  panes.msgs.textContent = JSON.stringify(currentMessages(), null, 2);
+}
+
+function commonRequestFields() {
+  const modelPreset = $('modelPreset').value;
+  const model = modelPreset === '__custom__' ? $('customModel').value.trim() : modelPreset;
+  const body = {
+    model,
+    max_tokens: parseInt($('maxTokens').value, 10) || 1024,
+  };
+  const sys = $('system').value.trim();
+  if (sys) body.system = sys;
+  if ($('stream').checked) body.stream = true;
+  return body;
+}
+
+function buildSingleRequest() {
+  const body = commonRequestFields();
+  body.messages = [{ role: 'user', content: $('userMsg').value }];
+  return body;
+}
+
+function buildMultiRequest(extraUserText) {
+  const body = commonRequestFields();
+  const msgs = [...currentMessages()];
+  if (extraUserText !== undefined && extraUserText !== null) {
+    msgs.push({ role: 'user', content: extraUserText });
+  }
+  body.messages = msgs;
+  if (state.mode === 'tools') {
+    try {
+      body.tools = JSON.parse($('toolsJson').value);
+    } catch (e) {
+      throw new Error('tools JSON 解析失败: ' + e.message);
+    }
+  }
+  return body;
+}
+
+function setStatus(text, kind) {
+  const el = $('statusInfo');
+  el.textContent = text;
+  el.className = kind || '';
+}
+
+function setBusy(busy) {
+  $('sendSingleBtn').disabled = busy;
+  $('sendMultiBtn').disabled = busy;
+  $('abortBtn').disabled = !busy;
+}
+
+async function sendRequest(body) {
+  panes.text.textContent = '';
+  panes.raw.textContent = '';
+  panes.req.textContent = JSON.stringify(body, null, 2);
+  $('usageInfo').textContent = '';
+  $('timeInfo').textContent = '';
+
+  const url = `http://${$('host').value}:${$('port').value}/v1/messages`;
+  const headers = {
+    'Content-Type': 'application/json',
+    'anthropic-version': '2023-06-01',
+  };
+  const key = $('apiKey').value.trim();
+  if (key) headers['x-api-key'] = key;
+
+  state.abortCtrl = new AbortController();
+  setBusy(true);
+  setStatus('请求中…');
+  const t0 = performance.now();
+
+  let assistantMessage = null;
+  let usage = null;
+
+  try {
+    const resp = await fetch(url, {
+      method: 'POST', headers, body: JSON.stringify(body), signal: state.abortCtrl.signal,
+    });
+    setStatus(`HTTP ${resp.status} ${resp.statusText}`, resp.ok ? 'ok' : 'err');
+
+    if (!resp.ok) {
+      const text = await resp.text();
+      panes.raw.textContent = text;
+      panes.text.textContent = text;
+      throw new Error(`HTTP ${resp.status}`);
+    }
+
+    if (!body.stream) {
+      const text = await resp.text();
+      panes.raw.textContent = text;
+      const json = JSON.parse(text);
+      assistantMessage = { role: 'assistant', content: json.content || [] };
+      usage = json.usage || null;
+      const flat = (json.content || [])
+        .filter(b => b.type === 'text').map(b => b.text).join('');
+      panes.text.textContent = flat;
+    } else {
+      const result = await consumeSSE(resp.body, panes.raw, panes.text);
+      assistantMessage = { role: 'assistant', content: result.contentBlocks };
+      usage = result.usage;
+    }
+
+    if (usage) {
+      $('usageInfo').textContent = `in:${usage.input_tokens ?? '?'} out:${usage.output_tokens ?? '?'}`;
+    }
+    return { assistantMessage, usage };
+
+  } catch (err) {
+    if (err.name === 'AbortError') setStatus('已中止', 'err');
+    else { setStatus(`错误: ${err.message}`, 'err'); }
+    throw err;
+  } finally {
+    $('timeInfo').textContent = `${Math.round(performance.now() - t0)} ms`;
+    setBusy(false);
+    state.abortCtrl = null;
+  }
+}
+
+async function consumeSSE(stream, rawPane, textPane) {
+  const reader = stream.getReader();
+  const decoder = new TextDecoder();
+  let buf = '';
+  let usage = null;
+  const blocksByIndex = new Map();
+
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    const chunk = decoder.decode(value, { stream: true });
+    rawPane.textContent += chunk;
+    buf += chunk;
+
+    const events = buf.split('\n\n');
+    buf = events.pop() || '';
+    for (const evt of events) {
+      const dataLines = evt.split('\n').filter(l => l.startsWith('data:'));
+      for (const line of dataLines) {
+        const payload = line.slice(5).trim();
+        if (!payload) continue;
+        let j;
+        try { j = JSON.parse(payload); } catch { continue; }
+
+        if (j.type === 'message_start' && j.message?.usage) usage = j.message.usage;
+        if (j.type === 'message_delta' && j.usage) usage = { ...usage, ...j.usage };
+
+        if (j.type === 'content_block_start') {
+          const cb = j.content_block || {};
+          const init = { type: cb.type };
+          if (cb.type === 'text') init.text = cb.text || '';
+          else if (cb.type === 'thinking') { init.thinking = ''; init.signature = ''; }
+          else if (cb.type === 'tool_use') { init.id = cb.id; init.name = cb.name; init._inputJson = ''; init.input = {}; }
+          else if (cb.type === 'redacted_thinking') { init.data = cb.data || ''; }
+          blocksByIndex.set(j.index, init);
+        }
+
+        if (j.type === 'content_block_delta') {
+          const block = blocksByIndex.get(j.index);
+          if (!block) continue;
+          const d = j.delta || {};
+          if (d.type === 'text_delta') {
+            block.text = (block.text || '') + (d.text || '');
+            textPane.textContent += d.text || '';
+          } else if (d.type === 'thinking_delta') {
+            block.thinking = (block.thinking || '') + (d.thinking || '');
+          } else if (d.type === 'signature_delta') {
+            block.signature = (block.signature || '') + (d.signature || '');
+          } else if (d.type === 'input_json_delta') {
+            block._inputJson = (block._inputJson || '') + (d.partial_json || '');
+          }
+        }
+
+        if (j.type === 'content_block_stop') {
+          const block = blocksByIndex.get(j.index);
+          if (block && block.type === 'tool_use' && block._inputJson) {
+            try { block.input = JSON.parse(block._inputJson); } catch {}
+            delete block._inputJson;
+          }
+        }
+      }
+    }
+  }
+
+  const contentBlocks = [...blocksByIndex.entries()]
+    .sort((a, b) => a[0] - b[0])
+    .map(([, v]) => v);
+  return { contentBlocks, usage };
+}
+
+$('sendSingleBtn').addEventListener('click', async () => {
+  try { await sendRequest(buildSingleRequest()); } catch {}
+});
+
+$('sendMultiBtn').addEventListener('click', async () => {
+  const text = $('multiInput').value.trim();
+  if (!text && state.pendingToolUses.length === 0) {
+    setStatus('请输入消息', 'err');
+    return;
+  }
+
+  let body;
+  try {
+    body = buildMultiRequest(text || null);
+  } catch (e) {
+    setStatus(e.message, 'err');
+    return;
+  }
+
+  const msgs = currentMessages();
+  if (text) msgs.push({ role: 'user', content: text });
+  setCurrentMessages(msgs);
+  $('multiInput').value = '';
+  renderConvo();
+  renderMessagesJson();
+
+  try {
+    const { assistantMessage } = await sendRequest(body);
+    msgs.push(assistantMessage);
+    setCurrentMessages(msgs);
+    renderConvo();
+    renderMessagesJson();
+
+    if (state.mode === 'tools') {
+      const tus = (assistantMessage.content || []).filter(b => b.type === 'tool_use');
+      state.pendingToolUses = tus;
+      renderToolFill();
+    }
+  } catch {}
+});
+
+$('clearConvoBtn').addEventListener('click', () => {
+  setCurrentMessages([]);
+  state.pendingToolUses = [];
+  renderConvo();
+  renderMessagesJson();
+  renderToolFill();
+  panes.text.textContent = '';
+  panes.raw.textContent = '';
+  setStatus('对话已清空');
+});
+
+$('copyMessagesBtn').addEventListener('click', async () => {
+  const json = JSON.stringify(currentMessages(), null, 2);
+  try {
+    await navigator.clipboard.writeText(json);
+    setStatus('messages JSON 已复制', 'ok');
+  } catch {
+    panes.msgs.textContent = json;
+    setStatus('复制失败,内容已显示在 messages JSON tab', 'err');
+  }
+});
+
+function renderToolFill() {
+  const area = $('toolFillArea');
+  clearChildren(area);
+  if (state.pendingToolUses.length === 0) return;
+
+  const box = document.createElement('div');
+  box.className = 'toolfill';
+  const h = document.createElement('h4');
+  h.textContent = `模型请求调用 ${state.pendingToolUses.length} 个工具,填入返回结果继续:`;
+  box.appendChild(h);
+
+  const inputs = [];
+  for (const tu of state.pendingToolUses) {
+    const item = document.createElement('div');
+    item.className = 'item';
+
+    const label = document.createElement('div');
+    const c1 = document.createElement('code'); c1.textContent = tu.name;
+    const c2 = document.createElement('code'); c2.textContent = tu.id;
+    const c3 = document.createElement('code'); c3.textContent = JSON.stringify(tu.input);
+    label.appendChild(c1);
+    label.appendChild(document.createTextNode(' · id='));
+    label.appendChild(c2);
+    label.appendChild(document.createTextNode(' · input='));
+    label.appendChild(c3);
+    label.style.marginBottom = '4px';
+    label.style.fontSize = '12px';
+
+    const ta = document.createElement('textarea');
+    ta.placeholder = '工具返回内容(纯文本或 JSON 字符串)';
+    ta.style.minHeight = '60px';
+
+    item.appendChild(label);
+    item.appendChild(ta);
+    box.appendChild(item);
+    inputs.push({ tu, ta });
+  }
+
+  const btn = document.createElement('button');
+  btn.textContent = '提交工具结果并继续';
+  btn.style.marginTop = '6px';
+  btn.addEventListener('click', async () => {
+    const toolResults = inputs.map(({ tu, ta }) => ({
+      type: 'tool_result',
+      tool_use_id: tu.id,
+      content: ta.value,
+    }));
+    const msgs = currentMessages();
+    msgs.push({ role: 'user', content: toolResults });
+    setCurrentMessages(msgs);
+    state.pendingToolUses = [];
+    renderConvo();
+    renderMessagesJson();
+    renderToolFill();
+
+    try {
+      const body = buildMultiRequest(null);
+      const { assistantMessage } = await sendRequest(body);
+      msgs.push(assistantMessage);
+      setCurrentMessages(msgs);
+      renderConvo();
+      renderMessagesJson();
+      const tus = (assistantMessage.content || []).filter(b => b.type === 'tool_use');
+      state.pendingToolUses = tus;
+      renderToolFill();
+    } catch {}
+  });
+  box.appendChild(btn);
+  area.appendChild(box);
+}
+
+$('abortBtn').addEventListener('click', () => state.abortCtrl?.abort());
+</script>
+
+</body>
+</html>
