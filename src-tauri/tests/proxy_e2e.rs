@@ -94,10 +94,10 @@ fn provider_loader_loads_builtin_providers() {
         .keys()
         .map(|k| (k.clone(), ()))
         .collect();
-    for expected in ["anthropic", "zhipu", "deepseek", "moonshot", "minimax", "xiaomi", "alibaba", "volcengine", "openrouter", "tencent", "aiberm", "whatai", "ollama", "fireworks", "stepfun", "baidu", "modelscope", "ucloud"] {
+    for expected in ["anthropic", "zhipu", "deepseek", "moonshot", "minimax", "xiaomi", "alibaba", "volcengine", "openrouter", "tencent", "aiberm", "whatai", "ollama", "fireworks", "stepfun", "baidu", "modelscope", "ucloud", "openai_codex"] {
         assert!(ids.contains_key(expected), "missing provider: {expected}");
     }
-    assert_eq!(providers.len(), 18);
+    assert_eq!(providers.len(), 19);
 }
 
 #[test]

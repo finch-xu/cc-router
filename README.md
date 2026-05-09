@@ -69,6 +69,7 @@
 | `baidu` | 百度千帆（按量付费/中国订阅） | ✅ | ✅ | untested |
 | `modelscope` | 魔搭 ModelScope（按量付费） | ❌ | ✅ | partial |
 | `ucloud` | 优云智算 UCloud Modelverse（Coding Plan 订阅 + 按量付费 API 国内/海外） | ✅ | ✅ | untested |
+| `openai_codex` | **OpenAI Codex (ChatGPT Plus/Pro 订阅)** 有封号风险，不推荐使用 | ✅ | ❌ | untested |
 | `自定义` | 自定义任意Anthropic协议API | ✅ | ✅ | verified |
 
 > Token Plan 列包含各厂商的套餐订阅形态（Token Plan / Coding Plan / Agent Plan 等）；API 列指按量付费的 Anthropic Messages 兼容端点。

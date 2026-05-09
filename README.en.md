@@ -69,6 +69,7 @@ Highlights:
 | `baidu` | Baidu Qianfan (pay-as-you-go / China subscription) | ✅ | ✅ | untested |
 | `modelscope` | ModelScope (pay-as-you-go) | ❌ | ✅ | partial |
 | `ucloud` | UCloud Modelverse (Coding Plan subscription + pay-as-you-go API in CN/global) | ✅ | ✅ | untested |
+| `openai_codex` | **OpenAI Codex (ChatGPT Plus/Pro subscription)** — account-suspension risk; not recommended | ✅ | ❌ | untested |
 | `Custom` | Bring your own Anthropic-compatible endpoint | ✅ | ✅ | verified |
 
 > The "Token Plan" column covers any subscription-style quota (Token Plan / Coding Plan / Agent Plan, etc.); "API" denotes pay-as-you-go Anthropic Messages-compatible endpoints.

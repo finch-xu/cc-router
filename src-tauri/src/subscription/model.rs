@@ -4,8 +4,27 @@ use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
-use crate::provider::model::{join_base_path, AuthHeaderFormat, ModelDiscovery};
+use crate::provider::model::{join_base_path, AuthHeaderFormat, AuthType, ModelDiscovery};
 use crate::virtual_model::model::SubscriptionSlot;
+
+/// OAuth 凭据元数据, 仅当 `auth_type = ChatgptOauth` 时有内容.
+/// 持久化为 subscriptions.oauth_metadata 列 (JSON 字符串).
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct OAuthMetadata {
+    /// ChatGPT 账户 id, 同时需作为 `ChatGPT-Account-Id` header 发给 chatgpt.com 后端.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub account_id: String,
+    /// 显示用账号 email (从 id_token JWT 解出, 可缺).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub email: Option<String>,
+    /// 长期 refresh_token. 用于 oauth/chatgpt.rs 自动刷新 access_token.
+    /// access_token 不持久化, 进程内存缓存即可.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub refresh_token: String,
+    /// 首次完成授权的时间戳 (毫秒). 显示用.
+    #[serde(default)]
+    pub authenticated_at: i64,
+}
 
 /// 自定义订阅的来源标记常量。
 pub const CUSTOM_SOURCE_MARKER: &str = "__custom__";
@@ -47,7 +66,12 @@ pub struct SubscriptionRow {
     /// 来源 endpoint id, 自定义订阅写 `CUSTOM_SOURCE_MARKER`
     pub endpoint_id: String,
     pub display_name: String,
+    /// API Key 明文 (auth_type=ApiKey 用); auth_type=ChatgptOauth 时留空, 实际凭据走 oauth_metadata.
     pub api_key: String,
+    /// 凭据来源类型, 决定 pipeline 走 api_key 路径还是 OAuth 路径.
+    pub auth_type: AuthType,
+    /// OAuth 元数据 (account_id, refresh_token 等), 仅 auth_type=ChatgptOauth 有值.
+    pub oauth_metadata: OAuthMetadata,
     pub model_slots: ModelSlots,
     pub enabled: bool,
     pub is_auth_failed: bool,
@@ -183,6 +207,27 @@ pub struct SubscriptionDto {
     pub provider_display_name: String,
     pub provider_icon: String,
     pub is_user_defined: bool,
+
+    /// 凭据来源类型. 默认 'api_key' 兼容老 DTO 消费者.
+    #[serde(default = "default_auth_type")]
+    pub auth_type: AuthType,
+    /// OAuth 公开元数据 (account_id + email + authenticated_at), 不含 refresh_token.
+    /// 仅 auth_type=ChatgptOauth 有意义.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub oauth_account: Option<OAuthAccountDto>,
+}
+
+fn default_auth_type() -> AuthType {
+    AuthType::ApiKey
+}
+
+/// 暴露给前端的 OAuth 账号信息. 不含 refresh_token, 类比现有 DTO 不暴露 api_key.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct OAuthAccountDto {
+    pub account_id: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub email: Option<String>,
+    pub authenticated_at: i64,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -201,6 +246,8 @@ impl SubscriptionRow {
             endpoint_id: endpoint_id.into(),
             display_name: "test".into(),
             api_key: "test-key".into(),
+            auth_type: AuthType::ApiKey,
+            oauth_metadata: OAuthMetadata::default(),
             model_slots: ModelSlots {
                 opus: "a".into(),
                 sonnet: "b".into(),
@@ -254,6 +301,24 @@ impl SubscriptionDto {
             provider_display_name: rt.row.provider_display_name.clone(),
             provider_icon: rt.row.provider_icon.clone(),
             is_user_defined: rt.row.is_user_defined,
+            auth_type: rt.row.auth_type,
+            oauth_account: oauth_account_dto(&rt.row),
         }
     }
+}
+
+/// 把 row.oauth_metadata (含 refresh_token) 缩减成前端可见的 OAuthAccountDto.
+/// auth_type=ApiKey 或 account_id 空时返回 None.
+fn oauth_account_dto(row: &SubscriptionRow) -> Option<OAuthAccountDto> {
+    if row.auth_type != AuthType::ChatgptOauth {
+        return None;
+    }
+    if row.oauth_metadata.account_id.is_empty() {
+        return None;
+    }
+    Some(OAuthAccountDto {
+        account_id: row.oauth_metadata.account_id.clone(),
+        email: row.oauth_metadata.email.clone(),
+        authenticated_at: row.oauth_metadata.authenticated_at,
+    })
 }

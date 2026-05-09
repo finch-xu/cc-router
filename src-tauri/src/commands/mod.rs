@@ -1,6 +1,7 @@
 pub mod app;
 pub mod debug;
 pub mod events;
+pub mod oauth;
 pub mod onboarding;
 pub mod providers;
 pub mod proxy;

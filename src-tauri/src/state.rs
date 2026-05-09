@@ -5,6 +5,7 @@ use tauri::AppHandle;
 use tokio::sync::{mpsc, RwLock};
 use uuid::Uuid;
 
+use crate::oauth::chatgpt::ChatGptOAuthManager;
 use crate::observability::body_dump::BodyDumpEntry;
 use crate::observability::events::EventEntry;
 use crate::observability::request_log::RequestLogEntry;
@@ -31,6 +32,8 @@ pub struct AppState {
     /// 短超时(30s) 单例, 仅用于订阅可达性探测(测试连接 + 后台巡检)。
     /// 与 `http_client` 的 600s 上限分离: 探测期望快速判定, 慢响应等同失败。
     pub probe_client: reqwest::Client,
+    /// ChatGPT OAuth manager (Phase 1 接入). 全订阅共享一份, 内含每订阅 access_token 缓存与 refresh 锁.
+    pub chatgpt_oauth: Arc<ChatGptOAuthManager>,
     pub app_handle: AppHandle,
 }
 

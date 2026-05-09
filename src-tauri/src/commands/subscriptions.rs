@@ -9,12 +9,12 @@ use tracing::warn;
 use uuid::Uuid;
 
 use crate::error::{AppError, AppResult};
-use crate::provider::model::{AuthHeaderFormat, ModelDiscovery};
+use crate::provider::model::{AuthHeaderFormat, AuthType, ModelDiscovery};
 use crate::state::AppState;
 use crate::subscription::{
     model::{
-        ModelCache, ModelInfo, ModelSlots, SubscriptionDto, SubscriptionRow, SubscriptionRuntime,
-        CUSTOM_SOURCE_MARKER,
+        ModelCache, ModelInfo, ModelSlots, OAuthMetadata, SubscriptionDto, SubscriptionRow,
+        SubscriptionRuntime, CUSTOM_SOURCE_MARKER,
     },
     model_discovery, ping, state_machine, store,
 };
@@ -162,6 +162,8 @@ pub async fn create_subscription(
                 endpoint_id: endpoint_id.clone(),
                 display_name: input.display_name,
                 api_key: input.api_key,
+                auth_type: provider.auth.auth_type,
+                oauth_metadata: OAuthMetadata::default(),
                 model_slots: input.model_slots,
                 enabled: true,
                 is_auth_failed: false,
@@ -195,6 +197,8 @@ pub async fn create_subscription(
                 endpoint_id: CUSTOM_SOURCE_MARKER.to_string(),
                 display_name: input.display_name,
                 api_key: input.api_key,
+                auth_type: AuthType::ApiKey,
+                oauth_metadata: OAuthMetadata::default(),
                 model_slots: input.model_slots,
                 enabled: true,
                 is_auth_failed: false,
@@ -378,6 +382,7 @@ pub async fn delete_subscription(state: State<'_, AppState>, id: String) -> AppR
             vm.subscription_ids.retain(|x| *x != id);
         }
     }
+    state.chatgpt_oauth.forget(id).await;
     store::delete(&state.db, &id).await?;
     Ok(())
 }
@@ -489,7 +494,21 @@ pub async fn refresh_model_list(
         g.row.clone()
     };
 
-    match model_discovery::fetch_and_cache(&state.db, &state.http_client, &row).await {
+    // OAuth 订阅走独立的 chatgpt_models 路径 (端点 / 鉴权 / 响应格式都不同),
+    // 其他 provider 走通用的 OpenAI /v1/models envelope.
+    let result = if matches!(row.auth_type, AuthType::ChatgptOauth) {
+        crate::oauth::chatgpt_models::fetch_and_cache(
+            &state.db,
+            &state.http_client,
+            &state.chatgpt_oauth,
+            &row,
+        )
+        .await
+    } else {
+        model_discovery::fetch_and_cache(&state.db, &state.http_client, &row).await
+    };
+
+    match result {
         Ok(cache) => {
             let mut guard = rt.write().await;
             guard.model_cache = Some(ModelCache {

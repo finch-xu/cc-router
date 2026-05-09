@@ -1,0 +1,45 @@
+id: openai_codex
+display_name: "OpenAI Codex (ChatGPT 订阅)"
+icon: openai
+description: "复用本机 ChatGPT Plus/Pro 的 Codex 订阅额度。需在 cc-router UI 内独立完成 OAuth 登录。"
+homepage: "https://openai.com/chatgpt/pricing"
+docs_url: "https://platform.openai.com/docs/api-reference/responses"
+
+compatibility: untested
+compatibility_notes: "通过 ChatGPT 反代 (chatgpt.com/backend-api/codex) 走 Responses API, 协议未公开, 风险高。"
+
+endpoints:
+  - id: chatgpt_subscription
+    label: "ChatGPT Plus/Pro · Codex"
+    description: "走 chatgpt.com/backend-api/codex/responses, 用 ChatGPT 订阅额度。所有请求强制流式且禁用 max_output_tokens。"
+    base_url: "https://chatgpt.com"
+    messages_path: "/backend-api/codex/responses"
+    region: global
+    billing: subscription
+
+default_endpoint: chatgpt_subscription
+
+auth:
+  type: chatgpt_oauth
+  header_name: "Authorization"
+  header_format: bearer
+
+required_headers:
+  # 注: User-Agent 由 oauth_dispatch.rs 在请求层显式覆盖为 build_codex_ua() 动态值
+  # (codex_cli_rs/<ver> (<os>; <arch>) cc-router/<ver>), 这里保留个静态兜底.
+  User-Agent: "codex_cli_rs cc-router"
+  OpenAI-Beta: "responses=experimental"
+  # OpenAI 风控 header. oauth_dispatch.rs 也会兜底注入, 这里写在 yaml 是为了对外可见
+  # 与 snapshot 一致性; 如果用户改 yaml 把这行删掉, oauth_dispatch 仍会兜底加.
+  originator: "codex_cli_rs"
+
+forward_headers: []
+
+model_discovery:
+  # 走独立的 OAuth 路径 (oauth/chatgpt_models.rs), 端点写死为
+  # https://chatgpt.com/backend-api/codex/models?client_version=<ver>,
+  # 不走通用 model_discovery.rs 的 base_url + path 拼接, 因此不需要 url / path 字段.
+  enabled: true
+  cache_ttl_hours: 168
+  example_models:
+    - "gpt-5.5"

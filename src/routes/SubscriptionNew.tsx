@@ -8,6 +8,7 @@ import { ProviderBadge } from "@/components/ProviderBadge";
 import { ProviderLogo } from "@/components/ProviderLogo";
 import { Spinner } from "@/components/Spinner";
 import { ModelSlotPicker } from "@/components/ModelSlotPicker";
+import { ChatGptOAuthDialog } from "@/components/ChatGptOAuthDialog";
 import {
   Select,
   SelectContent,
@@ -23,6 +24,7 @@ import { api } from "@/api/tauri";
 import { validateConnection } from "@/lib/connectionValidation";
 import type {
   AuthHeaderFormat,
+  ChatGptAccount,
   CreateSubscriptionInput,
   ModelInfo,
   ModelSlots,
@@ -81,6 +83,14 @@ export function SubscriptionNewPage() {
     () => provider?.endpoints.find((e) => e.id === endpointId),
     [provider, endpointId],
   );
+  const isChatGptOAuth = provider?.auth.type === "chatgpt_oauth";
+
+  // ChatGPT OAuth 流程 state. deviceCode + account 同生命周期, 合一份
+  const [oauthDialogOpen, setOauthDialogOpen] = useState(false);
+  const [oauthResult, setOauthResult] = useState<{
+    deviceCode: string;
+    account: ChatGptAccount;
+  } | null>(null);
 
   // 追踪自动生成的 displayName;用户手改后不再覆盖
   const autoGenNameRef = useRef<string>("");
@@ -116,6 +126,89 @@ export function SubscriptionNewPage() {
       const generated = `${v} ${suffix}`;
       setDisplayName(generated);
       autoGenNameRef.current = generated;
+    }
+  }
+
+  // ChatGPT OAuth 路径: step1 用 placeholder slots 调 createChatGptOAuthSubscription
+  // 落 DB (消费 device_code) → refresh_model_list 拿真实模型 → step2.
+  // 与内置 API Key 路径 (goToStep2) 完全对称, 保证两条路 UX 一致.
+  async function goToStep2OAuth() {
+    if (!provider || !endpoint) return;
+    if (!oauthResult || !displayName) return;
+
+    setFetchingModels(true);
+    setModelFetchError(null);
+    try {
+      const placeholderSlots: ModelSlots = {
+        opus: "(pending)",
+        sonnet: "(pending)",
+        haiku: "(pending)",
+      };
+      const created = await api.createChatGptOAuthSubscription({
+        device_code: oauthResult.deviceCode,
+        provider_id: provider.id,
+        endpoint_id: endpoint.id,
+        display_name: displayName,
+        model_slots: placeholderSlots,
+      });
+      await queryClient.invalidateQueries({ queryKey: ["subscriptions"] });
+
+      try {
+        const result: RefreshModelListResult = await invoke("refresh_model_list", {
+          id: created.id,
+        });
+        if (result.kind === "auto") {
+          setModels(result.models);
+          const first = result.models[0]?.id ?? "";
+          if (first) {
+            setSlots({ opus: first, sonnet: first, haiku: first });
+          }
+        } else {
+          setModels(null);
+          setModelFetchError(result.reason);
+          const fallback = provider.model_discovery.example_models[0] ?? "";
+          if (fallback) setSlots({ opus: fallback, sonnet: fallback, haiku: fallback });
+        }
+      } catch (e) {
+        setModelFetchError(String(e));
+        const fallback = provider.model_discovery.example_models[0] ?? "";
+        if (fallback) setSlots({ opus: fallback, sonnet: fallback, haiku: fallback });
+      }
+
+      setCreatedId(created.id);
+      setStep(2);
+    } catch (e) {
+      setModelFetchError(`${t("subscriptionNew.errCreate")}: ${e}`);
+    } finally {
+      setFetchingModels(false);
+    }
+  }
+
+  // step2 保存: 改 OAuth 订阅的 model_slots (订阅在 step1 已经创建落 DB).
+  // 不再调 createChatGptOAuthSubscription —— device_code 已经在 step1 消费.
+  async function saveOAuth() {
+    if (!createdId || !provider || !endpoint) return;
+    if (!slots.opus || !slots.sonnet || !slots.haiku) {
+      return setSubmitError(t("subscriptionNew.errFillSlots"));
+    }
+    setSubmitting(true);
+    setSubmitError(null);
+    try {
+      await invoke("update_subscription", {
+        id: createdId,
+        patch: { model_slots: slots },
+      });
+      await queryClient.invalidateQueries({ queryKey: ["subscriptions"] });
+      await bindToVirtualModelsIfOnboarding(createdId);
+      if (isOnboarding) {
+        navigate("/guide", { replace: true });
+        return;
+      }
+      navigate(returnTo ?? `/subscriptions/${createdId}`);
+    } catch (e) {
+      setSubmitError(`${t("subscriptionNew.errCreate")}: ${e}`);
+    } finally {
+      setSubmitting(false);
     }
   }
 
@@ -493,16 +586,67 @@ export function SubscriptionNewPage() {
                   </>
                 )}
 
-                <div style={{ marginBottom: 20 }}>
-                  <label className="field-label">API Key</label>
-                  <input
-                    className="input mono"
-                    type="password"
-                    value={apiKey}
-                    onChange={(e) => setApiKey(e.target.value)}
-                    placeholder="sk-..."
-                  />
-                </div>
+                {/* ChatGPT OAuth 路径: 用「连接账号」按钮替代 API Key 输入框 */}
+                {isChatGptOAuth ? (
+                  <div style={{ marginBottom: 20 }}>
+                    <label className="field-label">{t("subscriptionNew.field.chatgptAccount")}</label>
+                    {oauthResult ? (
+                      <div
+                        style={{
+                          display: "flex",
+                          alignItems: "center",
+                          justifyContent: "space-between",
+                          padding: 12,
+                          border: "1px solid var(--line)",
+                          borderRadius: 6,
+                          background: "var(--surface-2)",
+                        }}
+                      >
+                        <div>
+                          <div style={{ fontSize: 13, fontWeight: 500 }}>
+                            {oauthResult.account.email ?? t("oauth.chatgpt.noEmail")}
+                          </div>
+                          <div className="mono" style={{ fontSize: 11, color: "var(--ink-3)" }}>
+                            {oauthResult.account.account_id}
+                          </div>
+                        </div>
+                        <button
+                          type="button"
+                          className="btn bare sm"
+                          onClick={() => {
+                            setOauthResult(null);
+                            setOauthDialogOpen(true);
+                          }}
+                        >
+                          {t("oauth.chatgpt.reconnect")}
+                        </button>
+                      </div>
+                    ) : (
+                      <button
+                        type="button"
+                        className="btn primary"
+                        style={{ width: "100%" }}
+                        onClick={() => setOauthDialogOpen(true)}
+                      >
+                        {t("oauth.chatgpt.connectButton")}
+                      </button>
+                    )}
+                    <div className="field-hint" style={{ marginTop: 8 }}>
+                      {t("oauth.chatgpt.connectHint")}
+                    </div>
+                  </div>
+                ) : (
+                  <div style={{ marginBottom: 20 }}>
+                    <label className="field-label">API Key</label>
+                    <input
+                      className="input mono"
+                      type="password"
+                      value={apiKey}
+                      onChange={(e) => setApiKey(e.target.value)}
+                      placeholder="sk-..."
+                    />
+                  </div>
+                )}
 
                 <div style={{ marginBottom: 24 }}>
                   <label className="field-label">{t("subscriptionNew.field.note")}</label>
@@ -570,6 +714,15 @@ export function SubscriptionNewPage() {
                       {submitting && <Spinner />}
                       {t("common.save")}
                     </button>
+                  ) : isChatGptOAuth ? (
+                    <button
+                      className="btn primary"
+                      onClick={goToStep2OAuth}
+                      disabled={!provider || !endpoint || !oauthResult || !displayName}
+                      type="button"
+                    >
+                      {t("common.next")} <ArrowRight size={12} />
+                    </button>
                   ) : (
                     <button
                       className="btn primary"
@@ -597,6 +750,12 @@ export function SubscriptionNewPage() {
                   exampleModels={provider.model_discovery.example_models}
                 />
 
+                {submitError && (
+                  <div className="alert err" style={{ marginTop: 12 }}>
+                    {submitError}
+                  </div>
+                )}
+
                 <div
                   style={{
                     display: "flex",
@@ -611,10 +770,13 @@ export function SubscriptionNewPage() {
                   </button>
                   <button
                     className="btn primary"
-                    onClick={save}
-                    disabled={!slots.opus || !slots.sonnet || !slots.haiku}
+                    onClick={isChatGptOAuth ? saveOAuth : save}
+                    disabled={
+                      !slots.opus || !slots.sonnet || !slots.haiku || submitting
+                    }
                     type="button"
                   >
+                    {submitting && <Spinner />}
                     {t("common.save")}
                   </button>
                 </div>
@@ -623,6 +785,24 @@ export function SubscriptionNewPage() {
           </div>
         </div>
       </div>
+
+      <ChatGptOAuthDialog
+        open={oauthDialogOpen}
+        onClose={() => setOauthDialogOpen(false)}
+        onSuccess={(deviceCode, account) => {
+          setOauthResult({ deviceCode, account });
+          if (!displayName) {
+            const suffix = Math.random().toString(36).slice(2, 8);
+            const generated = account.email
+              ? `Codex · ${account.email} ${suffix}`
+              : `Codex · ${suffix}`;
+            setDisplayName(generated);
+            autoGenNameRef.current = generated;
+          }
+          // 让 dialog 短暂展示「已连接」状态再关
+          setTimeout(() => setOauthDialogOpen(false), 500);
+        }}
+      />
     </>
   );
 }

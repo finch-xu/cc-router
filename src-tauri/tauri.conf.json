@@ -64,6 +64,7 @@
       "providers/baidu.yaml",
       "providers/modelscope.yaml",
       "providers/ucloud.yaml",
+      "providers/openai-codex.yaml",
       "migrations/001_init.sql",
       "migrations/002_add_supports_thinking_blocks.sql",
       "migrations/003_add_events_and_diagnostics.sql",
@@ -71,6 +72,7 @@
       "migrations/005_drop_thinking_block_field_name.sql",
       "migrations/006_add_request_stats_daily.sql",
       "migrations/007_drop_supports_thinking_blocks.sql",
+      "migrations/008_add_subscription_oauth.sql",
       "../LICENSE"
     ],
     "category": "DeveloperTool",

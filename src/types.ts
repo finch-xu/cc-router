@@ -2,8 +2,37 @@
 // 约定：Rust 侧 serde 使用 serde(rename_all = "snake_case") 序列化。
 
 export type Compatibility = "verified" | "partial" | "untested";
-export type AuthType = "api_key";
+export type AuthType = "api_key" | "chatgpt_oauth";
 export type AuthHeaderFormat = "raw" | "bearer";
+
+/**
+ * Device Code 启动结果, 对应 Rust 侧 oauth::chatgpt::DeviceFlowStart.
+ */
+export interface DeviceFlowStart {
+  device_code: string;
+  user_code: string;
+  verification_uri: string;
+  /** 秒 */
+  expires_in: number;
+}
+
+/**
+ * ChatGPT 账号公开信息, 不含 refresh_token. 对应 Rust 侧 oauth::chatgpt::ChatGptAccount.
+ */
+export interface ChatGptAccount {
+  account_id: string;
+  email?: string;
+  /** Unix ms */
+  authenticated_at: number;
+}
+
+export interface CreateChatGptOAuthSubscriptionInput {
+  device_code: string;
+  provider_id: string;
+  endpoint_id: string;
+  display_name: string;
+  model_slots: ModelSlots;
+}
 export type VirtualModelName =
   | "model-opus"
   | "model-sonnet"
@@ -106,6 +135,16 @@ export interface SubscriptionDto {
   provider_display_name: string;
   provider_icon: string;
   is_user_defined: boolean;
+
+  /** 凭据来源类型. 默认 "api_key" 兼容老 DTO 消费者. */
+  auth_type: AuthType;
+  /** OAuth 账号信息 (仅 auth_type=chatgpt_oauth 有值, 不含 refresh_token) */
+  oauth_account?: {
+    account_id: string;
+    email?: string;
+    /** Unix ms */
+    authenticated_at: number;
+  };
 }
 
 /** 创建订阅时的 source: 内置 yaml 模板 vs 用户自定义 */

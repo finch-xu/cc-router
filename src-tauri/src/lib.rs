@@ -6,6 +6,7 @@
 pub mod commands;
 pub mod db;
 pub mod error;
+pub mod oauth;
 pub mod observability;
 pub mod provider;
 pub mod proxy;
@@ -102,6 +103,11 @@ pub fn run() {
             commands::updater::download_install_update,
             commands::debug::open_debug_dump_dir,
             commands::debug::clear_debug_dumps,
+            commands::oauth::start_chatgpt_device_flow,
+            commands::oauth::poll_chatgpt_device_code,
+            commands::oauth::create_chatgpt_oauth_subscription,
+            commands::oauth::forget_chatgpt_oauth_cache,
+            commands::oauth::get_chatgpt_oauth_usage,
         ])
         .run(tauri::generate_context!())
         .expect("运行 cc-router 时发生错误");
@@ -171,6 +177,8 @@ async fn bootstrap(
         .user_agent(concat!("cc-router-probe/", env!("CARGO_PKG_VERSION")))
         .build()?;
 
+    let chatgpt_oauth = Arc::new(oauth::chatgpt::ChatGptOAuthManager::new(pool.clone()));
+
     let state = AppState {
         db: pool,
         providers: Arc::new(providers),
@@ -183,6 +191,7 @@ async fn bootstrap(
         body_dump_tx,
         http_client,
         probe_client,
+        chatgpt_oauth,
         app_handle: handle.clone(),
     };
 

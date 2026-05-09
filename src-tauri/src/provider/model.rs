@@ -10,10 +10,33 @@ pub enum Compatibility {
     Untested,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub enum AuthType {
     ApiKey,
+    /// ChatGPT Plus/Pro 订阅 OAuth: 用户在 cc-router UI 完成 Device Code 登录,
+    /// pipeline 在每次请求前从 OAuth manager 取实时 access_token, 不读 subscriptions.api_key.
+    ChatgptOauth,
+}
+
+impl AuthType {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::ApiKey => "api_key",
+            Self::ChatgptOauth => "chatgpt_oauth",
+        }
+    }
+}
+
+impl FromStr for AuthType {
+    type Err = String;
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s {
+            "api_key" => Ok(Self::ApiKey),
+            "chatgpt_oauth" => Ok(Self::ChatgptOauth),
+            other => Err(format!("无效 auth_type: {other}")),
+        }
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]

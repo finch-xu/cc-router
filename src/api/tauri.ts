@@ -2,8 +2,11 @@ import { invoke } from "@tauri-apps/api/core";
 import type {
   BreakdownBy,
   BreakdownDto,
+  ChatGptAccount,
+  CreateChatGptOAuthSubscriptionInput,
   CreateSubscriptionInput,
   DailySeriesPointDto,
+  DeviceFlowStart,
   EventFilters,
   HeatmapDayDto,
   ListEventsResult,
@@ -50,6 +53,16 @@ export const api = {
     invoke<TestConnectionResult>("test_connection", { id }),
   refreshModelList: (id: string) =>
     invoke<RefreshModelListResult>("refresh_model_list", { id }),
+
+  // ChatGPT OAuth (Phase 1, OpenAI Codex provider)
+  startChatGptDeviceFlow: () =>
+    invoke<DeviceFlowStart>("start_chatgpt_device_flow"),
+  pollChatGptDeviceCode: (deviceCode: string) =>
+    invoke<ChatGptAccount | null>("poll_chatgpt_device_code", { deviceCode }),
+  createChatGptOAuthSubscription: (input: CreateChatGptOAuthSubscriptionInput) =>
+    invoke<SubscriptionDto>("create_chatgpt_oauth_subscription", { input }),
+  forgetChatGptOAuthCache: (subscriptionId: string) =>
+    invoke<void>("forget_chatgpt_oauth_cache", { subscriptionId }),
 
   // virtual models
   listVirtualModels: () => invoke<VirtualModelDto[]>("list_virtual_models"),

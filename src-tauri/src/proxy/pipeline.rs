@@ -16,7 +16,11 @@ use crate::error::AppResult;
 use crate::observability::body_dump::{BodyDumpEntry, BodyDumpKind};
 use crate::observability::events::{self, Severity};
 use crate::observability::request_log::{RequestLogEntry, RequestStatus};
+use crate::provider::model::AuthType;
 use crate::proxy::handler::error_body;
+use crate::proxy::oauth_dispatch::{
+    self, OAuthDispatchError,
+};
 use crate::proxy::overloaded;
 use crate::proxy::retry::{classify_response, ShouldRetry};
 use crate::proxy::sse;
@@ -152,6 +156,9 @@ pub async fn dispatch(
             auth_header_value,
             required_headers,
             forward_headers,
+            auth_type,
+            oauth_refresh_token,
+            oauth_account_id,
         ) = {
             let guard = rt.read().await;
             // fallback 透传原始 model; 其他三个按 slot 映射
@@ -171,8 +178,127 @@ pub async fn dispatch(
                 guard.row.auth_header_value(),
                 guard.row.required_headers.clone(),
                 guard.row.forward_headers.clone(),
+                guard.row.auth_type,
+                guard.row.oauth_metadata.refresh_token.clone(),
+                guard.row.oauth_metadata.account_id.clone(),
             )
         };
+
+        // ChatGPT OAuth 分支: 走独立的 dispatch + 翻译层 (proxy::oauth_dispatch).
+        // fallback 透传与 OAuth 互斥: 此 provider 不允许做 fallback (model 必须改写到 codex 模型).
+        if matches!(auth_type, AuthType::ChatgptOauth) {
+            // 改写 model 字段后给翻译层 (类似默认路径里 fallback==false 的处理)
+            let mut oauth_body = request_body.clone();
+            if !is_fallback {
+                oauth_body["model"] = Value::String(real_model.clone());
+            }
+            emit_attempt_started(state, sub_id, vm_name);
+            let dispatch_res = oauth_dispatch::dispatch_oauth_attempt(
+                &state.http_client,
+                state.chatgpt_oauth.clone(),
+                sub_id,
+                oauth_refresh_token,
+                oauth_account_id,
+                url.clone(),
+                &oauth_body,
+                is_streaming,
+                forward_headers.clone(),
+                client_headers.clone(),
+                required_headers.clone(),
+            )
+            .await;
+
+            match dispatch_res {
+                Ok(ok) => {
+                    emit_attempt_finished(state, sub_id, vm_name, true);
+                    return Ok(oauth_dispatch::finalize_oauth_response(
+                        ok,
+                        vm_name,
+                        attempt_id,
+                        sub_id,
+                        provider_id,
+                        endpoint_id,
+                        real_model,
+                        display_name,
+                        retry_count,
+                        state.request_log_tx.clone(),
+                        state.event_log_tx.clone(),
+                        state.db.clone(),
+                        state.app_handle.clone(),
+                        rt.clone(),
+                    ));
+                }
+                Err(err) => {
+                    emit_attempt_finished(state, sub_id, vm_name, false);
+                    let (event, retryable) = match &err {
+                        OAuthDispatchError::Auth(_) => (state_machine::Event::HttpStatus(401), false),
+                        OAuthDispatchError::Upstream { status, .. } => {
+                            let s = status.unwrap_or(502);
+                            let retryable =
+                                matches!(classify_response(s, None), ShouldRetry::Yes(_));
+                            (state_machine::Event::HttpStatus(s), retryable)
+                        }
+                    };
+                    let _ = state_machine::apply(
+                        &state.db,
+                        &state.app_handle,
+                        &state.event_log_tx,
+                        rt.clone(),
+                        event,
+                    )
+                    .await;
+
+                    let err_msg = match &err {
+                        OAuthDispatchError::Auth(m) => m.clone(),
+                        OAuthDispatchError::Upstream { message, .. } => message.clone(),
+                    };
+                    let entry = RequestLogEntry {
+                        id: attempt_id,
+                        timestamp_ms: chrono::Utc::now().timestamp_millis(),
+                        virtual_model_name: vm_name,
+                        subscription_id: sub_id,
+                        provider_id: provider_id.clone(),
+                        endpoint_id: endpoint_id.clone(),
+                        real_model_name: real_model.clone(),
+                        response_model_name: None,
+                        is_streaming,
+                        status: RequestStatus::Error,
+                        http_status: match &err {
+                            OAuthDispatchError::Upstream { status, .. } => *status,
+                            _ => Some(401),
+                        },
+                        ttft_ms: None,
+                        total_latency_ms: Some(start.elapsed().as_millis() as u64),
+                        upstream_input_tokens: None,
+                        upstream_output_tokens: None,
+                        upstream_cache_creation: None,
+                        upstream_cache_read: None,
+                        retry_count,
+                        error_message: Some(err_msg.clone()),
+                        upstream_response_body: Some(truncate_body(&err_msg, ERROR_BODY_LIMIT)),
+                    };
+                    let _ = state.request_log_tx.try_send(entry);
+                    events::record_request(
+                        &state.event_log_tx,
+                        attempt_id,
+                        sub_id,
+                        Severity::Error,
+                        format!(
+                            "{} · {} · OAuth · {}",
+                            vm_name.as_str(),
+                            display_name,
+                            err_msg
+                        ),
+                    );
+
+                    if retryable {
+                        retry_count += 1;
+                        continue;
+                    }
+                    return Ok(oauth_dispatch::build_error_response(&err));
+                }
+            }
+        }
 
         // fallback 透传原始 body, 不必 clone JSON, 直接序列化引用; 其他三个虚拟模型按
         // 订阅 slot 改写 model 字段, 必须在 clone 上改。

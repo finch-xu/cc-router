@@ -9,9 +9,9 @@ use uuid::Uuid;
 use std::str::FromStr;
 
 use crate::error::{AppError, AppResult};
-use crate::provider::model::{AuthHeaderFormat, ModelDiscovery};
+use crate::provider::model::{AuthHeaderFormat, AuthType, ModelDiscovery};
 use crate::subscription::model::{
-    ModelCache, ModelInfo, ModelSlots, SubscriptionRow, SubscriptionRuntime,
+    ModelCache, ModelInfo, ModelSlots, OAuthMetadata, SubscriptionRow, SubscriptionRuntime,
 };
 
 /// 启动时从 DB 加载全部订阅，并初始化运行时状态。
@@ -25,7 +25,8 @@ pub async fn load_runtime(
                 created_at, updated_at,
                 base_url, messages_path, auth_header_name, auth_header_format,
                 required_headers, forward_headers, model_discovery,
-                provider_display_name, provider_icon, is_user_defined
+                provider_display_name, provider_icon, is_user_defined,
+                auth_type, oauth_metadata
          FROM subscriptions",
     )
     .fetch_all(pool)
@@ -57,12 +58,19 @@ fn row_to_row(row: &sqlx::sqlite::SqliteRow) -> AppResult<SubscriptionRow> {
     // ModelDiscovery 各字段均带 #[serde(default)], 空对象 "{}" 自然得到 default。
     let model_discovery: ModelDiscovery = serde_json::from_str(&discovery_json)
         .map_err(|e| AppError::internal(format!("model_discovery JSON 解析失败: {e}")))?;
+    let auth_type_str: String = row.try_get("auth_type")?;
+    let auth_type = AuthType::from_str(&auth_type_str).map_err(AppError::internal)?;
+    let oauth_metadata_json: String = row.try_get("oauth_metadata")?;
+    let oauth_metadata: OAuthMetadata = serde_json::from_str(&oauth_metadata_json)
+        .map_err(|e| AppError::internal(format!("oauth_metadata JSON 解析失败: {e}")))?;
     Ok(SubscriptionRow {
         id,
         provider_id: row.try_get("provider_id")?,
         endpoint_id: row.try_get("endpoint_id")?,
         display_name: row.try_get("display_name")?,
         api_key: row.try_get("api_key")?,
+        auth_type,
+        oauth_metadata,
         model_slots: ModelSlots {
             opus: row.try_get("model_slot_opus")?,
             sonnet: row.try_get("model_slot_sonnet")?,
@@ -104,17 +112,20 @@ pub async fn insert(pool: &SqlitePool, sub: &SubscriptionRow) -> AppResult<()> {
     let required_json = serde_json::to_string(&sub.required_headers)?;
     let forward_json = serde_json::to_string(&sub.forward_headers)?;
     let discovery_json = serde_json::to_string(&sub.model_discovery)?;
+    let oauth_json = serde_json::to_string(&sub.oauth_metadata)?;
     sqlx::query(
         "INSERT INTO subscriptions (id, provider_id, endpoint_id, display_name, api_key,
             model_slot_opus, model_slot_sonnet, model_slot_haiku,
             enabled, is_auth_failed, last_error_message, created_at, updated_at,
             base_url, messages_path, auth_header_name, auth_header_format,
             required_headers, forward_headers, model_discovery,
-            provider_display_name, provider_icon, is_user_defined)
+            provider_display_name, provider_icon, is_user_defined,
+            auth_type, oauth_metadata)
          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
                  ?, ?, ?, ?,
                  ?, ?, ?,
-                 ?, ?, ?)",
+                 ?, ?, ?,
+                 ?, ?)",
     )
     .bind(sub.id.to_string())
     .bind(&sub.provider_id)
@@ -139,6 +150,27 @@ pub async fn insert(pool: &SqlitePool, sub: &SubscriptionRow) -> AppResult<()> {
     .bind(&sub.provider_display_name)
     .bind(&sub.provider_icon)
     .bind(sub.is_user_defined as i64)
+    .bind(sub.auth_type.as_str())
+    .bind(oauth_json)
+    .execute(pool)
+    .await?;
+    Ok(())
+}
+
+/// 更新订阅的 OAuth 元数据 (例如 refresh_token 被服务端旋转后落盘新值).
+/// 同时清掉 is_auth_failed 与 last_error_message, 类比 update_api_key 的行为.
+pub async fn update_oauth_metadata(
+    pool: &SqlitePool,
+    id: &Uuid,
+    metadata: &OAuthMetadata,
+) -> AppResult<()> {
+    let oauth_json = serde_json::to_string(metadata)?;
+    sqlx::query(
+        "UPDATE subscriptions SET oauth_metadata = ?, is_auth_failed = 0, last_error_message = NULL, updated_at = ? WHERE id = ?",
+    )
+    .bind(oauth_json)
+    .bind(Utc::now().timestamp_millis())
+    .bind(id.to_string())
     .execute(pool)
     .await?;
     Ok(())
