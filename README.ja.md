@@ -114,6 +114,57 @@
 
 LiteLLM 形式の `anthropic/` プレフィックスにも対応しています: `anthropic/model-opus` / `anthropic/model-sonnet` / `anthropic/model-haiku` はプレフィックスなしの記法と等価で、Anthropic プロトコルを認識させるためにプロバイダプレフィックスが必要なツールとの連携が容易になります。
 
+## FAQ・ユースケース
+
+<details>
+<summary>cc-router は何を解決する？</summary>
+
+**cc-router なし**: AI エージェント（Claude Code / OpenCode 等）は一度にひとつのベンダーしか使えず、小枠サブスクは肝心な場面で枯渇。設定ファイルを手で切り替える羽目になり、体験が悪い。
+
+**cc-router あり**: エージェント → cc-router → ベンダー A + B + C。自動ロードバランス・自動フェイルオーバーで、3 つのサブスクをまるで 1 つのように使える。
+
+得られるもの:
+
+- **コスト削減** —— 高額な上位 Coding Plan を買わなくても、安い小枠 2 つで仕事が回る
+- **中断ゼロ** —— レート制限や失敗で自動切替、エージェント側からは透過的
+- **トップモデルを混ぜる** —— GLM-5.1 / DeepSeek-V4-Pro / MiniMax-2.7 / MiMo-V2.5-Pro を同時に活用、Claude Opus や GPT-5.5 のような純正 API も投入可能
+- **使用量を一画面で** —— 全サブスクの token 消費を一目で確認、レシートとしてエクスポート可能
+
+</details>
+
+<details>
+<summary><code>model-opus</code> / <code>model-sonnet</code> / <code>model-haiku</code> という 3 つの仮想モデルは何のため？</summary>
+
+Claude Code はタスク難易度ごとに 3 段階のモデルを使い分けます: opus はプランニング、sonnet はコーディング、haiku はツール呼び出し。
+
+cc-router はこの 3 段階を `model-opus` / `model-sonnet` / `model-haiku` という仮想スロットに抽象化。各スロットには実モデルのリストとスケジューリングモードを割り当てます:
+
+- `model-opus` → DeepSeek-V4-Pro + GLM-5.1（ラウンドロビン）
+- `model-sonnet` → MiniMax-M2.7 + MiMo-V2.5-Pro（ラウンドロビン）
+- `model-haiku` → GLM-4-Flash
+
+CC からのリクエストはこのマッピングに従って転送されるので、`~/.claude/settings.json` を頻繁に書き換える必要はありません。
+
+</details>
+
+<details>
+<summary>複数の Coding Plan をどう組み合わせる？</summary>
+
+例: サブスク A = GLM-5 / MiniMax-2.7 / DeepSeek-Flash、サブスク B = DeepSeek-V4-Pro / MiniMax-2.7 / GLM-5。
+
+- **手堅い派** —— 両サブスクの同等性能のモデルを同じスロットにまとめてバインド。挙動が一貫し、フェイルオーバーも安定
+- **攻めの派** —— 両サブスクのフラッグシップを `model-opus` のラウンドロビンに投入。クロス活用で `1 + 1 ≥ 2` になりやすい
+
+</details>
+
+<details>
+<summary>スケジューリング: 順次とラウンドロビン、どちらを選ぶ？</summary>
+
+- **順次** —— アカウント A を使い切ってから B に切り替え。キャッシュヒット率が高く、**小枠 GLM Coding Plan 2 つを使い切るシナリオに最適**
+- **ラウンドロビン** —— 両アカウントが均等に負荷を分担。ただしアカウント跨ぎのキャッシュは独立しているので、若干余分に枠を消費する代わりに真のロードバランスが得られる
+
+</details>
+
 ## 開発
 
 前提条件: Node.js ≥ 20（pnpm 推奨）、Rust ≥ 1.77、Xcode Command Line Tools（macOS）。

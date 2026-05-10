@@ -114,6 +114,57 @@ When the `OPUS_MODEL` supports a `1m` context window, set it to `model-opus[1m]`
 
 The LiteLLM-style `anthropic/` prefix is also accepted: `anthropic/model-opus` / `anthropic/model-sonnet` / `anthropic/model-haiku` are equivalent to the prefix-less forms, making it easy to integrate with tools that require a provider prefix to recognize the Anthropic protocol.
 
+## FAQ & Use Cases
+
+<details>
+<summary>What problem does cc-router solve?</summary>
+
+**Without cc-router**: your AI agent (Claude Code / OpenCode / etc.) can only talk to one vendor at a time. Small-quota plans run out at the worst moment, and you end up swapping config files by hand — bad experience.
+
+**With cc-router**: agent → cc-router → vendor A + B + C, with automatic load balancing and failover. Three subscriptions behave like one.
+
+What you get:
+
+- **Save money** — no need for an expensive top-tier Coding Plan; two cheap small-quota plans get the job done
+- **No interruptions** — rate limits / failures trigger automatic switching, transparent to the agent
+- **Mix top models** — GLM-5.1, DeepSeek-V4-Pro, MiniMax-2.7, MiMo-V2.5-Pro all on the table at once, plus native APIs like Claude Opus or GPT-5.5
+- **Unified usage view** — every subscription's token spend on a single screen, exportable as a receipt
+
+</details>
+
+<details>
+<summary>What are the <code>model-opus</code> / <code>model-sonnet</code> / <code>model-haiku</code> virtual models?</summary>
+
+Claude Code uses three model tiers by task difficulty: opus for planning, sonnet for coding, haiku for tool calls.
+
+cc-router abstracts those tiers as the virtual slots `model-opus` / `model-sonnet` / `model-haiku`. Each slot is bound to a list of real models plus a scheduling mode:
+
+- `model-opus` → DeepSeek-V4-Pro + GLM-5.1 (round-robin)
+- `model-sonnet` → MiniMax-M2.7 + MiMo-V2.5-Pro (round-robin)
+- `model-haiku` → GLM-4-Flash
+
+When CC sends a request, cc-router routes by the mapping — no more hand-editing `~/.claude/settings.json`.
+
+</details>
+
+<details>
+<summary>How should I combine multiple Coding Plans?</summary>
+
+Example: subscription A = GLM-5 / MiniMax-2.7 / DeepSeek-Flash; subscription B = DeepSeek-V4-Pro / MiniMax-2.7 / GLM-5.
+
+- **Conservative** — bind same-tier models from both sides into the matching slot for consistent behavior and good failover
+- **Aggressive** — put each side's flagship model into `model-opus` on round-robin; cross-pollination often gives you `1 + 1 ≥ 2`
+
+</details>
+
+<details>
+<summary>Scheduling mode: sequential or round-robin?</summary>
+
+- **Sequential** — drain account A first, then switch to B. Better cache hit rate; ideal for **squeezing every token out of two small GLM Coding Plans**
+- **Round-robin** — both accounts share the load. Caveat: cross-account caches are independent, so you'll burn slightly more quota in exchange for true load balancing
+
+</details>
+
 ## Development
 
 Prerequisites: Node.js ≥ 20 (pnpm recommended), Rust ≥ 1.77, Xcode Command Line Tools (macOS).

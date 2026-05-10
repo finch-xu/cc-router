@@ -114,6 +114,58 @@
 
 也兼容 LiteLLM 风格的 `anthropic/` 前缀：`anthropic/model-opus` / `anthropic/model-sonnet` / `anthropic/model-haiku` 等同于无前缀写法，方便接入需要带 provider 前缀才能识别 Anthropic 协议的工具。
 
+## 常见问题&使用场景
+
+<details>
+<summary>cc-router 解决了什么问题？</summary>
+
+**没有 cc-router 时**：AI Agent（Claude Code / OpenCode 等）一次只能接一家厂商，小额度订阅在关键时刻断流，得手动切配置——体验糟糕。
+
+**接上 cc-router 后**：Agent → cc-router → 厂商 A + B + C，自动负载均衡、自动故障转移，三家订阅当一家用。
+
+收益：
+
+- **省钱** —— 不必买昂贵的大额 Coding Plan，两个小额度拼起来就够用
+- **不断流** —— 限流 / 失败自动切换，Agent 无感
+- **混搭顶配** —— GLM-5.1、DeepSeek-V4-Pro、MiniMax-2.7、MiMo-V2.5-Pro 同时上桌，也能掺 Claude Opus、GPT-5.5 这类原生 API
+- **用量统一** —— 所有订阅 token 消费一屏看完，可一键导出小票
+
+</details>
+
+<details>
+<summary><code>model-opus</code> / <code>model-sonnet</code> / <code>model-haiku</code> 三个虚拟模型是干啥的？</summary>
+
+Claude Code 按任务难度分三档：opus 做规划、sonnet 写代码、haiku 跑工具调用。
+
+cc-router 把这三档抽象成 `model-opus` / `model-sonnet` / `model-haiku` 三个虚拟槽位，每个槽位绑一组真实模型 + 调度模式：
+
+- `model-opus` → DeepSeek-V4-Pro + GLM-5.1（轮询）
+- `model-sonnet` → MiniMax-M2.7 + MiMo-V2.5-Pro（轮询）
+- `model-haiku` → GLM-4-Flash
+
+CC 请求来了就按映射转发，不用再频繁改 `~/.claude/settings.json`。
+
+</details>
+
+<details>
+<summary>有多个 Coding Plan 怎么搭配？</summary>
+
+举例：订阅 A = GLM-5 / MiniMax-2.7 / DeepSeek-Flash，订阅 B = DeepSeek-V4-Pro / MiniMax-2.7 / GLM-5。
+
+- **稳妥派**：把两边的同档模型一起绑进对应槽位，效果一致、容灾好
+- **激进派**：把两边各自的顶配模型都塞进 `model-opus` 轮询，交叉使用大概率 `1 + 1 ≥ 2`
+
+</details>
+
+<details>
+<summary>调度模式：顺序还是轮询？</summary>
+
+- **顺序** —— 用完 A 再切 B。命中缓存好、能榨干小额度订阅，**推荐给两个小额 GLM Coding Plan 这类场景**
+- **轮询** —— 两家均衡分担。但跨账号的缓存是独立的，会多吃额度，换来的是真正的负载均衡
+
+</details>
+
+
 ## 开发
 
 依赖：Node.js ≥ 20（推荐 pnpm），Rust ≥ 1.77，Xcode CLT（macOS）。
