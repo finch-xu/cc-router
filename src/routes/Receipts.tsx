@@ -69,8 +69,8 @@ export function ReceiptsPage() {
   const [options, setOptions] = useState<ReceiptDisplayOptions>({
     showCacheTokens: true,
     showRequestCounts: true,
-    colorMode: "mono",
-    showProviderLogo: false,
+    colorMode: "color",
+    showProviderLogo: true,
   });
   const [selectedSubs, setSelectedSubs] = useState<Set<string>>(new Set());
   const [selectedProviders, setSelectedProviders] = useState<Set<string>>(new Set());
