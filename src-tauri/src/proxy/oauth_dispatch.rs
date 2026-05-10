@@ -391,7 +391,10 @@ fn finalize_streaming(
             provider_id,
             endpoint_id,
             real_model_name: real_model.clone(),
-            response_model_name: None,
+            response_model_name: {
+                let m = converter.response_model();
+                if m.is_empty() { None } else { Some(m.to_string()) }
+            },
             is_streaming: true,
             status: RequestStatus::Success,
             http_status: Some(200),

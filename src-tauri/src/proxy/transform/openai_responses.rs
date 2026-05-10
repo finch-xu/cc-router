@@ -421,7 +421,7 @@ pub struct ResponsesSseConverter {
     started: bool,
     /// 真正暴露给 Claude Code 的 message id (Anthropic 习惯 msg_xxx, 我们沿用上游 response.id)
     message_id: String,
-    /// 真实模型名 (从 response.completed 拿)
+    /// 真实模型名 (从 response.created 拿)
     response_model: String,
     /// 下一个 Anthropic content block 用的索引 (顺序分配)
     next_anthropic_index: u32,
@@ -481,6 +481,11 @@ impl ResponsesSseConverter {
             return vec![AnthropicEvent::MessageStop];
         }
         Vec::new()
+    }
+
+    /// 响应模型名 (从 response.created 拿). 流首事件之前为空串.
+    pub fn response_model(&self) -> &str {
+        &self.response_model
     }
 
     // ---------- handlers ----------
@@ -971,6 +976,17 @@ mod tests {
         assert_eq!(tools[0]["name"], "get_weather");
         assert!(tools[0].get("parameters").is_some());
         assert!(tools[0].get("input_schema").is_none());
+    }
+
+    #[test]
+    fn converter_exposes_response_model_after_created() {
+        let mut conv = ResponsesSseConverter::new();
+        assert_eq!(conv.response_model(), "");
+        conv.feed(
+            "response.created",
+            &json!({"response":{"id":"resp_1","model":"gpt-5.5"}}),
+        );
+        assert_eq!(conv.response_model(), "gpt-5.5");
     }
 
     #[test]
