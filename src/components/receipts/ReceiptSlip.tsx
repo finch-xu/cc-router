@@ -1,7 +1,7 @@
 import { forwardRef } from "react";
 import { QRCodeSVG } from "qrcode.react";
 import { useT } from "@/i18n";
-import { fmtNum } from "@/lib/format";
+import { fmtNum, fmtCompact } from "@/lib/format";
 import { ProviderIcon } from "@/components/ProviderIcon";
 import type {
   ReceiptDto,
@@ -26,6 +26,8 @@ export interface ReceiptDisplayOptions {
   colorMode: ReceiptColorMode;
   /** 子项行展示 provider 品牌 logo (来自 lobehub/icons), 默认关 */
   showProviderLogo: boolean;
+  /** 把 token 数字压缩成 K/M 紧凑形式 (2 位小数), 默认开启; 仅作用于 token, 不影响请求次数 */
+  compactTokens: boolean;
 }
 
 interface Props {
@@ -116,6 +118,7 @@ export const ReceiptSlip = forwardRef<HTMLDivElement, Props>(function ReceiptSli
   const periodLabel = formatPeriod(dto.range_start_ms, dto.range_end_ms);
   const issuedLabel = formatIssued(dto.generated_at_ms);
   const grandTokens = totalTokens(dto.grand_total);
+  const fmtToken = options.compactTokens ? fmtCompact : fmtNum;
 
   return (
     <div
@@ -201,19 +204,19 @@ export const ReceiptSlip = forwardRef<HTMLDivElement, Props>(function ReceiptSli
         bold
         big
         label={t("receipts.slip.totalTokens")}
-        value={fmtNum(grandTokens)}
+        value={fmtToken(grandTokens)}
         palette={palette}
       />
       <Row
         indent
         label={`├ ${t("receipts.slip.input")}`}
-        value={fmtNum(dto.grand_total.input_tokens)}
+        value={fmtToken(dto.grand_total.input_tokens)}
         palette={palette}
       />
       <Row
         indent
         label={`├ ${t("receipts.slip.output")}`}
-        value={fmtNum(dto.grand_total.output_tokens)}
+        value={fmtToken(dto.grand_total.output_tokens)}
         palette={palette}
       />
       {options.showCacheTokens && (
@@ -221,13 +224,13 @@ export const ReceiptSlip = forwardRef<HTMLDivElement, Props>(function ReceiptSli
           <Row
             indent
             label={`├ ${t("receipts.slip.cacheCreate")}`}
-            value={fmtNum(dto.grand_total.cache_creation_tokens)}
+            value={fmtToken(dto.grand_total.cache_creation_tokens)}
             palette={palette}
           />
           <Row
             indent
             label={`└ ${t("receipts.slip.cacheRead")}`}
-            value={fmtNum(dto.grand_total.cache_read_tokens)}
+            value={fmtToken(dto.grand_total.cache_read_tokens)}
             palette={palette}
           />
         </>
@@ -303,6 +306,7 @@ function VmItemBlock({
   const subtotalTokens = totalTokens(item.subtotal);
   const display = VM_DISPLAY[item.virtual_model_name] ?? item.virtual_model_name.toUpperCase();
   const isEmpty = item.sub_items.length === 0;
+  const fmtToken = options.compactTokens ? fmtCompact : fmtNum;
 
   return (
     <div style={{ marginTop: 4 }}>
@@ -312,7 +316,7 @@ function VmItemBlock({
         value={
           options.showRequestCounts
             ? `${fmtNum(item.subtotal.request_count)}×`
-            : fmtNum(subtotalTokens)
+            : fmtToken(subtotalTokens)
         }
         palette={palette}
       />
@@ -333,7 +337,7 @@ function VmItemBlock({
           ))}
           <Row
             label={`  ${t("receipts.slip.subtotal")}`}
-            value={fmtNum(subtotalTokens)}
+            value={fmtToken(subtotalTokens)}
             small
             palette={palette}
           />
@@ -399,6 +403,7 @@ function SubItemRows({
         label2="out"
         value2={sub.totals.output_tokens}
         palette={palette}
+        compact={options.compactTokens}
       />
       {options.showCacheTokens &&
         (sub.totals.cache_creation_tokens > 0 || sub.totals.cache_read_tokens > 0) && (
@@ -408,6 +413,7 @@ function SubItemRows({
             label2="c-"
             value2={sub.totals.cache_read_tokens}
             palette={palette}
+            compact={options.compactTokens}
           />
         )}
     </div>
@@ -420,13 +426,16 @@ function TokenLine({
   label2,
   value2,
   palette,
+  compact,
 }: {
   label: string;
   value: number;
   label2: string;
   value2: number;
   palette: Palette;
+  compact: boolean;
 }) {
+  const fmtToken = compact ? fmtCompact : fmtNum;
   return (
     <div
       style={{
@@ -438,9 +447,9 @@ function TokenLine({
       }}
     >
       <span style={{ color: palette.muted }}>{label}</span>
-      <span style={{ textAlign: "right" }}>{fmtNum(value)}</span>
+      <span style={{ textAlign: "right" }}>{fmtToken(value)}</span>
       <span style={{ color: palette.muted, paddingLeft: 6 }}>{label2}</span>
-      <span style={{ textAlign: "right" }}>{fmtNum(value2)}</span>
+      <span style={{ textAlign: "right" }}>{fmtToken(value2)}</span>
     </div>
   );
 }

@@ -469,6 +469,8 @@
   "receipts.controls.display.showCacheDesc": "关掉只显示输入 / 输出两行,小票更清爽。",
   "receipts.controls.display.showCounts": "显示请求次数",
   "receipts.controls.display.showCountsDesc": "关掉则只展示 token 数,大项后不再带「156×」。",
+  "receipts.controls.display.compactTokens": "紧凑数字（K/M）",
+  "receipts.controls.display.compactTokensDesc": "把 token 数字压缩为 K/M 形式（如 12.35K、1.23M），小于 1000 时原样显示。",
   "receipts.controls.filter.title": "数据过滤",
   "receipts.controls.filter.bySubscription": "按订阅",
   "receipts.controls.filter.byProvider": "按厂商",

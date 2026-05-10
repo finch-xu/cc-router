@@ -155,6 +155,12 @@ export function ReceiptControls({
           desc={t("receipts.controls.display.showCountsDesc")}
           onChange={(v) => onOptionsChange({ ...options, showRequestCounts: v })}
         />
+        <CheckboxRow
+          checked={options.compactTokens}
+          label={t("receipts.controls.display.compactTokens")}
+          desc={t("receipts.controls.display.compactTokensDesc")}
+          onChange={(v) => onOptionsChange({ ...options, compactTokens: v })}
+        />
       </Section>
 
       {/* Section 4 — 过滤 */}

@@ -8,6 +8,17 @@ export function fmtKilo(n: number): string {
   return String(n);
 }
 
+/**
+ * 把 token 数字压缩成 K/M 紧凑形式, 保留 2 位小数。
+ *   null / undefined → "-"; n < 1000 原样; 1000 ≤ n < 1e6 → "X.XXK"; n ≥ 1e6 → "X.XXM"
+ */
+export function fmtCompact(n?: number | null): string {
+  if (n == null) return "-";
+  if (n < 1000) return String(n);
+  if (n < 1_000_000) return (n / 1000).toFixed(2) + "K";
+  return (n / 1_000_000).toFixed(2) + "M";
+}
+
 export function fmtTime(ms: number): string {
   return new Date(ms).toLocaleString("zh-CN", { hour12: false });
 }

@@ -71,6 +71,7 @@ export function ReceiptsPage() {
     showRequestCounts: true,
     colorMode: "color",
     showProviderLogo: true,
+    compactTokens: true,
   });
   const [selectedSubs, setSelectedSubs] = useState<Set<string>>(new Set());
   const [selectedProviders, setSelectedProviders] = useState<Set<string>>(new Set());
