@@ -36,6 +36,9 @@ pub enum Event {
     /// 用户手动测试连接通过 → 任意状态(含 AuthFailed)直接复活到 Healthy。
     /// 与 `UserUpdateKey` 区别: 不要求 key 改动, 是通用复活入口。
     UserManualReset,
+    /// 上游 HTTP 200 但 SSE 流首事件是 `event: error` (智谱 1302/1308 这类业务限流).
+    /// `is_quota_exhausted=true` → QuotaExhausted (长冷却); false → RateLimited (短冷却).
+    UpstreamSseError { is_quota_exhausted: bool },
 }
 
 /// 状态转换结果。
@@ -122,6 +125,7 @@ fn describe_event(e: &Event) -> &'static str {
         Event::UserDisable => "user_disable",
         Event::UserUpdateKey => "user_update_key",
         Event::UserManualReset => "user_manual_reset",
+        Event::UpstreamSseError { .. } => "upstream_sse_error",
     }
 }
 
@@ -147,6 +151,20 @@ fn transition(
         }
         (SubscriptionState::Healthy, Event::NetworkError) => {
             bump_transient(rt, "network error", &mut last_error_update)
+        }
+        (SubscriptionState::Healthy, Event::UpstreamSseError { is_quota_exhausted }) => {
+            let msg = if *is_quota_exhausted {
+                "上游 SSE error: 配额耗尽 (5h/月度)"
+            } else {
+                "上游 SSE error: 速率限制"
+            };
+            last_error_update = Some(msg.to_string());
+            rt.last_error_message = last_error_update.clone();
+            if *is_quota_exhausted {
+                SubscriptionState::QuotaExhausted
+            } else {
+                SubscriptionState::RateLimited
+            }
         }
         (SubscriptionState::Healthy, Event::UserDisable) => {
             rt.row.enabled = false;
@@ -221,9 +239,16 @@ fn transition(
         rt.state_entered_at = now;
         rt.row.updated_at = now;
         match new_state {
-            SubscriptionState::RateLimited | SubscriptionState::QuotaExhausted => {
+            SubscriptionState::RateLimited => {
+                // 短期 RPM/TPM 限流: 60s 冷却即可
                 rt.cooldown_until = Some(now + chrono::Duration::seconds(60));
                 schedule_cooldown = Some(Duration::from_secs(60));
+            }
+            SubscriptionState::QuotaExhausted => {
+                // 5h/月度配额耗尽: 30min 冷却避免来回切换浪费请求.
+                // 不解析 message 里的精确 reset 时间, 文本格式 fragile.
+                rt.cooldown_until = Some(now + chrono::Duration::seconds(1800));
+                schedule_cooldown = Some(Duration::from_secs(1800));
             }
             SubscriptionState::TransientError => {
                 let secs = match rt.transient_error_level {
@@ -492,6 +517,46 @@ mod tests {
         let mut rt = runtime();
         let (t, _, _) = transition(&mut rt, &Event::UserManualReset);
         assert!(!t.state_changed);
+        assert_eq!(rt.state, SubscriptionState::Healthy);
+    }
+
+    #[test]
+    fn healthy_to_rate_limited_on_sse_error_short() {
+        let mut rt = runtime();
+        let (t, _, _) = transition(
+            &mut rt,
+            &Event::UpstreamSseError { is_quota_exhausted: false },
+        );
+        assert!(t.state_changed);
+        assert_eq!(rt.state, SubscriptionState::RateLimited);
+        let cooldown_secs = (rt.cooldown_until.unwrap() - Utc::now()).num_seconds();
+        assert!((58..=62).contains(&cooldown_secs), "rate_limited 60s, got {cooldown_secs}");
+    }
+
+    #[test]
+    fn healthy_to_quota_exhausted_on_sse_error_long() {
+        let mut rt = runtime();
+        let (t, _, _) = transition(
+            &mut rt,
+            &Event::UpstreamSseError { is_quota_exhausted: true },
+        );
+        assert!(t.state_changed);
+        assert_eq!(rt.state, SubscriptionState::QuotaExhausted);
+        let cooldown_secs = (rt.cooldown_until.unwrap() - Utc::now()).num_seconds();
+        assert!((1798..=1802).contains(&cooldown_secs), "quota_exhausted 30min, got {cooldown_secs}");
+    }
+
+    #[test]
+    fn rate_limited_returns_to_healthy_on_cooldown_expired() {
+        // 与 quota_exhausted 共用 CooldownExpired 分支, 确保新状态也能复活
+        let mut rt = runtime();
+        transition(
+            &mut rt,
+            &Event::UpstreamSseError { is_quota_exhausted: true },
+        );
+        assert_eq!(rt.state, SubscriptionState::QuotaExhausted);
+        let (t, _, _) = transition(&mut rt, &Event::CooldownExpired);
+        assert!(t.state_changed);
         assert_eq!(rt.state, SubscriptionState::Healthy);
     }
 }

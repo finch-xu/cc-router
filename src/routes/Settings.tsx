@@ -42,8 +42,12 @@ export function SettingsPage() {
   const [resetting, setResetting] = useState(false);
   const [tokenJustRegenerated, setTokenJustRegenerated] = useState(false);
   const regenerateTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  // 防止 generateNewToken 等 mutation 触发的 settings 失效把用户未保存的编辑覆盖掉
+  // 仅在首次拿到 settings.data 时灌入本地 state + 记录 baseline. 后续 mutate refetch
+  // 不再回灌, 否则会覆盖用户正在 input 里编辑但尚未 blur 的值 (port/cors origin 跳光标).
   const initializedRef = useRef(false);
+  // baseline = 进程启动时观测到的 port/listen_all. 代理直到 app 重启才会按新值绑定,
+  // 所以"需要重启"的判定要拿 baseline (而非 settings.data) 比.
+  const baselineRef = useRef<{ proxy_port: number; listen_all: boolean } | null>(null);
 
   const generateTokenMut = useGenerateNewToken();
 
@@ -55,54 +59,83 @@ export function SettingsPage() {
   );
 
   useEffect(() => {
-    if (settings.data && !initializedRef.current) {
-      setPort(settings.data.proxy_port);
-      setListenAll(settings.data.listen_all);
-      setAutostart(settings.data.autostart);
-      setRetentionDays(settings.data.log_retention_days);
-      setDbLimitMb(settings.data.db_size_limit_mb);
-      setAuthEnabled(settings.data.auth_enabled);
-      setCorsEnabled(settings.data.cors_enabled);
-      setCorsAllowOrigin(settings.data.cors_allow_origin);
-      setPreferredLanguage(settings.data.preferred_language ?? "system");
-      setDebugMode(settings.data.debug_mode ?? false);
-      initializedRef.current = true;
-    }
+    if (!settings.data || initializedRef.current) return;
+    baselineRef.current = {
+      proxy_port: settings.data.proxy_port,
+      listen_all: settings.data.listen_all,
+    };
+    setPort(settings.data.proxy_port);
+    setListenAll(settings.data.listen_all);
+    setAutostart(settings.data.autostart);
+    setRetentionDays(settings.data.log_retention_days);
+    setDbLimitMb(settings.data.db_size_limit_mb);
+    setAuthEnabled(settings.data.auth_enabled);
+    setCorsEnabled(settings.data.cors_enabled);
+    setCorsAllowOrigin(settings.data.cors_allow_origin);
+    setPreferredLanguage(settings.data.preferred_language ?? "system");
+    setDebugMode(settings.data.debug_mode ?? false);
+    initializedRef.current = true;
   }, [settings.data]);
 
   const needsRestart =
-    settings.data !== undefined &&
-    (settings.data.proxy_port !== port || settings.data.listen_all !== listenAll);
+    baselineRef.current !== null &&
+    (port !== baselineRef.current.proxy_port ||
+      listenAll !== baselineRef.current.listen_all);
 
-  async function save() {
-    await updateMut.mutateAsync({
-      proxy_port: port,
-      listen_all: listenAll,
-      autostart,
-      log_retention_days: retentionDays,
-      db_size_limit_mb: dbLimitMb,
-      auth_enabled: authEnabled,
-      cors_enabled: corsEnabled,
-      cors_allow_origin: corsAllowOrigin,
-      preferred_language: preferredLanguage,
-    });
+  // 失败保留本地 state 以便用户看到自己改了什么; 不做乐观回滚.
+  async function patch(p: Parameters<typeof updateMut.mutateAsync>[0]) {
+    try {
+      await updateMut.mutateAsync(p);
+    } catch (e) {
+      alert(`${t("settings.saveFailed")}: ${e}`);
+    }
   }
 
-  // 语言下拉单独立即保存,无需用户点"保存设置";其他字段需要点保存按钮。
   async function changeLanguage(next: LanguagePref) {
     setPreferredLanguage(next);
-    await updateMut.mutateAsync({ preferred_language: next });
+    await patch({ preferred_language: next });
   }
 
-  // 更新源同样即时保存:运行时一次性 builder 下次 check 自动按新源走
   async function changeUpdateSource(next: UpdateSource) {
-    await updateMut.mutateAsync({ update_source: next });
+    await patch({ update_source: next });
   }
 
   // 调试模式即时生效:pipeline 每次出站读 settings.debug_mode 决定是否落盘.
   async function changeDebugMode(next: boolean) {
     setDebugMode(next);
-    await updateMut.mutateAsync({ debug_mode: next });
+    await patch({ debug_mode: next });
+  }
+
+  async function changeListenAll(next: boolean) {
+    setListenAll(next);
+    await patch({ listen_all: next });
+  }
+  async function changeProxyPort(next: number) {
+    setPort(next);
+    await patch({ proxy_port: next });
+  }
+  async function changeAutostart(next: boolean) {
+    setAutostart(next);
+    await patch({ autostart: next });
+  }
+  async function changeRetentionDays(next: number) {
+    setRetentionDays(next);
+    await patch({ log_retention_days: next });
+  }
+  async function changeDbLimit(next: number) {
+    setDbLimitMb(next);
+    await patch({ db_size_limit_mb: next });
+  }
+  async function changeAuthEnabled(next: boolean) {
+    setAuthEnabled(next);
+    await patch({ auth_enabled: next });
+  }
+  async function changeCorsEnabled(next: boolean) {
+    setCorsEnabled(next);
+    await patch({ cors_enabled: next });
+  }
+  async function changeCorsOrigin(next: string) {
+    await patch({ cors_allow_origin: next });
   }
 
   async function openDumps() {
@@ -232,6 +265,14 @@ export function SettingsPage() {
                 type="number"
                 value={port}
                 onChange={(e) => setPort(Number(e.target.value) || 23456)}
+                onBlur={() => {
+                  if (settings.data && port !== settings.data.proxy_port) {
+                    void changeProxyPort(port);
+                  }
+                }}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") (e.target as HTMLInputElement).blur();
+                }}
                 style={{ width: 120 }}
               />
               <span style={{ fontSize: 12, color: "var(--ink-4)" }}>
@@ -256,7 +297,7 @@ export function SettingsPage() {
                   <button
                     type="button"
                     className={!listenAll ? "on" : ""}
-                    onClick={() => setListenAll(false)}
+                    onClick={() => void changeListenAll(false)}
                     role="radio"
                     aria-checked={!listenAll}
                   >
@@ -265,7 +306,7 @@ export function SettingsPage() {
                   <button
                     type="button"
                     className={listenAll ? "on" : ""}
-                    onClick={() => setListenAll(true)}
+                    onClick={() => void changeListenAll(true)}
                     role="radio"
                     aria-checked={listenAll}
                   >
@@ -295,7 +336,7 @@ export function SettingsPage() {
             <div className="label-col">{t("settings.proxy.autostart.label")}</div>
             <Toggle
               checked={autostart}
-              onChange={setAutostart}
+              onChange={(v) => void changeAutostart(v)}
               aria-label={t("settings.proxy.autostart.label")}
             />
           </div>
@@ -324,7 +365,7 @@ export function SettingsPage() {
               <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 10 }}>
                 <Toggle
                   checked={authEnabled}
-                  onChange={setAuthEnabled}
+                  onChange={(v) => void changeAuthEnabled(v)}
                   aria-label={t("settings.auth.token.label")}
                 />
                 <span style={{ fontSize: 12, color: "var(--ink-2)" }}>
@@ -376,7 +417,7 @@ export function SettingsPage() {
               <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 10 }}>
                 <Toggle
                   checked={corsEnabled}
-                  onChange={setCorsEnabled}
+                  onChange={(v) => void changeCorsEnabled(v)}
                   aria-label={t("settings.auth.cors.label")}
                 />
                 <span style={{ fontSize: 12, color: "var(--ink-2)" }}>
@@ -391,6 +432,17 @@ export function SettingsPage() {
                     className="input mono"
                     value={corsAllowOrigin}
                     onChange={(e) => setCorsAllowOrigin(e.target.value)}
+                    onBlur={() => {
+                      if (
+                        settings.data &&
+                        corsAllowOrigin !== settings.data.cors_allow_origin
+                      ) {
+                        void changeCorsOrigin(corsAllowOrigin);
+                      }
+                    }}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter") (e.target as HTMLInputElement).blur();
+                    }}
                     placeholder="*"
                     style={{ maxWidth: 280 }}
                   />
@@ -419,7 +471,7 @@ export function SettingsPage() {
               className="select"
               style={{ maxWidth: 200 }}
               value={String(retentionDays)}
-              onChange={(e) => setRetentionDays(Number(e.target.value))}
+              onChange={(e) => void changeRetentionDays(Number(e.target.value))}
             >
               <option value="7">{t("settings.storage.retention.7d")}</option>
               <option value="30">{t("settings.storage.retention.30d")}</option>
@@ -433,19 +485,13 @@ export function SettingsPage() {
               className="select"
               style={{ maxWidth: 200 }}
               value={String(dbLimitMb)}
-              onChange={(e) => setDbLimitMb(Number(e.target.value))}
+              onChange={(e) => void changeDbLimit(Number(e.target.value))}
             >
               <option value="100">100 MB</option>
               <option value="500">500 MB</option>
               <option value="1024">1 GB</option>
               <option value="10240">{t("settings.storage.dbLimit.unlimited")}</option>
             </select>
-          </div>
-          <div style={{ display: "flex", justifyContent: "flex-end", paddingTop: 16 }}>
-            <button className="btn primary" onClick={save} disabled={updateMut.isPending} type="button">
-              {updateMut.isPending && <Spinner />}
-              {t("common.saveSettings")}
-            </button>
           </div>
         </div>
       </div>

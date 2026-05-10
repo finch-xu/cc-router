@@ -506,9 +506,9 @@ pub async fn dispatch(
                 headers: resp_headers,
                 stream,
             }) => {
-                emit_attempt_finished(state, sub_id, vm_name, status.is_success());
                 // 流式：若非 2xx 按非流式错误处理
                 if !status.is_success() {
+                    emit_attempt_finished(state, sub_id, vm_name, false);
                     let event = state_machine::Event::HttpStatus(status.as_u16());
                     let _ = state_machine::apply(
                         &state.db,
@@ -529,42 +529,206 @@ pub async fn dispatch(
                     }
                 }
 
-                let _ = state_machine::apply(
-                    &state.db,
-                    &state.app_handle,
-                    &state.event_log_tx,
-                    rt.clone(),
-                    state_machine::Event::RequestSucceeded,
-                )
-                .await;
+                // 智谱等上游用 200 + `event: error` 表达限流; 不 peek 会被透传成假成功.
+                let peek = sse::peek_first_event(stream).await;
+                match peek {
+                    sse::PeekResult::UpstreamError {
+                        code,
+                        message,
+                        raw_bytes,
+                    } => {
+                        // 仅对智谱按已知 1308 / 5h 文案判长冷却; 其他 provider 一律视为短期速率限制.
+                        let is_quota_exhausted = provider_id == "zhipu"
+                            && sse::classify_zhipu_sse_error(code.as_deref(), message.as_deref());
+                        emit_attempt_finished(state, sub_id, vm_name, false);
+                        let _ = state_machine::apply(
+                            &state.db,
+                            &state.app_handle,
+                            &state.event_log_tx,
+                            rt.clone(),
+                            state_machine::Event::UpstreamSseError { is_quota_exhausted },
+                        )
+                        .await;
 
-                let log_tx = state.request_log_tx.clone();
-                let event_tx = state.event_log_tx.clone();
-                let dump_tx = if debug_mode {
-                    Some(state.body_dump_tx.clone())
-                } else {
-                    None
-                };
-                let response = sse::stream_response(
-                    resp_headers,
-                    stream,
-                    vm_name,
-                    attempt_id,
-                    sub_id,
-                    provider_id,
-                    endpoint_id,
-                    real_model,
-                    display_name,
-                    retry_count,
-                    start,
-                    log_tx,
-                    event_tx,
-                    state.db.clone(),
-                    state.app_handle.clone(),
-                    rt.clone(),
-                    dump_tx,
-                );
-                return Ok(response);
+                        let err_summary = format!(
+                            "{}: {}",
+                            code.as_deref().unwrap_or("?"),
+                            message.as_deref().unwrap_or("(no message)")
+                        );
+
+                        if debug_mode {
+                            let _ = state.body_dump_tx.try_send(BodyDumpEntry::new(
+                                attempt_id,
+                                BodyDumpKind::UpstreamResponse,
+                                raw_bytes.to_vec(),
+                            ));
+                        }
+
+                        let entry = RequestLogEntry {
+                            id: attempt_id,
+                            timestamp_ms: chrono::Utc::now().timestamp_millis(),
+                            virtual_model_name: vm_name,
+                            subscription_id: sub_id,
+                            provider_id: provider_id.clone(),
+                            endpoint_id: endpoint_id.clone(),
+                            real_model_name: real_model.clone(),
+                            response_model_name: None,
+                            is_streaming: true,
+                            status: RequestStatus::Error,
+                            // HTTP 仍然是 200, 但语义层是错误; error_message 区分
+                            http_status: Some(200),
+                            ttft_ms: None,
+                            total_latency_ms: Some(start.elapsed().as_millis() as u64),
+                            upstream_input_tokens: None,
+                            upstream_output_tokens: None,
+                            upstream_cache_creation: None,
+                            upstream_cache_read: None,
+                            retry_count,
+                            error_message: Some(format!("SSE error {}", err_summary)),
+                            upstream_response_body: Some(truncate_body(
+                                &String::from_utf8_lossy(&raw_bytes),
+                                ERROR_BODY_LIMIT,
+                            )),
+                        };
+                        let _ = state.request_log_tx.try_send(entry);
+                        events::record_request(
+                            &state.event_log_tx,
+                            attempt_id,
+                            sub_id,
+                            Severity::Error,
+                            format!(
+                                "{} · {} · {} SSE {}",
+                                vm_name.as_str(),
+                                display_name,
+                                real_model,
+                                err_summary
+                            ),
+                        );
+
+                        retry_count += 1;
+                        continue;
+                    }
+                    sse::PeekResult::Network(e) => {
+                        emit_attempt_finished(state, sub_id, vm_name, false);
+                        warn!(?e, "upstream stream error during lookahead");
+                        let _ = state_machine::apply(
+                            &state.db,
+                            &state.app_handle,
+                            &state.event_log_tx,
+                            rt.clone(),
+                            state_machine::Event::NetworkError,
+                        )
+                        .await;
+                        let err_msg = format!("流首 lookahead 网络错误: {}", e);
+                        let entry = RequestLogEntry {
+                            id: attempt_id,
+                            timestamp_ms: chrono::Utc::now().timestamp_millis(),
+                            virtual_model_name: vm_name,
+                            subscription_id: sub_id,
+                            provider_id: provider_id.clone(),
+                            endpoint_id: endpoint_id.clone(),
+                            real_model_name: real_model.clone(),
+                            response_model_name: None,
+                            is_streaming: true,
+                            status: RequestStatus::Error,
+                            http_status: Some(200),
+                            ttft_ms: None,
+                            total_latency_ms: Some(start.elapsed().as_millis() as u64),
+                            upstream_input_tokens: None,
+                            upstream_output_tokens: None,
+                            upstream_cache_creation: None,
+                            upstream_cache_read: None,
+                            retry_count,
+                            error_message: Some(err_msg.clone()),
+                            upstream_response_body: None,
+                        };
+                        let _ = state.request_log_tx.try_send(entry);
+                        events::record_request(
+                            &state.event_log_tx,
+                            attempt_id,
+                            sub_id,
+                            Severity::Error,
+                            format!(
+                                "{} · {} · {} {}",
+                                vm_name.as_str(),
+                                display_name,
+                                real_model,
+                                err_msg
+                            ),
+                        );
+                        retry_count += 1;
+                        continue;
+                    }
+                    sse::PeekResult::Malformed(bytes) => {
+                        // 罕见: 上游返了 SSE Content-Type 但流首格式不对 / 提前结束.
+                        // 保守: 标 NetworkError + retry 切下家, body_dump 留证.
+                        emit_attempt_finished(state, sub_id, vm_name, false);
+                        warn!(
+                            "stream first event malformed (len={}), retrying",
+                            bytes.len()
+                        );
+                        let _ = state_machine::apply(
+                            &state.db,
+                            &state.app_handle,
+                            &state.event_log_tx,
+                            rt.clone(),
+                            state_machine::Event::NetworkError,
+                        )
+                        .await;
+                        if debug_mode && !bytes.is_empty() {
+                            let _ = state.body_dump_tx.try_send(BodyDumpEntry::new(
+                                attempt_id,
+                                BodyDumpKind::UpstreamResponse,
+                                bytes.to_vec(),
+                            ));
+                        }
+                        retry_count += 1;
+                        continue;
+                    }
+                    sse::PeekResult::Ok {
+                        stream,
+                        first_byte_at,
+                    } => {
+                        emit_attempt_finished(state, sub_id, vm_name, true);
+                        let _ = state_machine::apply(
+                            &state.db,
+                            &state.app_handle,
+                            &state.event_log_tx,
+                            rt.clone(),
+                            state_machine::Event::RequestSucceeded,
+                        )
+                        .await;
+
+                        let log_tx = state.request_log_tx.clone();
+                        let event_tx = state.event_log_tx.clone();
+                        let dump_tx = if debug_mode {
+                            Some(state.body_dump_tx.clone())
+                        } else {
+                            None
+                        };
+                        let response = sse::stream_response(
+                            resp_headers,
+                            stream,
+                            vm_name,
+                            attempt_id,
+                            sub_id,
+                            provider_id,
+                            endpoint_id,
+                            real_model,
+                            display_name,
+                            retry_count,
+                            start,
+                            log_tx,
+                            event_tx,
+                            state.db.clone(),
+                            state.app_handle.clone(),
+                            rt.clone(),
+                            dump_tx,
+                            Some(first_byte_at),
+                        );
+                        return Ok(response);
+                    }
+                }
             }
             Err(upstream::UpstreamError::Reqwest(e)) => {
                 emit_attempt_finished(state, sub_id, vm_name, false);

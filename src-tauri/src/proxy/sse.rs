@@ -22,6 +22,14 @@ use tokio::sync::{mpsc, RwLock};
 use tracing::warn;
 use uuid::Uuid;
 
+/// 单个 SSE 事件最多读 16KB; 防止恶意/异常上游让 peek_first_event 一直累积.
+const PEEK_LIMIT_BYTES: usize = 16 * 1024;
+
+/// 智谱业务错误码: 5h/月度配额耗尽, 走 30min 长冷却.
+pub const ZHIPU_ERR_QUOTA_EXHAUSTED: &str = "1308";
+/// 智谱业务错误码: 短期 RPM/TPM 速率限制, 走 60s 短冷却.
+pub const ZHIPU_ERR_RATE_LIMITED: &str = "1302";
+
 use crate::observability::body_dump::{BodyDumpEntry, BodyDumpKind};
 use crate::observability::events::{self, EventEntry, Severity};
 use crate::observability::request_log::{RequestLogEntry, RequestStatus};
@@ -49,6 +57,9 @@ pub fn stream_response(
     sub_rt: Arc<RwLock<SubscriptionRuntime>>,
     // 调试模式下的 body dump channel. None 表示 debug_mode=false, 跳过累积与投递.
     body_dump_tx: Option<mpsc::Sender<BodyDumpEntry>>,
+    // 流首 lookahead 已捕获的真实首字节时刻; 不传则按本函数收到第一个 chunk 的时刻计.
+    // 单独传是为了避免 peek + state_machine apply 的耗时被错算到 TTFT 里.
+    peek_first_byte_at: Option<Instant>,
 ) -> Response {
     let (client_tx, client_rx) = mpsc::channel::<Result<Bytes, std::io::Error>>(64);
 
@@ -67,7 +78,7 @@ pub fn stream_response(
             .as_ref()
             .map(|_| BytesMut::with_capacity(8 * 1024));
         let mut wrote_any_event = false;
-        let mut first_byte_at: Option<Instant> = None;
+        let mut first_byte_at: Option<Instant> = peek_first_byte_at;
         let mut input_tokens: Option<u32> = None;
         let mut output_tokens: Option<u32> = None;
         let mut cache_creation: Option<u32> = None;
@@ -425,6 +436,142 @@ fn format_error_event(msg: &str) -> String {
     format!("event: error\ndata: {}\n\n", payload)
 }
 
+/// 流首 lookahead 的结果. 让 dispatcher 在把 200 返客户端前先看一眼第一个 SSE 事件,
+/// 是 `event: error` 就触发 retry 切下家, 避免上游 200 + 业务错误的"假成功"被透传.
+pub enum PeekResult {
+    /// 首事件是 SSE error (如智谱 1302/1308). 调用方按 provider_id 判定冷却时长后触发状态机 + retry.
+    UpstreamError {
+        code: Option<String>,
+        message: Option<String>,
+        /// 已读到的原始字节, 给 debug_mode body_dump 用; 调用方决定是否落盘.
+        raw_bytes: Bytes,
+    },
+    /// 首事件正常 (message_start 等). `stream` 已把首事件字节拼回流头部, 调用方直接当全流处理即可.
+    Ok {
+        stream: BoxStream<'static, Result<Bytes, reqwest::Error>>,
+        /// 真实上游首字节到达时刻, 用于精准 TTFT 统计.
+        first_byte_at: Instant,
+    },
+    /// 上游传输层错误, 一个完整事件都没读完.
+    Network(reqwest::Error),
+    /// 累积 PEEK_LIMIT_BYTES 仍没出现 \n\n, 或流提前结束 / UTF-8 解析失败.
+    /// 调用方应当当成 NetworkError 处理 (retry).
+    Malformed(Bytes),
+}
+
+impl std::fmt::Debug for PeekResult {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::UpstreamError {
+                code,
+                message,
+                raw_bytes,
+            } => f
+                .debug_struct("UpstreamError")
+                .field("code", code)
+                .field("message", message)
+                .field("raw_bytes_len", &raw_bytes.len())
+                .finish(),
+            Self::Ok { .. } => f.debug_struct("Ok").finish_non_exhaustive(),
+            Self::Network(e) => f.debug_tuple("Network").field(e).finish(),
+            Self::Malformed(b) => f.debug_struct("Malformed").field("len", &b.len()).finish(),
+        }
+    }
+}
+
+/// 从上游 SSE 流中消费第一个完整事件 (以 `\n\n` 结尾), 解析后返回 PeekResult.
+/// 限制单事件最大 16KB (`PEEK_LIMIT_BYTES`), 防止异常上游让 dispatcher 一直阻塞.
+pub async fn peek_first_event(
+    mut stream: BoxStream<'static, Result<Bytes, reqwest::Error>>,
+) -> PeekResult {
+    let mut buffer = BytesMut::with_capacity(8 * 1024);
+    let mut first_byte_at: Option<Instant> = None;
+
+    loop {
+        if let Some(pos) = find_sequence(&buffer, b"\n\n") {
+            let event_end = pos + 2;
+            let event_bytes = &buffer[..event_end];
+            let text = match std::str::from_utf8(event_bytes) {
+                Ok(s) => s,
+                Err(_) => return PeekResult::Malformed(buffer.freeze()),
+            };
+            if sse_event_name(text) == Some("error") {
+                let (code, message) = parse_sse_error_data(text);
+                return PeekResult::UpstreamError {
+                    code,
+                    message,
+                    raw_bytes: buffer.freeze(),
+                };
+            }
+            let head = futures::stream::once(async move {
+                Ok::<_, reqwest::Error>(buffer.freeze())
+            });
+            return PeekResult::Ok {
+                stream: Box::pin(head.chain(stream)),
+                // first_byte_at must be Some here: 走到此必经过下面的 stream.next() 至少一次成功
+                first_byte_at: first_byte_at.expect("first_byte_at set after first chunk"),
+            };
+        }
+
+        if buffer.len() >= PEEK_LIMIT_BYTES {
+            return PeekResult::Malformed(buffer.freeze());
+        }
+
+        match stream.next().await {
+            Some(Ok(chunk)) => {
+                if first_byte_at.is_none() {
+                    first_byte_at = Some(Instant::now());
+                }
+                buffer.extend_from_slice(&chunk);
+            }
+            Some(Err(e)) => return PeekResult::Network(e),
+            None => return PeekResult::Malformed(buffer.freeze()),
+        }
+    }
+}
+
+/// 从 SSE 事件文本里抠出 `data:` 行并解析 JSON, 提取 `error.code` / `error.message`.
+fn parse_sse_error_data(text: &str) -> (Option<String>, Option<String>) {
+    for line in text.lines() {
+        let Some(rest) = line.strip_prefix("data:") else {
+            continue;
+        };
+        let json_str = rest.trim();
+        let Ok(v) = serde_json::from_str::<serde_json::Value>(json_str) else {
+            continue;
+        };
+        let err = v.get("error");
+        let code = err
+            .and_then(|e| e.get("code"))
+            .and_then(|c| {
+                c.as_str()
+                    .map(String::from)
+                    .or_else(|| c.as_u64().map(|n| n.to_string()))
+            });
+        let message = err
+            .and_then(|e| e.get("message"))
+            .and_then(|m| m.as_str())
+            .map(String::from);
+        return (code, message);
+    }
+    (None, None)
+}
+
+/// 智谱 SSE error 是否为长期配额耗尽 (vs 短期速率限制).
+/// 调用前必须确认 `provider_id == "zhipu"`, 否则其他 provider 的同名错误码会被误伤.
+/// 后续接更多 provider 时再抽到 yaml `error_mapping` 通用 schema.
+pub fn classify_zhipu_sse_error(code: Option<&str>, msg: Option<&str>) -> bool {
+    if matches!(code, Some(c) if c == ZHIPU_ERR_QUOTA_EXHAUSTED) {
+        return true;
+    }
+    if let Some(m) = msg {
+        if m.contains("使用上限") || m.contains("5 小时") || m.contains("额度") {
+            return true;
+        }
+    }
+    false
+}
+
 fn copy_safe_headers(from: &ReqHeaderMap, to: &mut HeaderMap) {
     const FORWARD: &[&str] = &[
         "content-type",
@@ -530,5 +677,111 @@ mod tests {
         let (bytes, meta) = process_event(raw, Some("model-sonnet"));
         assert!(meta.is_none());
         assert_eq!(&bytes[..], raw, "content_block_start 应原字节透传");
+    }
+
+    fn into_box_stream(
+        chunks: Vec<&'static [u8]>,
+    ) -> BoxStream<'static, Result<Bytes, reqwest::Error>> {
+        let iter = chunks.into_iter().map(|c| Ok(Bytes::from_static(c)));
+        Box::pin(futures::stream::iter(iter))
+    }
+
+    #[tokio::test]
+    async fn peek_zhipu_1308_returns_upstream_error() {
+        let stream = into_box_stream(vec![
+            b"event: error\ndata: {\"error\":{\"code\":\"1308\",\"message\":\"\xe5\xb7\xb2\xe8\xbe\xbe\xe5\x88\xb0 5 \xe5\xb0\x8f\xe6\x97\xb6\xe7\x9a\x84\xe4\xbd\xbf\xe7\x94\xa8\xe4\xb8\x8a\xe9\x99\x90\xe3\x80\x82\"}}\n\n",
+            b"data: [DONE]\n\n",
+        ]);
+        let result = peek_first_event(stream).await;
+        match result {
+            PeekResult::UpstreamError { code, message, .. } => {
+                assert_eq!(code.as_deref(), Some(ZHIPU_ERR_QUOTA_EXHAUSTED));
+                assert!(classify_zhipu_sse_error(code.as_deref(), message.as_deref()));
+            }
+            other => panic!("expected UpstreamError, got {:?}", other),
+        }
+    }
+
+    #[tokio::test]
+    async fn peek_zhipu_1302_returns_upstream_error_not_quota() {
+        let stream = into_box_stream(vec![
+            b"event: error\ndata: {\"error\":{\"code\":\"1302\",\"message\":\"rate limit\"}}\n\n",
+        ]);
+        let result = peek_first_event(stream).await;
+        match result {
+            PeekResult::UpstreamError { code, message, .. } => {
+                assert_eq!(code.as_deref(), Some(ZHIPU_ERR_RATE_LIMITED));
+                assert!(!classify_zhipu_sse_error(code.as_deref(), message.as_deref()));
+            }
+            other => panic!("expected UpstreamError, got {:?}", other),
+        }
+    }
+
+    #[tokio::test]
+    async fn peek_normal_message_start_returns_ok() {
+        let first_event: &[u8] = b"event: message_start\ndata: {\"type\":\"message_start\",\"message\":{\"id\":\"m1\",\"model\":\"glm-4.6\",\"role\":\"assistant\",\"type\":\"message\",\"content\":[],\"usage\":{\"input_tokens\":7}}}\n\n";
+        let second_event: &[u8] = b"event: content_block_delta\ndata: {\"type\":\"content_block_delta\",\"delta\":{\"type\":\"text_delta\",\"text\":\"hi\"},\"index\":0}\n\n";
+        let stream = into_box_stream(vec![first_event, second_event]);
+        let result = peek_first_event(stream).await;
+        match result {
+            PeekResult::Ok { mut stream, first_byte_at: _ } => {
+                // 拼回的流里应能依次读出首事件 + 后续事件全部字节
+                let mut all = Vec::new();
+                while let Some(chunk) = stream.next().await {
+                    all.extend_from_slice(&chunk.expect("no transport error"));
+                }
+                let text = std::str::from_utf8(&all).unwrap();
+                assert!(text.contains("message_start"));
+                assert!(text.contains("content_block_delta"));
+            }
+            other => panic!("expected Ok, got {:?}", other),
+        }
+    }
+
+    #[tokio::test]
+    async fn peek_chunked_first_event_accumulates_until_delim() {
+        let stream = into_box_stream(vec![
+            b"event: error\ndata: {\"error\":",
+            b"{\"code\":\"1308\",",
+            b"\"message\":\"x\"}}",
+            b"\n\n",
+        ]);
+        let result = peek_first_event(stream).await;
+        match result {
+            PeekResult::UpstreamError { code, .. } => {
+                assert_eq!(code.as_deref(), Some(ZHIPU_ERR_QUOTA_EXHAUSTED));
+            }
+            other => panic!("expected UpstreamError, got {:?}", other),
+        }
+    }
+
+    #[tokio::test]
+    async fn peek_stream_ends_without_delim_is_malformed() {
+        let stream = into_box_stream(vec![b"event: error\ndata: {\"error\":{\"code\":\"x\"}}"]);
+        let result = peek_first_event(stream).await;
+        assert!(matches!(result, PeekResult::Malformed(_)));
+    }
+
+    #[test]
+    fn classify_zhipu_sse_error_matches_quota_messages() {
+        assert!(classify_zhipu_sse_error(Some(ZHIPU_ERR_QUOTA_EXHAUSTED), None));
+        assert!(classify_zhipu_sse_error(None, Some("已达到 5 小时的使用上限")));
+        assert!(classify_zhipu_sse_error(None, Some("您的额度已用完")));
+        assert!(!classify_zhipu_sse_error(Some(ZHIPU_ERR_RATE_LIMITED), Some("rate limit")));
+        assert!(!classify_zhipu_sse_error(None, Some("network glitch")));
+    }
+
+    #[test]
+    fn parse_sse_error_data_handles_string_and_int_code() {
+        let (code, msg) =
+            parse_sse_error_data("event: error\ndata: {\"error\":{\"code\":\"1308\",\"message\":\"hi\"}}\n");
+        assert_eq!(code.as_deref(), Some("1308"));
+        assert_eq!(msg.as_deref(), Some("hi"));
+
+        // 部分 provider 把 code 写成数字
+        let (code2, _) = parse_sse_error_data(
+            "event: error\ndata: {\"error\":{\"code\":1308,\"message\":\"hi\"}}\n",
+        );
+        assert_eq!(code2.as_deref(), Some("1308"));
     }
 }

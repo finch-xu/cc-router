@@ -100,6 +100,120 @@ fn provider_loader_loads_builtin_providers() {
     assert_eq!(providers.len(), 19);
 }
 
+/// 上游用 200 + Anthropic SSE `event: error` 表达限流 (智谱 1308 真实场景);
+/// peek_first_event 必须识别为 UpstreamError 让 dispatcher 切下家,
+/// 而不是当成 200 成功透传给客户端.
+#[tokio::test]
+async fn streaming_sse_error_event_recognized_via_peek() {
+    use bytes::Bytes;
+    use futures::StreamExt;
+
+    let mock = MockServer::start().await;
+
+    // 模拟智谱 1308 5h 配额耗尽响应: 200 + Anthropic SSE event: error 流
+    let sse_body = "event: error\n\
+        data: {\"error\":{\"code\":\"1308\",\"message\":\"\u{5DF2}\u{8FBE}\u{5230} 5 \u{5C0F}\u{65F6}\u{7684}\u{4F7F}\u{7528}\u{4E0A}\u{9650}\"},\"request_id\":\"x\"}\n\
+        \n\
+        data: [DONE]\n\
+        \n";
+
+    Mock::given(method("POST"))
+        .and(path("/v1/messages"))
+        .respond_with(
+            ResponseTemplate::new(200)
+                .insert_header("content-type", "text/event-stream")
+                .set_body_string(sse_body),
+        )
+        .mount(&mock)
+        .await;
+
+    let client = reqwest::Client::new();
+    let resp = client
+        .post(format!("{}/v1/messages", mock.uri()))
+        .json(&json!({"model": "glm-4.6", "messages": [], "stream": true}))
+        .send()
+        .await
+        .expect("send failed");
+    assert_eq!(resp.status().as_u16(), 200, "上游返 200");
+
+    let stream: futures::stream::BoxStream<
+        'static,
+        Result<Bytes, reqwest::Error>,
+    > = Box::pin(resp.bytes_stream().map(|r| r.map(Bytes::from)));
+
+    let result = cc_router_lib::proxy::sse::peek_first_event(stream).await;
+    match result {
+        cc_router_lib::proxy::sse::PeekResult::UpstreamError { code, message, .. } => {
+            assert_eq!(code.as_deref(), Some(cc_router_lib::proxy::sse::ZHIPU_ERR_QUOTA_EXHAUSTED));
+            // 5h 文案应被 zhipu classifier 判为 QuotaExhausted
+            assert!(cc_router_lib::proxy::sse::classify_zhipu_sse_error(
+                code.as_deref(),
+                message.as_deref()
+            ));
+        }
+        other => panic!("expected UpstreamError, got {:?}", other),
+    }
+}
+
+/// 正常 SSE 流: peek 应当返回 Ok 并保留首事件字节, dispatcher 把 first_chunk
+/// 注入 stream_response 后客户端能看到完整事件序列.
+#[tokio::test]
+async fn streaming_normal_first_event_returns_ok_and_preserves_bytes() {
+    use bytes::Bytes;
+    use futures::StreamExt;
+
+    let mock = MockServer::start().await;
+
+    let first_event = "event: message_start\n\
+        data: {\"type\":\"message_start\",\"message\":{\"id\":\"m1\",\"model\":\"glm-4.6\",\"role\":\"assistant\",\"type\":\"message\",\"content\":[],\"usage\":{\"input_tokens\":3}}}\n\
+        \n";
+    let second_event = "event: content_block_delta\n\
+        data: {\"type\":\"content_block_delta\",\"delta\":{\"type\":\"text_delta\",\"text\":\"hi\"},\"index\":0}\n\
+        \n";
+    let body = format!("{}{}", first_event, second_event);
+
+    Mock::given(method("POST"))
+        .and(path("/v1/messages"))
+        .respond_with(
+            ResponseTemplate::new(200)
+                .insert_header("content-type", "text/event-stream")
+                .set_body_string(body),
+        )
+        .mount(&mock)
+        .await;
+
+    let client = reqwest::Client::new();
+    let resp = client
+        .post(format!("{}/v1/messages", mock.uri()))
+        .json(&json!({"model": "glm-4.6", "messages": [], "stream": true}))
+        .send()
+        .await
+        .expect("send failed");
+
+    let stream: futures::stream::BoxStream<
+        'static,
+        Result<Bytes, reqwest::Error>,
+    > = Box::pin(resp.bytes_stream().map(|r| r.map(Bytes::from)));
+
+    let result = cc_router_lib::proxy::sse::peek_first_event(stream).await;
+    match result {
+        cc_router_lib::proxy::sse::PeekResult::Ok { mut stream, .. } => {
+            // 拼回的流要保留首事件 + 后续事件全部字节
+            let mut all = Vec::new();
+            while let Some(chunk) = stream.next().await {
+                all.extend_from_slice(&chunk.expect("no transport error"));
+            }
+            let text = String::from_utf8(all).unwrap();
+            assert!(text.contains("message_start"));
+            assert!(
+                text.contains("content_block_delta"),
+                "拼回流应包含第二个事件: {text}"
+            );
+        }
+        other => panic!("expected Ok, got {:?}", other),
+    }
+}
+
 #[test]
 fn anthropic_uses_raw_header_format() {
     let resource_dir = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"));
