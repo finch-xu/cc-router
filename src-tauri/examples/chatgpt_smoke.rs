@@ -47,7 +47,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .ok_or("auth.json 缺少 tokens.account_id")?
         .to_string();
 
-    println!("[smoke] account_id={}", account_id);
+    println!(
+        "[smoke] account_id 预览={}…{} (长度 {})",
+        &account_id[..6.min(account_id.len())],
+        &account_id[account_id.len().saturating_sub(6)..],
+        account_id.len()
+    );
     println!("[smoke] access_token 长度={} (头/尾各保留 6 char)", access_token.len());
     println!(
         "[smoke] access_token 预览={}…{}",
