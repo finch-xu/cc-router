@@ -40,8 +40,15 @@ auth:
   header_name: "Authorization"
   header_format: bearer
 
+# OpenRouter app-attribution headers (核对 2026-05):
+#   https://openrouter.ai/docs/app-attribution
+#   - HTTP-Referer 是应用排名的主标识；X-OpenRouter-Title 是显示名;
+#   - X-OpenRouter-Categories 必须为文档白名单内值,未识别会被静默忽略。
 required_headers:
   anthropic-version: "2023-06-01"
+  HTTP-Referer: "https://ccrouter.app"
+  X-OpenRouter-Title: "cc-router"
+  X-OpenRouter-Categories: "cli-agent,programming-app"
 
 forward_headers: []
 
