@@ -6,6 +6,7 @@ use tokio::sync::{mpsc, RwLock};
 use uuid::Uuid;
 
 use crate::oauth::chatgpt::ChatGptOAuthManager;
+use crate::oauth::kiro::KiroOAuthManager;
 use crate::observability::body_dump::BodyDumpEntry;
 use crate::observability::events::EventEntry;
 use crate::observability::request_log::RequestLogEntry;
@@ -34,6 +35,7 @@ pub struct AppState {
     pub probe_client: reqwest::Client,
     /// ChatGPT OAuth manager (Phase 1 接入). 全订阅共享一份, 内含每订阅 access_token 缓存与 refresh 锁.
     pub chatgpt_oauth: Arc<ChatGptOAuthManager>,
+    pub kiro_oauth: Arc<KiroOAuthManager>,
     pub app_handle: AppHandle,
 }
 

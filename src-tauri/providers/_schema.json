@@ -36,7 +36,7 @@
       "type": "object",
       "required": ["type", "header_name", "header_format"],
       "properties": {
-        "type": { "enum": ["api_key", "chatgpt_oauth"] },
+        "type": { "enum": ["api_key", "chatgpt_oauth", "kiro_oauth"] },
         "header_name": { "type": "string" },
         "header_format": { "enum": ["raw", "bearer"] }
       }

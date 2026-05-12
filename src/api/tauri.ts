@@ -4,11 +4,16 @@ import type {
   BreakdownDto,
   ChatGptAccount,
   CreateChatGptOAuthSubscriptionInput,
+  CreateKiroSubscriptionInput,
   CreateSubscriptionInput,
   DailySeriesPointDto,
   DeviceFlowStart,
   EventFilters,
   HeatmapDayDto,
+  KiroAccount,
+  KiroDeviceFlowStart,
+  KiroDisguise,
+  KiroImportResult,
   ListEventsResult,
   ListRequestsResult,
   OnboardingState,
@@ -63,6 +68,22 @@ export const api = {
     invoke<SubscriptionDto>("create_chatgpt_oauth_subscription", { input }),
   forgetChatGptOAuthCache: (subscriptionId: string) =>
     invoke<void>("forget_chatgpt_oauth_cache", { subscriptionId }),
+
+  // Kiro OAuth (方案 A JSON 导入 + 方案 B AWS Builder ID OIDC Device Flow)
+  importKiroCredentialsFromFile: (path: string) =>
+    invoke<KiroImportResult>("import_kiro_credentials_from_file", { path }),
+  importKiroCredentialsFromText: (json: string) =>
+    invoke<KiroImportResult>("import_kiro_credentials_from_text", { json }),
+  startKiroDeviceFlow: (region?: string) =>
+    invoke<KiroDeviceFlowStart>("start_kiro_device_flow", { region }),
+  pollKiroDeviceCode: (deviceCode: string) =>
+    invoke<KiroAccount | null>("poll_kiro_device_code", { deviceCode }),
+  createKiroSubscription: (input: CreateKiroSubscriptionInput) =>
+    invoke<SubscriptionDto>("create_kiro_subscription", { input }),
+  forgetKiroOAuthCache: (subscriptionId: string) =>
+    invoke<void>("forget_kiro_oauth_cache", { subscriptionId }),
+  updateKiroDisguiseFields: (subscriptionId: string, disguise: KiroDisguise) =>
+    invoke<void>("update_kiro_disguise_fields", { subscriptionId, disguise }),
 
   // virtual models
   listVirtualModels: () => invoke<VirtualModelDto[]>("list_virtual_models"),

@@ -21,11 +21,13 @@ use crate::oauth::chatgpt::{
     build_codex_ua, ChatGptAccount, DeviceFlowStart, OAuthError, CHATGPT_ACCOUNT_ID_HEADER,
     CODEX_ORIGINATOR,
 };
+use crate::oauth::kiro::{KiroAccount, KiroDeviceFlowStart, KiroImportPreview};
 use crate::provider::model::AuthType;
 use crate::state::AppState;
 use crate::subscription::{
     model::{
-        ModelSlots, OAuthMetadata, SubscriptionDto, SubscriptionRow, SubscriptionRuntime,
+        KiroDisguise, KiroOAuthExtras, ModelSlots, OAuthMetadata, SubscriptionDto, SubscriptionRow,
+        SubscriptionRuntime,
     },
     store,
 };
@@ -121,6 +123,7 @@ pub async fn create_chatgpt_oauth_subscription(
         email: polled.email.clone(),
         refresh_token: polled.refresh_token.clone(),
         authenticated_at: polled.authenticated_at_ms,
+        kiro: None,
     };
 
     // required_headers 中的 ChatGPT-Account-Id 由 pipeline 在 OAuth 分支里动态注入,
@@ -245,4 +248,258 @@ pub async fn get_chatgpt_oauth_usage(
         raw,
         fetched_at: chrono::Utc::now().timestamp_millis(),
     })
+}
+
+// Kiro OAuth commands
+
+#[derive(Debug, serde::Serialize)]
+pub struct KiroImportResult {
+    /// 凭据 import session id, 前端创建订阅时回传以取走后端缓存的 polled tokens (refresh_token 不进 JS).
+    pub session_id: String,
+    pub preview: KiroImportPreview,
+}
+
+/// 支持 `~` 展开为 $HOME, 调用方可直接传 `~/.aws/sso/cache/kiro-auth-token.json`.
+#[tauri::command]
+pub async fn import_kiro_credentials_from_file(
+    state: State<'_, AppState>,
+    path: String,
+) -> AppResult<KiroImportResult> {
+    let expanded = expand_tilde(&path);
+    let json_str = std::fs::read_to_string(&expanded).map_err(|e| {
+        AppError::BadRequest(format!(
+            "无法读取凭据文件 {} ({}): {e}",
+            path,
+            expanded.display()
+        ))
+    })?;
+    import_kiro_inner(&state, &json_str).await
+}
+
+fn expand_tilde(path: &str) -> std::path::PathBuf {
+    if let Some(rest) = path.strip_prefix("~/") {
+        if let Some(home) = std::env::var_os("HOME") {
+            let mut out = std::path::PathBuf::from(home);
+            out.push(rest);
+            return out;
+        }
+    }
+    if path == "~" {
+        if let Some(home) = std::env::var_os("HOME") {
+            return std::path::PathBuf::from(home);
+        }
+    }
+    std::path::PathBuf::from(path)
+}
+
+#[tauri::command]
+pub async fn import_kiro_credentials_from_text(
+    state: State<'_, AppState>,
+    json: String,
+) -> AppResult<KiroImportResult> {
+    import_kiro_inner(&state, &json).await
+}
+
+async fn import_kiro_inner(state: &AppState, json_str: &str) -> AppResult<KiroImportResult> {
+    let (polled, preview) = state
+        .kiro_oauth
+        .parse_credential_json(json_str)
+        .map_err(map_oauth_err)?;
+    let session_id = Uuid::new_v4().to_string();
+    state.kiro_oauth.cache_imported_session(&session_id, polled).await;
+    Ok(KiroImportResult { session_id, preview })
+}
+
+#[tauri::command]
+pub async fn start_kiro_device_flow(
+    state: State<'_, AppState>,
+    region: Option<String>,
+) -> AppResult<KiroDeviceFlowStart> {
+    state
+        .kiro_oauth
+        .start_device_flow(region.as_deref())
+        .await
+        .map_err(map_oauth_err)
+}
+
+#[tauri::command]
+pub async fn poll_kiro_device_code(
+    state: State<'_, AppState>,
+    device_code: String,
+) -> AppResult<Option<KiroAccount>> {
+    state
+        .kiro_oauth
+        .poll_device_code(&device_code)
+        .await
+        .map_err(map_oauth_err)
+}
+
+#[derive(Debug, Deserialize)]
+pub struct CreateKiroSubscriptionInput {
+    /// 凭据来源二选一: JSON import 走 `session_id`, OIDC device flow 走 `device_code`.
+    #[serde(default)]
+    pub session_id: Option<String>,
+    #[serde(default)]
+    pub device_code: Option<String>,
+    pub provider_id: String,
+    pub endpoint_id: String,
+    pub display_name: String,
+    pub model_slots: ModelSlots,
+    /// 用户在 UI 编辑过的伪装字段. None 时用内置默认值.
+    #[serde(default)]
+    pub disguise: Option<KiroDisguise>,
+    #[serde(default)]
+    pub profile_arn_override: Option<String>,
+}
+#[tauri::command]
+pub async fn create_kiro_subscription(
+    state: State<'_, AppState>,
+    input: CreateKiroSubscriptionInput,
+) -> AppResult<SubscriptionDto> {
+    let provider = state
+        .providers
+        .get(&input.provider_id)
+        .ok_or_else(|| AppError::ProviderNotFound(input.provider_id.clone()))?;
+    if !matches!(provider.auth.auth_type, AuthType::KiroOauth) {
+        return Err(AppError::BadRequest(format!(
+            "Provider {} 不是 kiro_oauth 类型",
+            input.provider_id
+        )));
+    }
+    let endpoint = provider
+        .endpoint(&input.endpoint_id)
+        .ok_or_else(|| AppError::EndpointNotFound(input.endpoint_id.clone()))?;
+
+    let mut polled = match (input.session_id.as_deref(), input.device_code.as_deref()) {
+        (Some(sid), _) => state
+            .kiro_oauth
+            .consume_imported_session(sid)
+            .await
+            .map_err(map_oauth_err)?,
+        (None, Some(dc)) => state
+            .kiro_oauth
+            .consume_completed_poll(dc)
+            .await
+            .map_err(map_oauth_err)?,
+        (None, None) => {
+            return Err(AppError::BadRequest(
+                "必须传 session_id 或 device_code".into(),
+            ));
+        }
+    };
+    if let Some(arn) = input.profile_arn_override {
+        if !arn.is_empty() {
+            polled.profile_arn = Some(arn);
+        }
+    }
+
+    let metadata = state.kiro_oauth.polled_to_metadata(&polled, input.disguise);
+    let id = Uuid::new_v4();
+    let now = Utc::now();
+    let required_headers: BTreeMap<String, String> = provider.required_headers.clone();
+
+    let row = SubscriptionRow {
+        id,
+        provider_id: input.provider_id.clone(),
+        endpoint_id: input.endpoint_id.clone(),
+        display_name: input.display_name,
+        api_key: String::new(),
+        auth_type: AuthType::KiroOauth,
+        oauth_metadata: metadata,
+        model_slots: input.model_slots,
+        enabled: true,
+        is_auth_failed: false,
+        last_error_message: None,
+        created_at: now,
+        updated_at: now,
+        base_url: endpoint.base_url.clone(),
+        messages_path: endpoint.messages_path.clone(),
+        auth_header_name: provider.auth.header_name.clone(),
+        auth_header_format: provider.auth.header_format.clone(),
+        required_headers,
+        forward_headers: provider.forward_headers.clone(),
+        model_discovery: provider.model_discovery.clone(),
+        provider_display_name: provider.display_name.clone(),
+        provider_icon: provider.icon.clone().unwrap_or_default(),
+        is_user_defined: false,
+    };
+
+    store::insert(&state.db, &row).await?;
+
+    // seed access_token 进内存 (若导入的凭据带了 access_token 就跳过首次 refresh)
+    state
+        .kiro_oauth
+        .seed_cache(
+            id,
+            polled.access_token.clone(),
+            polled.access_token_expires_at_ms,
+        )
+        .await;
+
+    let rt = Arc::new(RwLock::new(SubscriptionRuntime::from_row(row)));
+    {
+        let mut subs = state.subscriptions.write().await;
+        subs.insert(id, rt.clone());
+    }
+    let guard = rt.read().await;
+    Ok(SubscriptionDto::from_runtime(&guard, vec![]))
+}
+
+#[tauri::command]
+pub async fn forget_kiro_oauth_cache(
+    state: State<'_, AppState>,
+    subscription_id: String,
+) -> AppResult<()> {
+    let id = Uuid::parse_str(&subscription_id)
+        .map_err(|_| AppError::BadRequest("无效 id".into()))?;
+    state.kiro_oauth.forget(id).await;
+    Ok(())
+}
+
+/// 修改一个 Kiro 订阅的伪装字段 (machineId / kiroVersion / systemVersion / nodeVersion).
+#[tauri::command]
+pub async fn update_kiro_disguise_fields(
+    state: State<'_, AppState>,
+    subscription_id: String,
+    disguise: KiroDisguise,
+) -> AppResult<()> {
+    let id = Uuid::parse_str(&subscription_id)
+        .map_err(|_| AppError::BadRequest("无效 id".into()))?;
+    let rt = state
+        .subscriptions
+        .read()
+        .await
+        .get(&id)
+        .cloned()
+        .ok_or_else(|| AppError::SubscriptionNotFound(id.to_string()))?;
+
+    // 取出当前 oauth_metadata + 修改 disguise + 落盘 + 同步 runtime
+    let new_metadata = {
+        let g = rt.read().await;
+        if !matches!(g.row.auth_type, AuthType::KiroOauth) {
+            return Err(AppError::BadRequest("该订阅不是 Kiro OAuth 类型".into()));
+        }
+        let mut meta = g.row.oauth_metadata.clone();
+        match meta.kiro.as_mut() {
+            Some(extras) => extras.disguise = disguise,
+            None => {
+                meta.kiro = Some(KiroOAuthExtras {
+                    auth_method: crate::subscription::model::KiroAuthMethod::Social,
+                    region: crate::oauth::kiro::DEFAULT_KIRO_REGION.to_string(),
+                    profile_arn: None,
+                    client_id: None,
+                    client_secret: None,
+                    disguise,
+                });
+            }
+        }
+        meta
+    };
+    store::update_oauth_metadata(&state.db, &id, &new_metadata).await?;
+    {
+        let mut g = rt.write().await;
+        g.row.oauth_metadata = new_metadata;
+        g.row.updated_at = Utc::now();
+    }
+    Ok(())
 }

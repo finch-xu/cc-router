@@ -2,8 +2,65 @@
 // 约定：Rust 侧 serde 使用 serde(rename_all = "snake_case") 序列化。
 
 export type Compatibility = "verified" | "partial" | "untested";
-export type AuthType = "api_key" | "chatgpt_oauth";
+export type AuthType = "api_key" | "chatgpt_oauth" | "kiro_oauth";
 export type AuthHeaderFormat = "raw" | "bearer";
+
+// ===== Kiro OAuth DTO (与 oauth/kiro.rs + subscription/model.rs 对齐) =====
+
+export type KiroAuthMethod = "social" | "idc";
+
+/** 凭据来源预览, 不含 refresh_token. */
+export interface KiroImportPreview {
+  auth_method: KiroAuthMethod;
+  region: string;
+  has_profile_arn: boolean;
+  has_access_token: boolean;
+}
+
+/** 凭据导入完成后的 session 句柄. 前端在创建订阅时回传 session_id. */
+export interface KiroImportResult {
+  session_id: string;
+  preview: KiroImportPreview;
+}
+
+export interface KiroDeviceFlowStart {
+  device_code: string;
+  user_code: string;
+  verification_uri: string;
+  verification_uri_complete?: string;
+  region: string;
+  /** 秒 */
+  expires_in: number;
+}
+
+export interface KiroAccount {
+  auth_method: KiroAuthMethod;
+  region: string;
+  /** Unix ms */
+  authenticated_at: number;
+}
+
+/** 风控伪装字段, 创建/编辑订阅时由 UI 提供 (None 走后端默认值). */
+export interface KiroDisguise {
+  /** 64 位十六进制 */
+  machine_id: string;
+  kiro_version: string;
+  system_version: string;
+  node_version: string;
+}
+
+export interface CreateKiroSubscriptionInput {
+  /** 方案 A 凭据来源: cache_imported_session 的 session_id */
+  session_id?: string;
+  /** 方案 B 凭据来源: device flow 的 device_code */
+  device_code?: string;
+  provider_id: string;
+  endpoint_id: string;
+  display_name: string;
+  model_slots: ModelSlots;
+  disguise?: KiroDisguise;
+  profile_arn_override?: string;
+}
 
 /**
  * Device Code 启动结果, 对应 Rust 侧 oauth::chatgpt::DeviceFlowStart.

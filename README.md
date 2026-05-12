@@ -70,6 +70,7 @@
 | `modelscope` | 魔搭 ModelScope（按量付费） | ❌ | ✅ | partial |
 | `ucloud` | 优云智算 UCloud Modelverse（Coding Plan 订阅 + 按量付费 API 国内/海外） | ✅ | ✅ | untested |
 | `openai_codex` | **OpenAI Codex (ChatGPT Plus/Pro 订阅)** 有封号风险，不推荐使用 | ✅ | ❌ | untested |
+| `kiro` | **Kiro IDE (AWS CodeWhisperer 后端)** 免费 Claude 额度，方案 A JSON 导入 / 方案 B AWS Builder ID OAuth；走二进制 AWS Event Stream 协议翻译；灰色地带有封号风险 | ✅ | ❌ | untested |
 | `自定义` | 自定义任意Anthropic协议API | ✅ | ✅ | verified |
 
 > Token Plan 列包含各厂商的套餐订阅形态（Token Plan / Coding Plan / Agent Plan 等）；API 列指按量付费的 Anthropic Messages 兼容端点。

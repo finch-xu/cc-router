@@ -1,13 +1,13 @@
-//! Anthropic Messages ↔ OpenAI Responses 协议翻译.
+//! 协议翻译模块. 各子模块仅供特定 `auth_type` 订阅使用, 不影响 cc-router 默认的
+//! Anthropic 透传管线.
 //!
-//! 仅供 `auth_type=ChatgptOauth` 的订阅使用. 其他订阅走 cc-router 默认的
-//! Anthropic 透传管线, 与本模块无关.
-//!
-//! 入口:
-//! - [`openai_responses::anthropic_to_responses`] - 把 Anthropic Messages 请求体转成 OpenAI Responses
-//! - [`openai_responses::ResponsesSseConverter`] - 流式状态机, 把 OpenAI Responses SSE 事件
-//!   转成 Anthropic Messages SSE 事件 (chunk 进 / chunk 出)
-//! - [`openai_responses::collect_to_anthropic_json`] - 非流式: 把所有 SSE 收完拼成 Anthropic 的 message 对象
-//!   (因为 ChatGPT 后端强制 stream=true, 即便 Claude Code 要非流式也得这么转)
+//! 子模块:
+//! - [`openai_responses`] - Anthropic Messages ↔ OpenAI Responses (ChatGPT 反代). 用于 `auth_type=ChatgptOauth`.
+//!   入口: `anthropic_to_responses`, `ResponsesSseConverter`, `collect_to_anthropic_json`.
+//! - [`aws_event_stream`] - AWS Event Stream 二进制流解码器. 用于 Kiro/CodeWhisperer 响应解析.
+//! - [`kiro_codewhisperer`] - Anthropic Messages ↔ AWS CodeWhisperer (Kiro IDE 后端). 用于 `auth_type=KiroOauth`.
+//!   入口: `anthropic_to_codewhisperer`, `KiroSseConverter`, `NonStreamingCollector`.
 
 pub mod openai_responses;
+pub mod aws_event_stream;
+pub mod kiro_codewhisperer;

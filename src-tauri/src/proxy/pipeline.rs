@@ -157,8 +157,7 @@ pub async fn dispatch(
             required_headers,
             forward_headers,
             auth_type,
-            oauth_refresh_token,
-            oauth_account_id,
+            oauth_metadata,
         ) = {
             let guard = rt.read().await;
             // fallback 透传原始 model; 其他三个按 slot 映射
@@ -179,10 +178,11 @@ pub async fn dispatch(
                 guard.row.required_headers.clone(),
                 guard.row.forward_headers.clone(),
                 guard.row.auth_type,
-                guard.row.oauth_metadata.refresh_token.clone(),
-                guard.row.oauth_metadata.account_id.clone(),
+                guard.row.oauth_metadata.clone(),
             )
         };
+        let oauth_refresh_token = oauth_metadata.refresh_token.clone();
+        let oauth_account_id = oauth_metadata.account_id.clone();
 
         // ChatGPT OAuth 分支: 走独立的 dispatch + 翻译层 (proxy::oauth_dispatch).
         // fallback 透传与 OAuth 互斥: 此 provider 不允许做 fallback (model 必须改写到 codex 模型).
@@ -285,6 +285,124 @@ pub async fn dispatch(
                         Severity::Error,
                         format!(
                             "{} · {} · OAuth · {}",
+                            vm_name.as_str(),
+                            display_name,
+                            err_msg
+                        ),
+                    );
+
+                    if retryable {
+                        retry_count += 1;
+                        continue;
+                    }
+                    return Ok(oauth_dispatch::build_error_response(&err));
+                }
+            }
+        }
+
+        // Kiro OAuth 分支: 凭据走 AWS Builder ID OIDC 或 Kiro IDE JSON 文件,
+        // 上游为 AWS CodeWhisperer (二进制 Event Stream), 协议完全独立, 与 codex 互不污染.
+        // fallback 与 OAuth 互斥, 同 codex 规则.
+        if matches!(auth_type, AuthType::KiroOauth) {
+            if is_fallback {
+                // fallback 透传原始 model, Kiro 后端只认 codewhisperer 模型, 必然 400.
+                // 直接跳过此候选, 不计入 retry.
+                continue;
+            }
+            let mut kiro_body = request_body.clone();
+            kiro_body["model"] = Value::String(real_model.clone());
+            emit_attempt_started(state, sub_id, vm_name);
+            let dispatch_res = oauth_dispatch::dispatch_kiro_attempt(
+                &state.http_client,
+                state.kiro_oauth.clone(),
+                sub_id,
+                oauth_metadata.clone(),
+                url.clone(),
+                &kiro_body,
+                is_streaming,
+                forward_headers.clone(),
+                client_headers.clone(),
+                required_headers.clone(),
+            )
+            .await;
+
+            match dispatch_res {
+                Ok(ok) => {
+                    emit_attempt_finished(state, sub_id, vm_name, true);
+                    return Ok(oauth_dispatch::finalize_kiro_response(
+                        ok,
+                        vm_name,
+                        attempt_id,
+                        sub_id,
+                        provider_id,
+                        endpoint_id,
+                        real_model,
+                        display_name,
+                        retry_count,
+                        state.request_log_tx.clone(),
+                        state.event_log_tx.clone(),
+                        state.db.clone(),
+                        state.app_handle.clone(),
+                        rt.clone(),
+                    ));
+                }
+                Err(err) => {
+                    emit_attempt_finished(state, sub_id, vm_name, false);
+                    let (event, retryable) = match &err {
+                        OAuthDispatchError::Auth(_) => (state_machine::Event::HttpStatus(401), false),
+                        OAuthDispatchError::Upstream { status, .. } => {
+                            let s = status.unwrap_or(502);
+                            let retryable =
+                                matches!(classify_response(s, None), ShouldRetry::Yes(_));
+                            (state_machine::Event::HttpStatus(s), retryable)
+                        }
+                    };
+                    let _ = state_machine::apply(
+                        &state.db,
+                        &state.app_handle,
+                        &state.event_log_tx,
+                        rt.clone(),
+                        event,
+                    )
+                    .await;
+
+                    let err_msg = match &err {
+                        OAuthDispatchError::Auth(m) => m.clone(),
+                        OAuthDispatchError::Upstream { message, .. } => message.clone(),
+                    };
+                    let entry = RequestLogEntry {
+                        id: attempt_id,
+                        timestamp_ms: chrono::Utc::now().timestamp_millis(),
+                        virtual_model_name: vm_name,
+                        subscription_id: sub_id,
+                        provider_id: provider_id.clone(),
+                        endpoint_id: endpoint_id.clone(),
+                        real_model_name: real_model.clone(),
+                        response_model_name: None,
+                        is_streaming,
+                        status: RequestStatus::Error,
+                        http_status: match &err {
+                            OAuthDispatchError::Upstream { status, .. } => *status,
+                            _ => Some(401),
+                        },
+                        ttft_ms: None,
+                        total_latency_ms: Some(start.elapsed().as_millis() as u64),
+                        upstream_input_tokens: None,
+                        upstream_output_tokens: None,
+                        upstream_cache_creation: None,
+                        upstream_cache_read: None,
+                        retry_count,
+                        error_message: Some(err_msg.clone()),
+                        upstream_response_body: Some(truncate_body(&err_msg, ERROR_BODY_LIMIT)),
+                    };
+                    let _ = state.request_log_tx.try_send(entry);
+                    events::record_request(
+                        &state.event_log_tx,
+                        attempt_id,
+                        sub_id,
+                        Severity::Error,
+                        format!(
+                            "{} · {} · Kiro · {}",
                             vm_name.as_str(),
                             display_name,
                             err_msg

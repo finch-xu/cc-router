@@ -477,6 +477,7 @@ impl ChatGptOAuthManager {
                     email,
                     refresh_token: new_rt.to_string(),
                     authenticated_at: Utc::now().timestamp_millis(),
+                    kiro: None,
                 };
                 if let Err(e) = store::update_oauth_metadata(&self.pool, &sub_id, &metadata).await {
                     warn!(%sub_id, error=?e, "落盘新 refresh_token 失败");

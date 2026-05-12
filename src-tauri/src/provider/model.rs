@@ -17,6 +17,10 @@ pub enum AuthType {
     /// ChatGPT Plus/Pro 订阅 OAuth: 用户在 cc-router UI 完成 Device Code 登录,
     /// pipeline 在每次请求前从 OAuth manager 取实时 access_token, 不读 subscriptions.api_key.
     ChatgptOauth,
+    /// Kiro IDE / AWS Builder ID OAuth: 凭据来自 Kiro IDE 落盘 JSON 或 AWS SSO OIDC Device Flow,
+    /// 上游协议为 AWS CodeWhisperer Streaming RPC (二进制 Event Stream), 需协议翻译.
+    /// pipeline 按 oauth_metadata.auth_method 走 social (kiro 桌面) 或 idc (AWS OIDC) refresh 分支.
+    KiroOauth,
 }
 
 impl AuthType {
@@ -24,6 +28,7 @@ impl AuthType {
         match self {
             Self::ApiKey => "api_key",
             Self::ChatgptOauth => "chatgpt_oauth",
+            Self::KiroOauth => "kiro_oauth",
         }
     }
 }
@@ -34,6 +39,7 @@ impl FromStr for AuthType {
         match s {
             "api_key" => Ok(Self::ApiKey),
             "chatgpt_oauth" => Ok(Self::ChatgptOauth),
+            "kiro_oauth" => Ok(Self::KiroOauth),
             other => Err(format!("无效 auth_type: {other}")),
         }
     }

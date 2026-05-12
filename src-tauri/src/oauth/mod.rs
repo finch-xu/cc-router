@@ -5,3 +5,4 @@
 
 pub mod chatgpt;
 pub mod chatgpt_models;
+pub mod kiro;

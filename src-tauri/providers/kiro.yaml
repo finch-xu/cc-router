@@ -1,0 +1,69 @@
+id: kiro
+display_name: "Kiro (Amazon AWS)"
+icon: ""
+description: "复用 Kiro IDE / kiro-cli 的免费 Claude 额度 (走 AWS CodeWhisperer 后端)。需在 cc-router UI 内独立完成凭据导入或 AWS Builder ID 登录。"
+homepage: "https://kiro.dev/"
+docs_url: "https://kiro.dev/docs"
+
+compatibility: untested
+compatibility_notes: 不推荐使用，封号频繁，风险较高。
+
+endpoints:
+  - id: runtime_us_east_1
+    label: "Kiro Runtime · US East (新地址 · 推荐)"
+    description: "走 runtime.us-east-1.kiro.dev/generateAssistantResponse, AWS 2026-05-15 起强制使用的新地址。"
+    base_url: "https://runtime.us-east-1.kiro.dev"
+    messages_path: "/generateAssistantResponse"
+    region: global
+    billing: subscription
+
+  - id: runtime_eu_central_1
+    label: "Kiro Runtime · EU Central (新地址)"
+    description: "走 runtime.eu-central-1.kiro.dev/generateAssistantResponse, 欧洲区域用户低延迟选择。"
+    base_url: "https://runtime.eu-central-1.kiro.dev"
+    messages_path: "/generateAssistantResponse"
+    region: global
+    billing: subscription
+
+  - id: codewhisperer
+    label: "Kiro CodeWhisperer · US East (旧地址 · 2026-05-15 后下线)"
+    description: "走 q.us-east-1.amazonaws.com/generateAssistantResponse, AWS 官方通知 2026-05-15 起废止, 仅作过渡期备用。新订阅请优先选 Runtime 端点。"
+    base_url: "https://q.us-east-1.amazonaws.com"
+    messages_path: "/generateAssistantResponse"
+    region: global
+    billing: subscription
+
+default_endpoint: runtime_us_east_1
+
+auth:
+  type: kiro_oauth
+  header_name: "Authorization"
+  header_format: bearer
+
+required_headers:
+  # 注: 以下 5 个 headers 由 oauth_dispatch.rs 在请求层动态注入 (含 machineId/kiroVersion 等订阅级伪装字段),
+  # 这里保留静态兜底值供 schema 校验通过 + 文档化用户可见性.
+  x-amzn-codewhisperer-optout: "true"
+  x-amzn-kiro-agent-mode: "vibe"
+  x-amz-user-agent: "aws-sdk-js/1.0.34 KiroIDE"
+  User-Agent: "aws-sdk-js/1.0.34 ua/2.1 KiroIDE"
+
+forward_headers: []
+
+model_discovery:
+  # Kiro/CodeWhisperer 无 Anthropic 风格 /v1/models 端点, 模型列表用户手填.
+  enabled: false
+  cache_ttl_hours: 168
+  example_models:
+    - "claude-opus-4.7"
+    - "claude-opus-4.6"
+    - "claude-opus-4.5"
+    - "claude-sonnet-4.6"
+    - "claude-sonnet-4.5"
+    - "claude-sonnet-4.0"
+    - "claude-haiku-4.5"
+    - "deepseek-3.2"
+    - "minimax-m2.5"
+    - "minimax-m2.1"
+    - "glm-5"
+    - "qwen3-coder-next"

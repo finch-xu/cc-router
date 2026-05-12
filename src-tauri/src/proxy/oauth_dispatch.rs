@@ -37,14 +37,22 @@ use uuid::Uuid;
 use crate::oauth::chatgpt::{
     build_codex_ua, ChatGptOAuthManager, OAuthError, CHATGPT_ACCOUNT_ID_HEADER, CODEX_ORIGINATOR,
 };
+use crate::oauth::kiro::{
+    KiroOAuthManager, KIRO_AGENT_MODE_HEADER, KIRO_AMZ_INVOCATION_HEADER, KIRO_AMZ_UA_HEADER,
+    KIRO_OPTOUT_HEADER,
+};
 use crate::observability::events::{self, EventEntry, Severity};
 use crate::observability::request_log::{RequestLogEntry, RequestStatus};
 use crate::proxy::handler::error_body;
+use crate::proxy::transform::aws_event_stream::EventStreamDecoder;
+use crate::proxy::transform::kiro_codewhisperer::{
+    anthropic_to_codewhisperer, KiroSseConverter, NonStreamingCollector as KiroCollector,
+};
 use crate::proxy::transform::openai_responses::{
     anthropic_to_responses, parse_sse_frame, NonStreamingCollector, ResponsesSseConverter,
 };
 use crate::proxy::upstream;
-use crate::subscription::model::SubscriptionRuntime;
+use crate::subscription::model::{OAuthMetadata, SubscriptionRuntime};
 use crate::subscription::state_machine;
 use crate::virtual_model::VirtualModelName;
 
@@ -546,6 +554,453 @@ async fn collect_to_json_response(
 
 fn find_double_newline(buf: &[u8]) -> Option<usize> {
     buf.windows(2).position(|w| w == b"\n\n")
+}
+
+// ============================================================================
+// Kiro 分支 (与 ChatgptOauth 完全独立, 共用 OAuthDispatchOk / OAuthDispatchError / build_error_response)
+// ============================================================================
+
+/// Kiro OAuth dispatch. 上游 AWS CodeWhisperer 返回 Event Stream 二进制流.
+#[allow(clippy::too_many_arguments)]
+pub async fn dispatch_kiro_attempt(
+    http_client: &reqwest::Client,
+    oauth_manager: Arc<KiroOAuthManager>,
+    sub_id: Uuid,
+    metadata: OAuthMetadata,
+    url: String,
+    request_body: &Value,
+    client_wants_streaming: bool,
+    forward_headers: Vec<String>,
+    client_headers: HeaderMap,
+    required_headers: std::collections::BTreeMap<String, String>,
+) -> Result<OAuthDispatchOk, OAuthDispatchError> {
+    let kiro_extras = metadata
+        .kiro
+        .as_ref()
+        .ok_or_else(|| OAuthDispatchError::Auth("Kiro 订阅缺少 oauth_metadata.kiro".into()))?;
+
+    // 1. 拿 access_token
+    let access_token = match oauth_manager.get_valid_access_token(sub_id, &metadata).await {
+        Ok(t) => t,
+        Err(OAuthError::RefreshTokenInvalid) => {
+            return Err(OAuthDispatchError::Auth(
+                "Kiro refresh_token 已失效, 需要重新登录".into(),
+            ));
+        }
+        Err(e) => return Err(OAuthDispatchError::Auth(format!("Kiro OAuth 刷新失败: {e}"))),
+    };
+
+    // 2. 翻译 body (Anthropic Messages → CodeWhisperer JSON)
+    let translated_body = anthropic_to_codewhisperer(
+        request_body,
+        kiro_extras.profile_arn.as_deref(),
+        None,
+    )
+    .map_err(|e| OAuthDispatchError::Upstream {
+        status: None,
+        message: format!("body 翻译失败: {e}"),
+    })?;
+    let body_bytes = serde_json::to_vec(&translated_body).map_err(|e| OAuthDispatchError::Upstream {
+        status: None,
+        message: format!("body 序列化失败: {e}"),
+    })?;
+
+    // 3. headers (5 个 Kiro 风控伪装 header + Authorization)
+    let mut headers = ReqHeaderMap::new();
+    let disguise = &kiro_extras.disguise;
+    let auth_value = ReqHeaderValue::from_str(&format!("Bearer {access_token}"))
+        .map_err(|e| OAuthDispatchError::Upstream {
+            status: None,
+            message: format!("Authorization header 构造失败: {e}"),
+        })?;
+    headers.insert(reqwest::header::AUTHORIZATION, auth_value);
+
+    let x_amz_user_agent = format!(
+        "aws-sdk-js/1.0.34 KiroIDE-{}-{}",
+        disguise.kiro_version, disguise.machine_id
+    );
+    let kiro_user_agent = format!(
+        "aws-sdk-js/1.0.34 ua/2.1 os/{} lang/js md/nodejs#{} api/codewhispererstreaming#1.0.34 m/E KiroIDE-{}-{}",
+        disguise.system_version, disguise.node_version, disguise.kiro_version, disguise.machine_id
+    );
+    let amz_invocation_id = Uuid::new_v4().to_string();
+    let kiro_headers = [
+        (KIRO_OPTOUT_HEADER, "true".to_string()),
+        (KIRO_AGENT_MODE_HEADER, "vibe".to_string()),
+        (KIRO_AMZ_UA_HEADER, x_amz_user_agent),
+        (KIRO_AMZ_INVOCATION_HEADER, amz_invocation_id),
+    ];
+    for (name, value) in &kiro_headers {
+        if let (Ok(n), Ok(v)) = (ReqHeaderName::try_from(*name), ReqHeaderValue::from_str(value)) {
+            headers.insert(n, v);
+        }
+    }
+    if let Ok(ua) = ReqHeaderValue::from_str(&kiro_user_agent) {
+        headers.insert(reqwest::header::USER_AGENT, ua);
+    }
+
+    // yaml `required_headers` 兜底; 与上面已注入的 4 个 kiro headers 冲突的跳过.
+    for (k, v) in required_headers {
+        if !k.eq_ignore_ascii_case("User-Agent")
+            && !k.eq_ignore_ascii_case(KIRO_AMZ_UA_HEADER)
+            && !k.eq_ignore_ascii_case(KIRO_OPTOUT_HEADER)
+            && !k.eq_ignore_ascii_case(KIRO_AGENT_MODE_HEADER)
+        {
+            if let (Ok(name), Ok(value)) =
+                (ReqHeaderName::try_from(k.as_str()), ReqHeaderValue::from_str(&v))
+            {
+                headers.insert(name, value);
+            }
+        }
+    }
+
+    for fwd in forward_headers {
+        if let Some(val) = client_headers.get(fwd.as_str()) {
+            if let (Ok(name), Ok(value)) = (
+                ReqHeaderName::try_from(fwd.as_str()),
+                ReqHeaderValue::from_bytes(val.as_bytes()),
+            ) {
+                headers.insert(name, value);
+            }
+        }
+    }
+    headers.insert(
+        reqwest::header::CONTENT_TYPE,
+        ReqHeaderValue::from_static("application/json"),
+    );
+    headers.insert(
+        reqwest::header::ACCEPT,
+        ReqHeaderValue::from_static("application/vnd.amazon.eventstream"),
+    );
+
+    // 4. 发送 (Kiro 后端响应总是 Event Stream)
+    let send_result = upstream::send(http_client, &url, body_bytes, headers, true).await;
+    let upstream_response = match send_result {
+        Ok(r) => r,
+        Err(upstream::UpstreamError::Reqwest(e)) => {
+            return Err(OAuthDispatchError::Upstream {
+                status: None,
+                message: format!("Kiro 网络错误: {e}"),
+            });
+        }
+    };
+    let (status, resp_headers, stream) = match upstream_response {
+        upstream::UpstreamResponse::Streaming { status, headers, stream } => (status, headers, stream),
+        upstream::UpstreamResponse::NonStreaming { status, body_text, .. } => {
+            return Err(OAuthDispatchError::Upstream {
+                status: Some(status.as_u16()),
+                message: body_text.unwrap_or_else(|| format!("HTTP {}", status.as_u16())),
+            });
+        }
+    };
+
+    if !status.is_success() {
+        let mut buf = String::new();
+        let mut s = stream;
+        while let Some(c) = s.next().await {
+            if let Ok(b) = c {
+                if let Ok(t) = std::str::from_utf8(&b) {
+                    buf.push_str(t);
+                }
+            }
+        }
+        return Err(OAuthDispatchError::Upstream {
+            status: Some(status.as_u16()),
+            message: buf,
+        });
+    }
+
+    Ok(OAuthDispatchOk {
+        upstream_status: status,
+        upstream_headers: resp_headers,
+        upstream_stream: stream,
+        client_wants_streaming,
+    })
+}
+
+/// 把 Kiro Event Stream 流翻译成 Anthropic SSE / JSON 给客户端.
+#[allow(clippy::too_many_arguments)]
+pub fn finalize_kiro_response(
+    ok: OAuthDispatchOk,
+    vm_name: VirtualModelName,
+    attempt_id: Uuid,
+    sub_id: Uuid,
+    provider_id: String,
+    endpoint_id: String,
+    real_model: String,
+    display_name: String,
+    retry_count: u32,
+    log_tx: mpsc::Sender<RequestLogEntry>,
+    event_log_tx: mpsc::Sender<EventEntry>,
+    pool: SqlitePool,
+    app: AppHandle,
+    sub_rt: Arc<RwLock<SubscriptionRuntime>>,
+) -> Response {
+    if ok.client_wants_streaming {
+        finalize_kiro_streaming(
+            ok.upstream_stream, vm_name, attempt_id, sub_id, provider_id, endpoint_id,
+            real_model, display_name, retry_count, log_tx, event_log_tx, pool, app, sub_rt,
+        )
+    } else {
+        let fut = collect_kiro_to_json_response(
+            ok.upstream_stream, vm_name, attempt_id, sub_id, provider_id, endpoint_id,
+            real_model, display_name, retry_count, log_tx, event_log_tx, pool, app, sub_rt,
+        );
+        let stream = futures::stream::once(async move {
+            let resp = fut.await;
+            let (_parts, body) = resp.into_parts();
+            let bytes = match axum::body::to_bytes(body, usize::MAX).await {
+                Ok(b) => b,
+                Err(e) => Bytes::from(format!("internal: {e}")),
+            };
+            Ok::<_, std::io::Error>(bytes)
+        });
+        let body = Body::from_stream(stream);
+        let mut response = Response::new(body);
+        *response.status_mut() = StatusCode::OK;
+        response.headers_mut().insert(
+            axum::http::header::CONTENT_TYPE,
+            HeaderValue::from_static("application/json"),
+        );
+        response
+    }
+}
+
+#[allow(clippy::too_many_arguments)]
+fn finalize_kiro_streaming(
+    upstream_stream: BoxStream<'static, Result<Bytes, reqwest::Error>>,
+    vm_name: VirtualModelName,
+    attempt_id: Uuid,
+    sub_id: Uuid,
+    provider_id: String,
+    endpoint_id: String,
+    real_model: String,
+    display_name: String,
+    retry_count: u32,
+    log_tx: mpsc::Sender<RequestLogEntry>,
+    event_log_tx: mpsc::Sender<EventEntry>,
+    pool: SqlitePool,
+    app: AppHandle,
+    sub_rt: Arc<RwLock<SubscriptionRuntime>>,
+) -> Response {
+    let (client_tx, client_rx) = mpsc::channel::<Result<Bytes, std::io::Error>>(64);
+
+    tokio::spawn(async move {
+        let start = std::time::Instant::now();
+        let mut decoder = EventStreamDecoder::new();
+        let mut converter = KiroSseConverter::new(&real_model);
+
+        let mut stream = upstream_stream;
+        'outer: while let Some(chunk) = stream.next().await {
+            let chunk = match chunk {
+                Ok(c) => c,
+                Err(e) => {
+                    warn!(?e, "Kiro upstream stream error");
+                    let _ = client_tx
+                        .send(Ok(Bytes::from(format!(
+                            "event: error\ndata: {{\"error\":\"{}\"}}\n\n",
+                            e
+                        ))))
+                        .await;
+                    break;
+                }
+            };
+            let frames = match decoder.feed_and_drain(&chunk) {
+                Ok(f) => f,
+                Err(e) => {
+                    warn!(?e, "Kiro Event Stream 解码错误");
+                    let _ = client_tx
+                        .send(Ok(Bytes::from(format!(
+                            "event: error\ndata: {{\"error\":\"event_stream_decode: {}\"}}\n\n",
+                            e
+                        ))))
+                        .await;
+                    break 'outer;
+                }
+            };
+            for frame in frames {
+                let anth_events = converter.feed(&frame);
+                if anth_events.is_empty() {
+                    continue;
+                }
+                let mut buf = Vec::new();
+                for evt in anth_events {
+                    buf.extend_from_slice(&evt.to_sse_bytes());
+                }
+                if client_tx.send(Ok(Bytes::from(buf))).await.is_err() {
+                    return;
+                }
+            }
+        }
+        let tail = converter.finalize();
+        if !tail.is_empty() {
+            let mut buf = Vec::new();
+            for evt in tail {
+                buf.extend_from_slice(&evt.to_sse_bytes());
+            }
+            let _ = client_tx.send(Ok(Bytes::from(buf))).await;
+        }
+
+        let _ = state_machine::apply(
+            &pool,
+            &app,
+            &event_log_tx,
+            sub_rt.clone(),
+            state_machine::Event::RequestSucceeded,
+        )
+        .await;
+
+        let usage = converter.usage();
+        let input_tokens = usage.get("input_tokens").and_then(|v| v.as_u64()).map(|v| v as u32);
+        let output_tokens = usage.get("output_tokens").and_then(|v| v.as_u64()).map(|v| v as u32);
+
+        let entry = RequestLogEntry {
+            id: attempt_id,
+            timestamp_ms: Utc::now().timestamp_millis(),
+            virtual_model_name: vm_name,
+            subscription_id: sub_id,
+            provider_id,
+            endpoint_id,
+            real_model_name: real_model.clone(),
+            response_model_name: None,
+            is_streaming: true,
+            status: RequestStatus::Success,
+            http_status: Some(200),
+            ttft_ms: None,
+            total_latency_ms: Some(start.elapsed().as_millis() as u64),
+            upstream_input_tokens: input_tokens,
+            upstream_output_tokens: output_tokens,
+            upstream_cache_creation: None,
+            upstream_cache_read: None,
+            retry_count,
+            error_message: None,
+            upstream_response_body: None,
+        };
+        let _ = log_tx.try_send(entry);
+        events::record_request(
+            &event_log_tx,
+            attempt_id,
+            sub_id,
+            Severity::Info,
+            format!("{} · {} · Kiro · {}", vm_name.as_str(), display_name, real_model),
+        );
+    });
+
+    let stream = futures::stream::unfold(client_rx, |mut rx| async move {
+        rx.recv().await.map(|item| (item, rx))
+    });
+    let body = Body::from_stream(stream);
+    let mut response = Response::new(body);
+    response.headers_mut().insert(
+        axum::http::header::CONTENT_TYPE,
+        HeaderValue::from_static("text/event-stream"),
+    );
+    response.headers_mut().insert(
+        HeaderName::from_static("cache-control"),
+        HeaderValue::from_static("no-cache"),
+    );
+    response
+}
+
+#[allow(clippy::too_many_arguments)]
+async fn collect_kiro_to_json_response(
+    upstream_stream: BoxStream<'static, Result<Bytes, reqwest::Error>>,
+    vm_name: VirtualModelName,
+    attempt_id: Uuid,
+    sub_id: Uuid,
+    provider_id: String,
+    endpoint_id: String,
+    real_model: String,
+    display_name: String,
+    retry_count: u32,
+    log_tx: mpsc::Sender<RequestLogEntry>,
+    event_log_tx: mpsc::Sender<EventEntry>,
+    pool: SqlitePool,
+    app: AppHandle,
+    sub_rt: Arc<RwLock<SubscriptionRuntime>>,
+) -> Response {
+    let start = std::time::Instant::now();
+    let mut decoder = EventStreamDecoder::new();
+    let mut collector = KiroCollector::new(&real_model);
+
+    let mut stream = upstream_stream;
+    while let Some(chunk) = stream.next().await {
+        let Ok(chunk) = chunk else { break };
+        let frames = match decoder.feed_and_drain(&chunk) {
+            Ok(f) => f,
+            Err(e) => {
+                warn!(?e, "Kiro Event Stream 解码错误");
+                break;
+            }
+        };
+        for frame in frames {
+            collector.feed(&frame);
+        }
+    }
+    let final_msg = collector.finalize();
+
+    let _ = state_machine::apply(
+        &pool,
+        &app,
+        &event_log_tx,
+        sub_rt.clone(),
+        state_machine::Event::RequestSucceeded,
+    )
+    .await;
+
+    let input_tokens = final_msg
+        .get("usage")
+        .and_then(|u| u.get("input_tokens"))
+        .and_then(|v| v.as_u64())
+        .map(|v| v as u32);
+    let output_tokens = final_msg
+        .get("usage")
+        .and_then(|u| u.get("output_tokens"))
+        .and_then(|v| v.as_u64())
+        .map(|v| v as u32);
+
+    let entry = RequestLogEntry {
+        id: attempt_id,
+        timestamp_ms: Utc::now().timestamp_millis(),
+        virtual_model_name: vm_name,
+        subscription_id: sub_id,
+        provider_id,
+        endpoint_id,
+        real_model_name: real_model.clone(),
+        response_model_name: final_msg
+            .get("model")
+            .and_then(|v| v.as_str())
+            .map(String::from),
+        is_streaming: false,
+        status: RequestStatus::Success,
+        http_status: Some(200),
+        ttft_ms: None,
+        total_latency_ms: Some(start.elapsed().as_millis() as u64),
+        upstream_input_tokens: input_tokens,
+        upstream_output_tokens: output_tokens,
+        upstream_cache_creation: None,
+        upstream_cache_read: None,
+        retry_count,
+        error_message: None,
+        upstream_response_body: None,
+    };
+    let _ = log_tx.try_send(entry);
+    events::record_request(
+        &event_log_tx,
+        attempt_id,
+        sub_id,
+        Severity::Info,
+        format!("{} · {} · Kiro · {}", vm_name.as_str(), display_name, real_model),
+    );
+
+    let bytes = serde_json::to_vec(&final_msg).unwrap_or_default();
+    let mut response = Response::new(Body::from(bytes));
+    *response.status_mut() = StatusCode::OK;
+    response.headers_mut().insert(
+        axum::http::header::CONTENT_TYPE,
+        HeaderValue::from_static("application/json"),
+    );
+    response
 }
 
 /// 把 OAuth 错误转成给客户端的 axum Response.

@@ -7,23 +7,107 @@ use uuid::Uuid;
 use crate::provider::model::{join_base_path, AuthHeaderFormat, AuthType, ModelDiscovery};
 use crate::virtual_model::model::SubscriptionSlot;
 
-/// OAuth 凭据元数据, 仅当 `auth_type = ChatgptOauth` 时有内容.
-/// 持久化为 subscriptions.oauth_metadata 列 (JSON 字符串).
+/// OAuth 凭据元数据, 持久化为 `subscriptions.oauth_metadata` 列 (JSON 字符串).
+///
+/// 按 `auth_type` 区分使用的字段子集:
+/// - `ChatgptOauth`: `account_id` + `email` + `refresh_token` + `authenticated_at`
+/// - `KiroOauth`: 上述基础字段 + `kiro` 子结构 (auth_method, region, profile_arn, client_id/secret, disguise)
+///
+/// 所有 kiro 专用字段都是 `Option` + `skip_serializing_if`, 老 chatgpt 订阅的 JSON 反序列化不受影响 (向后兼容).
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct OAuthMetadata {
-    /// ChatGPT 账户 id, 同时需作为 `ChatGPT-Account-Id` header 发给 chatgpt.com 后端.
+    /// ChatGPT/Kiro 账户 id. ChatGPT 时是 chatgpt_account_id (做 ChatGPT-Account-Id header),
+    /// Kiro 时是 sub claim 或邮箱 (仅显示用, Kiro API 不需要 account-id header).
     #[serde(default, skip_serializing_if = "String::is_empty")]
     pub account_id: String,
-    /// 显示用账号 email (从 id_token JWT 解出, 可缺).
+    /// 显示用账号 email.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub email: Option<String>,
-    /// 长期 refresh_token. 用于 oauth/chatgpt.rs 自动刷新 access_token.
-    /// access_token 不持久化, 进程内存缓存即可.
+    /// 长期 refresh_token. ChatGPT/Kiro 共用此字段.
     #[serde(default, skip_serializing_if = "String::is_empty")]
     pub refresh_token: String,
     /// 首次完成授权的时间戳 (毫秒). 显示用.
     #[serde(default)]
     pub authenticated_at: i64,
+    /// Kiro 专用元数据 (auth_method, region, profile_arn, client_id/secret, 4 个伪装字段).
+    /// 仅 `auth_type = KiroOauth` 时有值; ChatGPT 订阅此字段为 None, 不序列化.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub kiro: Option<KiroOAuthExtras>,
+}
+
+/// Kiro OAuth 扩展字段 (序列化嵌套在 OAuthMetadata.kiro).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct KiroOAuthExtras {
+    /// `social` (Kiro IDE 桌面登录) 或 `idc` (AWS SSO / Builder ID / 企业 IdC).
+    /// 决定 token refresh 走哪个 endpoint.
+    pub auth_method: KiroAuthMethod,
+    /// Auth region (token refresh 用), 默认 us-east-1.
+    pub region: String,
+    /// AWS CodeWhisperer profile ARN. Builder ID 用户可能没有, 留 None 时请求体不注入 profileArn.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub profile_arn: Option<String>,
+    /// IdC / AWS SSO 需要的 client_id (OIDC token refresh body 必填).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub client_id: Option<String>,
+    /// IdC / AWS SSO 需要的 client_secret.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub client_secret: Option<String>,
+    /// 风控伪装字段 (用户在 UI 可修改).
+    pub disguise: KiroDisguise,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum KiroAuthMethod {
+    /// Kiro IDE 桌面登录 (无 client_id/client_secret).
+    /// Refresh URL: `https://prod.{region}.auth.desktop.kiro.dev/refreshToken`
+    Social,
+    /// AWS SSO / Builder ID / 企业 IdC (有 client_id + client_secret).
+    /// Refresh URL: `https://oidc.{region}.amazonaws.com/token`
+    Idc,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct KiroDisguise {
+    /// 64 位十六进制 machineId. 首次创建订阅时随机生成, 跟随订阅持久化.
+    pub machine_id: String,
+    pub kiro_version: String,
+    pub system_version: String,
+    pub node_version: String,
+}
+
+impl Default for KiroDisguise {
+    fn default() -> Self {
+        Self {
+            machine_id: random_machine_id(),
+            kiro_version: default_kiro_version().to_string(),
+            system_version: default_system_version().to_string(),
+            node_version: default_node_version().to_string(),
+        }
+    }
+}
+
+pub fn random_machine_id() -> String {
+    use uuid::Uuid;
+    let a = Uuid::new_v4().simple().to_string();
+    let b = Uuid::new_v4().simple().to_string();
+    format!("{a}{b}")
+}
+
+pub fn default_kiro_version() -> &'static str {
+    "0.11.107"
+}
+
+pub fn default_system_version() -> &'static str {
+    if cfg!(target_os = "windows") {
+        "win32#10.0.22631"
+    } else {
+        "darwin#24.6.0"
+    }
+}
+
+pub fn default_node_version() -> &'static str {
+    "22.22.0"
 }
 
 /// 自定义订阅的来源标记常量。

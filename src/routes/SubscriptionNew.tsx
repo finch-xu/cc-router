@@ -9,6 +9,7 @@ import { ProviderLogo } from "@/components/ProviderLogo";
 import { Spinner } from "@/components/Spinner";
 import { ModelSlotPicker } from "@/components/ModelSlotPicker";
 import { ChatGptOAuthDialog } from "@/components/ChatGptOAuthDialog";
+import { KiroAuthDialog, type KiroAuthSuccessPayload } from "@/components/KiroAuthDialog";
 import {
   Select,
   SelectContent,
@@ -84,6 +85,7 @@ export function SubscriptionNewPage() {
     [provider, endpointId],
   );
   const isChatGptOAuth = provider?.auth.type === "chatgpt_oauth";
+  const isKiroOAuth = provider?.auth.type === "kiro_oauth";
 
   // ChatGPT OAuth 流程 state. deviceCode + account 同生命周期, 合一份
   const [oauthDialogOpen, setOauthDialogOpen] = useState(false);
@@ -91,6 +93,10 @@ export function SubscriptionNewPage() {
     deviceCode: string;
     account: ChatGptAccount;
   } | null>(null);
+
+  // Kiro OAuth 流程 state (与 codex 解耦, 凭据来源是 session_id 或 device_code)
+  const [kiroDialogOpen, setKiroDialogOpen] = useState(false);
+  const [kiroPayload, setKiroPayload] = useState<KiroAuthSuccessPayload | null>(null);
 
   // 追踪自动生成的 displayName;用户手改后不再覆盖
   const autoGenNameRef = useRef<string>("");
@@ -187,6 +193,70 @@ export function SubscriptionNewPage() {
   // step2 保存: 改 OAuth 订阅的 model_slots (订阅在 step1 已经创建落 DB).
   // 不再调 createChatGptOAuthSubscription —— device_code 已经在 step1 消费.
   async function saveOAuth() {
+    if (!createdId || !provider || !endpoint) return;
+    if (!slots.opus || !slots.sonnet || !slots.haiku) {
+      return setSubmitError(t("subscriptionNew.errFillSlots"));
+    }
+    setSubmitting(true);
+    setSubmitError(null);
+    try {
+      await invoke("update_subscription", {
+        id: createdId,
+        patch: { model_slots: slots },
+      });
+      await queryClient.invalidateQueries({ queryKey: ["subscriptions"] });
+      await bindToVirtualModelsIfOnboarding(createdId);
+      if (isOnboarding) {
+        navigate("/guide", { replace: true });
+        return;
+      }
+      navigate(returnTo ?? `/subscriptions/${createdId}`);
+    } catch (e) {
+      setSubmitError(`${t("subscriptionNew.errCreate")}: ${e}`);
+    } finally {
+      setSubmitting(false);
+    }
+  }
+
+  // Kiro OAuth 路径: 直接用 example_models 作为模型源 (model_discovery.enabled=false, 无 refresh).
+  // step1 调 createKiroSubscription 落 DB → 跳 step2 让用户挑 slot.
+  async function goToStep2Kiro() {
+    if (!provider || !endpoint || !kiroPayload || !displayName) return;
+    setFetchingModels(true);
+    setModelFetchError(null);
+    try {
+      const placeholderSlots: ModelSlots = {
+        opus: "(pending)",
+        sonnet: "(pending)",
+        haiku: "(pending)",
+      };
+      const created = await api.createKiroSubscription({
+        session_id: kiroPayload.sessionId,
+        device_code: kiroPayload.deviceCode,
+        provider_id: provider.id,
+        endpoint_id: endpoint.id,
+        display_name: displayName,
+        model_slots: placeholderSlots,
+        disguise: kiroPayload.disguise,
+        profile_arn_override: kiroPayload.profileArn,
+      });
+      await queryClient.invalidateQueries({ queryKey: ["subscriptions"] });
+      // Kiro 无 /models 端点, 直接拿 example_models 作初始值
+      const example = provider.model_discovery.example_models;
+      setModels(null);
+      const first = example[0] ?? "";
+      if (first) setSlots({ opus: first, sonnet: first, haiku: first });
+
+      setCreatedId(created.id);
+      setStep(2);
+    } catch (e) {
+      setModelFetchError(`${t("subscriptionNew.errCreate")}: ${e}`);
+    } finally {
+      setFetchingModels(false);
+    }
+  }
+
+  async function saveKiro() {
     if (!createdId || !provider || !endpoint) return;
     if (!slots.opus || !slots.sonnet || !slots.haiku) {
       return setSubmitError(t("subscriptionNew.errFillSlots"));
@@ -635,6 +705,56 @@ export function SubscriptionNewPage() {
                       {t("oauth.chatgpt.connectHint")}
                     </div>
                   </div>
+                ) : isKiroOAuth ? (
+                  <div style={{ marginBottom: 20 }}>
+                    <label className="field-label">{t("subscriptionNew.field.kiroCredential")}</label>
+                    {kiroPayload ? (
+                      <div
+                        style={{
+                          display: "flex",
+                          alignItems: "center",
+                          justifyContent: "space-between",
+                          padding: 12,
+                          border: "1px solid var(--line)",
+                          borderRadius: 6,
+                          background: "var(--surface-2)",
+                        }}
+                      >
+                        <div style={{ fontSize: 12.5 }}>
+                          <div>
+                            <strong>{t("oauth.kiro.connected")}</strong> · {kiroPayload.authMethod} · {kiroPayload.region}
+                          </div>
+                          <div style={{ fontSize: 11, color: "var(--ink-3)", marginTop: 4 }}>
+                            {kiroPayload.sessionId
+                              ? t("oauth.kiro.sourceFromJson")
+                              : t("oauth.kiro.sourceFromDeviceFlow")}
+                          </div>
+                        </div>
+                        <button
+                          type="button"
+                          className="btn bare sm"
+                          onClick={() => {
+                            setKiroPayload(null);
+                            setKiroDialogOpen(true);
+                          }}
+                        >
+                          {t("oauth.kiro.reconnect")}
+                        </button>
+                      </div>
+                    ) : (
+                      <button
+                        type="button"
+                        className="btn primary"
+                        style={{ width: "100%" }}
+                        onClick={() => setKiroDialogOpen(true)}
+                      >
+                        {t("oauth.kiro.connectButton")}
+                      </button>
+                    )}
+                    <div className="field-hint" style={{ marginTop: 8 }}>
+                      {t("oauth.kiro.connectHint")}
+                    </div>
+                  </div>
                 ) : (
                   <div style={{ marginBottom: 20 }}>
                     <label className="field-label">API Key</label>
@@ -723,6 +843,16 @@ export function SubscriptionNewPage() {
                     >
                       {t("common.next")} <ArrowRight size={12} />
                     </button>
+                  ) : isKiroOAuth ? (
+                    <button
+                      className="btn primary"
+                      onClick={goToStep2Kiro}
+                      disabled={!provider || !endpoint || !kiroPayload || !displayName || fetchingModels}
+                      type="button"
+                    >
+                      {fetchingModels && <Spinner />}
+                      {t("common.next")} <ArrowRight size={12} />
+                    </button>
                   ) : (
                     <button
                       className="btn primary"
@@ -770,7 +900,7 @@ export function SubscriptionNewPage() {
                   </button>
                   <button
                     className="btn primary"
-                    onClick={isChatGptOAuth ? saveOAuth : save}
+                    onClick={isChatGptOAuth ? saveOAuth : isKiroOAuth ? saveKiro : save}
                     disabled={
                       !slots.opus || !slots.sonnet || !slots.haiku || submitting
                     }
@@ -801,6 +931,21 @@ export function SubscriptionNewPage() {
           }
           // 让 dialog 短暂展示「已连接」状态再关
           setTimeout(() => setOauthDialogOpen(false), 500);
+        }}
+      />
+
+      <KiroAuthDialog
+        open={kiroDialogOpen}
+        onClose={() => setKiroDialogOpen(false)}
+        onSuccess={(payload) => {
+          setKiroPayload(payload);
+          if (!displayName || displayName === autoGenNameRef.current) {
+            const suffix = Math.random().toString(36).slice(2, 8);
+            const generated = `Kiro · ${payload.region} ${suffix}`;
+            setDisplayName(generated);
+            autoGenNameRef.current = generated;
+          }
+          setKiroDialogOpen(false);
         }}
       />
     </>

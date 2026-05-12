@@ -108,6 +108,13 @@ pub fn run() {
             commands::oauth::create_chatgpt_oauth_subscription,
             commands::oauth::forget_chatgpt_oauth_cache,
             commands::oauth::get_chatgpt_oauth_usage,
+            commands::oauth::import_kiro_credentials_from_file,
+            commands::oauth::import_kiro_credentials_from_text,
+            commands::oauth::start_kiro_device_flow,
+            commands::oauth::poll_kiro_device_code,
+            commands::oauth::create_kiro_subscription,
+            commands::oauth::forget_kiro_oauth_cache,
+            commands::oauth::update_kiro_disguise_fields,
         ])
         .run(tauri::generate_context!())
         .expect("运行 cc-router 时发生错误");
@@ -178,6 +185,7 @@ async fn bootstrap(
         .build()?;
 
     let chatgpt_oauth = Arc::new(oauth::chatgpt::ChatGptOAuthManager::new(pool.clone()));
+    let kiro_oauth = Arc::new(oauth::kiro::KiroOAuthManager::new(pool.clone()));
 
     let state = AppState {
         db: pool,
@@ -192,6 +200,7 @@ async fn bootstrap(
         http_client,
         probe_client,
         chatgpt_oauth,
+        kiro_oauth,
         app_handle: handle.clone(),
     };
 
