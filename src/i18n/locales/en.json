@@ -456,6 +456,13 @@
   "receipts.controls.display.showCacheDesc": "Hide to keep only the input / output rows for a cleaner slip.",
   "receipts.controls.display.showCounts": "Show request counts",
   "receipts.controls.display.showCountsDesc": "Hide to show only token counts; the \"156×\" suffix on each item disappears.",
+  "receipts.controls.display.compactTokens": "Compact numbers (K/M)",
+  "receipts.controls.display.compactTokensDesc": "Compress token numbers into K/M form (e.g. 12.35K, 1.23M); values below 1000 stay as-is.",
+  "receipts.controls.display.groupMode.label": "View mode",
+  "receipts.controls.display.groupMode.virtual_model": "By virtual model",
+  "receipts.controls.display.groupMode.subscription": "By subscription",
+  "receipts.controls.display.groupMode.totals_only": "Totals only",
+  "receipts.controls.display.groupMode.desc": "Switch the slip body's aggregation dimension; By subscription / Totals only no longer group by virtual-model slot.",
   "receipts.controls.filter.title": "Filters",
   "receipts.controls.filter.bySubscription": "By subscription",
   "receipts.controls.filter.byProvider": "By provider",
@@ -481,5 +488,7 @@
   "receipts.slip.subtotal": "subtotal",
   "receipts.slip.empty": "(no requests)",
   "receipts.slip.deletedSub": "(deleted subscription)",
-  "receipts.slip.thanks": "Thanks for routing with cc-router"
+  "receipts.slip.thanks": "Thanks for routing with cc-router",
+  "receipts.slip.section.bySubscription": "By subscription",
+  "receipts.slip.section.byRealModel": "By real model"
 }

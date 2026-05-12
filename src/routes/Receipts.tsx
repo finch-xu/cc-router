@@ -4,30 +4,13 @@ import { ReceiptSlip, type ReceiptDisplayOptions } from "@/components/receipts/R
 import { ReceiptControls } from "@/components/receipts/ReceiptControls";
 import { useReceipt } from "@/hooks/useReceipts";
 import { exportPng, exportPdf, exportHtml } from "@/utils/exportReceipt";
+import { ZERO_TOTALS, addTotals } from "@/lib/receipt-aggregations";
 import type {
   ReceiptDto,
   ReceiptRange,
   ReceiptTotalsDto,
   ReceiptVirtualModelItemDto,
 } from "@/types";
-
-const ZERO_TOTALS: ReceiptTotalsDto = {
-  request_count: 0,
-  input_tokens: 0,
-  output_tokens: 0,
-  cache_creation_tokens: 0,
-  cache_read_tokens: 0,
-};
-
-function addTotals(a: ReceiptTotalsDto, b: ReceiptTotalsDto): ReceiptTotalsDto {
-  return {
-    request_count: a.request_count + b.request_count,
-    input_tokens: a.input_tokens + b.input_tokens,
-    output_tokens: a.output_tokens + b.output_tokens,
-    cache_creation_tokens: a.cache_creation_tokens + b.cache_creation_tokens,
-    cache_read_tokens: a.cache_read_tokens + b.cache_read_tokens,
-  };
-}
 
 /** 空集合 = 全选(不过滤);否则 sub_items 按交集过滤,subtotal/grand_total 重算。 */
 function applyFilters(
@@ -72,6 +55,7 @@ export function ReceiptsPage() {
     colorMode: "color",
     showProviderLogo: true,
     compactTokens: true,
+    groupMode: "virtual_model",
   });
   const [selectedSubs, setSelectedSubs] = useState<Set<string>>(new Set());
   const [selectedProviders, setSelectedProviders] = useState<Set<string>>(new Set());

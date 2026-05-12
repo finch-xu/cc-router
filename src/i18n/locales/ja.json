@@ -456,6 +456,13 @@
   "receipts.controls.display.showCacheDesc": "オフにすると入力 / 出力の 2 行のみとなり、レシートがすっきりします。",
   "receipts.controls.display.showCounts": "リクエスト回数を表示",
   "receipts.controls.display.showCountsDesc": "オフにすると token 数のみ表示され、各項目末尾の「156×」が消えます。",
+  "receipts.controls.display.compactTokens": "コンパクト表記（K/M）",
+  "receipts.controls.display.compactTokensDesc": "token 数を K/M 形式（例: 12.35K、1.23M）に圧縮します。1000 未満はそのまま表示します。",
+  "receipts.controls.display.groupMode.label": "表示モード",
+  "receipts.controls.display.groupMode.virtual_model": "仮想モデル別",
+  "receipts.controls.display.groupMode.subscription": "サブスクリプション別",
+  "receipts.controls.display.groupMode.totals_only": "合計のみ",
+  "receipts.controls.display.groupMode.desc": "レシート本体の集計軸を切り替えます。サブスクリプション別 / 合計のみは仮想モデルスロットによる分類を行いません。",
   "receipts.controls.filter.title": "データ絞り込み",
   "receipts.controls.filter.bySubscription": "サブスクリプション別",
   "receipts.controls.filter.byProvider": "プロバイダー別",
@@ -481,5 +488,7 @@
   "receipts.slip.subtotal": "小計",
   "receipts.slip.empty": "(該当なし)",
   "receipts.slip.deletedSub": "(削除済みサブスクリプション)",
-  "receipts.slip.thanks": "cc-router をご利用いただきありがとうございます"
+  "receipts.slip.thanks": "cc-router をご利用いただきありがとうございます",
+  "receipts.slip.section.bySubscription": "サブスクリプション別",
+  "receipts.slip.section.byRealModel": "実モデル別"
 }

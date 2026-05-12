@@ -131,6 +131,26 @@ export function ReceiptControls({
 
       {/* Section 3 — 显示选项 */}
       <Section title={t("receipts.controls.display.title")}>
+        <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+          <div style={{ fontSize: 12, fontWeight: 500 }}>
+            {t("receipts.controls.display.groupMode.label")}
+          </div>
+          <div className="range-tabs" style={{ flexWrap: "wrap", marginBottom: 0 }}>
+            {(["virtual_model", "subscription", "totals_only"] as const).map((m) => (
+              <button
+                key={m}
+                type="button"
+                className={"range-tab" + (options.groupMode === m ? " active" : "")}
+                onClick={() => onOptionsChange({ ...options, groupMode: m })}
+              >
+                {t(`receipts.controls.display.groupMode.${m}`)}
+              </button>
+            ))}
+          </div>
+          <div className="field-hint" style={{ fontSize: 11 }}>
+            {t("receipts.controls.display.groupMode.desc")}
+          </div>
+        </div>
         <CheckboxRow
           checked={options.colorMode === "color"}
           label={t("receipts.controls.display.colorMode")}

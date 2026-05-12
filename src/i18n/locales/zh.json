@@ -472,6 +472,11 @@
   "receipts.controls.display.showCountsDesc": "关掉则只展示 token 数,大项后不再带「156×」。",
   "receipts.controls.display.compactTokens": "紧凑数字（K/M）",
   "receipts.controls.display.compactTokensDesc": "把 token 数字压缩为 K/M 形式（如 12.35K、1.23M），小于 1000 时原样显示。",
+  "receipts.controls.display.groupMode.label": "视图模式",
+  "receipts.controls.display.groupMode.virtual_model": "按虚拟模型",
+  "receipts.controls.display.groupMode.subscription": "按订阅",
+  "receipts.controls.display.groupMode.totals_only": "仅汇总",
+  "receipts.controls.display.groupMode.desc": "切换小票主体的聚合维度;按订阅 / 仅汇总不再按虚拟模型槽分类。",
   "receipts.controls.filter.title": "数据过滤",
   "receipts.controls.filter.bySubscription": "按订阅",
   "receipts.controls.filter.byProvider": "按厂商",
@@ -497,5 +502,7 @@
   "receipts.slip.subtotal": "小计",
   "receipts.slip.empty": "(本档暂无请求)",
   "receipts.slip.deletedSub": "(已删除订阅)",
-  "receipts.slip.thanks": "感谢你与 cc-router 同行"
+  "receipts.slip.thanks": "感谢你与 cc-router 同行",
+  "receipts.slip.section.bySubscription": "按订阅",
+  "receipts.slip.section.byRealModel": "按真实模型"
 }
