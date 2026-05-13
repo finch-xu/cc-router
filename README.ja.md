@@ -36,6 +36,9 @@
 - **任意のエンドポイントを追加可能** —— 内蔵プロバイダーで足りない場合、Anthropic Messages 互換 API なら何でも直接接続でき、内蔵サブスクと同等にディスパッチ
 - **利用レシート** —— トークン消費スナップショットを PNG / PDF / HTML へワンクリックでエクスポート。モノクロ / カラーの 2 モード、既定では料金非表示で利用量のみ、フッターの QR コードからリポジトリへジャンプ
 - **3 言語完全翻訳** —— 简体中文 / English / 日本語、システム言語追従または設定画面で手動切替
+- **仮想モデルのエイリアス対応** —— opus / sonnet / haiku の各スロットが複数の命名を識別。opus を例にすると `model-opus` / `claude-opus-4-7` / `anthropic/model-opus` / `anthropic/claude-opus-4-7` がすべて同じ仮想モデルにルーティングされ、ツール側の命名規約に左右されません
+- **ローカル HTTPS** —— ワンクリックで自己署名 CA とサーバー証明書を生成し、HTTPS しか受け付けないクライアントからも cc-router を呼び出せます。詳細は[設定ガイド](https://ccrouter.app/docs/claude-desktop-integration/)を参照
+- **Claude Desktop App 対応** —— ローカル HTTPS と仮想モデルエイリアスを組み合わせることで、Anthropic 公式デスクトップアプリから cc-router で集約した複数サブスクへ直接接続できます。詳細は[設定ガイド](https://ccrouter.app/docs/claude-desktop-integration/)を参照
 
 <table align="center">
   <tr>
@@ -114,6 +117,14 @@
 `OPUS_MODEL` が `1m` コンテキストに対応している場合、`model-opus[1m]` に設定すると Claude Code のロングコンテキストをフルに活用できます。
 
 LiteLLM 形式の `anthropic/` プレフィックスにも対応しています: `anthropic/model-opus` / `anthropic/model-sonnet` / `anthropic/model-haiku` はプレフィックスなしの記法と等価で、Anthropic プロトコルを認識させるためにプロバイダプレフィックスが必要なツールとの連携が容易になります。
+
+仮想モデルとエイリアス:
+
+| 仮想モデル | エイリアス |
+|---|---|
+| `model-opus` | `anthropic/model-opus` `anthropic/claude-opus-4-7` `claude-opus-4-7` |
+| `model-sonnet` | `anthropic/model-sonnet` `anthropic/claude-sonnet-4-6` `claude-sonnet-4-6` |
+| `model-haiku` | `anthropic/model-haiku` `anthropic/claude-haiku-4-5` `claude-haiku-4-5` |
 
 ## FAQ・ユースケース
 

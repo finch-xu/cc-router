@@ -36,6 +36,9 @@
 - **任意自定义端点** —— 内置厂商不够时,把任何 Anthropic Messages 兼容的 API 直接配进来,与内置订阅同等调度
 - **用量小票** —— token 消费快照一键导出 PNG / PDF / HTML,黑白 / 彩色双模式,默认不显示价格只展示用量,扫底部二维码即跳仓库
 - **三语完整翻译** —— 简体中文 / English / 日本語,可跟随系统或在设置页手动切换
+- **虚拟模型多别名** —— opus / sonnet / haiku 三个槽位各识别多种命名,以 opus 为例,`model-opus` / `claude-opus-4-7` / `anthropic/model-opus` / `anthropic/claude-opus-4-7` 都路由到同一虚拟模型,工具用什么命名都不挑
+- **本地 HTTPS** —— 一键生成自签 CA 与服务器证书,让只支持 HTTPS 的客户端也能接入 cc-router,详见[配置教程](https://ccrouter.app/docs/claude-desktop-integration/)
+- **接入 Claude Desktop App** —— 借助本地 HTTPS 与虚拟模型别名,Anthropic 官方桌面端可直接走 cc-router 聚合的多家订阅,详见[配置教程](https://ccrouter.app/docs/claude-desktop-integration/)
 
 <table align="center">
   <tr>
@@ -115,6 +118,14 @@
 
 也兼容 LiteLLM 风格的 `anthropic/` 前缀：`anthropic/model-opus` / `anthropic/model-sonnet` / `anthropic/model-haiku` 等同于无前缀写法，方便接入需要带 provider 前缀才能识别 Anthropic 协议的工具。
 
+虚拟模型和别名：
+
+| 虚拟模型 | 别名 |
+|---|---|
+|  `model-opus` |  `anthropic/model-opus` `anthropic/claude-opus-4-7`  `claude-opus-4-7` |
+|  `model-sonnet` |  `anthropic/model-sonnet` `anthropic/claude-sonnet-4-6`  `claude-sonnet-4-6` |
+|  `model-haiku` |  `anthropic/model-haiku` `anthropic/claude-haiku-4-5`  `claude-haiku-4-5` |
+
 ## 常见问题&使用场景
 
 <details>
@@ -165,7 +176,6 @@ CC 请求来了就按映射转发，不用再频繁改 `~/.claude/settings.json`
 - **轮询** —— 两家均衡分担。但跨账号的缓存是独立的，会多吃额度，换来的是真正的负载均衡
 
 </details>
-
 
 ## 开发
 

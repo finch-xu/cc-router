@@ -36,6 +36,9 @@ Highlights:
 - **Bring your own endpoint** — when the built-in providers don't cover what you need, plug any Anthropic Messages-compatible API in directly, dispatched alongside the built-in subscriptions
 - **Usage receipts** — export your token-spend snapshot as PNG / PDF / HTML in one click; mono / color modes, no pricing shown by default (usage only), QR code at the bottom links back to the repo
 - **Fully translated UI** — 简体中文 / English / 日本語, follows your system locale or pick manually in Settings
+- **Virtual model aliases** — each of opus / sonnet / haiku accepts multiple names; for opus that's `model-opus` / `claude-opus-4-7` / `anthropic/model-opus` / `anthropic/claude-opus-4-7`, all routed to the same virtual model — pick whatever naming your tool prefers
+- **Local HTTPS** — generate a self-signed CA and server cert in one click so HTTPS-only clients can talk to cc-router too; see the [setup guide](https://ccrouter.app/docs/claude-desktop-integration/)
+- **Claude Desktop App support** — combine local HTTPS with the virtual-model aliases above and Anthropic's official desktop app can route through cc-router's aggregated subscriptions; see the [setup guide](https://ccrouter.app/docs/claude-desktop-integration/)
 
 <table align="center">
   <tr>
@@ -114,6 +117,14 @@ The **Settings** page renders the full env snippet dynamically — if the defaul
 When the `OPUS_MODEL` supports a `1m` context window, set it to `model-opus[1m]` to get Claude Code's full long-context support.
 
 The LiteLLM-style `anthropic/` prefix is also accepted: `anthropic/model-opus` / `anthropic/model-sonnet` / `anthropic/model-haiku` are equivalent to the prefix-less forms, making it easy to integrate with tools that require a provider prefix to recognize the Anthropic protocol.
+
+Virtual models and aliases:
+
+| Virtual model | Aliases |
+|---|---|
+| `model-opus` | `anthropic/model-opus` `anthropic/claude-opus-4-7` `claude-opus-4-7` |
+| `model-sonnet` | `anthropic/model-sonnet` `anthropic/claude-sonnet-4-6` `claude-sonnet-4-6` |
+| `model-haiku` | `anthropic/model-haiku` `anthropic/claude-haiku-4-5` `claude-haiku-4-5` |
 
 ## FAQ & Use Cases
 
