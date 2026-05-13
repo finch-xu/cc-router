@@ -271,8 +271,15 @@ export interface UpdateVirtualModelInput {
   subscription_ids: string[];
 }
 
+/** 代理监听协议组合 (Settings.proxy_mode). 默认 "http". */
+export type ProxyMode = "http" | "https" | "both";
+
 export interface Settings {
   proxy_port: number;
+  /** 代理监听协议组合, 默认 "http"; 切换需重启 app */
+  proxy_mode: ProxyMode;
+  /** HTTPS 端口, 默认 23457; 仅当 proxy_mode 包含 https 时使用 */
+  https_port: number;
   /** true: 监听 0.0.0.0（局域网可访问）；false: 仅 127.0.0.1 */
   listen_all: boolean;
   autostart: boolean;
@@ -306,6 +313,8 @@ export type UpdateSource = "international" | "china";
 
 export interface SettingsPatch {
   proxy_port?: number;
+  proxy_mode?: ProxyMode;
+  https_port?: number;
   listen_all?: boolean;
   autostart?: boolean;
   log_retention_days?: number;
@@ -333,8 +342,25 @@ export type UpdaterProgressEvent =
   | { phase: "finished" };
 
 export interface ProxyStatus {
+  /** 兼容字段: HTTP 端口 (HTTPS-only 模式下回退到 HTTPS 端口) */
   port: number;
   running: boolean;
+  mode: ProxyMode;
+  /** HTTP listener 实际端口, 未启用为 null */
+  http_port: number | null;
+  /** HTTPS listener 实际端口, 未启用为 null */
+  https_port: number | null;
+  /** 监听地址 (0.0.0.0 vs 127.0.0.1) */
+  listen_all: boolean;
+}
+
+/** TLS 状态 (cc-router 自签 CA 信息). 对应 Rust 侧 tls::TlsStatus */
+export interface TlsStatus {
+  ca_exists: boolean;
+  /** SHA-256 hex 全小写, 64 字符. ca_exists=false 时为 null */
+  ca_fingerprint_sha256: string | null;
+  /** CA 公钥 PEM 文件绝对路径. ca_exists=false 时为 null */
+  ca_pem_path: string | null;
 }
 
 export interface OnboardingState {

@@ -30,6 +30,7 @@ import type {
   SubscriptionDto,
   SubscriptionPatch,
   TestConnectionResult,
+  TlsStatus,
   UpdateInfo,
   UpdateVirtualModelInput,
   VirtualModelDto,
@@ -141,4 +142,10 @@ export const api = {
   // updater (运行时按 settings.update_source 切换 manifest 源)
   checkForUpdate: () => invoke<UpdateInfo | null>("check_for_update"),
   downloadInstallUpdate: () => invoke<void>("download_install_update"),
+
+  // TLS / HTTPS 证书 (proxy_mode 包含 https 时使用)
+  tlsGetStatus: () => invoke<TlsStatus>("tls_get_status"),
+  tlsGetCaPemPath: () => invoke<string>("tls_get_ca_pem_path"),
+  tlsExportCaPem: (dest: string) => invoke<void>("tls_export_ca_pem", { dest }),
+  tlsRegenerateLeaf: () => invoke<TlsStatus>("tls_regenerate_leaf"),
 };

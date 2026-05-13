@@ -13,6 +13,7 @@ pub mod proxy;
 pub mod settings;
 pub mod state;
 pub mod subscription;
+pub mod tls;
 pub mod tray;
 pub mod updater_source;
 pub mod virtual_model;
@@ -115,6 +116,10 @@ pub fn run() {
             commands::oauth::create_kiro_subscription,
             commands::oauth::forget_kiro_oauth_cache,
             commands::oauth::update_kiro_disguise_fields,
+            commands::tls::tls_get_status,
+            commands::tls::tls_get_ca_pem_path,
+            commands::tls::tls_export_ca_pem,
+            commands::tls::tls_regenerate_leaf,
         ])
         .run(tauri::generate_context!())
         .expect("运行 cc-router 时发生错误");
@@ -187,13 +192,23 @@ async fn bootstrap(
     let chatgpt_oauth = Arc::new(oauth::chatgpt::ChatGptOAuthManager::new(pool.clone()));
     let kiro_oauth = Arc::new(oauth::kiro::KiroOAuthManager::new(pool.clone()));
 
+    // TLS 初始化: 只在 proxy_mode 包含 HTTPS 时加载/生成证书. HTTP-only 模式下 None,
+    // 切到 HTTPS 后由用户重启 app 触发. 失败 fatal (HTTPS 模式但起不来比 fallback 到 HTTP 更安全).
+    let tls_config = if settings.proxy_mode.includes_https() {
+        Some(tls::load_or_init_server_config(&app_data_dir).await?)
+    } else {
+        None
+    };
+
     let state = AppState {
         db: pool,
         providers: Arc::new(providers),
         subscriptions: Arc::new(RwLock::new(subscription_map)),
         virtual_models: Arc::new(RwLock::new(virtual_models)),
         settings: Arc::new(RwLock::new(settings)),
-        proxy_port: Arc::new(RwLock::new(0)),
+        http_bound_port: Arc::new(RwLock::new(None)),
+        https_bound_port: Arc::new(RwLock::new(None)),
+        tls_config,
         request_log_tx: log_tx,
         event_log_tx: event_tx,
         body_dump_tx,

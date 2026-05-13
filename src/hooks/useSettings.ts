@@ -1,7 +1,7 @@
 import { useEffect, useRef } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { api } from "@/api/tauri";
-import type { SettingsPatch, UpdateSource } from "@/types";
+import type { SettingsPatch } from "@/types";
 
 export const SETTINGS_KEY = ["settings"] as const;
 export const PROXY_STATUS_KEY = ["proxy-status"] as const;
@@ -60,13 +60,9 @@ export function useProxyEndpoint() {
 }
 
 /**
- * 首次启动按 navigator.language 推断默认更新源,只在 update_source 为 null 时触发一次。
- * zh-* → china,其他 → international。用户后续手动改不会被覆盖(因为 != null 即跳过)。
- *
- * 选择 navigator.language 而非 IP 探测的原因:
- * 1. 不需要任何网络请求,首次启动即可决定
- * 2. preferred_language 走的也是这个路径,口径一致
- * 3. zh-HK / zh-TW 误判到大陆源是可接受的(用户手动切回即可)
+ * 首次启动写入默认更新源,只在 update_source 为 null 时触发一次。
+ * 默认 "china" — 主要用户群是国内, GitHub 直连不稳定,中国大陆 OSS 镜像可达性更好;
+ * 国际用户在 Settings 里一键切回 "international" 即可,后续不再被覆盖.
  */
 export function useUpdateSourceAutoInit() {
   const { data } = useSettings();
@@ -77,9 +73,7 @@ export function useUpdateSourceAutoInit() {
     if (!data || sentRef.current) return;
     if (data.update_source != null) return; // 已经设置过
 
-    const lang = (navigator.language ?? "").toLowerCase();
-    const inferred: UpdateSource = lang.startsWith("zh") ? "china" : "international";
     sentRef.current = true;
-    void updateMut.mutateAsync({ update_source: inferred });
+    void updateMut.mutateAsync({ update_source: "china" });
   }, [data, updateMut]);
 }

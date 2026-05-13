@@ -2,29 +2,57 @@ use serde::Serialize;
 use tauri::State;
 
 use crate::error::AppResult;
+use crate::settings::model::ProxyMode;
 use crate::state::AppState;
 
 #[derive(Debug, Serialize)]
 pub struct ProxyStatus {
+    /// 兼容老前端字段: HTTP 端口 (HTTPS-only 模式下回退到 HTTPS 端口, 保留单值入口).
     pub port: u16,
     pub running: bool,
+    pub mode: ProxyMode,
+    /// HTTP listener 实际绑定端口, None=HTTP 未启用 (HTTPS-only 模式).
+    pub http_port: Option<u16>,
+    /// HTTPS listener 实际绑定端口, None=HTTPS 未启用 (HTTP-only 模式).
+    pub https_port: Option<u16>,
+    /// true: 监听 0.0.0.0; false: 仅 127.0.0.1.
+    pub listen_all: bool,
 }
 
 #[tauri::command]
 pub async fn proxy_status(state: State<'_, AppState>) -> AppResult<ProxyStatus> {
-    let port = *state.proxy_port.read().await;
+    let http_port = *state.http_bound_port.read().await;
+    let https_port = *state.https_bound_port.read().await;
+    let (mode, listen_all) = {
+        let g = state.settings.read().await;
+        (g.proxy_mode, g.listen_all)
+    };
+    let primary = http_port.or(https_port).unwrap_or(0);
     Ok(ProxyStatus {
-        port,
-        running: port != 0,
+        port: primary,
+        running: primary != 0,
+        mode,
+        http_port,
+        https_port,
+        listen_all,
     })
 }
 
 #[tauri::command]
 pub async fn env_snippet(state: State<'_, AppState>) -> AppResult<String> {
-    let port = *state.proxy_port.read().await;
+    let http_port = *state.http_bound_port.read().await;
+    let https_port = *state.https_bound_port.read().await;
     let token = state.settings.read().await.auth_token.clone();
+    // 优先用 HTTP 端口 (更通用); 仅 HTTPS 时给 https:// URL (用户需先导入 CA).
+    let base_url = if let Some(p) = http_port {
+        format!("http://127.0.0.1:{p}")
+    } else if let Some(p) = https_port {
+        format!("https://127.0.0.1:{p}")
+    } else {
+        "http://127.0.0.1:23456".to_string()
+    };
     Ok(format!(
-        "export ANTHROPIC_BASE_URL=http://127.0.0.1:{port}\n\
+        "export ANTHROPIC_BASE_URL={base_url}\n\
          export ANTHROPIC_AUTH_TOKEN={token}\n\
          export API_TIMEOUT_MS=3000000\n\
          export ANTHROPIC_MODEL=model-opus\n\

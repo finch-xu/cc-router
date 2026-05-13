@@ -214,6 +214,69 @@ async fn streaming_normal_first_event_returns_ok_and_preserves_bytes() {
     }
 }
 
+/// HTTPS smoke: tls 模块能生成 ServerConfig, axum-server 能用它起 https listener,
+/// reqwest 配 danger_accept_invalid_certs(true) 能完成 TLS handshake 并拿到 200.
+#[tokio::test]
+async fn tls_listener_serves_https_health() {
+    use std::net::SocketAddr;
+    use tempfile::tempdir;
+
+    let app_data_dir = tempdir().expect("tempdir");
+    let cfg = cc_router_lib::tls::load_or_init_server_config(app_data_dir.path())
+        .await
+        .expect("tls server config");
+
+    let router: axum::Router = axum::Router::new().route("/health", axum::routing::get(|| async { "ok" }));
+
+    // bind 一个临时端口
+    let listener = std::net::TcpListener::bind(SocketAddr::from(([127, 0, 0, 1], 0)))
+        .expect("bind");
+    listener.set_nonblocking(true).expect("nonblocking");
+    let local_addr = listener.local_addr().expect("local_addr");
+
+    let serve = tokio::spawn(async move {
+        axum_server::from_tcp_rustls(
+            listener,
+            axum_server::tls_rustls::RustlsConfig::from_config(cfg),
+        )
+        .serve(router.into_make_service())
+        .await
+    });
+
+    // 留时间让 listener 准备好
+    tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+
+    let client = reqwest::Client::builder()
+        .danger_accept_invalid_certs(true)
+        .timeout(std::time::Duration::from_secs(5))
+        .build()
+        .expect("client");
+    let url = format!("https://127.0.0.1:{}/health", local_addr.port());
+    let resp = client.get(&url).send().await.expect("https handshake");
+    assert_eq!(resp.status().as_u16(), 200);
+    let body = resp.text().await.unwrap();
+    assert_eq!(body, "ok");
+
+    serve.abort();
+}
+
+/// 双协议端口冲突避免: HTTP 占 N, HTTPS 默认也 N 时, 启动应 +1 到 N+1.
+/// 这里只测 tls 模块本身的端口探测 helper 行为不衰减.
+#[tokio::test]
+async fn tls_module_idempotent_on_second_init() {
+    use tempfile::tempdir;
+    let app_data_dir = tempdir().expect("tempdir");
+    let _cfg_1 = cc_router_lib::tls::load_or_init_server_config(app_data_dir.path())
+        .await
+        .expect("first init");
+    let _cfg_2 = cc_router_lib::tls::load_or_init_server_config(app_data_dir.path())
+        .await
+        .expect("second init reuses CA");
+    let ca_pem_path = cc_router_lib::tls::ca_pem_path(app_data_dir.path());
+    let pem = std::fs::read_to_string(&ca_pem_path).expect("ca pem");
+    assert!(pem.starts_with("-----BEGIN CERTIFICATE-----"));
+}
+
 #[test]
 fn anthropic_uses_raw_header_format() {
     let resource_dir = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"));

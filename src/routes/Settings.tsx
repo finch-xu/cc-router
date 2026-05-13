@@ -18,7 +18,9 @@ import {
   useGenerateNewToken,
 } from "@/hooks/useSettings";
 import { useT, type LanguagePref } from "@/i18n";
-import type { UpdateSource } from "@/types";
+import type { ProxyMode, TlsStatus, UpdateSource } from "@/types";
+import { save } from "@tauri-apps/plugin-dialog";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 
 export function SettingsPage() {
   const { t } = useT();
@@ -27,6 +29,8 @@ export function SettingsPage() {
   const updateMut = useUpdateSettings();
 
   const [port, setPort] = useState<number>(23456);
+  const [proxyMode, setProxyMode] = useState<ProxyMode>("http");
+  const [httpsPort, setHttpsPort] = useState<number>(23457);
   const [listenAll, setListenAll] = useState(false);
   const [autostart, setAutostart] = useState(false);
   const [retentionDays, setRetentionDays] = useState(30);
@@ -45,9 +49,14 @@ export function SettingsPage() {
   // 仅在首次拿到 settings.data 时灌入本地 state + 记录 baseline. 后续 mutate refetch
   // 不再回灌, 否则会覆盖用户正在 input 里编辑但尚未 blur 的值 (port/cors origin 跳光标).
   const initializedRef = useRef(false);
-  // baseline = 进程启动时观测到的 port/listen_all. 代理直到 app 重启才会按新值绑定,
-  // 所以"需要重启"的判定要拿 baseline (而非 settings.data) 比.
-  const baselineRef = useRef<{ proxy_port: number; listen_all: boolean } | null>(null);
+  // baseline = 进程启动时观测到的 port/listen_all/proxy_mode/https_port. 代理直到 app 重启才会
+  // 按新值绑定, 所以"需要重启"的判定要拿 baseline (而非 settings.data) 比.
+  const baselineRef = useRef<{
+    proxy_port: number;
+    listen_all: boolean;
+    proxy_mode: ProxyMode;
+    https_port: number;
+  } | null>(null);
 
   const generateTokenMut = useGenerateNewToken();
 
@@ -63,8 +72,12 @@ export function SettingsPage() {
     baselineRef.current = {
       proxy_port: settings.data.proxy_port,
       listen_all: settings.data.listen_all,
+      proxy_mode: settings.data.proxy_mode ?? "http",
+      https_port: settings.data.https_port ?? 23457,
     };
     setPort(settings.data.proxy_port);
+    setProxyMode(settings.data.proxy_mode ?? "http");
+    setHttpsPort(settings.data.https_port ?? 23457);
     setListenAll(settings.data.listen_all);
     setAutostart(settings.data.autostart);
     setRetentionDays(settings.data.log_retention_days);
@@ -80,7 +93,11 @@ export function SettingsPage() {
   const needsRestart =
     baselineRef.current !== null &&
     (port !== baselineRef.current.proxy_port ||
-      listenAll !== baselineRef.current.listen_all);
+      listenAll !== baselineRef.current.listen_all ||
+      proxyMode !== baselineRef.current.proxy_mode ||
+      httpsPort !== baselineRef.current.https_port);
+
+  const httpsEnabled = proxyMode === "https" || proxyMode === "both";
 
   // 失败保留本地 state 以便用户看到自己改了什么; 不做乐观回滚.
   async function patch(p: Parameters<typeof updateMut.mutateAsync>[0]) {
@@ -113,6 +130,14 @@ export function SettingsPage() {
   async function changeProxyPort(next: number) {
     setPort(next);
     await patch({ proxy_port: next });
+  }
+  async function changeProxyMode(next: ProxyMode) {
+    setProxyMode(next);
+    await patch({ proxy_mode: next });
+  }
+  async function changeHttpsPort(next: number) {
+    setHttpsPort(next);
+    await patch({ https_port: next });
   }
   async function changeAutostart(next: boolean) {
     setAutostart(next);
@@ -214,6 +239,14 @@ export function SettingsPage() {
               <option value="ja">日本語</option>
             </select>
           </div>
+          <div className="setting-row">
+            <div className="label-col">{t("settings.proxy.autostart.label")}</div>
+            <Toggle
+              checked={autostart}
+              onChange={(v) => void changeAutostart(v)}
+              aria-label={t("settings.proxy.autostart.label")}
+            />
+          </div>
         </div>
       </div>
 
@@ -230,7 +263,7 @@ export function SettingsPage() {
             <select
               className="select"
               style={{ maxWidth: 240 }}
-              value={settings.data?.update_source ?? "international"}
+              value={settings.data?.update_source ?? "china"}
               onChange={(e) => void changeUpdateSource(e.target.value as UpdateSource)}
             >
               <option value="international">
@@ -254,33 +287,112 @@ export function SettingsPage() {
           </span>
         </div>
         <div className="card-body">
+          {/* 协议模式三选一 */}
           <div className="setting-row">
             <div className="label-col">
-              {t("settings.proxy.port.label")}
-              <div className="desc">{t("settings.proxy.port.desc")}</div>
+              {t("settings.proxy.mode.label")}
+              <div className="desc">{t("settings.proxy.mode.desc")}</div>
             </div>
-            <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
-              <input
-                className="input mono"
-                type="number"
-                value={port}
-                onChange={(e) => setPort(Number(e.target.value) || 23456)}
-                onBlur={() => {
-                  if (settings.data && port !== settings.data.proxy_port) {
-                    void changeProxyPort(port);
-                  }
-                }}
-                onKeyDown={(e) => {
-                  if (e.key === "Enter") (e.target as HTMLInputElement).blur();
-                }}
-                style={{ width: 120 }}
-              />
-              <span style={{ fontSize: 12, color: "var(--ink-4)" }}>
-                {t("settings.proxy.port.actual")}
-                <span className="mono"> {proxy.data?.port ?? "-"}</span>
-              </span>
+            <div
+              className="radio-group"
+              role="radiogroup"
+              aria-label={t("settings.proxy.mode.label")}
+              style={{ display: "flex", maxWidth: 360 }}
+            >
+              <button
+                type="button"
+                className={proxyMode === "http" ? "on" : ""}
+                onClick={() => void changeProxyMode("http")}
+                role="radio"
+                aria-checked={proxyMode === "http"}
+                style={{ flex: 1 }}
+              >
+                {t("settings.proxy.mode.http")}
+              </button>
+              <button
+                type="button"
+                className={proxyMode === "https" ? "on" : ""}
+                onClick={() => void changeProxyMode("https")}
+                role="radio"
+                aria-checked={proxyMode === "https"}
+                style={{ flex: 1 }}
+              >
+                {t("settings.proxy.mode.https")}
+              </button>
+              <button
+                type="button"
+                className={proxyMode === "both" ? "on" : ""}
+                onClick={() => void changeProxyMode("both")}
+                role="radio"
+                aria-checked={proxyMode === "both"}
+                style={{ flex: 1 }}
+              >
+                {t("settings.proxy.mode.both")}
+              </button>
             </div>
           </div>
+
+          {/* HTTP 端口 (Http / Both 时可见) */}
+          {(proxyMode === "http" || proxyMode === "both") && (
+            <div className="setting-row">
+              <div className="label-col">
+                {t("settings.proxy.port.label")}
+                <div className="desc">{t("settings.proxy.port.desc")}</div>
+              </div>
+              <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+                <input
+                  className="input mono"
+                  type="number"
+                  value={port}
+                  onChange={(e) => setPort(Number(e.target.value) || 23456)}
+                  onBlur={() => {
+                    if (settings.data && port !== settings.data.proxy_port) {
+                      void changeProxyPort(port);
+                    }
+                  }}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter") (e.target as HTMLInputElement).blur();
+                  }}
+                  style={{ width: 120 }}
+                />
+                <span style={{ fontSize: 12, color: "var(--ink-4)" }}>
+                  {t("settings.proxy.port.actual")}
+                  <span className="mono"> {proxy.data?.http_port ?? "-"}</span>
+                </span>
+              </div>
+            </div>
+          )}
+
+          {/* HTTPS 端口 (Https / Both 时可见) */}
+          {httpsEnabled && (
+            <div className="setting-row">
+              <div className="label-col">
+                {t("settings.proxy.httpsPort.label")}
+                <div className="desc">{t("settings.proxy.httpsPort.desc")}</div>
+              </div>
+              <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+                <input
+                  className="input mono"
+                  type="number"
+                  value={httpsPort}
+                  onChange={(e) => setHttpsPort(Number(e.target.value) || 23457)}
+                  onBlur={() => {
+                    if (settings.data && httpsPort !== settings.data.https_port) {
+                      void changeHttpsPort(httpsPort);
+                    }
+                  }}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter") (e.target as HTMLInputElement).blur();
+                  }}
+                  style={{ width: 120 }}
+                />
+                <span style={{ fontSize: 12, color: "var(--ink-4)" }}>
+                  {t("settings.proxy.port.actual")}
+                  <span className="mono"> {proxy.data?.https_port ?? "-"}</span>
+                </span>
+              </div>
+            </div>
+          )}
 
           <div className="setting-row">
             <div className="label-col">
@@ -332,15 +444,6 @@ export function SettingsPage() {
             </div>
           </div>
 
-          <div className="setting-row">
-            <div className="label-col">{t("settings.proxy.autostart.label")}</div>
-            <Toggle
-              checked={autostart}
-              onChange={(v) => void changeAutostart(v)}
-              aria-label={t("settings.proxy.autostart.label")}
-            />
-          </div>
-
           {needsRestart && (
             <div className="alert warn">
               <AlertTriangle size={14} />
@@ -349,6 +452,9 @@ export function SettingsPage() {
           )}
         </div>
       </div>
+
+      {/* HTTPS 证书 (cc-router 自签 CA) — 仅 proxy_mode 包含 https 时显示 */}
+      {httpsEnabled && <HttpsCertSection />}
 
       {/* 鉴权与跨域 */}
       <div className="card section">
@@ -638,5 +744,95 @@ export function SettingsPage() {
         </DialogContent>
       </Dialog>
     </>
+  );
+}
+
+/** TLS 证书管理子组件: 显示 CA 指纹 + 导出 + 重新生成 leaf. 仅 proxy_mode 包含 https 时挂载. */
+function HttpsCertSection() {
+  const { t } = useT();
+  const qc = useQueryClient();
+  // CA 在 app 生命周期内不变, 由 tlsRegenerateLeaf 显式失效, 不需要 focus 重 fetch.
+  const tlsStatus = useQuery<TlsStatus>({
+    queryKey: ["tlsStatus"],
+    queryFn: () => api.tlsGetStatus(),
+    staleTime: Infinity,
+    refetchOnWindowFocus: false,
+  });
+
+  async function onExportCa() {
+    try {
+      const dest = await save({
+        defaultPath: "cc-router-ca.pem",
+        filters: [{ name: "PEM", extensions: ["pem", "crt"] }],
+      });
+      if (!dest) return;
+      await api.tlsExportCaPem(dest);
+      alert(t("settings.https.cert.exportOk"));
+    } catch (e) {
+      alert(`${t("settings.https.cert.exportFailed")}: ${e}`);
+    }
+  }
+
+  async function onRegenerate() {
+    if (!confirm(t("settings.https.cert.regenerateConfirm"))) return;
+    try {
+      const fresh = await api.tlsRegenerateLeaf();
+      qc.setQueryData(["tlsStatus"], fresh);
+      alert(t("settings.https.cert.regenerateOk"));
+    } catch (e) {
+      alert(`${t("settings.https.cert.regenerateFailed")}: ${e}`);
+    }
+  }
+
+  const fp = tlsStatus.data?.ca_fingerprint_sha256;
+  const shortFp = fp ? `${fp.slice(0, 8)}…${fp.slice(-8)}` : "—";
+
+  return (
+    <div className="card section">
+      <div className="card-head">
+        <div className="card-title">{t("settings.section.https")}</div>
+      </div>
+      <div className="card-body">
+        <div className="setting-row">
+          <div className="label-col">
+            {t("settings.https.cert.fingerprint.label")}
+            <div className="desc">{t("settings.https.cert.fingerprint.desc")}</div>
+          </div>
+          <span className="mono" style={{ fontSize: 12, color: "var(--ink-2)" }}>
+            {shortFp}
+          </span>
+        </div>
+        <div className="setting-row">
+          <div className="label-col">
+            {t("settings.https.cert.export.label")}
+            <div className="desc">{t("settings.https.cert.export.desc")}</div>
+          </div>
+          <div style={{ display: "flex", gap: 8 }}>
+            <button className="btn" type="button" onClick={onExportCa}>
+              {t("settings.https.cert.export.button")}
+            </button>
+            <button className="btn" type="button" onClick={onRegenerate}>
+              {t("settings.https.cert.regenerate.button")}
+            </button>
+          </div>
+        </div>
+        <div className="setting-row" style={{ display: "block" }}>
+          <div className="label-col" style={{ marginBottom: 8 }}>
+            {t("settings.https.cert.howto.title")}
+          </div>
+          <div style={{ fontSize: 12, color: "var(--ink-3)", lineHeight: 1.7 }}>
+            <div style={{ marginBottom: 6 }}>
+              <strong>macOS</strong>: {t("settings.https.cert.howto.macos")}
+            </div>
+            <div style={{ marginBottom: 6 }}>
+              <strong>Windows</strong>: {t("settings.https.cert.howto.windows")}
+            </div>
+            <div>
+              <strong>Linux</strong>: {t("settings.https.cert.howto.linux")}
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
   );
 }

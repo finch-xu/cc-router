@@ -23,7 +23,13 @@ pub struct AppState {
     pub subscriptions: Arc<RwLock<HashMap<Uuid, Arc<RwLock<SubscriptionRuntime>>>>>,
     pub virtual_models: Arc<RwLock<HashMap<VirtualModelName, VirtualModelConfig>>>,
     pub settings: Arc<RwLock<Settings>>,
-    pub proxy_port: Arc<RwLock<u16>>,
+    /// HTTP listener 实际绑定到的端口. None=HTTP listener 未启用 (HTTPS-only 模式).
+    /// 实际值在启动绑定完成后写入, 可能因端口冲突 +1 与 settings.proxy_port 不同.
+    pub http_bound_port: Arc<RwLock<Option<u16>>>,
+    /// HTTPS listener 实际绑定到的端口. None=HTTPS listener 未启用 (HTTP-only 模式).
+    pub https_bound_port: Arc<RwLock<Option<u16>>>,
+    /// rustls server config, 只有 HTTPS 模式启动时填值; HTTP-only 模式为 None.
+    pub tls_config: Option<Arc<rustls::ServerConfig>>,
     pub request_log_tx: mpsc::Sender<RequestLogEntry>,
     pub event_log_tx: mpsc::Sender<EventEntry>,
     /// 调试模式 dump channel. 仅在 settings.debug_mode=true 时被插桩点投递,

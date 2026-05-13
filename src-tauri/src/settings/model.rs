@@ -1,9 +1,44 @@
 use serde::{Deserialize, Serialize};
 
+/// 代理监听协议组合。
+/// - `Http`: 仅 HTTP (默认, 与历史行为一致)
+/// - `Https`: 仅 HTTPS (用 cc-router 自签 CA 签发的 leaf 证书)
+/// - `Both`: HTTP 和 HTTPS 双端口同时监听, 共享同一份 AppState
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "lowercase")]
+pub enum ProxyMode {
+    Http,
+    Https,
+    Both,
+}
+
+impl Default for ProxyMode {
+    fn default() -> Self {
+        Self::Http
+    }
+}
+
+impl ProxyMode {
+    pub fn includes_http(self) -> bool {
+        matches!(self, Self::Http | Self::Both)
+    }
+    pub fn includes_https(self) -> bool {
+        matches!(self, Self::Https | Self::Both)
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Settings {
+    /// HTTP 端口 (仅在 proxy_mode 包含 Http 时使用). 字段名保留 `proxy_port`
+    /// 兼容老 settings.json; HTTPS 单独由 `https_port` 控制.
     #[serde(default = "default_port")]
     pub proxy_port: u16,
+    /// 代理监听协议组合, 默认仅 HTTP. 切换需要重启 app.
+    #[serde(default)]
+    pub proxy_mode: ProxyMode,
+    /// HTTPS 端口 (仅在 proxy_mode 包含 Https 时使用). 默认 23457.
+    #[serde(default = "default_https_port")]
+    pub https_port: u16,
     /// true: 监听 0.0.0.0（局域网可访问）；false: 监听 127.0.0.1（仅本机）。
     #[serde(default)]
     pub listen_all: bool,
@@ -45,6 +80,9 @@ pub struct Settings {
 fn default_port() -> u16 {
     23456
 }
+fn default_https_port() -> u16 {
+    23457
+}
 fn default_retention() -> u32 {
     30
 }
@@ -68,6 +106,8 @@ impl Default for Settings {
     fn default() -> Self {
         Self {
             proxy_port: default_port(),
+            proxy_mode: ProxyMode::default(),
+            https_port: default_https_port(),
             listen_all: false,
             autostart: false,
             log_retention_days: default_retention(),
@@ -86,6 +126,8 @@ impl Default for Settings {
 #[derive(Debug, Clone, Default, Deserialize)]
 pub struct SettingsPatch {
     pub proxy_port: Option<u16>,
+    pub proxy_mode: Option<ProxyMode>,
+    pub https_port: Option<u16>,
     pub listen_all: Option<bool>,
     pub autostart: Option<bool>,
     pub log_retention_days: Option<u32>,
@@ -102,6 +144,12 @@ impl Settings {
     pub fn apply_patch(&mut self, patch: SettingsPatch) {
         if let Some(p) = patch.proxy_port {
             self.proxy_port = p;
+        }
+        if let Some(p) = patch.proxy_mode {
+            self.proxy_mode = p;
+        }
+        if let Some(p) = patch.https_port {
+            self.https_port = p;
         }
         if let Some(p) = patch.listen_all {
             self.listen_all = p;
@@ -180,5 +228,55 @@ mod tests {
         s.update_source = Some("china".into());
         s.apply_patch(SettingsPatch::default()); // 全 None patch
         assert_eq!(s.update_source.as_deref(), Some("china"));
+    }
+
+    #[test]
+    fn default_proxy_mode_is_http() {
+        let s = Settings::default();
+        assert_eq!(s.proxy_mode, ProxyMode::Http);
+        assert_eq!(s.https_port, 23457);
+    }
+
+    #[test]
+    fn legacy_settings_json_without_proxy_mode_deserializes_to_http() {
+        // 老版本 settings.json 没 proxy_mode / https_port 字段
+        let raw = r#"{
+            "proxy_port": 23456,
+            "listen_all": false,
+            "autostart": false,
+            "log_retention_days": 30,
+            "db_size_limit_mb": 500,
+            "auth_enabled": true,
+            "auth_token": "abc",
+            "cors_enabled": true,
+            "cors_allow_origin": "*",
+            "preferred_language": "system"
+        }"#;
+        let s: Settings = serde_json::from_str(raw).unwrap();
+        assert_eq!(s.proxy_mode, ProxyMode::Http);
+        assert_eq!(s.https_port, 23457);
+    }
+
+    #[test]
+    fn proxy_mode_both_string_deserializes() {
+        let raw = r#"{"proxy_port":23456,"proxy_mode":"both","https_port":23457,"listen_all":false,"autostart":false,"log_retention_days":30,"db_size_limit_mb":500,"auth_enabled":true,"auth_token":"","cors_enabled":true,"cors_allow_origin":"*","preferred_language":"system"}"#;
+        let s: Settings = serde_json::from_str(raw).unwrap();
+        assert_eq!(s.proxy_mode, ProxyMode::Both);
+        assert!(s.proxy_mode.includes_http());
+        assert!(s.proxy_mode.includes_https());
+    }
+
+    #[test]
+    fn apply_patch_sets_proxy_mode_and_https_port() {
+        let mut s = Settings::default();
+        s.apply_patch(SettingsPatch {
+            proxy_mode: Some(ProxyMode::Https),
+            https_port: Some(24000),
+            ..Default::default()
+        });
+        assert_eq!(s.proxy_mode, ProxyMode::Https);
+        assert_eq!(s.https_port, 24000);
+        // 未传的字段保持默认
+        assert_eq!(s.proxy_port, 23456);
     }
 }
