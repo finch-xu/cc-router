@@ -19,7 +19,11 @@
 </p>
 
 <p align="center">
-  <a href="https://finch-xu.github.io/docs/zh/cc-router/getting-started/">📖 中文文档</a> · <a href="https://finch-xu.github.io/docs/cc-router/getting-started/">📖 English Docs</a> · <a href="https://deepwiki.com/finch-xu/cc-router">🤖 DeepWiki</a> · <a href="https://ccrouter.app">ccrouter.app</a>
+  <a href="https://ccrouter.app/docs/" target="_blank" rel="noopener">📖 中文文档</a> ·
+  <a href="https://ccrouter.app/en/docs/" target="_blank" rel="noopener">📖 English Docs</a> ·
+  <a href="https://ccrouter.app/ja/docs/" target="_blank" rel="noopener">📖 日本語ドキュメント</a> ·
+  <a href="https://deepwiki.com/finch-xu/cc-router" target="_blank" rel="noopener">🤖 DeepWiki</a> ·
+  <a href="https://ccrouter.app" target="_blank" rel="noopener">🌐 公式サイト ccrouter.app</a>
 </p>
 
 複数の LLM ベンダーのサブスクリプションを契約しているのに、Claude Code は 1 社しか指せない——cc-router は DeepSeek・Qwen（通義千問）・Kimi・MiMo・MiniMax・GLM・Claude の Token Plan / Coding Plan / 従量課金 API を 1 つの仮想プランに統合します。opus / sonnet / haiku の 3 スロットに自由に割り当て、順次（sequential）またはラウンドロビン（round_robin）でディスパッチ。レート制限や障害時には自動でフォールバックするので、契約したクォータを余すことなく使い切れます。
