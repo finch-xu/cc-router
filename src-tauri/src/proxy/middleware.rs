@@ -2,7 +2,7 @@
 //!
 //! - `cors_layer`: 给响应附加 CORS 头,默认允许 `*`;OPTIONS 预检直接返 204。
 //! - `auth_layer`: 校验请求携带的 token(从 `x-api-key` 或 `Authorization: Bearer` 提取),
-//!   匹配 `settings.auth_token` 才放行;`/health` 与 OPTIONS 直通。
+//!   匹配 `settings.auth_token` 才放行;`/health`、`/v1/models` 与 OPTIONS 直通。
 //!
 //! 两个中间件都是「每请求即时读 settings」,改 settings 无需重启 app。
 //! 关于 layer 顺序:在 server.rs 里 cors 挂在外层 → auth 在内层。这样 401 错误响应也带 CORS 头,
@@ -37,7 +37,8 @@ pub async fn cors_layer(State(state): State<AppState>, req: Request<Body>, next:
 }
 
 pub async fn auth_layer(State(state): State<AppState>, req: Request<Body>, next: Next) -> Response {
-    if req.method() == Method::OPTIONS || req.uri().path() == "/health" {
+    let path = req.uri().path();
+    if req.method() == Method::OPTIONS || path == "/health" || path == "/v1/models" {
         return next.run(req).await;
     }
 

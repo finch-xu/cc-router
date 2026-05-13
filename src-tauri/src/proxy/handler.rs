@@ -71,3 +71,44 @@ pub fn error_body(kind: &str, message: &str) -> serde_json::Value {
 pub fn error_response(status: StatusCode, kind: &str, message: &str) -> Response {
     (status, Json(error_body(kind, message))).into_response()
 }
+
+/// GET /v1/models
+/// 返回 cc-router 对外暴露的固定模型清单, 无鉴权 (与 /health 同级在 auth_layer 直通).
+/// schema 对齐 Anthropic 官方 /v1/models 响应。
+pub async fn models() -> Response {
+    const MODEL_IDS: &[&str] = &[
+        "model-opus",
+        "model-sonnet",
+        "model-haiku",
+        "claude-opus-4-7",
+        "claude-sonnet-4-6",
+        "claude-haiku-4-5",
+        "anthropic/claude-opus-4-7",
+        "anthropic/claude-sonnet-4-6",
+        "anthropic/claude-haiku-4-5",
+        "anthropic/model-opus",
+        "anthropic/sonnet",
+        "anthropic/haiku",
+    ];
+    const CREATED_AT: &str = "2026-01-01T00:00:00Z";
+
+    let data: Vec<serde_json::Value> = MODEL_IDS
+        .iter()
+        .map(|id| {
+            json!({
+                "type": "model",
+                "id": id,
+                "display_name": id,
+                "created_at": CREATED_AT,
+            })
+        })
+        .collect();
+
+    Json(json!({
+        "data": data,
+        "has_more": false,
+        "first_id": MODEL_IDS.first(),
+        "last_id": MODEL_IDS.last(),
+    }))
+    .into_response()
+}
