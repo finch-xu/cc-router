@@ -11,7 +11,6 @@
 //! 不在本模块范围:
 //! - 装信任库的跨平台调用 (admin 提权; 本期由用户手动导入).
 //! - mTLS 客户端证书.
-//! - 任意 hostname/IP 重签 leaf.
 
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -25,18 +24,20 @@ mod store;
 
 pub use config::TlsStatus;
 
-/// 启动时调一次. 缺则生成, 有则验证 + 必要时续签 leaf. 返回可直接喂给 axum-server 的 rustls ServerConfig.
+/// 启动时调一次. 缺则生成, 有则直接复用. 返回可直接喂给 axum-server 的 rustls ServerConfig.
+///
+/// `extra_sans` 仅影响新生成的 leaf 证书; 如果磁盘上已有 leaf, 这里不会因 SAN 变化而重签
+/// (避免每次启动覆盖用户已固定的证书). 改动后需显式调 `regenerate_leaf`.
 pub async fn load_or_init_server_config(
     app_data_dir: &Path,
+    extra_sans: &[String],
 ) -> AppResult<Arc<rustls::ServerConfig>> {
     let tls_dir = tls_dir(app_data_dir);
     tokio::fs::create_dir_all(&tls_dir)
         .await
         .map_err(AppError::Io)?;
-    // CA: 不存在则生成.
     let ca_material = ca::ensure(&tls_dir).await?;
-    // Leaf: 不存在 / 过期 / SAN 不匹配则用 CA 重签.
-    let leaf_material = leaf::ensure(&tls_dir, &ca_material).await?;
+    let leaf_material = leaf::ensure(&tls_dir, &ca_material, extra_sans).await?;
     config::build_server_config(&leaf_material)
 }
 
@@ -64,11 +65,11 @@ pub async fn export_ca_pem(app_data_dir: &Path, dest: &Path) -> AppResult<()> {
         .map_err(AppError::Io)
 }
 
-/// 重新生成 leaf 证书 (CA 不动). 调试 / 手动续签入口.
-pub async fn regenerate_leaf(app_data_dir: &Path) -> AppResult<()> {
+/// 重新生成 leaf 证书 (CA 不动). 用 `extra_sans` 注入用户配置的额外 SAN.
+pub async fn regenerate_leaf(app_data_dir: &Path, extra_sans: &[String]) -> AppResult<()> {
     let tls_dir = tls_dir(app_data_dir);
     let ca_material = ca::load(&tls_dir).await?;
-    leaf::force_regenerate(&tls_dir, &ca_material).await
+    leaf::force_regenerate(&tls_dir, &ca_material, extra_sans).await
 }
 
 /// 读取当前 TLS 状态 (用于前端 status 展示).

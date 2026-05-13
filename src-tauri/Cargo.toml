@@ -62,6 +62,9 @@ crc32fast = "1.4"
 [dev-dependencies]
 wiremock = "0.6"
 tempfile = "3"
+# SAN e2e 用: 解析 leaf.pem 验证 SAN 列表. 已经被 rcgen feature 间接引入, 这里显式声明给 tests 用.
+x509-parser = "0.16"
+pem = "3"
 
 [profile.release]
 panic = "abort"

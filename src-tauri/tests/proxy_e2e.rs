@@ -222,7 +222,7 @@ async fn tls_listener_serves_https_health() {
     use tempfile::tempdir;
 
     let app_data_dir = tempdir().expect("tempdir");
-    let cfg = cc_router_lib::tls::load_or_init_server_config(app_data_dir.path())
+    let cfg = cc_router_lib::tls::load_or_init_server_config(app_data_dir.path(), &[])
         .await
         .expect("tls server config");
 
@@ -260,16 +260,98 @@ async fn tls_listener_serves_https_health() {
     serve.abort();
 }
 
+/// 额外 SAN 注入: extra_sans 里的 IP / DNS 进了签发出来的 leaf 证书 SAN 列表,
+/// 同时内置 localhost/127.0.0.1/::1 不被覆盖.
+#[tokio::test]
+async fn tls_leaf_includes_extra_sans() {
+    use std::net::IpAddr;
+    use tempfile::tempdir;
+    use x509_parser::extensions::GeneralName;
+    use x509_parser::prelude::FromDer;
+
+    let app_data_dir = tempdir().expect("tempdir");
+    let extras = vec![
+        "192.168.1.5".to_string(),
+        "my-laptop.local".to_string(),
+        "  ".to_string(),                 // 空白被丢
+        "not valid host!".to_string(),    // 非法 DNS 被丢
+    ];
+    cc_router_lib::tls::load_or_init_server_config(app_data_dir.path(), &extras)
+        .await
+        .expect("tls init with extras");
+
+    let leaf_pem =
+        std::fs::read_to_string(app_data_dir.path().join("tls").join("leaf.pem")).unwrap();
+    let pem = pem::parse(leaf_pem.as_bytes()).expect("parse leaf pem");
+    let (_, cert) = x509_parser::certificate::X509Certificate::from_der(pem.contents())
+        .expect("parse x509");
+
+    let san = cert
+        .extensions()
+        .iter()
+        .find_map(|ext| match ext.parsed_extension() {
+            x509_parser::extensions::ParsedExtension::SubjectAlternativeName(s) => Some(s),
+            _ => None,
+        })
+        .expect("SAN extension");
+
+    let mut has_localhost = false;
+    let mut has_loopback = false;
+    let mut has_extra_ip = false;
+    let mut has_extra_dns = false;
+    for name in &san.general_names {
+        match name {
+            GeneralName::DNSName(d) => {
+                if *d == "localhost" {
+                    has_localhost = true;
+                }
+                if *d == "my-laptop.local" {
+                    has_extra_dns = true;
+                }
+            }
+            GeneralName::IPAddress(bytes) => {
+                if let Ok(ip) = parse_ip_bytes(bytes) {
+                    if ip == IpAddr::from([127, 0, 0, 1]) {
+                        has_loopback = true;
+                    }
+                    if ip == IpAddr::from([192, 168, 1, 5]) {
+                        has_extra_ip = true;
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
+    assert!(has_localhost, "内置 localhost SAN 未保留");
+    assert!(has_loopback, "内置 127.0.0.1 SAN 未保留");
+    assert!(has_extra_ip, "192.168.1.5 未注入 SAN");
+    assert!(has_extra_dns, "my-laptop.local 未注入 SAN");
+}
+
+fn parse_ip_bytes(bytes: &[u8]) -> Result<std::net::IpAddr, ()> {
+    match bytes.len() {
+        4 => Ok(std::net::IpAddr::V4(std::net::Ipv4Addr::new(
+            bytes[0], bytes[1], bytes[2], bytes[3],
+        ))),
+        16 => {
+            let mut arr = [0u8; 16];
+            arr.copy_from_slice(bytes);
+            Ok(std::net::IpAddr::V6(std::net::Ipv6Addr::from(arr)))
+        }
+        _ => Err(()),
+    }
+}
+
 /// 双协议端口冲突避免: HTTP 占 N, HTTPS 默认也 N 时, 启动应 +1 到 N+1.
 /// 这里只测 tls 模块本身的端口探测 helper 行为不衰减.
 #[tokio::test]
 async fn tls_module_idempotent_on_second_init() {
     use tempfile::tempdir;
     let app_data_dir = tempdir().expect("tempdir");
-    let _cfg_1 = cc_router_lib::tls::load_or_init_server_config(app_data_dir.path())
+    let _cfg_1 = cc_router_lib::tls::load_or_init_server_config(app_data_dir.path(), &[])
         .await
         .expect("first init");
-    let _cfg_2 = cc_router_lib::tls::load_or_init_server_config(app_data_dir.path())
+    let _cfg_2 = cc_router_lib::tls::load_or_init_server_config(app_data_dir.path(), &[])
         .await
         .expect("second init reuses CA");
     let ca_pem_path = cc_router_lib::tls::ca_pem_path(app_data_dir.path());

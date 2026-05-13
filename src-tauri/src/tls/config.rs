@@ -84,7 +84,9 @@ mod tests {
     #[tokio::test]
     async fn ca_and_leaf_roundtrip_then_build_config() {
         let dir = tempdir().unwrap();
-        let _cfg = crate::tls::load_or_init_server_config(dir.path()).await.unwrap();
+        let _cfg = crate::tls::load_or_init_server_config(dir.path(), &[])
+            .await
+            .unwrap();
         let tls_dir = dir.path().join("tls");
         let status = read_status(&tls_dir).await.unwrap();
         assert!(status.ca_exists);
@@ -95,11 +97,11 @@ mod tests {
     #[tokio::test]
     async fn second_load_reuses_existing_ca() {
         let dir = tempdir().unwrap();
-        crate::tls::load_or_init_server_config(dir.path()).await.unwrap();
+        crate::tls::load_or_init_server_config(dir.path(), &[]).await.unwrap();
         let ca_pem_1 = tokio::fs::read_to_string(dir.path().join("tls/ca.pem"))
             .await
             .unwrap();
-        crate::tls::load_or_init_server_config(dir.path()).await.unwrap();
+        crate::tls::load_or_init_server_config(dir.path(), &[]).await.unwrap();
         let ca_pem_2 = tokio::fs::read_to_string(dir.path().join("tls/ca.pem"))
             .await
             .unwrap();
@@ -109,14 +111,14 @@ mod tests {
     #[tokio::test]
     async fn regenerate_leaf_keeps_ca() {
         let dir = tempdir().unwrap();
-        crate::tls::load_or_init_server_config(dir.path()).await.unwrap();
+        crate::tls::load_or_init_server_config(dir.path(), &[]).await.unwrap();
         let ca_before = tokio::fs::read_to_string(dir.path().join("tls/ca.pem"))
             .await
             .unwrap();
         let leaf_before = tokio::fs::read_to_string(dir.path().join("tls/leaf.pem"))
             .await
             .unwrap();
-        crate::tls::regenerate_leaf(dir.path()).await.unwrap();
+        crate::tls::regenerate_leaf(dir.path(), &[]).await.unwrap();
         let ca_after = tokio::fs::read_to_string(dir.path().join("tls/ca.pem"))
             .await
             .unwrap();

@@ -1,4 +1,9 @@
+import type React from "react";
 import { useState, useEffect, useRef } from "react";
+
+function arraysEqual<T>(a: readonly T[], b: readonly T[]): boolean {
+  return a.length === b.length && a.every((v, i) => v === b[i]);
+}
 import { AlertTriangle, RefreshCw, Check } from "lucide-react";
 import { Toggle } from "@/components/Toggle";
 import { Spinner } from "@/components/Spinner";
@@ -49,13 +54,14 @@ export function SettingsPage() {
   // 仅在首次拿到 settings.data 时灌入本地 state + 记录 baseline. 后续 mutate refetch
   // 不再回灌, 否则会覆盖用户正在 input 里编辑但尚未 blur 的值 (port/cors origin 跳光标).
   const initializedRef = useRef(false);
-  // baseline = 进程启动时观测到的 port/listen_all/proxy_mode/https_port. 代理直到 app 重启才会
-  // 按新值绑定, 所以"需要重启"的判定要拿 baseline (而非 settings.data) 比.
+  // baseline = 进程启动时观测到的 proxy/tls 配置. 代理直到 app 重启才会按新值绑定, 所以
+  // "需要重启"的判定要拿 baseline (而非 settings.data) 比.
   const baselineRef = useRef<{
     proxy_port: number;
     listen_all: boolean;
     proxy_mode: ProxyMode;
     https_port: number;
+    tls_extra_sans: string[];
   } | null>(null);
 
   const generateTokenMut = useGenerateNewToken();
@@ -74,6 +80,7 @@ export function SettingsPage() {
       listen_all: settings.data.listen_all,
       proxy_mode: settings.data.proxy_mode ?? "http",
       https_port: settings.data.https_port ?? 23457,
+      tls_extra_sans: settings.data.tls_extra_sans ?? [],
     };
     setPort(settings.data.proxy_port);
     setProxyMode(settings.data.proxy_mode ?? "http");
@@ -95,7 +102,11 @@ export function SettingsPage() {
     (port !== baselineRef.current.proxy_port ||
       listenAll !== baselineRef.current.listen_all ||
       proxyMode !== baselineRef.current.proxy_mode ||
-      httpsPort !== baselineRef.current.https_port);
+      httpsPort !== baselineRef.current.https_port ||
+      !arraysEqual(
+        settings.data?.tls_extra_sans ?? [],
+        baselineRef.current.tls_extra_sans,
+      ));
 
   const httpsEnabled = proxyMode === "https" || proxyMode === "both";
 
@@ -747,10 +758,12 @@ export function SettingsPage() {
   );
 }
 
-/** TLS 证书管理子组件: 显示 CA 指纹 + 导出 + 重新生成 leaf. 仅 proxy_mode 包含 https 时挂载. */
+/** TLS 证书管理子组件: 显示 CA 指纹 + 导出 + 重新生成 leaf + 自定义 SAN. 仅 proxy_mode 包含 https 时挂载. */
 function HttpsCertSection() {
   const { t } = useT();
   const qc = useQueryClient();
+  const settings = useSettings();
+  const updateMut = useUpdateSettings();
   // CA 在 app 生命周期内不变, 由 tlsRegenerateLeaf 显式失效, 不需要 focus 重 fetch.
   const tlsStatus = useQuery<TlsStatus>({
     queryKey: ["tlsStatus"],
@@ -758,6 +771,22 @@ function HttpsCertSection() {
     staleTime: Infinity,
     refetchOnWindowFocus: false,
   });
+
+  async function onSansBlur(e: React.FocusEvent<HTMLTextAreaElement>) {
+    const next = e.target.value
+      .split("\n")
+      .map((s) => s.trim())
+      .filter(Boolean);
+    if (arraysEqual(next, settings.data?.tls_extra_sans ?? [])) return;
+    try {
+      await updateMut.mutateAsync({ tls_extra_sans: next });
+      const fresh = await api.tlsRegenerateLeaf();
+      qc.setQueryData(["tlsStatus"], fresh);
+      alert(t("settings.https.cert.sans.regenerated"));
+    } catch (err) {
+      alert(`${t("settings.https.cert.regenerateFailed")}: ${err}`);
+    }
+  }
 
   async function onExportCa() {
     try {
@@ -801,6 +830,23 @@ function HttpsCertSection() {
           <span className="mono" style={{ fontSize: 12, color: "var(--ink-2)" }}>
             {shortFp}
           </span>
+        </div>
+        <div className="setting-row" style={{ display: "block" }}>
+          <div className="label-col" style={{ marginBottom: 6 }}>
+            {t("settings.https.cert.sans.label")}
+            <div className="desc">{t("settings.https.cert.sans.desc")}</div>
+          </div>
+          <textarea
+            // key 让 settings.data 第一次到达时强制 remount, defaultValue 才能生效;
+            // 后续 react-query refetch 同值 join 后 key 不变, 不会覆盖用户编辑中的输入.
+            key={(settings.data?.tls_extra_sans ?? []).join("\n")}
+            className="input mono"
+            rows={3}
+            placeholder={"192.168.1.5\nmy-laptop.local"}
+            style={{ minHeight: 72, fontSize: 12 }}
+            defaultValue={(settings.data?.tls_extra_sans ?? []).join("\n")}
+            onBlur={onSansBlur}
+          />
         </div>
         <div className="setting-row">
           <div className="label-col">

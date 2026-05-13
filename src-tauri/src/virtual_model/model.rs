@@ -28,9 +28,9 @@ impl VirtualModelName {
         // Accept LiteLLM-style `anthropic/<model-name>` prefix (issue #5).
         let s = s.strip_prefix("anthropic/").unwrap_or(s);
         match s {
-            "model-opus" => Some(Self::Opus),
-            "model-sonnet" => Some(Self::Sonnet),
-            "model-haiku" => Some(Self::Haiku),
+            "model-opus" | "claude-opus-4-7" => Some(Self::Opus),
+            "model-sonnet" | "claude-sonnet-4-6" => Some(Self::Sonnet),
+            "model-haiku" | "claude-haiku-4-5" => Some(Self::Haiku),
             "model-fallback" => Some(Self::Fallback),
             _ => None,
         }
@@ -96,6 +96,27 @@ mod tests {
         assert_eq!(VirtualModelName::parse("model-sonnet"), Some(VirtualModelName::Sonnet));
         assert_eq!(VirtualModelName::parse("model-haiku"), Some(VirtualModelName::Haiku));
         assert_eq!(VirtualModelName::parse("model-fallback"), Some(VirtualModelName::Fallback));
+    }
+
+    #[test]
+    fn parse_recognizes_versioned_model_aliases() {
+        // 无前缀
+        assert_eq!(VirtualModelName::parse("claude-opus-4-7"), Some(VirtualModelName::Opus));
+        assert_eq!(VirtualModelName::parse("claude-sonnet-4-6"), Some(VirtualModelName::Sonnet));
+        assert_eq!(VirtualModelName::parse("claude-haiku-4-5"), Some(VirtualModelName::Haiku));
+        // anthropic/ 前缀
+        assert_eq!(
+            VirtualModelName::parse("anthropic/claude-opus-4-7"),
+            Some(VirtualModelName::Opus)
+        );
+        assert_eq!(
+            VirtualModelName::parse("anthropic/claude-sonnet-4-6"),
+            Some(VirtualModelName::Sonnet)
+        );
+        assert_eq!(
+            VirtualModelName::parse("anthropic/claude-haiku-4-5"),
+            Some(VirtualModelName::Haiku)
+        );
     }
 
     #[test]

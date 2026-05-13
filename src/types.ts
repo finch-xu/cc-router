@@ -280,6 +280,8 @@ export interface Settings {
   proxy_mode: ProxyMode;
   /** HTTPS 端口, 默认 23457; 仅当 proxy_mode 包含 https 时使用 */
   https_port: number;
+  /** 用户配置的额外 SAN (IP/hostname). 内置 localhost/127.0.0.1/::1 永远在 leaf 证书里, 此项追加. */
+  tls_extra_sans: string[];
   /** true: 监听 0.0.0.0（局域网可访问）；false: 仅 127.0.0.1 */
   listen_all: boolean;
   autostart: boolean;
@@ -315,6 +317,7 @@ export interface SettingsPatch {
   proxy_port?: number;
   proxy_mode?: ProxyMode;
   https_port?: number;
+  tls_extra_sans?: string[];
   listen_all?: boolean;
   autostart?: boolean;
   log_retention_days?: number;

@@ -39,6 +39,12 @@ pub struct Settings {
     /// HTTPS 端口 (仅在 proxy_mode 包含 Https 时使用). 默认 23457.
     #[serde(default = "default_https_port")]
     pub https_port: u16,
+    /// 用户配置的额外 SAN (Subject Alternative Name) 列表. 每条字符串按 IpAddr::from_str 尝试解析:
+    /// 成功 = IP SAN; 失败 = DnsName SAN (rcgen 进一步校验, 不合规的静默丢弃).
+    /// 内置 localhost / 127.0.0.1 / ::1 永远在 SAN 列表里, 此 vec 是追加项.
+    /// 改动后需点「重新生成 leaf」按钮 + 重启 app 才生效.
+    #[serde(default)]
+    pub tls_extra_sans: Vec<String>,
     /// true: 监听 0.0.0.0（局域网可访问）；false: 监听 127.0.0.1（仅本机）。
     #[serde(default)]
     pub listen_all: bool,
@@ -108,6 +114,7 @@ impl Default for Settings {
             proxy_port: default_port(),
             proxy_mode: ProxyMode::default(),
             https_port: default_https_port(),
+            tls_extra_sans: Vec::new(),
             listen_all: false,
             autostart: false,
             log_retention_days: default_retention(),
@@ -128,6 +135,7 @@ pub struct SettingsPatch {
     pub proxy_port: Option<u16>,
     pub proxy_mode: Option<ProxyMode>,
     pub https_port: Option<u16>,
+    pub tls_extra_sans: Option<Vec<String>>,
     pub listen_all: Option<bool>,
     pub autostart: Option<bool>,
     pub log_retention_days: Option<u32>,
@@ -150,6 +158,9 @@ impl Settings {
         }
         if let Some(p) = patch.https_port {
             self.https_port = p;
+        }
+        if let Some(p) = patch.tls_extra_sans {
+            self.tls_extra_sans = p;
         }
         if let Some(p) = patch.listen_all {
             self.listen_all = p;
@@ -278,5 +289,37 @@ mod tests {
         assert_eq!(s.https_port, 24000);
         // 未传的字段保持默认
         assert_eq!(s.proxy_port, 23456);
+    }
+
+    #[test]
+    fn default_tls_extra_sans_is_empty() {
+        assert!(Settings::default().tls_extra_sans.is_empty());
+    }
+
+    #[test]
+    fn legacy_settings_json_without_tls_extra_sans_deserializes_to_empty() {
+        let raw = r#"{
+            "proxy_port": 23456, "proxy_mode": "http", "https_port": 23457,
+            "listen_all": false, "autostart": false,
+            "log_retention_days": 30, "db_size_limit_mb": 500,
+            "auth_enabled": true, "auth_token": "",
+            "cors_enabled": true, "cors_allow_origin": "*",
+            "preferred_language": "system"
+        }"#;
+        let s: Settings = serde_json::from_str(raw).unwrap();
+        assert!(s.tls_extra_sans.is_empty());
+    }
+
+    #[test]
+    fn apply_patch_sets_tls_extra_sans() {
+        let mut s = Settings::default();
+        s.apply_patch(SettingsPatch {
+            tls_extra_sans: Some(vec!["192.168.1.5".to_string(), "my-laptop.local".to_string()]),
+            ..Default::default()
+        });
+        assert_eq!(
+            s.tls_extra_sans,
+            vec!["192.168.1.5".to_string(), "my-laptop.local".to_string()]
+        );
     }
 }

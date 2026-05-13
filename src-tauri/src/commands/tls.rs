@@ -37,7 +37,8 @@ pub async fn tls_export_ca_pem(
 #[tauri::command]
 pub async fn tls_regenerate_leaf(state: State<'_, AppState>) -> AppResult<TlsStatus> {
     let app_data_dir = paths::app_data_dir(&state.app_handle)?;
+    let extra_sans = state.settings.read().await.tls_extra_sans.clone();
     tls::ensure_ca(&app_data_dir).await?;
-    tls::regenerate_leaf(&app_data_dir).await?;
+    tls::regenerate_leaf(&app_data_dir, &extra_sans).await?;
     tls::read_status(&app_data_dir).await
 }

@@ -53,7 +53,11 @@
 <body>
 
 <h1>cc-router 调试台</h1>
-<div class="hint">本地调试用 · 直接打 <code>http://127.0.0.1:23456/v1/messages</code></div>
+<div class="hint">本地调试用 · 直接打 <code id="hintUrl">http://127.0.0.1:23456/v1/messages</code></div>
+<div id="httpsTip" class="hint" style="display:none;color:#b45309;background:#fffbeb;border:1px solid #fde68a;border-radius:6px;padding:6px 10px;margin-top:-6px;margin-bottom:12px">
+  HTTPS 模式: 需先在 cc-router「设置 → HTTPS 证书」<strong>导出 CA</strong> 并装入系统/浏览器信任库。<br>
+  用 LAN IP (如 <code>192.168.x.x</code>) 测试需先把该 IP 加进「额外 SAN」并重新生成证书。
+</div>
 
 <div class="modebar">
   <button data-mode="single" class="active">单次</button>
@@ -66,6 +70,13 @@
     <legend>请求</legend>
 
     <div class="row">
+      <div style="flex:0 0 90px">
+        <label>Scheme</label>
+        <select id="scheme">
+          <option value="http">HTTP</option>
+          <option value="https">HTTPS</option>
+        </select>
+      </div>
       <div>
         <label>Host</label>
         <input id="host" value="127.0.0.1">
@@ -348,7 +359,7 @@ async function sendRequest(body) {
   $('usageInfo').textContent = '';
   $('timeInfo').textContent = '';
 
-  const url = `http://${$('host').value}:${$('port').value}/v1/messages`;
+  const url = `${$('scheme').value}://${$('host').value}:${$('port').value}/v1/messages`;
   const headers = {
     'Content-Type': 'application/json',
     'anthropic-version': '2023-06-01',
@@ -613,6 +624,23 @@ function renderToolFill() {
 }
 
 $('abortBtn').addEventListener('click', () => state.abortCtrl?.abort());
+
+// scheme / host / port 联动: 顶部 hint URL 实时跟随; 切换协议时若 port 仍为另一协议默认值,
+// 自动切到本协议默认 (23456 ↔ 23457), 用户已自定义的 port 不覆盖.
+function updateHintUrl() {
+  const url = `${$('scheme').value}://${$('host').value}:${$('port').value}/v1/messages`;
+  $('hintUrl').textContent = url;
+  $('httpsTip').style.display = $('scheme').value === 'https' ? '' : 'none';
+}
+$('scheme').addEventListener('change', () => {
+  const port = $('port');
+  if ($('scheme').value === 'https' && port.value === '23456') port.value = '23457';
+  if ($('scheme').value === 'http'  && port.value === '23457') port.value = '23456';
+  updateHintUrl();
+});
+$('host').addEventListener('input', updateHintUrl);
+$('port').addEventListener('input', updateHintUrl);
+updateHintUrl();
 </script>
 
 </body>
