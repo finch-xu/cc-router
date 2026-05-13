@@ -19,7 +19,7 @@
 </p>
 
 <p align="center">
-  <a href="https://finch-xu.github.io/docs/zh/cc-router/getting-started/">📖 中文文档</a> · <a href="https://finch-xu.github.io/docs/cc-router/getting-started/">📖 English Docs</a> · <a href="https://deepwiki.com/finch-xu/cc-router">🤖 DeepWiki</a>
+  <a href="https://finch-xu.github.io/docs/zh/cc-router/getting-started/">📖 中文文档</a> · <a href="https://finch-xu.github.io/docs/cc-router/getting-started/">📖 English Docs</a> · <a href="https://deepwiki.com/finch-xu/cc-router">🤖 DeepWiki</a> · <a href="https://ccrouter.app">ccrouter.app</a>
 </p>
 
 订阅买多了 Claude Code 却只能用一家？cc-router 把 DeepSeek、Qwen、Kimi、MiMo、MiniMax、GLM、Claude 的 Token Plan、Coding Plan、API 额度合并成一个虚拟 Plan，任意搭配 opus / sonnet / haiku 三槽位，按顺序或轮询调度，限流、失败自动切换——充分利用每一份额度。
