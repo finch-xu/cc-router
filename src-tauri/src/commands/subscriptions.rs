@@ -14,10 +14,19 @@ use crate::state::AppState;
 use crate::subscription::{
     model::{
         ModelCache, ModelInfo, ModelSlots, OAuthMetadata, SubscriptionDto, SubscriptionRow,
-        SubscriptionRuntime, CUSTOM_SOURCE_MARKER,
+        SubscriptionRuntime, CUSTOM_GEMINI_SOURCE_MARKER, CUSTOM_SOURCE_MARKER,
     },
     model_discovery, ping, state_machine, store,
 };
+
+/// 自定义订阅的协议家族, 决定 cc-router 用哪条 dispatch 路径.
+#[derive(Debug, Clone, Copy, Deserialize, PartialEq, Eq, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum CustomProtocol {
+    #[default]
+    Anthropic,
+    Gemini,
+}
 
 /// 创建订阅时的 source 区分: 内置 yaml 模板 vs 用户自定义。
 #[derive(Debug, Deserialize)]
@@ -29,12 +38,15 @@ pub enum CreateSource {
         endpoint_id: String,
     },
     /// 自定义路径: 用户在表单里填完整连接信息。
+    /// `protocol` 缺省 → Anthropic 透传; `Gemini` → `auth_type=GeminiApiKey` + `__custom_gemini__` provider_id.
     Custom {
         provider_display_name: String,
         base_url: String,
         messages_path: String,
         auth_header_name: String,
         auth_header_format: AuthHeaderFormat,
+        #[serde(default)]
+        protocol: CustomProtocol,
     },
 }
 
@@ -188,16 +200,49 @@ pub async fn create_subscription(
             messages_path,
             auth_header_name,
             auth_header_format,
+            protocol,
         } => {
             validate_base_url(&base_url)?;
             validate_messages_path(&messages_path)?;
+            let is_gemini = protocol == CustomProtocol::Gemini;
+            if is_gemini && !messages_path.contains("{model}") {
+                return Err(AppError::BadRequest(
+                    "Gemini 兼容订阅的 messages_path 必须包含 {model} 占位符".into(),
+                ));
+            }
+            let (provider_id, endpoint_id, auth_type_choice, icon, discovery) = if is_gemini {
+                (
+                    CUSTOM_GEMINI_SOURCE_MARKER.to_string(),
+                    CUSTOM_GEMINI_SOURCE_MARKER.to_string(),
+                    AuthType::GeminiApiKey,
+                    "google".to_string(),
+                    // Gemini 端点通常都有 /v1beta/models, 默认启用自动发现; 失败时前端 manual fallback.
+                    ModelDiscovery {
+                        enabled: true,
+                        path: "/v1beta/models".into(),
+                        ..ModelDiscovery::default()
+                    },
+                )
+            } else {
+                (
+                    CUSTOM_SOURCE_MARKER.to_string(),
+                    CUSTOM_SOURCE_MARKER.to_string(),
+                    AuthType::ApiKey,
+                    "custom".to_string(),
+                    // 自定义 Anthropic 订阅默认 disable model_discovery, 走 manual fallback
+                    ModelDiscovery {
+                        enabled: false,
+                        ..ModelDiscovery::default()
+                    },
+                )
+            };
             SubscriptionRow {
                 id,
-                provider_id: CUSTOM_SOURCE_MARKER.to_string(),
-                endpoint_id: CUSTOM_SOURCE_MARKER.to_string(),
+                provider_id,
+                endpoint_id,
                 display_name: input.display_name,
                 api_key: input.api_key,
-                auth_type: AuthType::ApiKey,
+                auth_type: auth_type_choice,
                 oauth_metadata: OAuthMetadata::default(),
                 model_slots: input.model_slots,
                 enabled: true,
@@ -211,13 +256,9 @@ pub async fn create_subscription(
                 auth_header_format,
                 required_headers: BTreeMap::new(),
                 forward_headers: Vec::new(),
-                // 自定义订阅默认 disable model_discovery, 走 manual fallback
-                model_discovery: ModelDiscovery {
-                    enabled: false,
-                    ..ModelDiscovery::default()
-                },
+                model_discovery: discovery,
                 provider_display_name,
-                provider_icon: "custom".to_string(),
+                provider_icon: icon,
                 is_user_defined: true,
             }
         }

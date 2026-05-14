@@ -16,6 +16,7 @@ import Stepfun from "@lobehub/icons/es/Stepfun";
 import BaiduCloud from "@lobehub/icons/es/BaiduCloud";
 import ModelScope from "@lobehub/icons/es/ModelScope";
 import OpenAI from "@lobehub/icons/es/OpenAI";
+import Gemini from "@lobehub/icons/es/Gemini";
 import { cn } from "@/lib/utils";
 
 type IconVariant = ComponentType<{ size?: number | string }>;
@@ -43,6 +44,8 @@ const BRAND_MAP: Record<string, BrandIcon> = {
   modelscope: ModelScope as unknown as BrandIcon,
   openai: OpenAI as unknown as BrandIcon,
   openai_codex: OpenAI as unknown as BrandIcon,
+  google: Gemini as unknown as BrandIcon,
+  google_ai_studio: Gemini as unknown as BrandIcon,
 };
 
 interface Props {

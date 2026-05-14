@@ -4,6 +4,7 @@ use std::sync::Arc;
 use chrono::{DateTime, TimeZone, Utc};
 use sqlx::{Row, SqlitePool};
 use tokio::sync::RwLock;
+use tracing::warn;
 use uuid::Uuid;
 
 use std::str::FromStr;
@@ -15,6 +16,10 @@ use crate::subscription::model::{
 };
 
 /// 启动时从 DB 加载全部订阅，并初始化运行时状态。
+///
+/// 单条 row 解析失败时 warn+skip 而非 fail-fast。原因: 用户从含新 AuthType variant
+/// (e.g. `gemini_api_key`) 的版本降级到旧 binary 时, 旧 `AuthType::from_str` 会失败,
+/// 不应让整个订阅列表加载失败导致 app 不可用。
 pub async fn load_runtime(
     pool: &SqlitePool,
 ) -> AppResult<HashMap<Uuid, Arc<RwLock<SubscriptionRuntime>>>> {
@@ -34,7 +39,20 @@ pub async fn load_runtime(
 
     let mut out = HashMap::new();
     for row in rows {
-        let sub = row_to_row(&row)?;
+        let sub = match row_to_row(&row) {
+            Ok(s) => s,
+            Err(e) => {
+                let id_str: String = row.try_get("id").unwrap_or_default();
+                let display_name: String = row.try_get("display_name").unwrap_or_default();
+                warn!(
+                    subscription_id = %id_str,
+                    display_name = %display_name,
+                    error = %e,
+                    "订阅 row 解析失败, 跳过该订阅 (可能是从含新 AuthType 的版本降级所致)"
+                );
+                continue;
+            }
+        };
         let cache = load_model_cache(pool, &sub.id, &sub.endpoint_id).await?;
         let mut rt = SubscriptionRuntime::from_row(sub);
         rt.model_cache = cache;

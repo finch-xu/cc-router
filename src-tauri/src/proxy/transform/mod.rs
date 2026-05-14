@@ -7,7 +7,10 @@
 //! - [`aws_event_stream`] - AWS Event Stream 二进制流解码器. 用于 Kiro/CodeWhisperer 响应解析.
 //! - [`kiro_codewhisperer`] - Anthropic Messages ↔ AWS CodeWhisperer (Kiro IDE 后端). 用于 `auth_type=KiroOauth`.
 //!   入口: `anthropic_to_codewhisperer`, `KiroSseConverter`, `NonStreamingCollector`.
+//! - [`gemini`] - Anthropic Messages ↔ Google Gemini generateContent. 用于 `auth_type=GeminiApiKey`.
+//!   入口: `anthropic_to_gemini`, `GeminiSseConverter`, `NonStreamingCollector`.
 
 pub mod openai_responses;
 pub mod aws_event_stream;
 pub mod kiro_codewhisperer;
+pub mod gemini;

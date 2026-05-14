@@ -36,12 +36,21 @@ import type {
 type Step = 1 | 2;
 
 const CUSTOM_VALUE = "__custom__";
+const CUSTOM_GEMINI_VALUE = "__custom_gemini__";
 
-/** 自定义路径的鉴权方式预设: 选一个就同时确定 header_name + header_format */
+/** 自定义 Anthropic 兼容路径的鉴权方式预设: 选一个就同时确定 header_name + header_format */
 type AuthPreset = "bearer" | "x_api_key";
 const AUTH_PRESETS: Record<AuthPreset, { name: string; format: AuthHeaderFormat; label: string }> = {
   bearer: { name: "Authorization", format: "bearer", label: "Authorization: Bearer <key>" },
   x_api_key: { name: "x-api-key", format: "raw", label: "x-api-key: <key>" },
+};
+
+/** Gemini 兼容路径锁定的连接参数. */
+const GEMINI_DEFAULTS = {
+  baseUrl: "https://generativelanguage.googleapis.com",
+  messagesPath: "/v1beta/models/{model}:streamGenerateContent",
+  authHeaderName: "x-goog-api-key",
+  authHeaderFormat: "raw" as AuthHeaderFormat,
 };
 
 export function SubscriptionNewPage() {
@@ -74,12 +83,46 @@ export function SubscriptionNewPage() {
   const [customMessagesPath, setCustomMessagesPath] = useState<string>("/v1/messages");
   const [customAuthPreset, setCustomAuthPreset] = useState<AuthPreset>("bearer");
 
-  const isCustom = providerId === CUSTOM_VALUE;
+  const isCustomAnthropic = providerId === CUSTOM_VALUE;
+  const isCustomGemini = providerId === CUSTOM_GEMINI_VALUE;
+  const isCustom = isCustomAnthropic || isCustomGemini;
 
   const provider = useMemo(
-    () => (isCustom ? undefined : providers.data?.find((p) => p.id === providerId)),
-    [providers.data, providerId, isCustom],
+    () => providers.data?.find((p) => p.id === providerId),
+    [providers.data, providerId],
   );
+
+  function renderProviderTriggerLabel() {
+    if (isCustomGemini) {
+      return (
+        <span style={{ display: "inline-flex", alignItems: "center", gap: 8, minWidth: 0 }}>
+          <ProviderLogo iconId="google" size={20} />
+          {t("subscriptionNew.customGeminiProvider")}
+        </span>
+      );
+    }
+    if (isCustom) {
+      return (
+        <span style={{ display: "inline-flex", alignItems: "center", gap: 8, minWidth: 0 }}>
+          <Boxes size={20} />
+          {t("subscriptionNew.customProvider")}
+        </span>
+      );
+    }
+    if (provider) {
+      return (
+        <span style={{ display: "inline-flex", alignItems: "center", gap: 8, minWidth: 0 }}>
+          <ProviderLogo iconId={provider.icon} size={20} />
+          <span style={{ overflow: "hidden", textOverflow: "ellipsis" }}>
+            {provider.display_name}
+          </span>
+        </span>
+      );
+    }
+    return (
+      <span style={{ color: "var(--ink-4)" }}>{t("subscriptionNew.providerSelect")}</span>
+    );
+  }
   const endpoint = useMemo(
     () => provider?.endpoints.find((e) => e.id === endpointId),
     [provider, endpointId],
@@ -104,13 +147,20 @@ export function SubscriptionNewPage() {
   function handleProviderChange(v: string) {
     setProviderId(v);
     setSubmitError(null);
-    if (v === CUSTOM_VALUE) {
+    if (v === CUSTOM_VALUE || v === CUSTOM_GEMINI_VALUE) {
       setEndpointId("");
       // 自定义路径备注名自动: <自定义厂商名> <随机后缀>
       // 等用户填了 customProviderName 再生成,这里清掉旧值
       if (displayName === autoGenNameRef.current) {
         setDisplayName("");
         autoGenNameRef.current = "";
+      }
+      // Gemini 默认值预填; 用户仍可改 (除 path 占位符语义)
+      if (v === CUSTOM_GEMINI_VALUE) {
+        setCustomBaseUrl(GEMINI_DEFAULTS.baseUrl);
+        setCustomMessagesPath(GEMINI_DEFAULTS.messagesPath);
+      } else {
+        setCustomMessagesPath("/v1/messages");
       }
       return;
     }
@@ -411,13 +461,22 @@ export function SubscriptionNewPage() {
       messages_path: customMessagesPath,
     });
     if (connErrKey) return setSubmitError(t(connErrKey));
+    // Gemini 路径必须保留 {model} 占位符 — 后端会再校验, 这里做前端 hint 减少往返
+    if (isCustomGemini && !customMessagesPath.includes("{model}")) {
+      return setSubmitError(t("subscriptionNew.errGeminiPathPlaceholder"));
+    }
     if (!apiKey) return setSubmitError(t("subscriptionNew.errFillKey"));
     if (!displayName) return setSubmitError(t("subscriptionNew.errFillNote"));
     if (!slots.opus || !slots.sonnet || !slots.haiku) {
       return setSubmitError(t("subscriptionNew.errFillSlots"));
     }
 
-    const preset = AUTH_PRESETS[customAuthPreset];
+    const headerName = isCustomGemini
+      ? GEMINI_DEFAULTS.authHeaderName
+      : AUTH_PRESETS[customAuthPreset].name;
+    const headerFormat: AuthHeaderFormat = isCustomGemini
+      ? GEMINI_DEFAULTS.authHeaderFormat
+      : AUTH_PRESETS[customAuthPreset].format;
     const input: CreateSubscriptionInput = {
       display_name: displayName,
       api_key: apiKey,
@@ -427,8 +486,9 @@ export function SubscriptionNewPage() {
         provider_display_name: customProviderName,
         base_url: customBaseUrl.trim(),
         messages_path: customMessagesPath.trim(),
-        auth_header_name: preset.name,
-        auth_header_format: preset.format,
+        auth_header_name: headerName,
+        auth_header_format: headerFormat,
+        ...(isCustomGemini ? { protocol: "gemini" as const } : {}),
       },
     };
 
@@ -492,37 +552,28 @@ export function SubscriptionNewPage() {
                   <label className="field-label">{t("subscriptionNew.field.provider")}</label>
                   <Select value={providerId} onValueChange={handleProviderChange}>
                     <SelectTrigger className="select h-auto">
-                      {isCustom ? (
-                        <span style={{ display: "inline-flex", alignItems: "center", gap: 8, minWidth: 0 }}>
-                          <Boxes size={20} />
-                          <span>{t("subscriptionNew.customProvider")}</span>
-                        </span>
-                      ) : provider ? (
-                        <span style={{ display: "inline-flex", alignItems: "center", gap: 8, minWidth: 0 }}>
-                          <ProviderLogo iconId={provider.icon} size={20} />
-                          <span style={{ overflow: "hidden", textOverflow: "ellipsis" }}>
-                            {provider.display_name}
-                          </span>
-                        </span>
-                      ) : (
-                        <span style={{ color: "var(--ink-4)" }}>{t("subscriptionNew.providerSelect")}</span>
-                      )}
+                      {renderProviderTriggerLabel()}
                     </SelectTrigger>
                     <SelectContent>
                       {providers.data?.map((p) => (
                         <SelectItem key={p.id} value={p.id}>
                           <span style={{ display: "inline-flex", alignItems: "center", gap: 8 }}>
                             <ProviderLogo iconId={p.icon} size={20} />
-                            <span>{p.display_name}</span>
+                            {p.display_name}
                           </span>
                         </SelectItem>
                       ))}
-                      {/* 末尾分隔: 自定义入口 */}
                       <div style={{ height: 1, background: "var(--line)", margin: "4px 0" }} />
                       <SelectItem value={CUSTOM_VALUE}>
                         <span style={{ display: "inline-flex", alignItems: "center", gap: 8 }}>
                           <Plus size={20} />
-                          <span>{t("subscriptionNew.customProvider")}</span>
+                          {t("subscriptionNew.customProvider")}
+                        </span>
+                      </SelectItem>
+                      <SelectItem value={CUSTOM_GEMINI_VALUE}>
+                        <span style={{ display: "inline-flex", alignItems: "center", gap: 8 }}>
+                          <ProviderLogo iconId="google" size={20} />
+                          {t("subscriptionNew.customGeminiProvider")}
                         </span>
                       </SelectItem>
                     </SelectContent>
@@ -544,9 +595,14 @@ export function SubscriptionNewPage() {
                       )}
                     </div>
                   )}
-                  {isCustom && (
+                  {isCustomAnthropic && (
                     <div className="field-hint" style={{ marginTop: 6 }}>
                       {t("subscriptionNew.customHint")}
+                    </div>
+                  )}
+                  {isCustomGemini && (
+                    <div className="field-hint" style={{ marginTop: 6 }}>
+                      {t("subscriptionNew.customGeminiHint")}
                     </div>
                   )}
                 </div>
@@ -619,9 +675,13 @@ export function SubscriptionNewPage() {
                         className="input mono"
                         value={customBaseUrl}
                         onChange={(e) => setCustomBaseUrl(e.target.value)}
-                        placeholder="https://api.example.com"
+                        placeholder={isCustomGemini ? GEMINI_DEFAULTS.baseUrl : "https://api.example.com"}
                       />
-                      <div className="field-hint">{t("subscriptionNew.baseUrlHint")}</div>
+                      <div className="field-hint">
+                        {isCustomGemini
+                          ? t("subscriptionNew.geminiBaseUrlHint")
+                          : t("subscriptionNew.baseUrlHint")}
+                      </div>
                     </div>
 
                     <div style={{ marginBottom: 20 }}>
@@ -630,29 +690,45 @@ export function SubscriptionNewPage() {
                         className="input mono"
                         value={customMessagesPath}
                         onChange={(e) => setCustomMessagesPath(e.target.value)}
-                        placeholder="/v1/messages"
+                        placeholder={isCustomGemini ? GEMINI_DEFAULTS.messagesPath : "/v1/messages"}
                       />
-                      <div className="field-hint">{t("subscriptionNew.messagesPathHint")}</div>
+                      <div className="field-hint">
+                        {isCustomGemini
+                          ? t("subscriptionNew.geminiMessagesPathHint")
+                          : t("subscriptionNew.messagesPathHint")}
+                      </div>
                     </div>
 
-                    <div style={{ marginBottom: 20 }}>
-                      <label className="field-label">{t("subscriptionNew.authMethod")}</label>
-                      <Select
-                        value={customAuthPreset}
-                        onValueChange={(v) => setCustomAuthPreset(v as AuthPreset)}
-                      >
-                        <SelectTrigger className="select h-auto">
-                          <SelectValue />
-                        </SelectTrigger>
-                        <SelectContent>
-                          {Object.entries(AUTH_PRESETS).map(([k, v]) => (
-                            <SelectItem key={k} value={k}>
-                              {v.label}
-                            </SelectItem>
-                          ))}
-                        </SelectContent>
-                      </Select>
-                    </div>
+                    {isCustomGemini ? (
+                      <div style={{ marginBottom: 20 }}>
+                        <label className="field-label">{t("subscriptionNew.authMethod")}</label>
+                        <div className="mono field-hint" style={{ marginTop: 4 }}>
+                          {`${GEMINI_DEFAULTS.authHeaderName}: <key>`}
+                        </div>
+                        <div className="field-hint" style={{ marginTop: 6 }}>
+                          {t("subscriptionNew.geminiAuthLocked")}
+                        </div>
+                      </div>
+                    ) : (
+                      <div style={{ marginBottom: 20 }}>
+                        <label className="field-label">{t("subscriptionNew.authMethod")}</label>
+                        <Select
+                          value={customAuthPreset}
+                          onValueChange={(v) => setCustomAuthPreset(v as AuthPreset)}
+                        >
+                          <SelectTrigger className="select h-auto">
+                            <SelectValue />
+                          </SelectTrigger>
+                          <SelectContent>
+                            {Object.entries(AUTH_PRESETS).map(([k, v]) => (
+                              <SelectItem key={k} value={k}>
+                                {v.label}
+                              </SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                      </div>
+                    )}
                   </>
                 )}
 

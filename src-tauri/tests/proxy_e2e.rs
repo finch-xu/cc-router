@@ -94,10 +94,10 @@ fn provider_loader_loads_builtin_providers() {
         .keys()
         .map(|k| (k.clone(), ()))
         .collect();
-    for expected in ["anthropic", "zhipu", "deepseek", "moonshot", "minimax", "xiaomi", "alibaba", "volcengine", "openrouter", "tencent", "aiberm", "whatai", "ollama", "fireworks", "stepfun", "baidu", "modelscope", "ucloud", "openai_codex", "kiro"] {
+    for expected in ["anthropic", "zhipu", "deepseek", "moonshot", "minimax", "xiaomi", "alibaba", "volcengine", "openrouter", "tencent", "aiberm", "whatai", "ollama", "fireworks", "stepfun", "baidu", "modelscope", "ucloud", "openai_codex", "kiro", "google_ai_studio"] {
         assert!(ids.contains_key(expected), "missing provider: {expected}");
     }
-    assert_eq!(providers.len(), 20);
+    assert_eq!(providers.len(), 21);
 }
 
 /// 上游用 200 + Anthropic SSE `event: error` 表达限流 (智谱 1308 真实场景);
@@ -368,5 +368,179 @@ fn anthropic_uses_raw_header_format() {
     use cc_router_lib::provider::model::AuthHeaderFormat;
     assert!(matches!(anthropic.auth.header_format, AuthHeaderFormat::Raw));
     assert_eq!(anthropic.auth.header_name, "x-api-key");
+}
+
+#[test]
+fn google_ai_studio_provider_yaml_shape() {
+    let resource_dir = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    let providers = cc_router_lib::provider::loader::load_all(&resource_dir)
+        .expect("load providers");
+    let g = providers.get("google_ai_studio").expect("google_ai_studio present");
+    use cc_router_lib::provider::model::{AuthHeaderFormat, AuthType};
+    assert!(matches!(g.auth.auth_type, AuthType::GeminiApiKey));
+    assert!(matches!(g.auth.header_format, AuthHeaderFormat::Raw));
+    assert_eq!(g.auth.header_name, "x-goog-api-key");
+    let default_endpoint = g
+        .endpoint(g.default_endpoint.as_deref().unwrap_or(""))
+        .expect("default endpoint exists");
+    assert!(
+        default_endpoint.messages_path.contains("{model}"),
+        "Gemini messages_path 必须含 {{model}} 占位符"
+    );
+    assert!(g.model_discovery.enabled);
+    assert!(!g.model_discovery.example_models.is_empty());
+}
+
+/// Gemini 流式: dispatch 把 Anthropic 请求翻译成 Gemini, 上游回 SSE,
+/// dispatch 再把它翻译回 Anthropic SSE. 验证 round-trip 完整性 + URL 占位符替换 + alt=sse query.
+#[tokio::test]
+async fn gemini_streaming_roundtrip() {
+    use bytes::Bytes;
+    use futures::StreamExt;
+    use wiremock::matchers::{header, query_param};
+
+    let mock = MockServer::start().await;
+
+    // 上游 Gemini SSE: 两帧文本 + 终帧带 finishReason + usage.
+    // 真实 Gemini 用 CRLF (\r\n\r\n) 作帧分隔符, fixture 必须复刻, 否则 find_frame_boundary
+    // 兼容性退化时无法被 CI 抓到 (历史 bug: 客户端收到 0 字节响应).
+    let sse_body = "data: {\"candidates\":[{\"content\":{\"role\":\"model\",\"parts\":[{\"text\":\"hello \"}]}}]}\r\n\r\n\
+        data: {\"candidates\":[{\"content\":{\"parts\":[{\"text\":\"world\"}]}}]}\r\n\r\n\
+        data: {\"candidates\":[{\"content\":{\"parts\":[]},\"finishReason\":\"STOP\"}],\"usageMetadata\":{\"promptTokenCount\":3,\"candidatesTokenCount\":2}}\r\n\r\n";
+
+    Mock::given(method("POST"))
+        .and(path("/v1beta/models/gemini-2.5-flash:streamGenerateContent"))
+        .and(query_param("alt", "sse"))
+        .and(header("x-goog-api-key", "test-key"))
+        .respond_with(
+            ResponseTemplate::new(200)
+                .insert_header("content-type", "text/event-stream")
+                .set_body_string(sse_body),
+        )
+        .mount(&mock)
+        .await;
+
+    let url_template = format!("{}/v1beta/models/{{model}}:streamGenerateContent", mock.uri());
+    let client = reqwest::Client::new();
+    let body = json!({
+        "model": "gemini-2.5-flash",
+        "messages": [{"role": "user", "content": "say hi"}],
+    });
+
+    let ok = cc_router_lib::proxy::gemini_dispatch::dispatch_gemini_attempt(
+        &client,
+        "test-key".into(),
+        "x-goog-api-key".into(),
+        url_template,
+        "gemini-2.5-flash".into(),
+        &body,
+        true, // client_wants_streaming
+        Vec::new(),
+        axum::http::HeaderMap::new(),
+        std::collections::BTreeMap::new(),
+    )
+    .await
+    .expect("dispatch ok");
+
+    // 消费 upstream_stream + 跑 GeminiSseConverter (与 finalize_gemini_streaming 等价的逻辑)
+    use cc_router_lib::proxy::transform::gemini::{parse_gemini_sse_frame, GeminiSseConverter};
+
+    let mut converter = GeminiSseConverter::new("gemini-2.5-flash");
+    let mut buffer = bytes::BytesMut::new();
+    let mut anth_events: Vec<String> = Vec::new();
+    let mut stream = ok.upstream_stream;
+    while let Some(c) = stream.next().await {
+        let chunk: Bytes = c.expect("chunk ok");
+        buffer.extend_from_slice(&chunk);
+        loop {
+            let Some((idx, sep_len)) =
+                cc_router_lib::proxy::sse_framing::find_sse_frame_boundary(&buffer)
+            else {
+                break;
+            };
+            let frame_bytes = buffer.split_to(idx + sep_len);
+            let frame_str = std::str::from_utf8(&frame_bytes[..frame_bytes.len() - sep_len]).unwrap_or("");
+            if let Some(j) = parse_gemini_sse_frame(frame_str) {
+                for evt in converter.feed(&j) {
+                    anth_events.push(evt.event.to_string());
+                }
+            }
+        }
+    }
+    for evt in converter.finalize() {
+        anth_events.push(evt.event.to_string());
+    }
+
+    // 验证 emit 序列含: message_start, content_block_start(text), 多个 content_block_delta,
+    // content_block_stop, message_delta, message_stop
+    assert_eq!(anth_events.first().map(|s| s.as_str()), Some("message_start"));
+    assert!(anth_events.contains(&"content_block_start".to_string()));
+    assert!(anth_events.contains(&"content_block_delta".to_string()));
+    assert!(anth_events.contains(&"content_block_stop".to_string()));
+    assert_eq!(anth_events.last().map(|s| s.as_str()), Some("message_stop"));
+    assert!(anth_events.contains(&"message_delta".to_string()));
+}
+
+/// Gemini 401: dispatch 返回 OAuthDispatchError::Upstream with status=401, 携带上游错误 body.
+#[tokio::test]
+async fn gemini_401_returns_upstream_error() {
+    let mock = MockServer::start().await;
+    let err_body = json!({
+        "error": {"code": 401, "message": "API key not valid", "status": "UNAUTHENTICATED"}
+    });
+    Mock::given(method("POST"))
+        .and(path("/v1beta/models/gemini-2.5-flash:streamGenerateContent"))
+        .respond_with(ResponseTemplate::new(401).set_body_json(err_body))
+        .mount(&mock)
+        .await;
+
+    let url_template = format!("{}/v1beta/models/{{model}}:streamGenerateContent", mock.uri());
+    let client = reqwest::Client::new();
+    let body = json!({"model": "gemini-2.5-flash", "messages": [{"role": "user", "content": "hi"}]});
+
+    let res = cc_router_lib::proxy::gemini_dispatch::dispatch_gemini_attempt(
+        &client,
+        "bad-key".into(),
+        "x-goog-api-key".into(),
+        url_template,
+        "gemini-2.5-flash".into(),
+        &body,
+        false,
+        Vec::new(),
+        axum::http::HeaderMap::new(),
+        std::collections::BTreeMap::new(),
+    )
+    .await;
+
+    use cc_router_lib::proxy::oauth_dispatch::OAuthDispatchError;
+    match res {
+        Err(OAuthDispatchError::Upstream { status, message }) => {
+            assert_eq!(status, Some(401));
+            assert!(message.contains("UNAUTHENTICATED") || message.contains("API key"));
+        }
+        other => panic!("expected Upstream 401, got {:?}", other.is_ok()),
+    }
+}
+
+/// URL 模板缺少 {model} 占位符 → dispatch 直接返回错误, 不发请求.
+#[tokio::test]
+async fn gemini_missing_model_placeholder_errors() {
+    let client = reqwest::Client::new();
+    let body = json!({"model": "gemini-2.5-flash", "messages": []});
+    let res = cc_router_lib::proxy::gemini_dispatch::dispatch_gemini_attempt(
+        &client,
+        "k".into(),
+        "x-goog-api-key".into(),
+        "https://example.invalid/v1beta/models/gemini-2.5-flash:streamGenerateContent".into(),
+        "gemini-2.5-flash".into(),
+        &body,
+        false,
+        Vec::new(),
+        axum::http::HeaderMap::new(),
+        std::collections::BTreeMap::new(),
+    )
+    .await;
+    use cc_router_lib::proxy::oauth_dispatch::OAuthDispatchError;
+    assert!(matches!(res, Err(OAuthDispatchError::Upstream { .. })));
 }
 

@@ -21,6 +21,11 @@ pub enum AuthType {
     /// 上游协议为 AWS CodeWhisperer Streaming RPC (二进制 Event Stream), 需协议翻译.
     /// pipeline 按 oauth_metadata.auth_method 走 social (kiro 桌面) 或 idc (AWS OIDC) refresh 分支.
     KiroOauth,
+    /// Google AI Studio (Gemini): 用户输入 Google API key (x-goog-api-key header),
+    /// 上游协议为 Gemini generateContent / streamGenerateContent, 需协议翻译
+    /// (Anthropic Messages ↔ Gemini contents/parts). model 嵌在 URL 路径里,
+    /// dispatch 层做 `{model}` 占位符替换 + 强制 `?alt=sse`.
+    GeminiApiKey,
 }
 
 impl AuthType {
@@ -29,6 +34,7 @@ impl AuthType {
             Self::ApiKey => "api_key",
             Self::ChatgptOauth => "chatgpt_oauth",
             Self::KiroOauth => "kiro_oauth",
+            Self::GeminiApiKey => "gemini_api_key",
         }
     }
 }
@@ -40,6 +46,7 @@ impl FromStr for AuthType {
             "api_key" => Ok(Self::ApiKey),
             "chatgpt_oauth" => Ok(Self::ChatgptOauth),
             "kiro_oauth" => Ok(Self::KiroOauth),
+            "gemini_api_key" => Ok(Self::GeminiApiKey),
             other => Err(format!("无效 auth_type: {other}")),
         }
     }

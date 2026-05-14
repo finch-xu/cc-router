@@ -17,6 +17,7 @@ use crate::observability::body_dump::{BodyDumpEntry, BodyDumpKind};
 use crate::observability::events::{self, Severity};
 use crate::observability::request_log::{RequestLogEntry, RequestStatus};
 use crate::provider::model::AuthType;
+use crate::proxy::gemini_dispatch;
 use crate::proxy::handler::error_body;
 use crate::proxy::oauth_dispatch::{
     self, OAuthDispatchError,
@@ -403,6 +404,123 @@ pub async fn dispatch(
                         Severity::Error,
                         format!(
                             "{} · {} · Kiro · {}",
+                            vm_name.as_str(),
+                            display_name,
+                            err_msg
+                        ),
+                    );
+
+                    if retryable {
+                        retry_count += 1;
+                        continue;
+                    }
+                    return Ok(oauth_dispatch::build_error_response(&err));
+                }
+            }
+        }
+
+        // Gemini 分支: Google AI Studio API key + Gemini generateContent 协议翻译.
+        // 与 OAuth 分支不同, auth 仍是 api_key (而非 OAuth token), 但响应/请求体走独立翻译路径
+        // (Anthropic Messages ↔ Gemini contents/parts). model 嵌在 URL 路径里, 由 dispatch 层
+        // 做 `{model}` 占位符替换. fallback 与翻译互斥, 因为 fallback 不改写 model.
+        if matches!(auth_type, AuthType::GeminiApiKey) {
+            if is_fallback {
+                // fallback 透传原始 model, Gemini URL 拼接需要真实 model 名才能命中端点.
+                // 直接跳过此候选, 不计 retry.
+                continue;
+            }
+            emit_attempt_started(state, sub_id, vm_name);
+            let dispatch_res = gemini_dispatch::dispatch_gemini_attempt(
+                &state.http_client,
+                auth_header_value.clone(),
+                auth_header_name.clone(),
+                url.clone(),
+                real_model.clone(),
+                &request_body,
+                is_streaming,
+                forward_headers.clone(),
+                client_headers.clone(),
+                required_headers.clone(),
+            )
+            .await;
+
+            match dispatch_res {
+                Ok(ok) => {
+                    emit_attempt_finished(state, sub_id, vm_name, true);
+                    return Ok(gemini_dispatch::finalize_gemini_response(
+                        ok,
+                        vm_name,
+                        attempt_id,
+                        sub_id,
+                        provider_id,
+                        endpoint_id,
+                        real_model,
+                        display_name,
+                        retry_count,
+                        state.request_log_tx.clone(),
+                        state.event_log_tx.clone(),
+                        state.db.clone(),
+                        state.app_handle.clone(),
+                        rt.clone(),
+                    ));
+                }
+                Err(err) => {
+                    emit_attempt_finished(state, sub_id, vm_name, false);
+                    let (event, retryable) = match &err {
+                        OAuthDispatchError::Auth(_) => (state_machine::Event::HttpStatus(401), false),
+                        OAuthDispatchError::Upstream { status, .. } => {
+                            let s = status.unwrap_or(502);
+                            let retryable =
+                                matches!(classify_response(s, None), ShouldRetry::Yes(_));
+                            (state_machine::Event::HttpStatus(s), retryable)
+                        }
+                    };
+                    let _ = state_machine::apply(
+                        &state.db,
+                        &state.app_handle,
+                        &state.event_log_tx,
+                        rt.clone(),
+                        event,
+                    )
+                    .await;
+
+                    let err_msg = match &err {
+                        OAuthDispatchError::Auth(m) => m.clone(),
+                        OAuthDispatchError::Upstream { message, .. } => message.clone(),
+                    };
+                    let entry = RequestLogEntry {
+                        id: attempt_id,
+                        timestamp_ms: chrono::Utc::now().timestamp_millis(),
+                        virtual_model_name: vm_name,
+                        subscription_id: sub_id,
+                        provider_id: provider_id.clone(),
+                        endpoint_id: endpoint_id.clone(),
+                        real_model_name: real_model.clone(),
+                        response_model_name: None,
+                        is_streaming,
+                        status: RequestStatus::Error,
+                        http_status: match &err {
+                            OAuthDispatchError::Upstream { status, .. } => *status,
+                            _ => Some(401),
+                        },
+                        ttft_ms: None,
+                        total_latency_ms: Some(start.elapsed().as_millis() as u64),
+                        upstream_input_tokens: None,
+                        upstream_output_tokens: None,
+                        upstream_cache_creation: None,
+                        upstream_cache_read: None,
+                        retry_count,
+                        error_message: Some(err_msg.clone()),
+                        upstream_response_body: Some(truncate_body(&err_msg, ERROR_BODY_LIMIT)),
+                    };
+                    let _ = state.request_log_tx.try_send(entry);
+                    events::record_request(
+                        &state.event_log_tx,
+                        attempt_id,
+                        sub_id,
+                        Severity::Error,
+                        format!(
+                            "{} · {} · Gemini · {}",
                             vm_name.as_str(),
                             display_name,
                             err_msg

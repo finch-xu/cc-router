@@ -44,6 +44,7 @@ use crate::oauth::kiro::{
 use crate::observability::events::{self, EventEntry, Severity};
 use crate::observability::request_log::{RequestLogEntry, RequestStatus};
 use crate::proxy::handler::error_body;
+use crate::proxy::sse_framing::find_sse_frame_boundary;
 use crate::proxy::transform::aws_event_stream::EventStreamDecoder;
 use crate::proxy::transform::kiro_codewhisperer::{
     anthropic_to_codewhisperer, KiroSseConverter, NonStreamingCollector as KiroCollector,
@@ -340,13 +341,12 @@ fn finalize_streaming(
             };
             buffer.extend_from_slice(&chunk);
 
-            // 按 \n\n 切帧
             loop {
-                let Some(idx) = find_double_newline(&buffer) else {
+                let Some((idx, sep_len)) = find_sse_frame_boundary(&buffer) else {
                     break;
                 };
-                let frame_bytes = buffer.split_to(idx + 2);
-                let frame_str = std::str::from_utf8(&frame_bytes[..frame_bytes.len() - 2])
+                let frame_bytes = buffer.split_to(idx + sep_len);
+                let frame_str = std::str::from_utf8(&frame_bytes[..frame_bytes.len() - sep_len])
                     .unwrap_or("");
                 let Some((event_name, data)) = parse_sse_frame(frame_str) else {
                     continue;
@@ -473,12 +473,12 @@ async fn collect_to_json_response(
         let Ok(chunk) = chunk else { break };
         buffer.extend_from_slice(&chunk);
         loop {
-            let Some(idx) = find_double_newline(&buffer) else {
+            let Some((idx, sep_len)) = find_sse_frame_boundary(&buffer) else {
                 break;
             };
-            let frame_bytes = buffer.split_to(idx + 2);
+            let frame_bytes = buffer.split_to(idx + sep_len);
             let frame_str =
-                std::str::from_utf8(&frame_bytes[..frame_bytes.len() - 2]).unwrap_or("");
+                std::str::from_utf8(&frame_bytes[..frame_bytes.len() - sep_len]).unwrap_or("");
             if let Some((event_name, data)) = parse_sse_frame(frame_str) {
                 if event_name == "response.completed" {
                     if let Some(usage) = data.get("response").and_then(|r| r.get("usage")) {
@@ -550,10 +550,6 @@ async fn collect_to_json_response(
         HeaderValue::from_static("application/json"),
     );
     response
-}
-
-fn find_double_newline(buf: &[u8]) -> Option<usize> {
-    buf.windows(2).position(|w| w == b"\n\n")
 }
 
 // ============================================================================

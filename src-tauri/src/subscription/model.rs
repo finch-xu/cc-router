@@ -113,6 +113,10 @@ pub fn default_node_version() -> &'static str {
 /// 自定义订阅的来源标记常量。
 pub const CUSTOM_SOURCE_MARKER: &str = "__custom__";
 
+/// 自定义 Gemini 兼容订阅的来源标记常量。
+/// 与 `CUSTOM_SOURCE_MARKER` 平级, 但走 [`AuthType::GeminiApiKey`] 翻译分支.
+pub const CUSTOM_GEMINI_SOURCE_MARKER: &str = "__custom_gemini__";
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ModelSlots {
     pub opus: String,

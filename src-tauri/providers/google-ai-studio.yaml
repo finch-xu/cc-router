@@ -1,0 +1,40 @@
+id: google_ai_studio
+display_name: "Google AI Studio (Gemini)"
+icon: google
+description: "Google AI Studio Gemini API, 通过协议翻译适配 Anthropic Messages 接口"
+homepage: "https://aistudio.google.com"
+docs_url: "https://ai.google.dev/gemini-api/docs"
+api_key_url: "https://aistudio.google.com/app/apikey"
+
+compatibility: untested
+compatibility_notes: "cc-router 内部做 Anthropic Messages ↔ Gemini generateContent 翻译, 强制走 streamGenerateContent + alt=sse, 客户端非流式时由 cc-router 收齐再吐 JSON."
+
+endpoints:
+  - id: ai_studio
+    label: "Google AI Studio · 官方"
+    description: "generativelanguage.googleapis.com, 使用 AI Studio 控制台生成的 API Key. URL 模板里的 {model} 占位符由 cc-router 在 dispatch 层按订阅 slot 替换."
+    base_url: "https://generativelanguage.googleapis.com"
+    messages_path: "/v1beta/models/{model}:streamGenerateContent"
+    region: global
+    billing: pay_as_you_go
+
+default_endpoint: ai_studio
+
+auth:
+  type: gemini_api_key
+  header_name: "x-goog-api-key"
+  header_format: raw
+
+required_headers: {}
+
+forward_headers: []
+
+model_discovery:
+  enabled: true
+  path: "/v1beta/models"
+  cache_ttl_hours: 168
+  example_models:
+    - "gemini-2.5-pro"
+    - "gemini-2.5-flash"
+    - "gemini-2.5-flash-lite"
+    - "gemini-2.0-flash"

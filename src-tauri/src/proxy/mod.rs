@@ -1,3 +1,4 @@
+pub mod gemini_dispatch;
 pub mod handler;
 pub mod middleware;
 pub mod oauth_dispatch;
@@ -6,5 +7,6 @@ pub mod pipeline;
 pub mod retry;
 pub mod server;
 pub mod sse;
+pub mod sse_framing;
 pub mod transform;
 pub mod upstream;
