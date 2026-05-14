@@ -6,7 +6,7 @@ homepage: "https://aistudio.google.com"
 docs_url: "https://ai.google.dev/gemini-api/docs"
 api_key_url: "https://aistudio.google.com/app/apikey"
 
-compatibility: untested
+compatibility: verified
 compatibility_notes: "cc-router 内部做 Anthropic Messages ↔ Gemini generateContent 翻译, 强制走 streamGenerateContent + alt=sse, 客户端非流式时由 cc-router 收齐再吐 JSON."
 
 endpoints:

@@ -5,7 +5,7 @@ description: "复用 Kiro IDE / kiro-cli 的免费 Claude 额度 (走 AWS CodeWh
 homepage: "https://kiro.dev/"
 docs_url: "https://kiro.dev/docs"
 
-compatibility: untested
+compatibility: tested
 compatibility_notes: 不推荐使用，封号频繁，风险较高。
 
 endpoints:

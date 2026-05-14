@@ -5,7 +5,7 @@ description: "复用本机 ChatGPT Plus/Pro 的 Codex 订阅额度。需在 cc-r
 homepage: "https://openai.com/chatgpt/pricing"
 docs_url: "https://platform.openai.com/docs/api-reference/responses"
 
-compatibility: untested
+compatibility: tested
 compatibility_notes: "通过 ChatGPT 反代 (chatgpt.com/backend-api/codex) 走 Responses API, 协议未公开, 风险高。"
 
 endpoints:
