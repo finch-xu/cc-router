@@ -61,7 +61,7 @@
 | `anthropic` | Anthropic 公式 API（従量課金のみ、サブスクリプションプラン非対応） | ❌ | ✅ | verified |
 | `openai_codex` | **OpenAI Codex（ChatGPT Plus/Pro サブスクリプション）** — アカウント停止リスクあり、推奨しません | ✅ | ❌ | tested |
 | `kiro` | **Kiro IDE（AWS）** — Claude サブスクリプション無料枠、アカウント停止リスクあり、推奨しません | ✅ | ❌ | tested |
-| `google_ai_studio` | **Google AI Studio（Gemini）** 従量課金 + 無料枠 | ❌ | ✅ | tested |
+| `google_ai_studio` | **Google AI Studio（Gemini）** 従量課金 + 無料枠 | ❌ | ✅ | verified |
 | `zhipu` | 智譜 GLM（従量課金 / 中国サブスク） | ✅ | ✅ | verified |
 | `deepseek` | DeepSeek（従量課金） | ❌ | ✅ | verified |
 | `moonshot` | Moonshot Kimi（従量課金 / 中国サブスク / グローバルサブスク） | ✅ | ✅ | untested |

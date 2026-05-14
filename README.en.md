@@ -61,7 +61,7 @@ Highlights:
 | `anthropic` | Anthropic official API (pay-as-you-go only, no subscription plan) | ❌ | ✅ | verified |
 | `openai_codex` | **OpenAI Codex (ChatGPT Plus/Pro subscription)** — account-suspension risk; not recommended | ✅ | ❌ | tested |
 | `kiro` | **Kiro IDE (AWS)** — free Claude subscription quota; account-suspension risk; not recommended | ✅ | ❌ | tested |
-| `google_ai_studio` | **Google AI Studio (Gemini)** pay-as-you-go + free quota | ❌ | ✅ | tested |
+| `google_ai_studio` | **Google AI Studio (Gemini)** pay-as-you-go + free quota | ❌ | ✅ | verified |
 | `zhipu` | Zhipu GLM (pay-as-you-go / China subscription) | ✅ | ✅ | verified |
 | `deepseek` | DeepSeek (pay-as-you-go) | ❌ | ✅ | verified |
 | `moonshot` | Moonshot Kimi (pay-as-you-go / China subscription / global subscription) | ✅ | ✅ | untested |
