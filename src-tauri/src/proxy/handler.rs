@@ -87,8 +87,8 @@ pub async fn models() -> Response {
         "anthropic/claude-sonnet-4-6",
         "anthropic/claude-haiku-4-5",
         "anthropic/model-opus",
-        "anthropic/sonnet",
-        "anthropic/haiku",
+        "anthropic/model-sonnet",
+        "anthropic/model-haiku",
     ];
     const CREATED_AT: &str = "2026-01-01T00:00:00Z";
 
