@@ -36,8 +36,8 @@
 
 機能ハイライト：
 
-- **18 プロバイダーを 1 つのルーターで** —— DeepSeek・Qwen・Kimi・MiMo・MiniMax・GLM・Claude などの Token Plan / Coding Plan / 従量課金 API を内蔵対応。opus / sonnet / haiku の 3 スロットに自由に割り当て、順次（sequential）またはラウンドロビン（round_robin）で自動切替
-- **任意のエンドポイントを追加可能** —— 内蔵プロバイダーで足りない場合、Anthropic Messages 互換 API なら何でも直接接続でき、内蔵サブスクと同等にディスパッチ
+- **19 プロバイダーを 1 つのルーターで** —— DeepSeek・Qwen・Kimi・MiMo・MiniMax・GLM・Claude・Gemini などの Token Plan / Coding Plan / 従量課金 API を内蔵対応。opus / sonnet / haiku の 3 スロットに自由に割り当て、順次（sequential）またはラウンドロビン（round_robin）で自動切替
+- **任意のエンドポイントを追加可能** —— 内蔵プロバイダーで足りない場合、Anthropic Messages 互換 / Gemini generateContent 互換 API なら何でも直接接続でき、内蔵サブスクと同等にディスパッチ
 - **利用レシート** —— トークン消費スナップショットを PNG / PDF / HTML へワンクリックでエクスポート。モノクロ / カラーの 2 モード、既定では料金非表示で利用量のみ、フッターの QR コードからリポジトリへジャンプ
 - **3 言語完全翻訳** —— 简体中文 / English / 日本語、システム言語追従または設定画面で手動切替
 - **仮想モデルのエイリアス対応** —— opus / sonnet / haiku の各スロットが複数の命名を識別。opus を例にすると `model-opus` / `claude-opus-4-7` / `anthropic/model-opus` / `anthropic/claude-opus-4-7` がすべて同じ仮想モデルにルーティングされ、ツール側の命名規約に左右されません
@@ -59,11 +59,14 @@
 | id | 名称 | Token Plan | API | 動作確認 |
 |---|---|---|---|---|
 | `anthropic` | Anthropic 公式 API（従量課金のみ、サブスクリプションプラン非対応） | ❌ | ✅ | verified |
+| `openai_codex` | **OpenAI Codex（ChatGPT Plus/Pro サブスクリプション）** — アカウント停止リスクあり、推奨しません | ✅ | ❌ | tested |
+| `kiro` | **Kiro IDE（AWS）** — Claude サブスクリプション無料枠、アカウント停止リスクあり、推奨しません | ✅ | ❌ | tested |
+| `google_ai_studio` | **Google AI Studio（Gemini）** 従量課金 + 無料枠 | ❌ | ✅ | tested |
 | `zhipu` | 智譜 GLM（従量課金 / 中国サブスク） | ✅ | ✅ | verified |
 | `deepseek` | DeepSeek（従量課金） | ❌ | ✅ | verified |
 | `moonshot` | Moonshot Kimi（従量課金 / 中国サブスク / グローバルサブスク） | ✅ | ✅ | untested |
 | `minimax` | MiniMax（従量課金 / 中国サブスク / グローバルサブスク） | ✅ | ✅ | verified |
-| `xiaomi` | Xiaomi MiMo（従量課金 / 中国サブスク / グローバルサブスク） | ✅ | ✅ | untested |
+| `xiaomi` | Xiaomi MiMo（従量課金 / 中国サブスク / グローバルサブスク） | ✅ | ✅ | verified |
 | `alibaba` | Alibaba Cloud Bailian（チーム版 Token Plan + 2 リージョン従量課金 + 販売終了の Coding Plan） | ✅ | ✅ | verified |
 | `volcengine` | バイトダンス 火山方舟 Volcengine Ark（Coding Plan サブスクリプション + Agent Plan サブスクリプション + 従量課金） | ✅ | ✅ | untested |
 | `openrouter` | OpenRouter アグリゲーター（500+ モデルをルーティング） | ❌ | ✅ | untested |
@@ -76,9 +79,8 @@
 | `baidu` | 百度千帆（従量課金 / 中国サブスク） | ✅ | ✅ | untested |
 | `modelscope` | ModelScope 魔搭（従量課金） | ❌ | ✅ | partial |
 | `ucloud` | 優雲智算 UCloud Modelverse（Coding Plan サブスク + 従量課金 API、中国国内/海外） | ✅ | ✅ | untested |
-| `openai_codex` | **OpenAI Codex（ChatGPT Plus/Pro サブスクリプション）** — アカウント停止リスクあり、推奨しません | ✅ | ❌ | untested |
-| `kiro` | **Kiro IDE（AWS）** — Claude サブスクリプション無料枠、アカウント停止リスクあり、推奨しません | ✅ | ❌ | untested |
 | `カスタム` | Anthropic プロトコル準拠の任意の API を自前で追加 | ✅ | ✅ | verified |
+| `カスタム (Gemini 互換)` | Gemini generateContent 互換の任意のエンドポイント（中継など）を追加。`messages_path` に `{model}` プレースホルダを含める必要があります | ❌ | ✅ | untested |
 
 > 「Token Plan」列はサブスクリプション形式のクォータ全般（Token Plan / Coding Plan / Agent Plan 等）を指し、「API」列は従量課金の Anthropic Messages 互換エンドポイントを指します。
 

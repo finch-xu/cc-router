@@ -59,11 +59,14 @@
 | id | 名称 | Token Plan | API | 兼容性 |
 |---|---|---|---|---|
 | `anthropic` | Anthropic 官方 API（仅按量付费，不含 Plan） | ❌ | ✅ | verified |
+| `openai_codex` | **OpenAI Codex (ChatGPT Plus/Pro 订阅)** 有封号风险，不推荐使用 | ✅ | ❌ | tested |
+| `kiro` | **Kiro IDE (AWS)** 免费 Claude 订阅额度，灰色地带有封号风险，不推荐使用 | ✅ | ❌ | tested |
+| `google_ai_studio` | **Google AI Studio (Gemini)** 按量付费 + 免费 quota | ❌ | ✅ | verified |
 | `zhipu` | 智谱 GLM（按量付费/中国订阅） | ✅ | ✅ | verified |
 | `deepseek` | DeepSeek（按量付费） | ❌ | ✅ | verified |
 | `moonshot` | Moonshot Kimi（按量付费/中国订阅/国际订阅） | ✅ | ✅ | untested |
 | `minimax` | MiniMax（按量付费/中国订阅/国际订阅） | ✅ | ✅ | verified |
-| `xiaomi` | 小米 MiMo（按量付费/中国订阅/国际订阅） | ✅ | ✅ | untested |
+| `xiaomi` | 小米 MiMo（按量付费/中国订阅/国际订阅） | ✅ | ✅ | verified |
 | `alibaba` | 阿里云百炼（Token Plan 团队版 + 按量付费 2 地域 + 停售的 Coding Plan） | ✅ | ✅ | verified |
 | `volcengine` | 字节跳动 火山方舟（Coding Plan 订阅 + Agent Plan 订阅 + 按量付费） | ✅ | ✅ | untested |
 | `openrouter` | OpenRouter 聚合平台（500+ 模型路由） | ❌ | ✅ | untested |
@@ -76,9 +79,6 @@
 | `baidu` | 百度千帆（按量付费/中国订阅） | ✅ | ✅ | untested |
 | `modelscope` | 魔搭 ModelScope（按量付费） | ❌ | ✅ | partial |
 | `ucloud` | 优云智算 UCloud Modelverse（Coding Plan 订阅 + 按量付费 API 国内/海外） | ✅ | ✅ | untested |
-| `openai_codex` | **OpenAI Codex (ChatGPT Plus/Pro 订阅)** 有封号风险，不推荐使用 | ✅ | ❌ | untested |
-| `kiro` | **Kiro IDE (AWS)** 免费 Claude 订阅额度，灰色地带有封号风险，不推荐使用 | ✅ | ❌ | untested |
-| `google_ai_studio` | **Google AI Studio (Gemini)** 按量付费 + 免费 quota，cc-router 内部做 Anthropic ↔ Gemini generateContent 协议翻译 | ❌ | ✅ | untested |
 | `自定义` | 自定义任意Anthropic协议API | ✅ | ✅ | verified |
 | `自定义 (Gemini 兼容)` | 接入任意 Gemini generateContent 兼容端点（中转站等），messages_path 用 `{model}` 占位符 | ❌ | ✅ | untested |
 

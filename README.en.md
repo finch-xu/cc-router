@@ -36,8 +36,8 @@ Stacked subscriptions across multiple LLM vendors, but Claude Code can only poin
 
 Highlights:
 
-- **18 providers, one router** — built-in routing for DeepSeek, Qwen, Kimi, MiMo, MiniMax, GLM, Claude, etc., across Token Plans / Coding Plans / pay-as-you-go APIs; mix and match opus / sonnet / haiku slots with sequential or round-robin dispatch
-- **Bring your own endpoint** — when the built-in providers don't cover what you need, plug any Anthropic Messages-compatible API in directly, dispatched alongside the built-in subscriptions
+- **19 providers, one router** — built-in routing for DeepSeek, Qwen, Kimi, MiMo, MiniMax, GLM, Claude, Gemini, etc., across Token Plans / Coding Plans / pay-as-you-go APIs; mix and match opus / sonnet / haiku slots with sequential or round-robin dispatch
+- **Bring your own endpoint** — when the built-in providers don't cover what you need, plug any Anthropic Messages-compatible or Gemini generateContent-compatible API in directly, dispatched alongside the built-in subscriptions
 - **Usage receipts** — export your token-spend snapshot as PNG / PDF / HTML in one click; mono / color modes, no pricing shown by default (usage only), QR code at the bottom links back to the repo
 - **Fully translated UI** — 简体中文 / English / 日本語, follows your system locale or pick manually in Settings
 - **Virtual model aliases** — each of opus / sonnet / haiku accepts multiple names; for opus that's `model-opus` / `claude-opus-4-7` / `anthropic/model-opus` / `anthropic/claude-opus-4-7`, all routed to the same virtual model — pick whatever naming your tool prefers
@@ -59,11 +59,14 @@ Highlights:
 | id | Name | Token Plan | API | Status |
 |---|---|---|---|---|
 | `anthropic` | Anthropic official API (pay-as-you-go only, no subscription plan) | ❌ | ✅ | verified |
+| `openai_codex` | **OpenAI Codex (ChatGPT Plus/Pro subscription)** — account-suspension risk; not recommended | ✅ | ❌ | tested |
+| `kiro` | **Kiro IDE (AWS)** — free Claude subscription quota; account-suspension risk; not recommended | ✅ | ❌ | tested |
+| `google_ai_studio` | **Google AI Studio (Gemini)** pay-as-you-go + free quota | ❌ | ✅ | tested |
 | `zhipu` | Zhipu GLM (pay-as-you-go / China subscription) | ✅ | ✅ | verified |
 | `deepseek` | DeepSeek (pay-as-you-go) | ❌ | ✅ | verified |
 | `moonshot` | Moonshot Kimi (pay-as-you-go / China subscription / global subscription) | ✅ | ✅ | untested |
 | `minimax` | MiniMax (pay-as-you-go / China subscription / global subscription) | ✅ | ✅ | verified |
-| `xiaomi` | Xiaomi MiMo (pay-as-you-go / China subscription / global subscription) | ✅ | ✅ | untested |
+| `xiaomi` | Xiaomi MiMo (pay-as-you-go / China subscription / global subscription) | ✅ | ✅ | verified |
 | `alibaba` | Alibaba Cloud Bailian (team Token Plan + 2-region pay-as-you-go + discontinued Coding Plan) | ✅ | ✅ | verified |
 | `volcengine` | ByteDance Volcengine Ark (Coding Plan subscription + Agent Plan subscription + pay-as-you-go) | ✅ | ✅ | untested |
 | `openrouter` | OpenRouter aggregator (500+ models routed) | ❌ | ✅ | untested |
@@ -76,9 +79,8 @@ Highlights:
 | `baidu` | Baidu Qianfan (pay-as-you-go / China subscription) | ✅ | ✅ | untested |
 | `modelscope` | ModelScope (pay-as-you-go) | ❌ | ✅ | partial |
 | `ucloud` | UCloud Modelverse (Coding Plan subscription + pay-as-you-go API in CN/global) | ✅ | ✅ | untested |
-| `openai_codex` | **OpenAI Codex (ChatGPT Plus/Pro subscription)** — account-suspension risk; not recommended | ✅ | ❌ | untested |
-| `kiro` | **Kiro IDE (AWS)** — free Claude subscription quota; account-suspension risk; not recommended | ✅ | ❌ | untested |
 | `Custom` | Bring your own Anthropic-compatible endpoint | ✅ | ✅ | verified |
+| `Custom (Gemini compatible)` | Bring your own Gemini generateContent-compatible endpoint (relay, etc.); `messages_path` must contain the `{model}` placeholder | ❌ | ✅ | untested |
 
 > The "Token Plan" column covers any subscription-style quota (Token Plan / Coding Plan / Agent Plan, etc.); "API" denotes pay-as-you-go Anthropic Messages-compatible endpoints.
 
