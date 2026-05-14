@@ -36,8 +36,8 @@
 
 功能亮点：
 
-- **18 家 provider 一站调度** —— 内置 DeepSeek、Qwen、Kimi、MiMo、MiniMax、GLM、Claude 等 Token Plan / Coding Plan / API 额度,opus / sonnet / haiku 三槽位任意搭配,顺序或轮询自动切换
-- **任意自定义端点** —— 内置厂商不够时,把任何 Anthropic Messages 兼容的 API 直接配进来,与内置订阅同等调度
+- **19 家 provider 一站调度** —— 内置 DeepSeek、Qwen、Kimi、MiMo、MiniMax、GLM、Claude、Gemini 等 Token Plan / Coding Plan / API 额度,opus / sonnet / haiku 三槽位任意搭配,顺序或轮询自动切换
+- **任意自定义端点** —— 内置厂商不够时,把任何 Anthropic Messages 兼容或 Gemini generateContent 兼容的 API 直接配进来,与内置订阅同等调度
 - **用量小票** —— token 消费快照一键导出 PNG / PDF / HTML,黑白 / 彩色双模式,默认不显示价格只展示用量,扫底部二维码即跳仓库
 - **三语完整翻译** —— 简体中文 / English / 日本語,可跟随系统或在设置页手动切换
 - **虚拟模型多别名** —— opus / sonnet / haiku 三个槽位各识别多种命名,以 opus 为例,`model-opus` / `claude-opus-4-7` / `anthropic/model-opus` / `anthropic/claude-opus-4-7` 都路由到同一虚拟模型,工具用什么命名都不挑
@@ -78,7 +78,9 @@
 | `ucloud` | 优云智算 UCloud Modelverse（Coding Plan 订阅 + 按量付费 API 国内/海外） | ✅ | ✅ | untested |
 | `openai_codex` | **OpenAI Codex (ChatGPT Plus/Pro 订阅)** 有封号风险，不推荐使用 | ✅ | ❌ | untested |
 | `kiro` | **Kiro IDE (AWS)** 免费 Claude 订阅额度，灰色地带有封号风险，不推荐使用 | ✅ | ❌ | untested |
+| `google_ai_studio` | **Google AI Studio (Gemini)** 按量付费 + 免费 quota，cc-router 内部做 Anthropic ↔ Gemini generateContent 协议翻译 | ❌ | ✅ | untested |
 | `自定义` | 自定义任意Anthropic协议API | ✅ | ✅ | verified |
+| `自定义 (Gemini 兼容)` | 接入任意 Gemini generateContent 兼容端点（中转站等），messages_path 用 `{model}` 占位符 | ❌ | ✅ | untested |
 
 > Token Plan 列包含各厂商的套餐订阅形态（Token Plan / Coding Plan / Agent Plan 等）；API 列指按量付费的 Anthropic Messages 兼容端点。
 
