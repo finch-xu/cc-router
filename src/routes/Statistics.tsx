@@ -153,12 +153,25 @@ export function StatisticsPage() {
           </div>
         </div>
         <div className="stat">
-          <div className="stat-label">{t("stats.kpi.totalTokensOut")}</div>
-          <div className="stat-val tnum">{fmtKilo(o?.total_output_tokens ?? 0)}</div>
+          <div className="stat-label">{t("stats.kpi.totalTokens")}</div>
+          <div className="stat-val tnum">
+            {fmtCompact(
+              (o?.total_input_tokens ?? 0) +
+                (o?.total_output_tokens ?? 0) +
+                (o?.total_cache_creation_tokens ?? 0) +
+                (o?.total_cache_read_tokens ?? 0),
+            )}
+          </div>
           <div className="stat-delta">
-            {t("stats.kpi.tokensInPrefix")}
-            {fmtKilo(o?.total_input_tokens ?? 0)}
-            {t("stats.kpi.tokensInSuffix")}
+            {t("stats.daily.tokenTooltipInput")}{" "}
+            {fmtCompact(
+              (o?.total_input_tokens ?? 0) +
+                (o?.total_cache_creation_tokens ?? 0) +
+                (o?.total_cache_read_tokens ?? 0),
+            )}
+            {" · "}
+            {t("stats.daily.tokenTooltipOutput")}{" "}
+            {fmtCompact(o?.total_output_tokens ?? 0)}
           </div>
         </div>
       </div>
@@ -397,6 +410,14 @@ interface DailyTokenChartPoint {
   total: number;
 }
 
+// Bar 渲染顺序：先写的在下层。量大者 (cache_read) 做底座
+const TOKEN_BAR_SEGMENTS = [
+  { key: "cache_read",     color: "var(--ink-4)",         labelKey: "stats.daily.tokenTooltipCacheRead" },
+  { key: "cache_creation", color: "oklch(0.70 0.05 270)", labelKey: "stats.daily.tokenTooltipCacheCreate" },
+  { key: "input",          color: "oklch(0.62 0.13 240)", labelKey: "stats.daily.tokenTooltipInput" },
+  { key: "output",         color: "oklch(0.50 0.16 240)", labelKey: "stats.daily.tokenTooltipOutput" },
+] as const;
+
 function DailyTokenSection({ points }: { points: DailySeriesPointDto[] }) {
   const { t } = useT();
   const data: DailyTokenChartPoint[] = points.map((p) => {
@@ -436,12 +457,25 @@ function DailyTokenSection({ points }: { points: DailySeriesPointDto[] }) {
             width={48}
           />
           <Tooltip content={<DailyTokenTooltip />} cursor={{ fill: "var(--surface-2)" }} />
-          <Bar dataKey="cache_read" stackId="tok" fill="var(--ink-4)" />
-          <Bar dataKey="cache_creation" stackId="tok" fill="oklch(0.70 0.05 270)" />
-          <Bar dataKey="input" stackId="tok" fill="oklch(0.62 0.13 240)" />
-          <Bar dataKey="output" stackId="tok" fill="oklch(0.50 0.16 240)" radius={[2, 2, 0, 0]} />
+          {TOKEN_BAR_SEGMENTS.map((seg, i) => (
+            <Bar
+              key={seg.key}
+              dataKey={seg.key}
+              stackId="tok"
+              fill={seg.color}
+              radius={i === TOKEN_BAR_SEGMENTS.length - 1 ? [2, 2, 0, 0] : undefined}
+            />
+          ))}
         </BarChart>
       </ResponsiveContainer>
+      <div className="token-legend">
+        {[...TOKEN_BAR_SEGMENTS].reverse().map((seg) => (
+          <span key={seg.key} className="token-legend-item">
+            <span className="token-legend-swatch" style={{ background: seg.color }} />
+            {t(seg.labelKey)}
+          </span>
+        ))}
+      </div>
     </StatsSection>
   );
 }

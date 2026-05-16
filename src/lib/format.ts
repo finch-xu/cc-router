@@ -9,14 +9,16 @@ export function fmtKilo(n: number): string {
 }
 
 /**
- * 把 token 数字压缩成 K/M 紧凑形式, 保留 2 位小数。
- *   null / undefined → "-"; n < 1000 原样; 1000 ≤ n < 1e6 → "X.XXK"; n ≥ 1e6 → "X.XXM"
+ * 把 token 数字压缩成 K/M/B/T 紧凑形式, 保留 2 位小数。
+ *   null / undefined → "-"; < 1e3 原样; < 1e6 → "X.XXK"; < 1e9 → "X.XXM"; < 1e12 → "X.XXB"; ≥ 1e12 → "X.XXT"
  */
 export function fmtCompact(n?: number | null): string {
   if (n == null) return "-";
   if (n < 1000) return String(n);
   if (n < 1_000_000) return (n / 1000).toFixed(2) + "K";
-  return (n / 1_000_000).toFixed(2) + "M";
+  if (n < 1_000_000_000) return (n / 1_000_000).toFixed(2) + "M";
+  if (n < 1_000_000_000_000) return (n / 1_000_000_000).toFixed(2) + "B";
+  return (n / 1_000_000_000_000).toFixed(2) + "T";
 }
 
 export function fmtTime(ms: number): string {

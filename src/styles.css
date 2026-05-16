@@ -930,6 +930,28 @@ input, select, textarea { font: inherit; color: inherit; }
 }
 .heatmap-legend .heatmap-cell { width: 11px; height: 11px; }
 
+.token-legend {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 14px;
+  font-size: 11px;
+  color: var(--ink-3);
+  margin-top: 8px;
+  justify-content: flex-end;
+}
+.token-legend-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.token-legend-swatch {
+  width: 11px;
+  height: 11px;
+  border-radius: 2px;
+  display: inline-block;
+}
+
 .recharts-tooltip-wrapper { outline: none; }
 .stats-tooltip {
   background: var(--surface);
