@@ -79,8 +79,10 @@ Highlights:
 | `baidu` | Baidu Qianfan (pay-as-you-go / China subscription) | ✅ | ✅ | untested |
 | `modelscope` | ModelScope (pay-as-you-go) | ❌ | ✅ | partial |
 | `ucloud` | UCloud Modelverse (Coding Plan subscription + pay-as-you-go API in CN/global) | ✅ | ✅ | untested |
+| `openai` | **OpenAI official API** (pay-as-you-go; includes GPT-5 / o3 / 4.1 reasoning models; auto-translates Anthropic thinking ↔ OpenAI reasoning) | ❌ | ✅ | untested |
 | `Custom` | Bring your own Anthropic-compatible endpoint | ✅ | ✅ | verified |
-| `Custom (Gemini compatible)` | Bring your own Gemini generateContent-compatible endpoint (relay, etc.); `messages_path` must contain the `{model}` placeholder | ❌ | ✅ | untested |
+| `Custom (Gemini compatible)` | Bring your own Gemini generateContent-compatible endpoint (relay, etc.); `messages_path` must contain the `{model}` placeholder | ❌ | ✅ | tested |
+| `Custom (OpenAI Responses compatible)` | Bring your own OpenAI `/v1/responses`-compatible endpoint (one-api / new-api relays, etc.); auto protocol translation | ❌ | ✅ | tested |
 
 > The "Token Plan" column covers any subscription-style quota (Token Plan / Coding Plan / Agent Plan, etc.); "API" denotes pay-as-you-go Anthropic Messages-compatible endpoints.
 

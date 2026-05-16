@@ -79,8 +79,10 @@
 | `baidu` | 百度千帆（従量課金 / 中国サブスク） | ✅ | ✅ | untested |
 | `modelscope` | ModelScope 魔搭（従量課金） | ❌ | ✅ | partial |
 | `ucloud` | 優雲智算 UCloud Modelverse（Coding Plan サブスク + 従量課金 API、中国国内/海外） | ✅ | ✅ | untested |
+| `openai` | **OpenAI 公式 API**（従量課金、GPT-5 / o3 / 4.1 などの reasoning モデル対応、Anthropic thinking ↔ OpenAI reasoning を自動変換） | ❌ | ✅ | untested |
 | `カスタム` | Anthropic プロトコル準拠の任意の API を自前で追加 | ✅ | ✅ | verified |
-| `カスタム (Gemini 互換)` | Gemini generateContent 互換の任意のエンドポイント（中継など）を追加。`messages_path` に `{model}` プレースホルダを含める必要があります | ❌ | ✅ | untested |
+| `カスタム (Gemini 互換)` | Gemini generateContent 互換の任意のエンドポイント（中継など）を追加。`messages_path` に `{model}` プレースホルダを含める必要があります | ❌ | ✅ | tested |
+| `カスタム (OpenAI Responses 互換)` | OpenAI `/v1/responses` 互換の任意のエンドポイント（one-api / new-api などの中継）を追加、プロトコル自動変換 | ❌ | ✅ | tested |
 
 > 「Token Plan」列はサブスクリプション形式のクォータ全般（Token Plan / Coding Plan / Agent Plan 等）を指し、「API」列は従量課金の Anthropic Messages 互換エンドポイントを指します。
 
