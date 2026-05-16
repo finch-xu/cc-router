@@ -66,12 +66,19 @@ pub struct GeminiExtras {
 
 /// Anthropic `thinking.effort` → Gemini `thinkingBudget` 整数预算阈值. 与 openai.rs 的
 /// `ReasoningEffort::from_budget_tokens` 阈值对齐 (反向)。
+///
+/// `xhigh` / `max` 是 Anthropic Opus 4.7 / OpenAI GPT-5.2+ 引入的新 effort levels:
+/// - `xhigh` → 131072 (Gemini 2.5 系列 thinkingBudget 上限实际是 24576/32768, 上游会 clamp,
+///   但 cc-router 这边表达"高于 high"的意图)
+/// - `max` → -1 (Gemini 的 dynamic 信号, 让模型自家决定上限, 比固定大数更符合 max 语义)
 pub fn effort_to_budget(effort: &str) -> Option<i64> {
     match effort {
         "minimal" => Some(512),
         "low" => Some(4096),
         "medium" => Some(16384),
         "high" => Some(65536),
+        "xhigh" => Some(131072),
+        "max" => Some(-1),
         _ => None,
     }
 }
@@ -1423,6 +1430,34 @@ mod tests {
         // 非法 effort → 继续往下找
         let body = json!({"thinking": {"effort": "garbage"}, "extra_body": {"reasoning_effort": "high"}});
         assert_eq!(resolve_thinking_budget(&body, None), Some(65536));
+    }
+
+    #[test]
+    fn effort_to_budget_xhigh_returns_131072() {
+        // OpenAI 5.2+ / Anthropic Opus 4.7 引入 xhigh, Gemini 实际上限会 clamp 这个值,
+        // 但 cc-router 这边表达"高于 high"的意图明确
+        assert_eq!(effort_to_budget("xhigh"), Some(131072));
+    }
+
+    #[test]
+    fn effort_to_budget_max_returns_dynamic_minus_one() {
+        // Anthropic 独有的 max → Gemini dynamic 信号 (-1, 由模型自家决定上限)
+        assert_eq!(effort_to_budget("max"), Some(-1));
+    }
+
+    #[test]
+    fn resolve_thinking_budget_xhigh_no_longer_dropped() {
+        // 修复前: 客户端传 xhigh → silent drop → 落回 yaml medium (16384, 反而降级)
+        // 修复后: 客户端传 xhigh → 131072
+        let body = json!({"extra_body": {"reasoning_effort": "xhigh"}});
+        assert_eq!(resolve_thinking_budget(&body, Some("medium")), Some(131072));
+    }
+
+    #[test]
+    fn resolve_thinking_budget_max_dynamic_via_chain() {
+        // 客户端传 max → -1 (动态), 不再 silent drop
+        let body = json!({"thinking": {"effort": "max"}});
+        assert_eq!(resolve_thinking_budget(&body, Some("medium")), Some(-1));
     }
 
     #[test]

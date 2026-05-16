@@ -63,7 +63,7 @@
       }
     },
     "expose_reasoning": { "type": "boolean" },
-    "default_reasoning_effort": { "type": "string", "enum": ["minimal", "low", "medium", "high"] },
+    "default_reasoning_effort": { "type": "string", "enum": ["minimal", "low", "medium", "high", "xhigh", "max"] },
     "inject_missing_thinking_placeholder": { "type": "boolean" }
   }
 }
