@@ -19,7 +19,9 @@ use crate::observability::request_log::{RequestLogEntry, RequestStatus};
 use crate::provider::model::AuthType;
 use crate::proxy::gemini_dispatch;
 use crate::proxy::openai_responses_dispatch;
+use crate::proxy::transform::gemini::{resolve_thinking_budget, GeminiExtras};
 use crate::proxy::transform::openai::{resolve_reasoning_effort, OpenAiResponsesExtras};
+use crate::proxy::transform::openai_responses::CodexExtras;
 use crate::proxy::handler::error_body;
 use crate::proxy::oauth_dispatch::{
     self, OAuthDispatchError,
@@ -34,6 +36,23 @@ use crate::virtual_model::scheduler::build_candidate_order;
 use crate::virtual_model::VirtualModelName;
 
 const ERROR_BODY_LIMIT: usize = 4096;
+
+/// 翻译类 provider 在 yaml 未声明 reasoning 字段时的兜底 effort.
+/// 与 openai-codex.yaml / google-ai-studio.yaml / openai.yaml 默认值保持一致。
+const DEFAULT_REASONING_EFFORT: &str = "medium";
+
+/// 从 provider yaml 读 (expose_reasoning, default_reasoning_effort), 缺失时落 (true, "medium").
+/// codex/openai_responses/gemini 三个翻译类分支共用此兜底——保证未注册 provider 仍能默认 thinking 双向。
+fn provider_reasoning_defaults(
+    state: &AppState,
+    provider_id: &str,
+) -> (bool, Option<String>) {
+    state
+        .providers
+        .get(provider_id)
+        .map(|p| (p.expose_reasoning, p.default_reasoning_effort.clone()))
+        .unwrap_or((true, Some(DEFAULT_REASONING_EFFORT.into())))
+}
 
 /// 按 char_indices 找 UTF-8 边界, 避免切坏多字节字符
 fn truncate_body(text: &str, limit: usize) -> String {
@@ -199,6 +218,19 @@ pub async fn dispatch(
             if !is_fallback {
                 oauth_body["model"] = Value::String(real_model.clone());
             }
+
+            let (yaml_expose_reasoning, yaml_default_effort) =
+                provider_reasoning_defaults(state, &provider_id);
+            // 订阅级 effort 暂未做 (待 DB migration 落 reasoning_effort 列后填入)。
+            let codex_extras = CodexExtras {
+                reasoning_effort: resolve_reasoning_effort(
+                    &request_body,
+                    None,
+                    yaml_default_effort.as_deref(),
+                ),
+                expose_reasoning: yaml_expose_reasoning,
+            };
+
             emit_attempt_started(state, sub_id, vm_name);
             let dispatch_res = oauth_dispatch::dispatch_oauth_attempt(
                 &state.http_client,
@@ -212,6 +244,7 @@ pub async fn dispatch(
                 forward_headers.clone(),
                 client_headers.clone(),
                 required_headers.clone(),
+                codex_extras,
             )
             .await;
 
@@ -435,6 +468,14 @@ pub async fn dispatch(
                 // 直接跳过此候选, 不计 retry.
                 continue;
             }
+
+            let (yaml_expose_reasoning, yaml_default_effort) =
+                provider_reasoning_defaults(state, &provider_id);
+            let gemini_extras = GeminiExtras {
+                thinking_budget: resolve_thinking_budget(&request_body, yaml_default_effort.as_deref()),
+                include_thoughts: yaml_expose_reasoning,
+            };
+
             emit_attempt_started(state, sub_id, vm_name);
             let dispatch_res = gemini_dispatch::dispatch_gemini_attempt(
                 &state.http_client,
@@ -447,6 +488,7 @@ pub async fn dispatch(
                 forward_headers.clone(),
                 client_headers.clone(),
                 required_headers.clone(),
+                gemini_extras,
             )
             .await;
 
@@ -548,29 +590,21 @@ pub async fn dispatch(
             if is_fallback {
                 continue;
             }
-            // 从 provider yaml 查 expose_reasoning / default_reasoning_effort.
-            // 自定义路径 (provider_id == __custom_openai__) 没注册到 providers map,
-            // 用合理默认值 (expose_reasoning=true, 无默认 effort).
-            let (yaml_expose_reasoning, yaml_default_effort) = state
-                .providers
-                .get(&provider_id)
-                .map(|p| (p.expose_reasoning, p.default_reasoning_effort.clone()))
-                .unwrap_or((true, None));
-
-            // reasoning_effort 优先级: client body > subscription > yaml default。
-            // 订阅级 effort 暂未做 (待 DB migration 落 reasoning_effort 列后填入)。
-            let resolved_effort = resolve_reasoning_effort(
-                &request_body,
-                None,
-                yaml_default_effort.as_deref(),
-            );
+            // 自定义路径 (provider_id == __custom_openai__) 未注册到 providers map,
+            // 走 provider_reasoning_defaults 兜底 (expose=true + medium effort)。
+            let (yaml_expose_reasoning, yaml_default_effort) =
+                provider_reasoning_defaults(state, &provider_id);
 
             // model 改写到 slot 真实模型名 (与 codex / gemini 分支一致)
             let mut openai_body = request_body.clone();
             openai_body["model"] = Value::String(real_model.clone());
 
             let extras = OpenAiResponsesExtras {
-                reasoning_effort: resolved_effort,
+                reasoning_effort: resolve_reasoning_effort(
+                    &request_body,
+                    None,
+                    yaml_default_effort.as_deref(),
+                ),
                 expose_reasoning: yaml_expose_reasoning,
             };
 

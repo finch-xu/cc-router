@@ -43,3 +43,9 @@ model_discovery:
   cache_ttl_hours: 168
   example_models:
     - "gpt-5.5"
+
+# OpenAI Responses 翻译层: 上游 reasoning item 暴露为 Anthropic thinking content_block
+# (encrypted_content 编码进 signature, 客户端多轮可回灌). v2.x 起 Codex 默认开启,
+# 与 openai 官方端点保持一致体验. 若想退回 v1.8 silent drop 行为, 改成 false。
+expose_reasoning: true
+default_reasoning_effort: "medium"

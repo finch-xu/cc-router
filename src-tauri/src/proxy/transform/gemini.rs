@@ -25,7 +25,10 @@
 //! | `temperature/top_p/max_tokens/stop_sequences` | `generationConfig.{temperature,topP,maxOutputTokens,stopSequences}` |
 //! | `tools[]` (input_schema) | `tools[0].functionDeclarations: [{name, description, parameters}]` |
 //! | `tool_choice: auto/any/none/tool` | `toolConfig.functionCallingConfig.mode: AUTO/ANY/NONE` |
-//! | `thinking` block | Phase 1 跳过 |
+//! | `thinking` block | `parts[].thoughtSignature` 回灌 (yaml `expose_reasoning: true` 时) |
+//! | `thinking.budget_tokens` / `thinking.effort` | `generationConfig.thinkingConfig.{thinkingBudget,includeThoughts}` |
+//!
+//! 仅 Gemini 2.5+ 系列原生支持 `thinkingConfig`. 2.0/1.5 系列上游静默忽略, cc-router 不门控。
 //!
 //! ## 响应侧 (GeminiSseConverter)
 //!
@@ -47,6 +50,104 @@ use uuid::Uuid;
 use crate::error::{AppError, AppResult};
 
 // ============================================================
+// Extras (dispatch 层填入)
+// ============================================================
+
+/// `anthropic_to_gemini` 的可选项. dispatch 层从 yaml / 客户端 body 推导后传入.
+#[derive(Debug, Clone, Default)]
+pub struct GeminiExtras {
+    /// `generationConfig.thinkingConfig.thinkingBudget` 值.
+    /// `Some(-1)`: 动态预算; `Some(0)`: 关闭思考; `Some(>0)`: 显式上限; `None`: 不注入 thinkingBudget。
+    pub thinking_budget: Option<i64>,
+    /// `generationConfig.thinkingConfig.includeThoughts` 值. yaml `expose_reasoning` 字段映射来。
+    /// 同时控制响应侧是否暴露 thought parts + 是否回灌 thinking block 的 thoughtSignature。
+    pub include_thoughts: bool,
+}
+
+/// Anthropic `thinking.effort` → Gemini `thinkingBudget` 整数预算阈值. 与 openai.rs 的
+/// `ReasoningEffort::from_budget_tokens` 阈值对齐 (反向)。
+pub fn effort_to_budget(effort: &str) -> Option<i64> {
+    match effort {
+        "minimal" => Some(512),
+        "low" => Some(4096),
+        "medium" => Some(16384),
+        "high" => Some(65536),
+        _ => None,
+    }
+}
+
+/// thinking budget 优先级链:
+/// 1. `body.thinking.budget_tokens` (整数, 直接透传)
+/// 2. `body.thinking.effort` (string, 走 [`effort_to_budget`] 映射)
+/// 3. `body.extra_body.reasoning_effort` (string, 同上)
+/// 4. `yaml_default_effort` (provider yaml `default_reasoning_effort`, 同上)
+///
+/// 任意一档为空/非法都视为缺失继续找。返回 None 表示不注入 thinkingBudget,
+/// Gemini 后端会按默认 (2.5 系列约 -1 动态) 处理。
+pub fn resolve_thinking_budget(body: &Value, yaml_default_effort: Option<&str>) -> Option<i64> {
+    if let Some(thinking) = body.get("thinking") {
+        if let Some(bt) = thinking.get("budget_tokens").and_then(|x| x.as_i64()) {
+            return Some(bt);
+        }
+        if let Some(s) = thinking.get("effort").and_then(|x| x.as_str()) {
+            if let Some(b) = effort_to_budget(s) {
+                return Some(b);
+            }
+        }
+    }
+    if let Some(s) = body
+        .get("extra_body")
+        .and_then(|x| x.get("reasoning_effort"))
+        .and_then(|x| x.as_str())
+    {
+        if let Some(b) = effort_to_budget(s) {
+            return Some(b);
+        }
+    }
+    yaml_default_effort.and_then(effort_to_budget)
+}
+
+// ============================================================
+// thoughtSignature 编码 (gemini 多轮回灌)
+// ============================================================
+
+/// Gemini `parts[].thoughtSignature` 在 Anthropic thinking content_block 的 `signature` 字段
+/// 编码格式: `base64url(JSON{v: 1, p: "gemini", ts: "<thoughtSignature原文>"})`.
+///
+/// `p` 字段是 provider 区分标识 (与 openai signature 的 `{v, id, ec}` 物理隔离): 避免订阅切换
+/// 时 cc-router 把 openai signature 喂回 Gemini (或反之) 导致上游 400 校验失败。
+const GEMINI_SIG_VERSION: u64 = 1;
+const GEMINI_SIG_PROVIDER: &str = "gemini";
+
+pub fn encode_gemini_thought_signature(thought_signature: &str) -> String {
+    use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine as _};
+    let payload = json!({
+        "v": GEMINI_SIG_VERSION,
+        "p": GEMINI_SIG_PROVIDER,
+        "ts": thought_signature,
+    });
+    let json_str = serde_json::to_string(&payload).unwrap_or_default();
+    URL_SAFE_NO_PAD.encode(json_str.as_bytes())
+}
+
+pub fn decode_gemini_thought_signature(signature: &str) -> Option<String> {
+    use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine as _};
+    if signature.is_empty() {
+        return None;
+    }
+    let bytes = URL_SAFE_NO_PAD.decode(signature.as_bytes()).ok()?;
+    let v: Value = serde_json::from_slice(&bytes).ok()?;
+    if v.get("v").and_then(|x| x.as_u64()) != Some(GEMINI_SIG_VERSION) {
+        return None;
+    }
+    if v.get("p").and_then(|x| x.as_str()) != Some(GEMINI_SIG_PROVIDER) {
+        // openai signature 错喂到 gemini, 静默 drop 避免污染上游
+        return None;
+    }
+    v.get("ts").and_then(|x| x.as_str()).map(str::to_string)
+}
+
+// ============================================================
 // 请求转换
 // ============================================================
 
@@ -54,7 +155,7 @@ use crate::error::{AppError, AppResult};
 ///
 /// 注意: `body["model"]` 不写到输出 JSON 里 — Gemini 的 model 嵌在 URL 路径中,
 /// 由 dispatch 层做 `{model}` 占位符替换. 但本函数仍要求 body 含 model 字段做校验.
-pub fn anthropic_to_gemini(body: &Value) -> AppResult<Value> {
+pub fn anthropic_to_gemini(body: &Value, extras: &GeminiExtras) -> AppResult<Value> {
     body.get("model")
         .and_then(|v| v.as_str())
         .ok_or_else(|| AppError::BadRequest("请求 body 缺少 model".into()))?;
@@ -73,7 +174,7 @@ pub fn anthropic_to_gemini(body: &Value) -> AppResult<Value> {
 
     // messages[] → contents[]
     if let Some(msgs) = body.get("messages").and_then(|m| m.as_array()) {
-        let contents = anthropic_messages_to_contents(msgs)?;
+        let contents = anthropic_messages_to_contents(msgs, extras)?;
         out["contents"] = json!(contents);
     }
 
@@ -90,6 +191,17 @@ pub fn anthropic_to_gemini(body: &Value) -> AppResult<Value> {
     }
     if let Some(v) = body.get("stop_sequences") {
         gen_config.insert("stopSequences".into(), v.clone());
+    }
+    // thinkingConfig: 仅 Gemini 2.5+ 支持; 2.0/1.5 静默忽略, 不门控。
+    if extras.thinking_budget.is_some() || extras.include_thoughts {
+        let mut tc = serde_json::Map::new();
+        if let Some(b) = extras.thinking_budget {
+            tc.insert("thinkingBudget".into(), json!(b));
+        }
+        if extras.include_thoughts {
+            tc.insert("includeThoughts".into(), json!(true));
+        }
+        gen_config.insert("thinkingConfig".into(), Value::Object(tc));
     }
     if !gen_config.is_empty() {
         out["generationConfig"] = Value::Object(gen_config);
@@ -134,7 +246,9 @@ fn anthropic_system_to_text(system: &Value) -> String {
 /// - role: assistant → model, user 不变
 /// - content 可能是 str (整段当 text part) 或 blocks 数组
 /// - tool_use 提为 parts[].functionCall; tool_result 提为 parts[].functionResponse
-fn anthropic_messages_to_contents(msgs: &[Value]) -> AppResult<Vec<Value>> {
+/// - thinking 块: `extras.include_thoughts=true` 时解码 signature 生成 `parts[].thoughtSignature`
+///   独立 part (无 text), 通常出现在 model role assistant 回复里。
+fn anthropic_messages_to_contents(msgs: &[Value], extras: &GeminiExtras) -> AppResult<Vec<Value>> {
     let mut out: Vec<Value> = Vec::new();
     for m in msgs {
         let role_anth = m.get("role").and_then(|v| v.as_str()).unwrap_or("user");
@@ -142,7 +256,7 @@ fn anthropic_messages_to_contents(msgs: &[Value]) -> AppResult<Vec<Value>> {
         let content = m.get("content");
         let parts = match content {
             Some(Value::String(text)) => vec![json!({"text": text})],
-            Some(Value::Array(blocks)) => convert_content_blocks(blocks),
+            Some(Value::Array(blocks)) => convert_content_blocks(blocks, extras),
             _ => Vec::new(),
         };
         if parts.is_empty() {
@@ -156,7 +270,7 @@ fn anthropic_messages_to_contents(msgs: &[Value]) -> AppResult<Vec<Value>> {
     Ok(out)
 }
 
-fn convert_content_blocks(blocks: &[Value]) -> Vec<Value> {
+fn convert_content_blocks(blocks: &[Value], extras: &GeminiExtras) -> Vec<Value> {
     let mut parts: Vec<Value> = Vec::new();
     for blk in blocks {
         let blk_type = blk.get("type").and_then(|v| v.as_str()).unwrap_or("");
@@ -221,7 +335,19 @@ fn convert_content_blocks(blocks: &[Value]) -> Vec<Value> {
                     }
                 }));
             }
-            // thinking / document 等 Phase 1 跳过
+            "thinking" if extras.include_thoughts => {
+                // 多轮回灌: 解码 signature 还原 thoughtSignature, 生成独立 part。
+                // Gemini 上游用此字段恢复 encrypted reasoning context 上下文。
+                // thinking.text 内容本身被丢弃 — Gemini input parts 不接受 thought summary 文本。
+                if let Some(sig) = blk.get("signature").and_then(|v| v.as_str()) {
+                    if let Some(thought_signature) = decode_gemini_thought_signature(sig) {
+                        if !thought_signature.is_empty() {
+                            parts.push(json!({"thoughtSignature": thought_signature}));
+                        }
+                    }
+                }
+            }
+            // thinking (include_thoughts=false) / redacted_thinking / document 等跳过
             _ => {}
         }
     }
@@ -301,6 +427,12 @@ pub struct GeminiSseConverter {
     next_index: u32,
     /// 当前开着的 text block index, None 表示无活跃 text 块
     text_block_index: Option<u32>,
+    /// 当前开着的 thinking block index, None 表示无活跃 thinking 块
+    thinking_block_index: Option<u32>,
+    /// 当前 thinking 块累积到的最新 thoughtSignature (finalize 时通过 signature_delta 写入)
+    pending_thought_signature: Option<String>,
+    /// 是否暴露 thought parts. yaml `expose_reasoning` → dispatch 层传入。
+    emit_thoughts: bool,
     /// 流末记录的 stop_reason (映射自 Gemini finishReason)
     stop_reason: String,
     /// 累计 usage. Gemini 每帧都可能携带 usageMetadata, 取末值.
@@ -310,7 +442,13 @@ pub struct GeminiSseConverter {
 }
 
 impl GeminiSseConverter {
+    /// 默认 `emit_thoughts=false` (维持 v2.1 行为, thought parts 静默丢弃)。
+    /// 暴露 thought 走 [`Self::new_with_extras`]。
     pub fn new(response_model: &str) -> Self {
+        Self::new_with_extras(response_model, false)
+    }
+
+    pub fn new_with_extras(response_model: &str, emit_thoughts: bool) -> Self {
         Self {
             started: false,
             stopped: false,
@@ -318,6 +456,9 @@ impl GeminiSseConverter {
             response_model: response_model.to_string(),
             next_index: 0,
             text_block_index: None,
+            thinking_block_index: None,
+            pending_thought_signature: None,
+            emit_thoughts,
             stop_reason: "end_turn".to_string(),
             final_usage: json!({"input_tokens": 0, "output_tokens": 0}),
             saw_finish: false,
@@ -350,13 +491,9 @@ impl GeminiSseConverter {
                 if !reason.is_empty() && reason != "FINISH_REASON_UNSPECIFIED" {
                     self.stop_reason = map_finish_reason(reason).to_string();
                     self.saw_finish = true;
-                    // 关掉残留 text block
-                    if let Some(idx) = self.text_block_index.take() {
-                        out.push(AnthropicEvent {
-                            event: "content_block_stop",
-                            data: json!({"type": "content_block_stop", "index": idx}),
-                        });
-                    }
+                    // 关掉残留块 (text 或 thinking)
+                    self.close_thinking_block_if_open(&mut out);
+                    self.close_text_block_if_open(&mut out);
                 }
             }
         }
@@ -375,13 +512,9 @@ impl GeminiSseConverter {
         if !self.started || self.stopped {
             return out;
         }
-        // 兜底关掉残留 text block
-        if let Some(idx) = self.text_block_index.take() {
-            out.push(AnthropicEvent {
-                event: "content_block_stop",
-                data: json!({"type": "content_block_stop", "index": idx}),
-            });
-        }
+        // 兜底关掉残留块 (thinking 优先 — 它通常先于 text 出现且不会被 text 关掉)
+        self.close_thinking_block_if_open(&mut out);
+        self.close_text_block_if_open(&mut out);
         out.push(AnthropicEvent {
             event: "message_delta",
             data: json!({
@@ -430,21 +563,55 @@ impl GeminiSseConverter {
     }
 
     fn handle_part(&mut self, part: &Value, out: &mut Vec<AnthropicEvent>) {
+        let is_thought = part.get("thought").and_then(|v| v.as_bool()).unwrap_or(false);
+        let thought_signature_present = part
+            .get("thoughtSignature")
+            .and_then(|v| v.as_str())
+            .filter(|s| !s.is_empty())
+            .map(str::to_string);
+
+        // thoughtSignature 单独出现 (无 text 无 functionCall) — Gemini 用这种形态携带 reasoning context.
+        // 累积到 pending, 关 thinking 块时 emit signature_delta。
+        if self.emit_thoughts {
+            if let Some(sig) = &thought_signature_present {
+                self.pending_thought_signature = Some(sig.clone());
+            }
+        }
+
         if let Some(text) = part.get("text").and_then(|v| v.as_str()) {
-            if !text.is_empty() {
-                let idx = self.ensure_text_block(out);
+            if text.is_empty() {
+                return;
+            }
+            if is_thought && self.emit_thoughts {
+                // thought summary text → Anthropic thinking_delta
+                self.close_text_block_if_open(out);
+                let idx = self.ensure_thinking_block(out);
                 out.push(AnthropicEvent {
                     event: "content_block_delta",
                     data: json!({
                         "type": "content_block_delta",
                         "index": idx,
-                        "delta": {"type": "text_delta", "text": text},
+                        "delta": {"type": "thinking_delta", "thinking": text},
                     }),
                 });
+                return;
             }
+            // 普通 text — 关掉 thinking 块, 再开/续 text 块
+            self.close_thinking_block_if_open(out);
+            let idx = self.ensure_text_block(out);
+            out.push(AnthropicEvent {
+                event: "content_block_delta",
+                data: json!({
+                    "type": "content_block_delta",
+                    "index": idx,
+                    "delta": {"type": "text_delta", "text": text},
+                }),
+            });
             return;
         }
         if let Some(fc) = part.get("functionCall") {
+            // functionCall 出现前关掉 thinking + text
+            self.close_thinking_block_if_open(out);
             self.close_text_block_if_open(out);
             let name = fc.get("name").and_then(|v| v.as_str()).unwrap_or("");
             let args = fc.get("args").cloned().unwrap_or(json!({}));
@@ -479,7 +646,46 @@ impl GeminiSseConverter {
                 data: json!({"type": "content_block_stop", "index": idx}),
             });
         }
-        // inlineData / fileData / thought 等 Phase 1 跳过
+        // inlineData / fileData 等跳过
+    }
+
+    fn ensure_thinking_block(&mut self, out: &mut Vec<AnthropicEvent>) -> u32 {
+        if let Some(idx) = self.thinking_block_index {
+            return idx;
+        }
+        let idx = self.next_index;
+        self.next_index += 1;
+        self.thinking_block_index = Some(idx);
+        out.push(AnthropicEvent {
+            event: "content_block_start",
+            data: json!({
+                "type": "content_block_start",
+                "index": idx,
+                "content_block": {"type": "thinking", "thinking": ""},
+            }),
+        });
+        idx
+    }
+
+    fn close_thinking_block_if_open(&mut self, out: &mut Vec<AnthropicEvent>) {
+        if let Some(idx) = self.thinking_block_index.take() {
+            // 先 emit pending signature_delta (若有), 再关块
+            if let Some(thought_signature) = self.pending_thought_signature.take() {
+                let signature = encode_gemini_thought_signature(&thought_signature);
+                out.push(AnthropicEvent {
+                    event: "content_block_delta",
+                    data: json!({
+                        "type": "content_block_delta",
+                        "index": idx,
+                        "delta": {"type": "signature_delta", "signature": signature},
+                    }),
+                });
+            }
+            out.push(AnthropicEvent {
+                event: "content_block_stop",
+                data: json!({"type": "content_block_stop", "index": idx}),
+            });
+        }
     }
 
     fn ensure_text_block(&mut self, out: &mut Vec<AnthropicEvent>) -> u32 {
@@ -552,6 +758,10 @@ pub struct NonStreamingCollector {
     converter: GeminiSseConverter,
     /// content_block index → 累积的 text
     text_acc: HashMap<u32, String>,
+    /// content_block index → 累积的 thinking
+    thinking_acc: HashMap<u32, String>,
+    /// content_block index → 累积的 signature (signature_delta)
+    signature_acc: HashMap<u32, String>,
     /// content_block index → 块元信息 (block_start 时记录)
     block_meta: HashMap<u32, Value>,
     /// content_block index 出现顺序
@@ -560,9 +770,15 @@ pub struct NonStreamingCollector {
 
 impl NonStreamingCollector {
     pub fn new(response_model: &str) -> Self {
+        Self::new_with_extras(response_model, false)
+    }
+
+    pub fn new_with_extras(response_model: &str, emit_thoughts: bool) -> Self {
         Self {
-            converter: GeminiSseConverter::new(response_model),
+            converter: GeminiSseConverter::new_with_extras(response_model, emit_thoughts),
             text_acc: HashMap::new(),
+            thinking_acc: HashMap::new(),
+            signature_acc: HashMap::new(),
             block_meta: HashMap::new(),
             order: Vec::new(),
         }
@@ -591,6 +807,15 @@ impl NonStreamingCollector {
                     "text" => {
                         let text = self.text_acc.get(idx).cloned().unwrap_or_default();
                         Some(json!({"type": "text", "text": text}))
+                    }
+                    "thinking" => {
+                        let thinking = self.thinking_acc.get(idx).cloned().unwrap_or_default();
+                        let signature = self.signature_acc.get(idx).cloned().unwrap_or_default();
+                        Some(json!({
+                            "type": "thinking",
+                            "thinking": thinking,
+                            "signature": signature,
+                        }))
                     }
                     "tool_use" => Some(json!({
                         "type": "tool_use",
@@ -636,6 +861,16 @@ impl NonStreamingCollector {
                     "text_delta" => {
                         if let Some(t) = delta.get("text").and_then(|v| v.as_str()) {
                             self.text_acc.entry(index).or_default().push_str(t);
+                        }
+                    }
+                    "thinking_delta" => {
+                        if let Some(t) = delta.get("thinking").and_then(|v| v.as_str()) {
+                            self.thinking_acc.entry(index).or_default().push_str(t);
+                        }
+                    }
+                    "signature_delta" => {
+                        if let Some(s) = delta.get("signature").and_then(|v| v.as_str()) {
+                            self.signature_acc.insert(index, s.to_string());
                         }
                     }
                     "input_json_delta" => {
@@ -696,7 +931,7 @@ mod tests {
             "model": "gemini-2.5-flash",
             "messages": [{"role": "user", "content": "hello"}],
         });
-        let out = anthropic_to_gemini(&body).unwrap();
+        let out = anthropic_to_gemini(&body, &GeminiExtras::default()).unwrap();
         assert!(out.get("model").is_none(), "model 不应进 body");
         let contents = out["contents"].as_array().unwrap();
         assert_eq!(contents.len(), 1);
@@ -714,7 +949,7 @@ mod tests {
                 {"role": "user", "content": "more"},
             ],
         });
-        let out = anthropic_to_gemini(&body).unwrap();
+        let out = anthropic_to_gemini(&body, &GeminiExtras::default()).unwrap();
         let contents = out["contents"].as_array().unwrap();
         assert_eq!(contents[0]["role"], "user");
         assert_eq!(contents[1]["role"], "model");
@@ -728,7 +963,7 @@ mod tests {
             "system": "你是助手",
             "messages": [{"role": "user", "content": "hi"}],
         });
-        let out = anthropic_to_gemini(&body).unwrap();
+        let out = anthropic_to_gemini(&body, &GeminiExtras::default()).unwrap();
         assert_eq!(out["systemInstruction"]["parts"][0]["text"], "你是助手");
     }
 
@@ -742,7 +977,7 @@ mod tests {
             ],
             "messages": [{"role": "user", "content": "hi"}],
         });
-        let out = anthropic_to_gemini(&body).unwrap();
+        let out = anthropic_to_gemini(&body, &GeminiExtras::default()).unwrap();
         assert_eq!(out["systemInstruction"]["parts"][0]["text"], "段 A\n\n段 B");
     }
 
@@ -752,7 +987,7 @@ mod tests {
             "model": "gemini-2.5-flash",
             "messages": [{"role": "user", "content": "hi"}],
         });
-        let out = anthropic_to_gemini(&body).unwrap();
+        let out = anthropic_to_gemini(&body, &GeminiExtras::default()).unwrap();
         assert!(out.get("systemInstruction").is_none());
     }
 
@@ -766,7 +1001,7 @@ mod tests {
             "stop_sequences": ["STOP"],
             "messages": [{"role": "user", "content": "hi"}],
         });
-        let out = anthropic_to_gemini(&body).unwrap();
+        let out = anthropic_to_gemini(&body, &GeminiExtras::default()).unwrap();
         let gc = &out["generationConfig"];
         assert_eq!(gc["temperature"], 0.7);
         assert_eq!(gc["topP"], 0.95);
@@ -789,7 +1024,7 @@ mod tests {
                 }
             }],
         });
-        let out = anthropic_to_gemini(&body).unwrap();
+        let out = anthropic_to_gemini(&body, &GeminiExtras::default()).unwrap();
         let decls = out["tools"][0]["functionDeclarations"].as_array().unwrap();
         assert_eq!(decls.len(), 1);
         assert_eq!(decls[0]["name"], "get_weather");
@@ -810,7 +1045,7 @@ mod tests {
                 "messages": [{"role": "user", "content": "hi"}],
                 "tool_choice": input,
             });
-            let out = anthropic_to_gemini(&body).unwrap();
+            let out = anthropic_to_gemini(&body, &GeminiExtras::default()).unwrap();
             assert_eq!(out["toolConfig"]["functionCallingConfig"]["mode"], expected_mode);
         }
 
@@ -819,7 +1054,7 @@ mod tests {
             "messages": [{"role": "user", "content": "hi"}],
             "tool_choice": {"type": "tool", "name": "get_weather"},
         });
-        let out = anthropic_to_gemini(&body).unwrap();
+        let out = anthropic_to_gemini(&body, &GeminiExtras::default()).unwrap();
         let cfg = &out["toolConfig"]["functionCallingConfig"];
         assert_eq!(cfg["mode"], "ANY");
         assert_eq!(cfg["allowedFunctionNames"], json!(["get_weather"]));
@@ -842,7 +1077,7 @@ mod tests {
                 ]},
             ],
         });
-        let out = anthropic_to_gemini(&body).unwrap();
+        let out = anthropic_to_gemini(&body, &GeminiExtras::default()).unwrap();
         let contents = out["contents"].as_array().unwrap();
         assert_eq!(contents.len(), 3);
         // 第二条 assistant→model 含 text + functionCall
@@ -867,7 +1102,7 @@ mod tests {
                 {"type": "image", "source": {"type": "base64", "media_type": "image/png", "data": "BASE64XYZ"}},
             ]}],
         });
-        let out = anthropic_to_gemini(&body).unwrap();
+        let out = anthropic_to_gemini(&body, &GeminiExtras::default()).unwrap();
         let parts = out["contents"][0]["parts"].as_array().unwrap();
         assert_eq!(parts.len(), 2);
         assert_eq!(parts[0]["text"], "看图");
@@ -1023,5 +1258,260 @@ mod tests {
         assert_eq!(map_finish_reason("MAX_TOKENS"), "max_tokens");
         assert_eq!(map_finish_reason("SAFETY"), "stop_sequence");
         assert_eq!(map_finish_reason("UNKNOWN_FUTURE"), "end_turn");
+    }
+
+    // ============================================================
+    // Thinking 双向翻译 (v2.x 新增)
+    // ============================================================
+
+    #[test]
+    fn request_omits_thinking_config_when_extras_default() {
+        let body = json!({
+            "model": "gemini-2.5-flash",
+            "messages": [{"role": "user", "content": "hi"}],
+        });
+        let out = anthropic_to_gemini(&body, &GeminiExtras::default()).unwrap();
+        assert!(
+            out.get("generationConfig")
+                .and_then(|g| g.get("thinkingConfig"))
+                .is_none(),
+            "默认 extras 不应注入 thinkingConfig"
+        );
+    }
+
+    #[test]
+    fn request_injects_thinking_config_with_budget_and_includes() {
+        let body = json!({
+            "model": "gemini-2.5-flash",
+            "messages": [{"role": "user", "content": "hi"}],
+        });
+        let extras = GeminiExtras {
+            thinking_budget: Some(16384),
+            include_thoughts: true,
+        };
+        let out = anthropic_to_gemini(&body, &extras).unwrap();
+        let tc = &out["generationConfig"]["thinkingConfig"];
+        assert_eq!(tc["thinkingBudget"], 16384);
+        assert_eq!(tc["includeThoughts"], true);
+    }
+
+    #[test]
+    fn resolve_thinking_budget_priority_chain() {
+        // 1. budget_tokens 直接透传
+        let body = json!({"thinking": {"budget_tokens": 12345}});
+        assert_eq!(resolve_thinking_budget(&body, Some("low")), Some(12345));
+
+        // 2. thinking.effort 映射
+        let body = json!({"thinking": {"effort": "high"}});
+        assert_eq!(resolve_thinking_budget(&body, Some("low")), Some(65536));
+
+        // 3. extra_body.reasoning_effort 映射
+        let body = json!({"extra_body": {"reasoning_effort": "minimal"}});
+        assert_eq!(resolve_thinking_budget(&body, Some("low")), Some(512));
+
+        // 4. yaml default
+        let body = json!({});
+        assert_eq!(resolve_thinking_budget(&body, Some("medium")), Some(16384));
+
+        // 5. 全空 → None
+        let body = json!({});
+        assert_eq!(resolve_thinking_budget(&body, None), None);
+
+        // 非法 effort → 继续往下找
+        let body = json!({"thinking": {"effort": "garbage"}, "extra_body": {"reasoning_effort": "high"}});
+        assert_eq!(resolve_thinking_budget(&body, None), Some(65536));
+    }
+
+    #[test]
+    fn gemini_thought_signature_roundtrip_encoding() {
+        let sig = encode_gemini_thought_signature("Gemini_TS_BYTES_42");
+        assert!(!sig.is_empty());
+        let ts = decode_gemini_thought_signature(&sig).unwrap();
+        assert_eq!(ts, "Gemini_TS_BYTES_42");
+    }
+
+    #[test]
+    fn gemini_signature_rejects_openai_signature() {
+        // 用 openai 的 signature 编码喂给 gemini decoder, 应返回 None 避免错喂上游
+        let openai_sig =
+            crate::proxy::transform::responses_common::encode_reasoning_signature("rs_x", "ENC");
+        assert!(
+            decode_gemini_thought_signature(&openai_sig).is_none(),
+            "openai signature 不能被 gemini decoder 解出, 否则会污染上游"
+        );
+    }
+
+    #[test]
+    fn request_thinking_block_roundtrip_into_thought_signature_part() {
+        // 客户端回灌一轮: assistant 消息包含 thinking 块, signature 编码自上一轮的 thoughtSignature
+        let encoded = encode_gemini_thought_signature("PREV_THOUGHT_SIG");
+        let body = json!({
+            "model": "gemini-2.5-flash",
+            "messages": [
+                {"role": "user", "content": "step 1?"},
+                {"role": "assistant", "content": [
+                    {"type": "thinking", "thinking": "summary", "signature": encoded},
+                    {"type": "text", "text": "answer 1"},
+                ]},
+                {"role": "user", "content": "next"},
+            ],
+        });
+        let extras = GeminiExtras {
+            thinking_budget: None,
+            include_thoughts: true,
+        };
+        let out = anthropic_to_gemini(&body, &extras).unwrap();
+        let assistant_parts = out["contents"][1]["parts"].as_array().unwrap();
+        // 期望: 第一个 part 是 thoughtSignature, 第二个是 text
+        let has_signature_part = assistant_parts.iter().any(|p| {
+            p.get("thoughtSignature")
+                .and_then(|v| v.as_str())
+                .map(|s| s == "PREV_THOUGHT_SIG")
+                .unwrap_or(false)
+        });
+        assert!(has_signature_part, "缺少 thoughtSignature part: {:?}", assistant_parts);
+    }
+
+    #[test]
+    fn request_thinking_block_dropped_when_extras_disabled() {
+        let encoded = encode_gemini_thought_signature("SIG");
+        let body = json!({
+            "model": "gemini-2.5-flash",
+            "messages": [{"role": "assistant", "content": [
+                {"type": "thinking", "thinking": "x", "signature": encoded},
+                {"type": "text", "text": "y"},
+            ]}],
+        });
+        let out = anthropic_to_gemini(&body, &GeminiExtras::default()).unwrap();
+        let parts = out["contents"][0]["parts"].as_array().unwrap();
+        assert!(
+            parts.iter().all(|p| p.get("thoughtSignature").is_none()),
+            "extras.include_thoughts=false 时 thinking 块应被丢弃"
+        );
+    }
+
+    #[test]
+    fn response_thought_part_emits_thinking_block() {
+        let mut conv = GeminiSseConverter::new_with_extras("gemini-2.5-flash", true);
+        let evts = conv.feed(&json!({
+            "candidates": [{"content": {"parts": [
+                {"thought": true, "text": "step 1"},
+            ]}}],
+        }));
+        // message_start + content_block_start(thinking) + content_block_delta(thinking_delta)
+        assert!(evts.iter().any(|e| e.event == "message_start"));
+        let has_start = evts.iter().any(|e| {
+            e.event == "content_block_start"
+                && e.data.get("content_block").and_then(|cb| cb.get("type"))
+                    == Some(&json!("thinking"))
+        });
+        assert!(has_start, "应 emit thinking content_block_start");
+        let has_delta = evts.iter().any(|e| {
+            e.event == "content_block_delta"
+                && e.data
+                    .get("delta")
+                    .and_then(|d| d.get("type"))
+                    .and_then(|t| t.as_str())
+                    == Some("thinking_delta")
+        });
+        assert!(has_delta, "应 emit thinking_delta");
+    }
+
+    #[test]
+    fn response_text_after_thought_closes_thinking_block() {
+        let mut conv = GeminiSseConverter::new_with_extras("gemini-2.5-flash", true);
+        let _ = conv.feed(&json!({
+            "candidates": [{"content": {"parts": [
+                {"thought": true, "text": "thinking summary"},
+            ]}}],
+        }));
+        let evts = conv.feed(&json!({
+            "candidates": [{"content": {"parts": [
+                {"text": "real answer"},
+            ]}}],
+        }));
+        // 应先 emit content_block_stop(thinking), 再 content_block_start(text)
+        let stop_pos = evts.iter().position(|e| e.event == "content_block_stop");
+        let start_pos = evts.iter().position(|e| {
+            e.event == "content_block_start"
+                && e.data.get("content_block").and_then(|cb| cb.get("type"))
+                    == Some(&json!("text"))
+        });
+        assert!(
+            stop_pos.is_some() && start_pos.is_some() && stop_pos.unwrap() < start_pos.unwrap(),
+            "thinking 块应在 text 块开始前关闭: {:?}",
+            evts.iter().map(|e| e.event).collect::<Vec<_>>()
+        );
+    }
+
+    #[test]
+    fn response_thought_signature_emitted_as_signature_delta() {
+        let mut conv = GeminiSseConverter::new_with_extras("gemini-2.5-flash", true);
+        let _ = conv.feed(&json!({
+            "candidates": [{"content": {"parts": [
+                {"thought": true, "text": "x"},
+                {"thoughtSignature": "BUFFER_SIG_BYTES"},
+            ]}}],
+        }));
+        // close 块时 emit signature_delta + content_block_stop
+        let evts = conv.feed(&json!({
+            "candidates": [{"content": {"parts": [{"text": "answer"}]}}],
+        }));
+        let sig_delta = evts.iter().find(|e| {
+            e.event == "content_block_delta"
+                && e.data
+                    .get("delta")
+                    .and_then(|d| d.get("type"))
+                    .and_then(|t| t.as_str())
+                    == Some("signature_delta")
+        });
+        let sig_delta = sig_delta.expect("应 emit signature_delta 关 thinking 块");
+        let sig = sig_delta.data["delta"]["signature"].as_str().unwrap();
+        let decoded = decode_gemini_thought_signature(sig).unwrap();
+        assert_eq!(decoded, "BUFFER_SIG_BYTES");
+    }
+
+    #[test]
+    fn response_thoughts_skipped_when_emit_disabled() {
+        let mut conv = GeminiSseConverter::new_with_extras("gemini-2.5-flash", false);
+        let evts = conv.feed(&json!({
+            "candidates": [{"content": {"parts": [
+                {"thought": true, "text": "should be dropped"},
+                {"text": "kept"},
+            ]}}],
+        }));
+        // 只应有 message_start + text 相关事件, 没有 thinking 块
+        let has_thinking = evts.iter().any(|e| {
+            e.data.get("content_block").and_then(|cb| cb.get("type"))
+                == Some(&json!("thinking"))
+                || e.data
+                    .get("delta")
+                    .and_then(|d| d.get("type"))
+                    .and_then(|t| t.as_str())
+                    == Some("thinking_delta")
+        });
+        assert!(!has_thinking, "emit_thoughts=false 时不应有 thinking 事件");
+    }
+
+    #[test]
+    fn nonstreaming_collector_assembles_thinking_block_with_signature() {
+        let mut col = NonStreamingCollector::new_with_extras("gemini-2.5-flash", true);
+        col.feed(&json!({
+            "candidates": [{"content": {"parts": [
+                {"thought": true, "text": "step 1 "},
+                {"thought": true, "text": "step 2"},
+                {"thoughtSignature": "TS_FULL"},
+                {"text": "final answer"},
+            ]}, "finishReason": "STOP"}],
+        }));
+        let msg = col.finalize();
+        let content = msg["content"].as_array().unwrap();
+        assert_eq!(content.len(), 2);
+        assert_eq!(content[0]["type"], "thinking");
+        assert_eq!(content[0]["thinking"], "step 1 step 2");
+        let sig = content[0]["signature"].as_str().unwrap();
+        assert_eq!(decode_gemini_thought_signature(sig).unwrap(), "TS_FULL");
+        assert_eq!(content[1]["type"], "text");
+        assert_eq!(content[1]["text"], "final answer");
     }
 }

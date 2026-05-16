@@ -5,6 +5,9 @@
 //! - 请求体: JSON, 含 `profileArn` + `conversationState`
 //! - 响应: AWS Event Stream 二进制流 (见 [`super::aws_event_stream`] 解码)
 //! - 模型 ID 必须用 Kiro 专属名 (`claude-sonnet-4.5` 等), 而非 `claude-sonnet-4-20250514` 这种 API 全名
+//! - **不支持 reasoning/thinking**: CodeWhisperer 协议无对应字段, 客户端 thinking 块会被 warning 日志后
+//!   丢弃 (kiro.yaml `expose_reasoning: false` 是协议事实而非未实现)。若需 thinking 能力使用
+//!   openai / openai_codex / gemini provider。
 //!
 //! ## 请求侧字段映射
 //!
@@ -178,7 +181,13 @@ fn split_content_blocks(content: Option<&Value>) -> (String, Vec<Value>, Vec<Val
                         }
                     }
                     "thinking" | "redacted_thinking" => {
-                        // CodeWhisperer 不接受 thinking 块, silent drop.
+                        // Kiro/CodeWhisperer 上游协议无 reasoning/thinking 字段, 客户端 thinking 块只能丢弃.
+                        // yaml `expose_reasoning: false` 是协议事实而非未实现; warn 让用户能在日志里看到原因。
+                        tracing::warn!(
+                            target: "kiro_translate",
+                            "客户端发送 thinking 块, Kiro/CodeWhisperer 上游不支持 reasoning, 已丢弃. \
+                             若需 thinking 能力请用 openai / openai_codex / gemini provider."
+                        );
                     }
                     "tool_use" => {
                         let id = blk.get("id").and_then(|v| v.as_str()).unwrap_or("");

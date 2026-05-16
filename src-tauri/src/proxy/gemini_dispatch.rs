@@ -38,7 +38,8 @@ use crate::observability::request_log::{RequestLogEntry, RequestStatus};
 use crate::proxy::oauth_dispatch::{OAuthDispatchError, OAuthDispatchOk};
 use crate::proxy::sse_framing::find_sse_frame_boundary;
 use crate::proxy::transform::gemini::{
-    anthropic_to_gemini, parse_gemini_sse_frame, GeminiSseConverter, NonStreamingCollector,
+    anthropic_to_gemini, parse_gemini_sse_frame, GeminiExtras, GeminiSseConverter,
+    NonStreamingCollector,
 };
 use crate::proxy::upstream;
 use crate::subscription::model::SubscriptionRuntime;
@@ -63,6 +64,7 @@ pub async fn dispatch_gemini_attempt(
     forward_headers: Vec<String>,
     client_headers: HeaderMap,
     required_headers: std::collections::BTreeMap<String, String>,
+    extras: GeminiExtras,
 ) -> Result<OAuthDispatchOk, OAuthDispatchError> {
     if !url_template.contains("{model}") {
         return Err(OAuthDispatchError::Upstream {
@@ -77,8 +79,9 @@ pub async fn dispatch_gemini_attempt(
         format!("{}?alt=sse", url_with_model)
     };
 
+    let emit_thoughts = extras.include_thoughts;
     let translated_body =
-        anthropic_to_gemini(request_body).map_err(|e| OAuthDispatchError::Upstream {
+        anthropic_to_gemini(request_body, &extras).map_err(|e| OAuthDispatchError::Upstream {
             status: None,
             message: format!("body 翻译失败: {e}"),
         })?;
@@ -181,6 +184,8 @@ pub async fn dispatch_gemini_attempt(
         upstream_headers: resp_headers,
         upstream_stream: stream,
         client_wants_streaming,
+        transform_config: None,
+        gemini_emit_thoughts: emit_thoughts,
     })
 }
 
@@ -203,9 +208,11 @@ pub fn finalize_gemini_response(
     app: AppHandle,
     sub_rt: Arc<RwLock<SubscriptionRuntime>>,
 ) -> Response {
+    let emit_thoughts = ok.gemini_emit_thoughts;
     if ok.client_wants_streaming {
         finalize_gemini_streaming(
             ok.upstream_stream,
+            emit_thoughts,
             vm_name,
             attempt_id,
             sub_id,
@@ -223,6 +230,7 @@ pub fn finalize_gemini_response(
     } else {
         let fut = collect_gemini_to_json_response(
             ok.upstream_stream,
+            emit_thoughts,
             vm_name,
             attempt_id,
             sub_id,
@@ -260,6 +268,7 @@ pub fn finalize_gemini_response(
 #[allow(clippy::too_many_arguments)]
 fn finalize_gemini_streaming(
     upstream_stream: BoxStream<'static, Result<Bytes, reqwest::Error>>,
+    emit_thoughts: bool,
     vm_name: VirtualModelName,
     attempt_id: Uuid,
     sub_id: Uuid,
@@ -278,7 +287,7 @@ fn finalize_gemini_streaming(
 
     tokio::spawn(async move {
         let start = std::time::Instant::now();
-        let mut converter = GeminiSseConverter::new(&real_model);
+        let mut converter = GeminiSseConverter::new_with_extras(&real_model, emit_thoughts);
         let mut buffer = BytesMut::with_capacity(8 * 1024);
 
         let mut stream = upstream_stream;
@@ -403,6 +412,7 @@ fn finalize_gemini_streaming(
 #[allow(clippy::too_many_arguments)]
 async fn collect_gemini_to_json_response(
     upstream_stream: BoxStream<'static, Result<Bytes, reqwest::Error>>,
+    emit_thoughts: bool,
     vm_name: VirtualModelName,
     attempt_id: Uuid,
     sub_id: Uuid,
@@ -418,7 +428,7 @@ async fn collect_gemini_to_json_response(
     sub_rt: Arc<RwLock<SubscriptionRuntime>>,
 ) -> Response {
     let start = std::time::Instant::now();
-    let mut collector = NonStreamingCollector::new(&real_model);
+    let mut collector = NonStreamingCollector::new_with_extras(&real_model, emit_thoughts);
     let mut buffer = BytesMut::with_capacity(8 * 1024);
 
     let mut stream = upstream_stream;

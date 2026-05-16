@@ -86,19 +86,11 @@ pub fn anthropic_to_openai_responses(
     body: &Value,
     extras: &OpenAiResponsesExtras,
 ) -> AppResult<Value> {
-    let mut config = ResponsesTransformConfig::openai_official();
-    if extras.expose_reasoning {
-        config.inject_default_include = vec!["reasoning.encrypted_content".into()];
-        config.emit_reasoning = true;
-        config.roundtrip_reasoning = true;
-    }
-
+    let config = ResponsesTransformConfig::openai_official(extras.expose_reasoning);
     let mut out = responses_common::build_responses_body(body, &config)?;
-
     if let Some(effort) = extras.reasoning_effort {
         out["reasoning"] = json!({ "effort": effort.as_str() });
     }
-
     Ok(out)
 }
 
@@ -334,7 +326,7 @@ mod tests {
         use super::super::responses_common::{
             anthropic_messages_to_input, encode_reasoning_signature, ResponsesTransformConfig,
         };
-        let mut config = ResponsesTransformConfig::openai_official();
+        let mut config = ResponsesTransformConfig::openai_official(false);
         config.roundtrip_reasoning = true;
 
         let sig = encode_reasoning_signature("rs_abc", "ENC_BYTES");
@@ -359,7 +351,7 @@ mod tests {
     #[test]
     fn roundtrip_disabled_drops_thinking_block() {
         use super::super::responses_common::{anthropic_messages_to_input, ResponsesTransformConfig};
-        let config = ResponsesTransformConfig::openai_official(); // roundtrip_reasoning=false
+        let config = ResponsesTransformConfig::openai_official(false); // roundtrip_reasoning=false
         let msgs = vec![json!({
             "role": "assistant",
             "content": [
@@ -387,7 +379,7 @@ mod tests {
             ],
             "usage": {"input_tokens": 5, "output_tokens": 2}
         });
-        let cfg = ResponsesTransformConfig::openai_official();
+        let cfg = ResponsesTransformConfig::openai_official(false);
         let out = responses_json_to_anthropic(&upstream, &cfg).unwrap();
         assert_eq!(out["id"], json!("resp_1"));
         assert_eq!(out["model"], json!("gpt-5"));
@@ -411,7 +403,7 @@ mod tests {
             ],
             "usage": {}
         });
-        let cfg = ResponsesTransformConfig::openai_official();
+        let cfg = ResponsesTransformConfig::openai_official(false);
         let out = responses_json_to_anthropic(&upstream, &cfg).unwrap();
         let content = out["content"].as_array().unwrap();
         assert_eq!(content.len(), 1);
@@ -431,7 +423,7 @@ mod tests {
             ],
             "usage": {}
         });
-        let cfg = ResponsesTransformConfig::openai_official(); // emit_reasoning=false
+        let cfg = ResponsesTransformConfig::openai_official(false); // emit_reasoning=false
         let out = responses_json_to_anthropic(&upstream, &cfg).unwrap();
         let content = out["content"].as_array().unwrap();
         assert_eq!(content.len(), 1, "reasoning skip, 只剩 text");
@@ -448,7 +440,7 @@ mod tests {
             ],
             "usage": {}
         });
-        let mut cfg = ResponsesTransformConfig::openai_official();
+        let mut cfg = ResponsesTransformConfig::openai_official(false);
         cfg.emit_reasoning = true;
         let out = responses_json_to_anthropic(&upstream, &cfg).unwrap();
         let content = out["content"].as_array().unwrap();

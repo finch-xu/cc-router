@@ -38,3 +38,9 @@ model_discovery:
     - "gemini-2.5-flash"
     - "gemini-2.5-flash-lite"
     - "gemini-2.0-flash"
+
+# Gemini 翻译层: 客户端 thinking.{budget_tokens, effort} → generationConfig.thinkingConfig.{thinkingBudget, includeThoughts};
+# 上游 parts[].thought=true 与 thoughtSignature → Anthropic thinking content_block (signature 字段编码携带 thoughtSignature).
+# 仅 Gemini 2.5+ 系列原生支持 thinkingConfig; 2.0/1.5 系列上游静默忽略不报错。
+expose_reasoning: true
+default_reasoning_effort: "medium"

@@ -50,8 +50,10 @@ use crate::proxy::transform::kiro_codewhisperer::{
     anthropic_to_codewhisperer, KiroSseConverter, NonStreamingCollector as KiroCollector,
 };
 use crate::proxy::transform::openai_responses::{
-    anthropic_to_responses, parse_sse_frame, NonStreamingCollector, ResponsesSseConverter,
+    anthropic_to_responses, parse_sse_frame, CodexExtras, NonStreamingCollector,
+    ResponsesSseConverter,
 };
+use crate::proxy::transform::responses_common::ResponsesTransformConfig;
 use crate::proxy::upstream;
 use crate::subscription::model::{OAuthMetadata, SubscriptionRuntime};
 use crate::subscription::state_machine;
@@ -86,6 +88,7 @@ pub async fn dispatch_oauth_attempt(
     forward_headers: Vec<String>,
     client_headers: HeaderMap,
     required_headers: std::collections::BTreeMap<String, String>,
+    extras: CodexExtras,
 ) -> Result<OAuthDispatchOk, OAuthDispatchError> {
     // 1. 拿 access_token
     let access_token = match oauth_manager.get_valid_access_token(sub_id, &refresh_token).await {
@@ -101,8 +104,9 @@ pub async fn dispatch_oauth_attempt(
     };
 
     // 2. 翻译 body
+    let transform_config = ResponsesTransformConfig::codex_chatgpt(extras.expose_reasoning);
     let translated_body =
-        anthropic_to_responses(request_body).map_err(|e| OAuthDispatchError::Upstream {
+        anthropic_to_responses(request_body, &extras).map_err(|e| OAuthDispatchError::Upstream {
             status: None,
             message: format!("body 翻译失败: {e}"),
         })?;
@@ -207,16 +211,27 @@ pub async fn dispatch_oauth_attempt(
         upstream_headers: resp_headers,
         upstream_stream: stream,
         client_wants_streaming,
+        transform_config: Some(transform_config),
+        gemini_emit_thoughts: false,
     })
 }
 
 /// dispatch_oauth_attempt 成功时返回的「待消费的上游流」+ 客户端意图.
+///
+/// 翻译配置按 provider 分别填入:
+/// - codex / openai responses: `transform_config = Some(...)`, `gemini_emit_thoughts` 不读
+/// - gemini: `transform_config = None`, `gemini_emit_thoughts = yaml.expose_reasoning`
+/// - kiro: 两者都不读 (走自家协议翻译)
 pub struct OAuthDispatchOk {
     pub upstream_status: reqwest::StatusCode,
     #[allow(dead_code)]
     pub upstream_headers: ReqHeaderMap,
     pub upstream_stream: BoxStream<'static, Result<Bytes, reqwest::Error>>,
     pub client_wants_streaming: bool,
+    pub transform_config: Option<ResponsesTransformConfig>,
+    /// Gemini 专用: SSE converter 是否暴露 thought parts。dispatch_gemini_attempt 填,
+    /// finalize_gemini_response 消费。其它 provider 留 false 默认即可。
+    pub gemini_emit_thoughts: bool,
 }
 
 /// 把 OAuth 上游的 SSE 流翻译成给客户端的最终响应 (流式或非流式).
@@ -238,9 +253,13 @@ pub fn finalize_oauth_response(
     app: AppHandle,
     sub_rt: Arc<RwLock<SubscriptionRuntime>>,
 ) -> Response {
+    let transform_config = ok
+        .transform_config
+        .unwrap_or_else(|| ResponsesTransformConfig::codex_chatgpt(false));
     if ok.client_wants_streaming {
         finalize_streaming(
             ok.upstream_stream,
+            transform_config,
             vm_name,
             attempt_id,
             sub_id,
@@ -260,6 +279,7 @@ pub fn finalize_oauth_response(
         // 我们把整个 collect 过程跑在异步 body 里.
         let fut = collect_to_json_response(
             ok.upstream_stream,
+            transform_config,
             vm_name,
             attempt_id,
             sub_id,
@@ -301,6 +321,7 @@ pub fn finalize_oauth_response(
 #[allow(clippy::too_many_arguments)]
 fn finalize_streaming(
     upstream_stream: BoxStream<'static, Result<Bytes, reqwest::Error>>,
+    transform_config: ResponsesTransformConfig,
     vm_name: VirtualModelName,
     attempt_id: Uuid,
     sub_id: Uuid,
@@ -319,7 +340,7 @@ fn finalize_streaming(
 
     tokio::spawn(async move {
         let start = std::time::Instant::now();
-        let mut converter = ResponsesSseConverter::new();
+        let mut converter = ResponsesSseConverter::new_with_config(transform_config);
         let mut buffer = BytesMut::with_capacity(8 * 1024);
         let mut input_tokens: Option<u32> = None;
         let mut output_tokens: Option<u32> = None;
@@ -448,6 +469,7 @@ fn finalize_streaming(
 #[allow(clippy::too_many_arguments)]
 async fn collect_to_json_response(
     upstream_stream: BoxStream<'static, Result<Bytes, reqwest::Error>>,
+    transform_config: ResponsesTransformConfig,
     vm_name: VirtualModelName,
     attempt_id: Uuid,
     sub_id: Uuid,
@@ -463,7 +485,7 @@ async fn collect_to_json_response(
     sub_rt: Arc<RwLock<SubscriptionRuntime>>,
 ) -> Response {
     let start = std::time::Instant::now();
-    let mut collector = NonStreamingCollector::new();
+    let mut collector = NonStreamingCollector::new_with_config(transform_config);
     let mut buffer = BytesMut::with_capacity(8 * 1024);
     let mut input_tokens: Option<u32> = None;
     let mut output_tokens: Option<u32> = None;
@@ -711,6 +733,8 @@ pub async fn dispatch_kiro_attempt(
         upstream_headers: resp_headers,
         upstream_stream: stream,
         client_wants_streaming,
+        transform_config: None,
+        gemini_emit_thoughts: false,
     })
 }
 

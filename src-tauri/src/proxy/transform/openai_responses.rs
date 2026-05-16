@@ -12,10 +12,11 @@
 //!
 //! 全部封装在 [`ResponsesTransformConfig::codex_chatgpt`] 里, 本模块只调用 common::build_responses_body。
 
-use serde_json::Value;
+use serde_json::{json, Value};
 
 use crate::error::AppResult;
 
+use super::openai::ReasoningEffort;
 use super::responses_common::{self, ResponsesTransformConfig};
 
 // 重新导出供 oauth_dispatch.rs 等调用方使用 — 与 v2.1 之前的 API 完全一致, 调用点不需要改。
@@ -23,12 +24,28 @@ pub use super::responses_common::{
     parse_sse_frame, AnthropicEvent, NonStreamingCollector, ResponsesSseConverter,
 };
 
+/// `anthropic_to_responses` 的可选项. 由 dispatch 层从 yaml / 订阅 / 客户端 body 推导后传入,
+/// 字段与 [`super::openai::OpenAiResponsesExtras`] 同形但独立 — codex 反代 quirks 与 openai 官方
+/// 可能各自演化, 不共用结构避免后续耦合。
+#[derive(Debug, Clone, Default)]
+pub struct CodexExtras {
+    /// None 表示不传, 让 codex 后端走默认 (medium)。
+    pub reasoning_effort: Option<ReasoningEffort>,
+    /// 控制 emit_reasoning + roundtrip_reasoning. 来自 yaml `expose_reasoning` 字段。
+    pub expose_reasoning: bool,
+}
+
 /// 把 Anthropic Messages 请求体转成 OpenAI Responses 请求体 (codex 路径, chatgpt 反代专用).
 ///
 /// model 已经被 pipeline 改写为 slot 真实模型名 (例如 `gpt-5.5`).
 /// 不能用 `gpt-5` 等通用名 — chatgpt 反代会 400。
-pub fn anthropic_to_responses(body: &Value) -> AppResult<Value> {
-    responses_common::build_responses_body(body, &ResponsesTransformConfig::codex_chatgpt())
+pub fn anthropic_to_responses(body: &Value, extras: &CodexExtras) -> AppResult<Value> {
+    let config = ResponsesTransformConfig::codex_chatgpt(extras.expose_reasoning);
+    let mut out = responses_common::build_responses_body(body, &config)?;
+    if let Some(effort) = extras.reasoning_effort {
+        out["reasoning"] = json!({ "effort": effort.as_str() });
+    }
+    Ok(out)
 }
 
 // ============================================================
@@ -48,7 +65,7 @@ mod tests {
             "stream": false,
             "messages": [{"role": "user", "content": "hi"}],
         });
-        let out = anthropic_to_responses(&body).unwrap();
+        let out = anthropic_to_responses(&body, &CodexExtras::default()).unwrap();
         assert_eq!(out["stream"], json!(true));
         assert_eq!(out["store"], json!(false));
         assert_eq!(out["include"], json!(["reasoning.encrypted_content"]));
@@ -63,7 +80,7 @@ mod tests {
             "system": "你是一个助手",
             "messages": [{"role": "user", "content": "hi"}],
         });
-        let out = anthropic_to_responses(&body).unwrap();
+        let out = anthropic_to_responses(&body, &CodexExtras::default()).unwrap();
         assert_eq!(out["instructions"], json!("你是一个助手"));
     }
 
@@ -77,7 +94,7 @@ mod tests {
             ],
             "messages": [{"role": "user", "content": "hi"}],
         });
-        let out = anthropic_to_responses(&body).unwrap();
+        let out = anthropic_to_responses(&body, &CodexExtras::default()).unwrap();
         assert_eq!(out["instructions"], json!("段落 A\n\n段落 B"));
     }
 
@@ -88,7 +105,7 @@ mod tests {
             "model": "gpt-5.5",
             "messages": [{"role": "user", "content": "hi"}],
         });
-        let out = anthropic_to_responses(&body).unwrap();
+        let out = anthropic_to_responses(&body, &CodexExtras::default()).unwrap();
         assert_eq!(out["instructions"], json!(""));
     }
 
@@ -99,7 +116,7 @@ mod tests {
             "system": "",
             "messages": [{"role": "user", "content": "hi"}],
         });
-        let out = anthropic_to_responses(&body).unwrap();
+        let out = anthropic_to_responses(&body, &CodexExtras::default()).unwrap();
         assert_eq!(out["instructions"], json!(""));
     }
 
@@ -110,7 +127,7 @@ mod tests {
             "system": [],
             "messages": [{"role": "user", "content": "hi"}],
         });
-        let out = anthropic_to_responses(&body).unwrap();
+        let out = anthropic_to_responses(&body, &CodexExtras::default()).unwrap();
         assert_eq!(out["instructions"], json!(""));
     }
 
@@ -123,7 +140,7 @@ mod tests {
                 {"role": "assistant", "content": "我是助手"},
             ],
         });
-        let out = anthropic_to_responses(&body).unwrap();
+        let out = anthropic_to_responses(&body, &CodexExtras::default()).unwrap();
         let input = out["input"].as_array().unwrap();
         assert_eq!(input.len(), 2);
         assert_eq!(input[0]["role"], "user");
@@ -150,7 +167,7 @@ mod tests {
                 ]
             }],
         });
-        let out = anthropic_to_responses(&body).unwrap();
+        let out = anthropic_to_responses(&body, &CodexExtras::default()).unwrap();
         let input = out["input"].as_array().unwrap();
         assert_eq!(input.len(), 3);
         assert_eq!(input[0]["type"], "message");
@@ -179,7 +196,7 @@ mod tests {
                 }
             }],
         });
-        let out = anthropic_to_responses(&body).unwrap();
+        let out = anthropic_to_responses(&body, &CodexExtras::default()).unwrap();
         let tools = out["tools"].as_array().unwrap();
         assert_eq!(tools.len(), 1);
         assert_eq!(tools[0]["type"], "function");

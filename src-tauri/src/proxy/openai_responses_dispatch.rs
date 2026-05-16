@@ -171,12 +171,9 @@ pub async fn dispatch_openai_responses_attempt(
         );
     }
 
-    // 3. transform config (与 anthropic_to_openai_responses 内部用的同一份, 为响应翻译复用)
-    let mut transform_config = ResponsesTransformConfig::openai_official();
-    if extras.expose_reasoning {
-        transform_config.emit_reasoning = true;
-        transform_config.roundtrip_reasoning = true;
-    }
+    // 3. transform config: 与 anthropic_to_openai_responses 内部用同一份 (单一信息源在
+    // ResponsesTransformConfig::openai_official 工厂方法)，响应侧 SSE converter 复用此 config。
+    let transform_config = ResponsesTransformConfig::openai_official(extras.expose_reasoning);
 
     // 4. 发送请求
     let send_result =

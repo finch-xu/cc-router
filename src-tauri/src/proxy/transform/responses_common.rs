@@ -4,8 +4,11 @@
 //! provider 特定的 quirk (例如 chatgpt.com 反代强制 stream=true / strip max_tokens).
 //! quirks 通过 [`ResponsesTransformConfig`] 集中表达, 由各个入口选择不同 preset:
 //!
-//! - `codex_chatgpt()` — ChatGPT 反代 (openai_codex provider, oauth_dispatch.rs 走它)
-//! - `openai_official()` — 标准 OpenAI Responses (custom_openai / openai.yaml 走它)
+//! - `codex_chatgpt(expose_reasoning)` — ChatGPT 反代 (openai_codex provider, oauth_dispatch.rs 走它)
+//! - `openai_official(expose_reasoning)` — 标准 OpenAI Responses (custom_openai / openai.yaml 走它)
+//!
+//! `expose_reasoning` 由 dispatch 层从 yaml `expose_reasoning` 字段读出, 控制是否暴露 reasoning
+//! 块到客户端 + 是否回灌客户端 thinking 块到上游 input。
 //!
 //! ## 边界
 //!
@@ -60,29 +63,40 @@ pub struct ResponsesTransformConfig {
 
 impl ResponsesTransformConfig {
     /// codex (ChatGPT 反代) 的强约束配置.
-    /// 与 v1.8 Phase 1 行为完全一致 — 不能变。
-    pub fn codex_chatgpt() -> Self {
+    ///
+    /// `expose_reasoning`: 是否把上游 reasoning item 暴露成 Anthropic thinking content_block,
+    /// 同时启用客户端 thinking 块 → 上游 reasoning input 的回灌。yaml `expose_reasoning` 字段控制。
+    /// 注意 `inject_default_include` 始终保留 `reasoning.encrypted_content` —— chatgpt 反代
+    /// `store=false` 下不发 include 会丢失 encrypted_content, 多轮回灌不可能。
+    pub fn codex_chatgpt(expose_reasoning: bool) -> Self {
         Self {
             force_upstream_streaming: true,
             inject_store_false: true,
             inject_default_include: vec!["reasoning.encrypted_content".into()],
             force_instructions_present: true,
             drop_max_tokens: true,
-            emit_reasoning: false,
-            roundtrip_reasoning: false,
+            emit_reasoning: expose_reasoning,
+            roundtrip_reasoning: expose_reasoning,
         }
     }
 
     /// OpenAI 官方 `/v1/responses` 的宽松配置.
-    pub fn openai_official() -> Self {
+    ///
+    /// `expose_reasoning`: 同上语义。区别于 codex: openai 官方端口 `include` 字段视 expose 决定,
+    /// 不暴露时不发 include 减少上游开销。
+    pub fn openai_official(expose_reasoning: bool) -> Self {
         Self {
             force_upstream_streaming: false,
             inject_store_false: true,
-            inject_default_include: vec![],
+            inject_default_include: if expose_reasoning {
+                vec!["reasoning.encrypted_content".into()]
+            } else {
+                vec![]
+            },
             force_instructions_present: false,
             drop_max_tokens: false,
-            emit_reasoning: false,
-            roundtrip_reasoning: false,
+            emit_reasoning: expose_reasoning,
+            roundtrip_reasoning: expose_reasoning,
         }
     }
 }
@@ -526,7 +540,7 @@ pub(crate) enum BlockKind {
 /// 然后调用 `feed` 拿一组 (可能为 0) 待写出的 Anthropic 帧.
 ///
 /// 通过 [`ResponsesTransformConfig`] 控制 reasoning 暴露等行为. 默认 [`Self::new`] 使用
-/// `codex_chatgpt()` 配置 (向后兼容 oauth_dispatch.rs); openai 路径用 [`Self::new_with_config`].
+/// `codex_chatgpt(false)` 配置 (向后兼容 oauth_dispatch.rs); openai 路径用 [`Self::new_with_config`].
 pub struct ResponsesSseConverter {
     config: ResponsesTransformConfig,
     started: bool,
@@ -545,9 +559,10 @@ impl Default for ResponsesSseConverter {
 }
 
 impl ResponsesSseConverter {
-    /// 默认配置: codex chatgpt 反代 (向后兼容 oauth_dispatch.rs)。
+    /// 默认配置: codex chatgpt 反代 + expose_reasoning=false (维持历史行为).
+    /// 真实 dispatch 路径都走 [`Self::new_with_config`] 显式传配置, 此构造仅为测试便利。
     pub fn new() -> Self {
-        Self::new_with_config(ResponsesTransformConfig::codex_chatgpt())
+        Self::new_with_config(ResponsesTransformConfig::codex_chatgpt(false))
     }
 
     pub fn new_with_config(config: ResponsesTransformConfig) -> Self {
@@ -884,8 +899,10 @@ impl Default for NonStreamingCollector {
 }
 
 impl NonStreamingCollector {
+    /// 默认配置: codex chatgpt 反代 + expose_reasoning=false (维持历史行为).
+    /// 真实 dispatch 路径都走 [`Self::new_with_config`] 显式传配置。
     pub fn new() -> Self {
-        Self::new_with_config(ResponsesTransformConfig::codex_chatgpt())
+        Self::new_with_config(ResponsesTransformConfig::codex_chatgpt(false))
     }
 
     pub fn new_with_config(config: ResponsesTransformConfig) -> Self {
@@ -1048,7 +1065,7 @@ mod tests {
         // 复现 probe4 实测的 gpt-5.5 reasoning SSE 序列:
         // output_item.added(reasoning, encrypted_content=部分) → output_item.done(reasoning, encrypted_content=完整)
         // 不发 reasoning_summary_text.delta, summary 始终空数组
-        let mut cfg = ResponsesTransformConfig::openai_official();
+        let mut cfg = ResponsesTransformConfig::openai_official(false);
         cfg.emit_reasoning = true;
         let mut conv = ResponsesSseConverter::new_with_config(cfg);
 
@@ -1111,7 +1128,7 @@ mod tests {
     #[test]
     fn reasoning_sse_flow_with_summary_delta() {
         // 模拟 o1/o3 模型可能发的 reasoning_summary_text.delta 事件
-        let mut cfg = ResponsesTransformConfig::openai_official();
+        let mut cfg = ResponsesTransformConfig::openai_official(false);
         cfg.emit_reasoning = true;
         let mut conv = ResponsesSseConverter::new_with_config(cfg);
 
@@ -1163,7 +1180,7 @@ mod tests {
 
     #[test]
     fn nonstreaming_collector_assembles_thinking_block() {
-        let mut cfg = ResponsesTransformConfig::openai_official();
+        let mut cfg = ResponsesTransformConfig::openai_official(false);
         cfg.emit_reasoning = true;
         let mut col = NonStreamingCollector::new_with_config(cfg);
 
@@ -1231,7 +1248,7 @@ mod tests {
 
     #[test]
     fn codex_config_matches_legacy_behavior() {
-        let cfg = ResponsesTransformConfig::codex_chatgpt();
+        let cfg = ResponsesTransformConfig::codex_chatgpt(false);
         assert!(cfg.force_upstream_streaming);
         assert!(cfg.inject_store_false);
         assert_eq!(cfg.inject_default_include, vec!["reasoning.encrypted_content"]);
@@ -1243,7 +1260,7 @@ mod tests {
 
     #[test]
     fn openai_config_loose_defaults() {
-        let cfg = ResponsesTransformConfig::openai_official();
+        let cfg = ResponsesTransformConfig::openai_official(false);
         assert!(!cfg.force_upstream_streaming);
         assert!(cfg.inject_store_false);
         assert!(cfg.inject_default_include.is_empty());
@@ -1258,7 +1275,7 @@ mod tests {
             "stream": false,
             "messages": [{"role": "user", "content": "hi"}],
         });
-        let out = build_responses_body(&body, &ResponsesTransformConfig::openai_official()).unwrap();
+        let out = build_responses_body(&body, &ResponsesTransformConfig::openai_official(false)).unwrap();
         assert_eq!(out["stream"], json!(false));
     }
 
@@ -1269,7 +1286,7 @@ mod tests {
             "max_tokens": 512,
             "messages": [{"role": "user", "content": "hi"}],
         });
-        let out = build_responses_body(&body, &ResponsesTransformConfig::openai_official()).unwrap();
+        let out = build_responses_body(&body, &ResponsesTransformConfig::openai_official(false)).unwrap();
         assert_eq!(out["max_output_tokens"], json!(512));
         assert!(out.get("max_tokens").is_none());
     }
@@ -1280,7 +1297,7 @@ mod tests {
             "model": "gpt-5",
             "messages": [{"role": "user", "content": "hi"}],
         });
-        let out = build_responses_body(&body, &ResponsesTransformConfig::openai_official()).unwrap();
+        let out = build_responses_body(&body, &ResponsesTransformConfig::openai_official(false)).unwrap();
         assert!(out.get("instructions").is_none(), "openai 路径无 system 不该注入 instructions");
     }
 
@@ -1291,7 +1308,7 @@ mod tests {
             "system": "你是助手",
             "messages": [{"role": "user", "content": "hi"}],
         });
-        let out = build_responses_body(&body, &ResponsesTransformConfig::openai_official()).unwrap();
+        let out = build_responses_body(&body, &ResponsesTransformConfig::openai_official(false)).unwrap();
         assert_eq!(out["instructions"], json!("你是助手"));
     }
 
@@ -1301,7 +1318,7 @@ mod tests {
             "model": "gpt-5",
             "messages": [{"role": "user", "content": "hi"}],
         });
-        let out = build_responses_body(&body, &ResponsesTransformConfig::openai_official()).unwrap();
+        let out = build_responses_body(&body, &ResponsesTransformConfig::openai_official(false)).unwrap();
         assert!(out.get("include").is_none(), "openai 路径默认不注入 include");
     }
 }

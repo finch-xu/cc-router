@@ -67,3 +67,8 @@ model_discovery:
     - "minimax-m2.1"
     - "glm-5"
     - "qwen3-coder-next"
+
+# Kiro/AWS CodeWhisperer 上游协议不支持 reasoning/thinking, 这是协议事实而非未实现。
+# 客户端发来的 thinking 块在 kiro_codewhisperer.rs 里会被 warning 日志后丢弃。
+# 如需 thinking 能力请用 openai / openai_codex / gemini provider。
+expose_reasoning: false
