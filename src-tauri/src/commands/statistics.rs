@@ -137,6 +137,8 @@ pub struct DailySeriesPointDto {
     pub timeout_count: i64,
     pub total_input_tokens: i64,
     pub total_output_tokens: i64,
+    pub total_cache_creation_tokens: i64,
+    pub total_cache_read_tokens: i64,
     pub avg_duration_ms: Option<f64>,
 }
 
@@ -154,6 +156,8 @@ pub async fn get_daily_series(
                 SUM(timeout_count) AS timeout_count,
                 SUM(input_tokens)  AS total_input_tokens,
                 SUM(output_tokens) AS total_output_tokens,
+                SUM(cache_creation_tokens) AS total_cache_creation_tokens,
+                SUM(cache_read_tokens)     AS total_cache_read_tokens,
                 SUM(total_duration_ms_sum)   AS dur_sum,
                 SUM(total_duration_ms_count) AS dur_count
          FROM request_stats_daily
@@ -177,6 +181,8 @@ pub async fn get_daily_series(
                 timeout_count: r.try_get("timeout_count")?,
                 total_input_tokens: r.try_get("total_input_tokens")?,
                 total_output_tokens: r.try_get("total_output_tokens")?,
+                total_cache_creation_tokens: r.try_get("total_cache_creation_tokens")?,
+                total_cache_read_tokens: r.try_get("total_cache_read_tokens")?,
                 avg_duration_ms: if dur_count > 0 {
                     Some(dur_sum as f64 / dur_count as f64)
                 } else {

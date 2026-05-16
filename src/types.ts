@@ -449,6 +449,8 @@ export interface DailySeriesPointDto {
   timeout_count: number;
   total_input_tokens: number;
   total_output_tokens: number;
+  total_cache_creation_tokens: number;
+  total_cache_read_tokens: number;
   avg_duration_ms?: number;
 }
 

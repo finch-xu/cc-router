@@ -13,7 +13,7 @@ import {
 import { useIsFetching, useQueryClient } from "@tanstack/react-query";
 import { ProviderLogo } from "@/components/ProviderLogo";
 import { useT } from "@/i18n";
-import { fmtNum, fmtKilo } from "@/lib/format";
+import { fmtNum, fmtKilo, fmtCompact } from "@/lib/format";
 import { VM_META, VM_ORDER } from "@/lib/virtualModels";
 import {
   STATS_KEY,
@@ -165,6 +165,7 @@ export function StatisticsPage() {
 
       <HeatmapSection days={heatmap.data ?? []} />
       <DailyTrendSection points={daily.data ?? []} />
+      <DailyTokenSection points={daily.data ?? []} />
       <VmBreakdownSection items={byVm.data ?? []} />
       <SubscriptionRankingSection items={bySub.data ?? []} />
     </>
@@ -379,6 +380,106 @@ function DailyTooltip({
         <div className="tt-row">
           <span className="tt-label">{t("stats.daily.tooltipTimeout")}</span>
           <span className="tt-val">{p.timeout}</span>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ============== Daily token usage (4-segment stacked bar) ==============
+
+interface DailyTokenChartPoint {
+  date: string;
+  cache_read: number;
+  cache_creation: number;
+  input: number;
+  output: number;
+  total: number;
+}
+
+function DailyTokenSection({ points }: { points: DailySeriesPointDto[] }) {
+  const { t } = useT();
+  const data: DailyTokenChartPoint[] = points.map((p) => {
+    const cacheRead = p.total_cache_read_tokens;
+    const cacheCreate = p.total_cache_creation_tokens;
+    const input = p.total_input_tokens;
+    const output = p.total_output_tokens;
+    return {
+      date: new Date(p.date_utc).toLocaleDateString(undefined, {
+        month: "numeric",
+        day: "numeric",
+      }),
+      cache_read: cacheRead,
+      cache_creation: cacheCreate,
+      input,
+      output,
+      total: cacheRead + cacheCreate + input + output,
+    };
+  });
+
+  return (
+    <StatsSection
+      title={t("stats.daily.tokenTitle")}
+      subtitle={t("stats.daily.tokenSubtitle")}
+      isEmpty={points.length === 0}
+      emptyText={t("stats.daily.empty")}
+    >
+      <ResponsiveContainer width="100%" height={220}>
+        <BarChart data={data} margin={{ top: 8, right: 12, bottom: 0, left: -8 }}>
+          <CartesianGrid strokeDasharray="3 3" stroke="var(--line)" vertical={false} />
+          <XAxis dataKey="date" tick={{ fontSize: 10, fill: "var(--ink-3)" }} stroke="var(--line-2)" />
+          <YAxis
+            tick={{ fontSize: 10, fill: "var(--ink-3)" }}
+            stroke="var(--line-2)"
+            allowDecimals={false}
+            tickFormatter={(v: number) => fmtCompact(v)}
+            width={48}
+          />
+          <Tooltip content={<DailyTokenTooltip />} cursor={{ fill: "var(--surface-2)" }} />
+          <Bar dataKey="cache_read" stackId="tok" fill="var(--ink-4)" />
+          <Bar dataKey="cache_creation" stackId="tok" fill="oklch(0.70 0.05 270)" />
+          <Bar dataKey="input" stackId="tok" fill="oklch(0.62 0.13 240)" />
+          <Bar dataKey="output" stackId="tok" fill="oklch(0.50 0.16 240)" radius={[2, 2, 0, 0]} />
+        </BarChart>
+      </ResponsiveContainer>
+    </StatsSection>
+  );
+}
+
+function DailyTokenTooltip({
+  active,
+  payload,
+}: {
+  active?: boolean;
+  payload?: { payload: DailyTokenChartPoint }[];
+}) {
+  const { t } = useT();
+  if (!active || !payload || payload.length === 0) return null;
+  const p = payload[0].payload;
+  return (
+    <div className="stats-tooltip">
+      <div className="tt-row">
+        <span className="tt-label">{p.date}</span>
+        <span className="tt-val">{fmtNum(p.total)}</span>
+      </div>
+      <div className="tt-row">
+        <span className="tt-label">{t("stats.daily.tokenTooltipOutput")}</span>
+        <span className="tt-val">{fmtNum(p.output)}</span>
+      </div>
+      <div className="tt-row">
+        <span className="tt-label">{t("stats.daily.tokenTooltipInput")}</span>
+        <span className="tt-val">{fmtNum(p.input)}</span>
+      </div>
+      {p.cache_creation > 0 && (
+        <div className="tt-row">
+          <span className="tt-label">{t("stats.daily.tokenTooltipCacheCreate")}</span>
+          <span className="tt-val">{fmtNum(p.cache_creation)}</span>
+        </div>
+      )}
+      {p.cache_read > 0 && (
+        <div className="tt-row">
+          <span className="tt-label">{t("stats.daily.tokenTooltipCacheRead")}</span>
+          <span className="tt-val">{fmtNum(p.cache_read)}</span>
         </div>
       )}
     </div>
