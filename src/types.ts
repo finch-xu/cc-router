@@ -2,7 +2,12 @@
 // 约定：Rust 侧 serde 使用 serde(rename_all = "snake_case") 序列化。
 
 export type Compatibility = "verified" | "partial" | "untested";
-export type AuthType = "api_key" | "chatgpt_oauth" | "kiro_oauth" | "gemini_api_key";
+export type AuthType =
+  | "api_key"
+  | "chatgpt_oauth"
+  | "kiro_oauth"
+  | "gemini_api_key"
+  | "openai_responses_api_key";
 export type AuthHeaderFormat = "raw" | "bearer";
 
 // ===== Kiro OAuth DTO (与 oauth/kiro.rs + subscription/model.rs 对齐) =====
@@ -218,8 +223,8 @@ export type CreateSource =
       messages_path: string;
       auth_header_name: string;
       auth_header_format: AuthHeaderFormat;
-      /** 协议家族 — 缺省=anthropic 透传; "gemini"=走 Gemini 翻译分支 */
-      protocol?: "anthropic" | "gemini";
+      /** 协议家族 — 缺省=anthropic 透传; "gemini"=走 Gemini 翻译分支; "openai_responses"=走 OpenAI Responses 翻译分支 */
+      protocol?: "anthropic" | "gemini" | "openai_responses";
     };
 
 export interface CreateSubscriptionInput {

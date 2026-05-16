@@ -65,6 +65,7 @@
       "providers/modelscope.yaml",
       "providers/ucloud.yaml",
       "providers/openai-codex.yaml",
+      "providers/openai.yaml",
       "providers/kiro.yaml",
       "providers/google-ai-studio.yaml",
       "migrations/001_init.sql",

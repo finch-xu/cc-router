@@ -37,6 +37,7 @@ type Step = 1 | 2;
 
 const CUSTOM_VALUE = "__custom__";
 const CUSTOM_GEMINI_VALUE = "__custom_gemini__";
+const CUSTOM_OPENAI_VALUE = "__custom_openai__";
 
 /** 自定义 Anthropic 兼容路径的鉴权方式预设: 选一个就同时确定 header_name + header_format */
 type AuthPreset = "bearer" | "x_api_key";
@@ -45,12 +46,53 @@ const AUTH_PRESETS: Record<AuthPreset, { name: string; format: AuthHeaderFormat;
   x_api_key: { name: "x-api-key", format: "raw", label: "x-api-key: <key>" },
 };
 
-/** Gemini 兼容路径锁定的连接参数. */
-const GEMINI_DEFAULTS = {
-  baseUrl: "https://generativelanguage.googleapis.com",
-  messagesPath: "/v1beta/models/{model}:streamGenerateContent",
-  authHeaderName: "x-goog-api-key",
-  authHeaderFormat: "raw" as AuthHeaderFormat,
+type CustomProtocolValue =
+  | typeof CUSTOM_GEMINI_VALUE
+  | typeof CUSTOM_OPENAI_VALUE;
+
+/** 锁定连接参数的自定义协议预设 (Gemini / OpenAI Responses 走这里; Anthropic 兼容走 AUTH_PRESETS dropdown). */
+const LOCKED_CUSTOM_PRESETS: Record<CustomProtocolValue, {
+  baseUrl: string;
+  messagesPath: string;
+  authHeaderName: string;
+  authHeaderFormat: AuthHeaderFormat;
+  iconId: string;
+  triggerLabelKey: string;
+  hintKey: string;
+  baseUrlHintKey: string;
+  messagesPathHintKey: string;
+  authLockedHintKey: string;
+  authLockedDisplay: string;
+  protocol: "gemini" | "openai_responses";
+}> = {
+  [CUSTOM_GEMINI_VALUE]: {
+    baseUrl: "https://generativelanguage.googleapis.com",
+    messagesPath: "/v1beta/models/{model}:streamGenerateContent",
+    authHeaderName: "x-goog-api-key",
+    authHeaderFormat: "raw",
+    iconId: "google",
+    triggerLabelKey: "subscriptionNew.customGeminiProvider",
+    hintKey: "subscriptionNew.customGeminiHint",
+    baseUrlHintKey: "subscriptionNew.geminiBaseUrlHint",
+    messagesPathHintKey: "subscriptionNew.geminiMessagesPathHint",
+    authLockedHintKey: "subscriptionNew.geminiAuthLocked",
+    authLockedDisplay: "x-goog-api-key: <key>",
+    protocol: "gemini",
+  },
+  [CUSTOM_OPENAI_VALUE]: {
+    baseUrl: "https://api.openai.com",
+    messagesPath: "/v1/responses",
+    authHeaderName: "Authorization",
+    authHeaderFormat: "bearer",
+    iconId: "openai",
+    triggerLabelKey: "subscriptionNew.customOpenaiProvider",
+    hintKey: "subscriptionNew.customOpenaiHint",
+    baseUrlHintKey: "subscriptionNew.openaiBaseUrlHint",
+    messagesPathHintKey: "subscriptionNew.openaiMessagesPathHint",
+    authLockedHintKey: "subscriptionNew.openaiAuthLocked",
+    authLockedDisplay: "Authorization: Bearer <key>",
+    protocol: "openai_responses",
+  },
 };
 
 export function SubscriptionNewPage() {
@@ -84,8 +126,13 @@ export function SubscriptionNewPage() {
   const [customAuthPreset, setCustomAuthPreset] = useState<AuthPreset>("bearer");
 
   const isCustomAnthropic = providerId === CUSTOM_VALUE;
-  const isCustomGemini = providerId === CUSTOM_GEMINI_VALUE;
-  const isCustom = isCustomAnthropic || isCustomGemini;
+  const lockedPreset =
+    providerId === CUSTOM_GEMINI_VALUE || providerId === CUSTOM_OPENAI_VALUE
+      ? LOCKED_CUSTOM_PRESETS[providerId]
+      : null;
+  // gemini 的 {model} 占位符校验依赖此专属判断 — 其余路径 (logo / 默认值 / 锁定 UI) 都走 lockedPreset
+  const isCustomGemini = lockedPreset?.protocol === "gemini";
+  const isCustom = isCustomAnthropic || lockedPreset !== null;
 
   const provider = useMemo(
     () => providers.data?.find((p) => p.id === providerId),
@@ -93,11 +140,11 @@ export function SubscriptionNewPage() {
   );
 
   function renderProviderTriggerLabel() {
-    if (isCustomGemini) {
+    if (lockedPreset) {
       return (
         <span style={{ display: "inline-flex", alignItems: "center", gap: 8, minWidth: 0 }}>
-          <ProviderLogo iconId="google" size={20} />
-          {t("subscriptionNew.customGeminiProvider")}
+          <ProviderLogo iconId={lockedPreset.iconId} size={20} />
+          {t(lockedPreset.triggerLabelKey)}
         </span>
       );
     }
@@ -147,7 +194,7 @@ export function SubscriptionNewPage() {
   function handleProviderChange(v: string) {
     setProviderId(v);
     setSubmitError(null);
-    if (v === CUSTOM_VALUE || v === CUSTOM_GEMINI_VALUE) {
+    if (v === CUSTOM_VALUE || v === CUSTOM_GEMINI_VALUE || v === CUSTOM_OPENAI_VALUE) {
       setEndpointId("");
       // 自定义路径备注名自动: <自定义厂商名> <随机后缀>
       // 等用户填了 customProviderName 再生成,这里清掉旧值
@@ -155,10 +202,14 @@ export function SubscriptionNewPage() {
         setDisplayName("");
         autoGenNameRef.current = "";
       }
-      // Gemini 默认值预填; 用户仍可改 (除 path 占位符语义)
-      if (v === CUSTOM_GEMINI_VALUE) {
-        setCustomBaseUrl(GEMINI_DEFAULTS.baseUrl);
-        setCustomMessagesPath(GEMINI_DEFAULTS.messagesPath);
+      // 锁定预设 (Gemini / OpenAI) 一次性预填 base+path; 普通 anthropic 自定义只设默认 path
+      const preset =
+        v === CUSTOM_GEMINI_VALUE || v === CUSTOM_OPENAI_VALUE
+          ? LOCKED_CUSTOM_PRESETS[v]
+          : null;
+      if (preset) {
+        setCustomBaseUrl(preset.baseUrl);
+        setCustomMessagesPath(preset.messagesPath);
       } else {
         setCustomMessagesPath("/v1/messages");
       }
@@ -471,12 +522,12 @@ export function SubscriptionNewPage() {
       return setSubmitError(t("subscriptionNew.errFillSlots"));
     }
 
-    const headerName = isCustomGemini
-      ? GEMINI_DEFAULTS.authHeaderName
-      : AUTH_PRESETS[customAuthPreset].name;
-    const headerFormat: AuthHeaderFormat = isCustomGemini
-      ? GEMINI_DEFAULTS.authHeaderFormat
-      : AUTH_PRESETS[customAuthPreset].format;
+    const headerName = lockedPreset?.authHeaderName ?? AUTH_PRESETS[customAuthPreset].name;
+    const headerFormat: AuthHeaderFormat =
+      lockedPreset?.authHeaderFormat ?? AUTH_PRESETS[customAuthPreset].format;
+    const protocolOverride = lockedPreset
+      ? { protocol: lockedPreset.protocol }
+      : {};
     const input: CreateSubscriptionInput = {
       display_name: displayName,
       api_key: apiKey,
@@ -488,7 +539,7 @@ export function SubscriptionNewPage() {
         messages_path: customMessagesPath.trim(),
         auth_header_name: headerName,
         auth_header_format: headerFormat,
-        ...(isCustomGemini ? { protocol: "gemini" as const } : {}),
+        ...protocolOverride,
       },
     };
 
@@ -576,6 +627,12 @@ export function SubscriptionNewPage() {
                           {t("subscriptionNew.customGeminiProvider")}
                         </span>
                       </SelectItem>
+                      <SelectItem value={CUSTOM_OPENAI_VALUE}>
+                        <span style={{ display: "inline-flex", alignItems: "center", gap: 8 }}>
+                          <ProviderLogo iconId="openai" size={20} />
+                          {t("subscriptionNew.customOpenaiProvider")}
+                        </span>
+                      </SelectItem>
                     </SelectContent>
                   </Select>
                   {provider && !isCustom && (
@@ -600,9 +657,9 @@ export function SubscriptionNewPage() {
                       {t("subscriptionNew.customHint")}
                     </div>
                   )}
-                  {isCustomGemini && (
+                  {lockedPreset && (
                     <div className="field-hint" style={{ marginTop: 6 }}>
-                      {t("subscriptionNew.customGeminiHint")}
+                      {t(lockedPreset.hintKey)}
                     </div>
                   )}
                 </div>
@@ -675,12 +732,10 @@ export function SubscriptionNewPage() {
                         className="input mono"
                         value={customBaseUrl}
                         onChange={(e) => setCustomBaseUrl(e.target.value)}
-                        placeholder={isCustomGemini ? GEMINI_DEFAULTS.baseUrl : "https://api.example.com"}
+                        placeholder={lockedPreset?.baseUrl ?? "https://api.example.com"}
                       />
                       <div className="field-hint">
-                        {isCustomGemini
-                          ? t("subscriptionNew.geminiBaseUrlHint")
-                          : t("subscriptionNew.baseUrlHint")}
+                        {t(lockedPreset?.baseUrlHintKey ?? "subscriptionNew.baseUrlHint")}
                       </div>
                     </div>
 
@@ -690,23 +745,21 @@ export function SubscriptionNewPage() {
                         className="input mono"
                         value={customMessagesPath}
                         onChange={(e) => setCustomMessagesPath(e.target.value)}
-                        placeholder={isCustomGemini ? GEMINI_DEFAULTS.messagesPath : "/v1/messages"}
+                        placeholder={lockedPreset?.messagesPath ?? "/v1/messages"}
                       />
                       <div className="field-hint">
-                        {isCustomGemini
-                          ? t("subscriptionNew.geminiMessagesPathHint")
-                          : t("subscriptionNew.messagesPathHint")}
+                        {t(lockedPreset?.messagesPathHintKey ?? "subscriptionNew.messagesPathHint")}
                       </div>
                     </div>
 
-                    {isCustomGemini ? (
+                    {lockedPreset ? (
                       <div style={{ marginBottom: 20 }}>
                         <label className="field-label">{t("subscriptionNew.authMethod")}</label>
                         <div className="mono field-hint" style={{ marginTop: 4 }}>
-                          {`${GEMINI_DEFAULTS.authHeaderName}: <key>`}
+                          {lockedPreset.authLockedDisplay}
                         </div>
                         <div className="field-hint" style={{ marginTop: 6 }}>
-                          {t("subscriptionNew.geminiAuthLocked")}
+                          {t(lockedPreset.authLockedHintKey)}
                         </div>
                       </div>
                     ) : (

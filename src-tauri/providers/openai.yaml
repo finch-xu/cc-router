@@ -1,0 +1,44 @@
+id: openai
+display_name: "OpenAI 官方 API"
+icon: openai
+description: "openai.com 官方 /v1/responses, 使用 platform.openai.com 控制台生成的 sk-... API Key. cc-router 做 Anthropic Messages ↔ OpenAI Responses 协议翻译, 客户端 stream 决定上游 stream, reasoning 双向支持 (Claude Code 看到 thinking 块 + 多轮 reasoning 上下文延续)."
+homepage: "https://openai.com"
+docs_url: "https://platform.openai.com/docs/api-reference/responses"
+api_key_url: "https://platform.openai.com/api-keys"
+
+compatibility: untested
+compatibility_notes: "中转层协议实测通过, 官方端点 sk- API key 尚待用户实测确认"
+
+endpoints:
+  - id: paid
+    label: "OpenAI · 官方付费"
+    description: "api.openai.com/v1/responses, 按使用量计费 (input/output tokens), reasoning 模型 (o-series, gpt-5) 额外按 reasoning_tokens 计费."
+    base_url: "https://api.openai.com"
+    messages_path: "/v1/responses"
+    region: global
+    billing: pay_as_you_go
+
+default_endpoint: paid
+
+auth:
+  type: openai_responses_api_key
+  header_name: "Authorization"
+  header_format: bearer
+
+required_headers: {}
+forward_headers: []
+
+model_discovery:
+  enabled: true
+  path: "/v1/models"
+  cache_ttl_hours: 168
+  example_models:
+    - "gpt-5"
+    - "gpt-5.1"
+    - "gpt-4.1"
+    - "gpt-4o"
+    - "o3"
+    - "o3-mini"
+
+expose_reasoning: true
+default_reasoning_effort: "medium"

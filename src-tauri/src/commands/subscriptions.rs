@@ -14,7 +14,7 @@ use crate::state::AppState;
 use crate::subscription::{
     model::{
         ModelCache, ModelInfo, ModelSlots, OAuthMetadata, SubscriptionDto, SubscriptionRow,
-        SubscriptionRuntime, CUSTOM_GEMINI_SOURCE_MARKER, CUSTOM_SOURCE_MARKER,
+        SubscriptionRuntime, CUSTOM_GEMINI_SOURCE_MARKER, CUSTOM_OPENAI_SOURCE_MARKER, CUSTOM_SOURCE_MARKER,
     },
     model_discovery, ping, state_machine, store,
 };
@@ -26,6 +26,9 @@ pub enum CustomProtocol {
     #[default]
     Anthropic,
     Gemini,
+    /// OpenAI Responses (官方 / 兼容中转), 走 Anthropic ↔ Responses 翻译 + API key 鉴权.
+    /// dispatch 走 [`crate::proxy::openai_responses_dispatch`].
+    OpenaiResponses,
 }
 
 /// 创建订阅时的 source 区分: 内置 yaml 模板 vs 用户自定义。
@@ -205,6 +208,7 @@ pub async fn create_subscription(
             validate_base_url(&base_url)?;
             validate_messages_path(&messages_path)?;
             let is_gemini = protocol == CustomProtocol::Gemini;
+            let is_openai = protocol == CustomProtocol::OpenaiResponses;
             if is_gemini && !messages_path.contains("{model}") {
                 return Err(AppError::BadRequest(
                     "Gemini 兼容订阅的 messages_path 必须包含 {model} 占位符".into(),
@@ -220,6 +224,19 @@ pub async fn create_subscription(
                     ModelDiscovery {
                         enabled: true,
                         path: "/v1beta/models".into(),
+                        ..ModelDiscovery::default()
+                    },
+                )
+            } else if is_openai {
+                (
+                    CUSTOM_OPENAI_SOURCE_MARKER.to_string(),
+                    CUSTOM_OPENAI_SOURCE_MARKER.to_string(),
+                    AuthType::OpenaiResponsesApiKey,
+                    "openai".to_string(),
+                    // OpenAI 兼容 endpoint 普遍提供 /v1/models, 默认启用自动发现
+                    ModelDiscovery {
+                        enabled: true,
+                        path: "/v1/models".into(),
                         ..ModelDiscovery::default()
                     },
                 )

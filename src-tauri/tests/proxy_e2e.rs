@@ -94,10 +94,10 @@ fn provider_loader_loads_builtin_providers() {
         .keys()
         .map(|k| (k.clone(), ()))
         .collect();
-    for expected in ["anthropic", "zhipu", "deepseek", "moonshot", "minimax", "xiaomi", "alibaba", "volcengine", "openrouter", "tencent", "aiberm", "whatai", "ollama", "fireworks", "stepfun", "baidu", "modelscope", "ucloud", "openai_codex", "kiro", "google_ai_studio"] {
+    for expected in ["anthropic", "zhipu", "deepseek", "moonshot", "minimax", "xiaomi", "alibaba", "volcengine", "openrouter", "tencent", "aiberm", "whatai", "ollama", "fireworks", "stepfun", "baidu", "modelscope", "ucloud", "openai_codex", "openai", "kiro", "google_ai_studio"] {
         assert!(ids.contains_key(expected), "missing provider: {expected}");
     }
-    assert_eq!(providers.len(), 21);
+    assert_eq!(providers.len(), 22);
 }
 
 /// 上游用 200 + Anthropic SSE `event: error` 表达限流 (智谱 1308 真实场景);

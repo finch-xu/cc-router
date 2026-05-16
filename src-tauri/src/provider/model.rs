@@ -26,6 +26,11 @@ pub enum AuthType {
     /// (Anthropic Messages ↔ Gemini contents/parts). model 嵌在 URL 路径里,
     /// dispatch 层做 `{model}` 占位符替换 + 强制 `?alt=sse`.
     GeminiApiKey,
+    /// OpenAI Responses API key: 普通 `sk-...` 形式 (Bearer header), 上游协议为
+    /// OpenAI `/v1/responses` (官方 api.openai.com 或 OpenAI 兼容中转/网关), 需协议翻译
+    /// (Anthropic Messages ↔ OpenAI Responses). 客户端 stream 决定上游 stream;
+    /// 支持 reasoning 双向 (thinking ↔ reasoning encrypted_content 多轮回灌)。
+    OpenaiResponsesApiKey,
 }
 
 impl AuthType {
@@ -35,6 +40,7 @@ impl AuthType {
             Self::ChatgptOauth => "chatgpt_oauth",
             Self::KiroOauth => "kiro_oauth",
             Self::GeminiApiKey => "gemini_api_key",
+            Self::OpenaiResponsesApiKey => "openai_responses_api_key",
         }
     }
 }
@@ -47,6 +53,7 @@ impl FromStr for AuthType {
             "chatgpt_oauth" => Ok(Self::ChatgptOauth),
             "kiro_oauth" => Ok(Self::KiroOauth),
             "gemini_api_key" => Ok(Self::GeminiApiKey),
+            "openai_responses_api_key" => Ok(Self::OpenaiResponsesApiKey),
             other => Err(format!("无效 auth_type: {other}")),
         }
     }
@@ -189,6 +196,17 @@ pub struct Provider {
 
     #[serde(default)]
     pub model_discovery: ModelDiscovery,
+
+    /// OpenAI Responses 翻译路径专用 (auth_type=OpenaiResponsesApiKey / ChatgptOauth):
+    /// 是否在响应翻译时把 reasoning 内容暴露成 Anthropic thinking content_block。
+    /// codex 默认 false (向后兼容, opt-in), openai 官方 yaml 默认 true. 其他 provider 忽略此字段。
+    #[serde(default)]
+    pub expose_reasoning: bool,
+
+    /// OpenAI Responses 翻译路径专用: reasoning_effort 默认值 (minimal/low/medium/high).
+    /// 客户端 body 未指定 + 订阅级未设置时, 使用此值. 空字符串视为「不传」。
+    #[serde(default)]
+    pub default_reasoning_effort: Option<String>,
 }
 
 impl Provider {

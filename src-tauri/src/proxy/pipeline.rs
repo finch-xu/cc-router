@@ -18,6 +18,8 @@ use crate::observability::events::{self, Severity};
 use crate::observability::request_log::{RequestLogEntry, RequestStatus};
 use crate::provider::model::AuthType;
 use crate::proxy::gemini_dispatch;
+use crate::proxy::openai_responses_dispatch;
+use crate::proxy::transform::openai::{resolve_reasoning_effort, OpenAiResponsesExtras};
 use crate::proxy::handler::error_body;
 use crate::proxy::oauth_dispatch::{
     self, OAuthDispatchError,
@@ -154,7 +156,9 @@ pub async fn dispatch(
             display_name,
             url,
             auth_header_name,
+            auth_header_format,
             auth_header_value,
+            api_key_raw,
             required_headers,
             forward_headers,
             auth_type,
@@ -175,7 +179,9 @@ pub async fn dispatch(
                 guard.row.display_name.clone(),
                 guard.row.messages_url(),
                 guard.row.auth_header_name.clone(),
+                guard.row.auth_header_format.clone(),
                 guard.row.auth_header_value(),
+                guard.row.api_key.clone(),
                 guard.row.required_headers.clone(),
                 guard.row.forward_headers.clone(),
                 guard.row.auth_type,
@@ -521,6 +527,146 @@ pub async fn dispatch(
                         Severity::Error,
                         format!(
                             "{} · {} · Gemini · {}",
+                            vm_name.as_str(),
+                            display_name,
+                            err_msg
+                        ),
+                    );
+
+                    if retryable {
+                        retry_count += 1;
+                        continue;
+                    }
+                    return Ok(oauth_dispatch::build_error_response(&err));
+                }
+            }
+        }
+
+        // OpenAI Responses (API key) 分支: 走独立的 dispatch + 翻译层 (proxy::openai_responses_dispatch).
+        // 客户端 stream 决定上游 stream; reasoning 双向支持; 与 fallback 互斥 (model 必须改写).
+        if matches!(auth_type, AuthType::OpenaiResponsesApiKey) {
+            if is_fallback {
+                continue;
+            }
+            // 从 provider yaml 查 expose_reasoning / default_reasoning_effort.
+            // 自定义路径 (provider_id == __custom_openai__) 没注册到 providers map,
+            // 用合理默认值 (expose_reasoning=true, 无默认 effort).
+            let (yaml_expose_reasoning, yaml_default_effort) = state
+                .providers
+                .get(&provider_id)
+                .map(|p| (p.expose_reasoning, p.default_reasoning_effort.clone()))
+                .unwrap_or((true, None));
+
+            // reasoning_effort 优先级: client body > subscription > yaml default。
+            // 订阅级 effort 暂未做 (待 DB migration 落 reasoning_effort 列后填入)。
+            let resolved_effort = resolve_reasoning_effort(
+                &request_body,
+                None,
+                yaml_default_effort.as_deref(),
+            );
+
+            // model 改写到 slot 真实模型名 (与 codex / gemini 分支一致)
+            let mut openai_body = request_body.clone();
+            openai_body["model"] = Value::String(real_model.clone());
+
+            let extras = OpenAiResponsesExtras {
+                reasoning_effort: resolved_effort,
+                expose_reasoning: yaml_expose_reasoning,
+            };
+
+            emit_attempt_started(state, sub_id, vm_name);
+            let dispatch_res = openai_responses_dispatch::dispatch_openai_responses_attempt(
+                &state.http_client,
+                api_key_raw.clone(),
+                auth_header_name.clone(),
+                auth_header_format.clone(),
+                url.clone(),
+                &openai_body,
+                is_streaming,
+                forward_headers.clone(),
+                client_headers.clone(),
+                required_headers.clone(),
+                extras,
+            )
+            .await;
+
+            match dispatch_res {
+                Ok(ok) => {
+                    emit_attempt_finished(state, sub_id, vm_name, true);
+                    return Ok(openai_responses_dispatch::finalize_openai_responses(
+                        ok,
+                        vm_name,
+                        attempt_id,
+                        sub_id,
+                        provider_id,
+                        endpoint_id,
+                        real_model,
+                        display_name,
+                        retry_count,
+                        state.request_log_tx.clone(),
+                        state.event_log_tx.clone(),
+                        state.db.clone(),
+                        state.app_handle.clone(),
+                        rt.clone(),
+                    ));
+                }
+                Err(err) => {
+                    emit_attempt_finished(state, sub_id, vm_name, false);
+                    let (event, retryable) = match &err {
+                        OAuthDispatchError::Auth(_) => (state_machine::Event::HttpStatus(401), false),
+                        OAuthDispatchError::Upstream { status, .. } => {
+                            let s = status.unwrap_or(502);
+                            let retryable =
+                                matches!(classify_response(s, None), ShouldRetry::Yes(_));
+                            (state_machine::Event::HttpStatus(s), retryable)
+                        }
+                    };
+                    let _ = state_machine::apply(
+                        &state.db,
+                        &state.app_handle,
+                        &state.event_log_tx,
+                        rt.clone(),
+                        event,
+                    )
+                    .await;
+
+                    let err_msg = match &err {
+                        OAuthDispatchError::Auth(m) => m.clone(),
+                        OAuthDispatchError::Upstream { message, .. } => message.clone(),
+                    };
+                    let entry = RequestLogEntry {
+                        id: attempt_id,
+                        timestamp_ms: chrono::Utc::now().timestamp_millis(),
+                        virtual_model_name: vm_name,
+                        subscription_id: sub_id,
+                        provider_id: provider_id.clone(),
+                        endpoint_id: endpoint_id.clone(),
+                        real_model_name: real_model.clone(),
+                        response_model_name: None,
+                        is_streaming,
+                        status: RequestStatus::Error,
+                        http_status: match &err {
+                            OAuthDispatchError::Upstream { status, .. } => *status,
+                            _ => Some(401),
+                        },
+                        ttft_ms: None,
+                        total_latency_ms: Some(start.elapsed().as_millis() as u64),
+                        upstream_input_tokens: None,
+                        upstream_output_tokens: None,
+                        upstream_cache_creation: None,
+                        upstream_cache_read: None,
+                        retry_count,
+                        error_message: Some(err_msg.clone()),
+                        upstream_response_body: Some(truncate_body(&err_msg, ERROR_BODY_LIMIT)),
+                    };
+                    let _ = state.request_log_tx.try_send(entry);
+                    events::record_request(
+                        &state.event_log_tx,
+                        attempt_id,
+                        sub_id,
+                        Severity::Error,
+                        format!(
+                            "{} · {} · OpenAI · {}",
                             vm_name.as_str(),
                             display_name,
                             err_msg

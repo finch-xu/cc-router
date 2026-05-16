@@ -26,6 +26,10 @@ mydata/
 # (req/resp/meta JSON 抓包), 包含真实多轮对话内容, 不进 git.
 scripts/probe-out/
 
+# 协议实测原始抓包数据 (curl 探针落盘), 体积大且包含真实模型输出, 不入库.
+# 翻译层单测用 inline JSON, 不依赖这些 fixture 文件.
+src-tauri/tests/fixtures/openai_responses/
+
 # Node
 node_modules/
 dist/

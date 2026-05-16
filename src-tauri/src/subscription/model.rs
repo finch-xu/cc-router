@@ -117,6 +117,10 @@ pub const CUSTOM_SOURCE_MARKER: &str = "__custom__";
 /// 与 `CUSTOM_SOURCE_MARKER` 平级, 但走 [`AuthType::GeminiApiKey`] 翻译分支.
 pub const CUSTOM_GEMINI_SOURCE_MARKER: &str = "__custom_gemini__";
 
+/// 自定义 OpenAI Responses 订阅的来源标记常量。
+/// 与 `CUSTOM_SOURCE_MARKER` 平级, 但走 [`AuthType::OpenaiResponsesApiKey`] 翻译分支.
+pub const CUSTOM_OPENAI_SOURCE_MARKER: &str = "__custom_openai__";
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ModelSlots {
     pub opus: String,

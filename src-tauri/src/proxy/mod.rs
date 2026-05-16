@@ -2,6 +2,7 @@ pub mod gemini_dispatch;
 pub mod handler;
 pub mod middleware;
 pub mod oauth_dispatch;
+pub mod openai_responses_dispatch;
 pub mod overloaded;
 pub mod pipeline;
 pub mod retry;
