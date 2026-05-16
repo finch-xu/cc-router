@@ -207,6 +207,19 @@ pub struct Provider {
     /// 客户端 body 未指定 + 订阅级未设置时, 使用此值. 空字符串视为「不传」。
     #[serde(default)]
     pub default_reasoning_effort: Option<String>,
+
+    /// Anthropic 协议透传 provider 专用: 进入 dispatch 时是否给缺 thinking content_block 的
+    /// `role: assistant` 消息插入空 placeholder `{type:"thinking", thinking:"", signature:""}`.
+    ///
+    /// 默认 false (不动). 设 true 用于 DeepSeek 这类要求"每个含 tool_use 的 assistant 消息
+    /// 必须有 thinking block"的兼容子集 — 多 provider 轮询时由 GLM/anthropic 等不发 thinking
+    /// 的 provider 生成的 assistant 消息回灌到 DeepSeek 时会触发 400 "thinking must be passed
+    /// back to the API", 插入空 placeholder 后 DeepSeek 接受 (curl 实测确认)。
+    ///
+    /// 本字段保留用户已有的 thinking 上下文不变, 只对缺 thinking 的 assistant 消息补 placeholder,
+    /// 因此 tool_use 推理质量不受影响 (DeepSeek 官方说 tool_use 场景 thinking 上下文必需)。
+    #[serde(default)]
+    pub inject_missing_thinking_placeholder: bool,
 }
 
 impl Provider {

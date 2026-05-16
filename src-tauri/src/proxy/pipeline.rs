@@ -28,6 +28,7 @@ use crate::proxy::oauth_dispatch::{
 };
 use crate::proxy::overloaded;
 use crate::proxy::retry::{classify_response, ShouldRetry};
+use crate::proxy::sanitize::{inject_missing_thinking_placeholders, strip_foreign_thinking_blocks};
 use crate::proxy::sse;
 use crate::proxy::upstream;
 use crate::state::AppState;
@@ -718,11 +719,41 @@ pub async fn dispatch(
 
         // fallback 透传原始 body, 不必 clone JSON, 直接序列化引用; 其他三个虚拟模型按
         // 订阅 slot 改写 model 字段, 必须在 clone 上改。
-        let serialized_body = if is_fallback {
-            serde_json::to_vec(&request_body)?
-        } else {
+        //
+        // 透传分支 (Anthropic 协议: anthropic/zhipu/deepseek/xiaomi/moonshot/minimax/alibaba 等)
+        // 都走这一段, 上游不认 cc-router 自家翻译层 (openai_responses/gemini) 包装的 thinking
+        // signature, 必须先剥离, 否则多 provider 轮询下会触发上游 400 "thinking/reasoning_content
+        // must be passed back to the API"。详见 [`strip_foreign_thinking_blocks`].
+        let serialized_body = {
             let mut upstream_body = request_body.clone();
-            upstream_body["model"] = Value::String(real_model.clone());
+            if !is_fallback {
+                upstream_body["model"] = Value::String(real_model.clone());
+            }
+            // 第一道: 无条件 drop cc-router 翻译层 (openai_responses/gemini) 包装的 thinking blocks
+            let dropped_foreign = strip_foreign_thinking_blocks(&mut upstream_body);
+            // 第二道: 按 provider yaml inject_missing_thinking_placeholder 给缺 thinking 的
+            // assistant 消息补空 placeholder. 当前 DeepSeek 显式 opt-in: 它要求每个含 tool_use
+            // 的 assistant 消息必须有 thinking block 开头, 否则 400.
+            let need_inject = state
+                .providers
+                .get(&provider_id)
+                .map(|p| p.inject_missing_thinking_placeholder)
+                .unwrap_or(false);
+            let injected = if need_inject {
+                inject_missing_thinking_placeholders(&mut upstream_body)
+            } else {
+                0
+            };
+            if dropped_foreign > 0 || injected > 0 {
+                info!(
+                    %attempt_id,
+                    %sub_id,
+                    %provider_id,
+                    dropped_foreign,
+                    injected,
+                    "sanitized thinking blocks before anthropic passthrough"
+                );
+            }
             serde_json::to_vec(&upstream_body)?
         };
 

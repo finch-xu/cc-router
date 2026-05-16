@@ -29,6 +29,13 @@ required_headers:
 
 forward_headers: []
 
+# Anthropic 兼容子集 quirk: DeepSeek 要求每个含 tool_use 的 assistant 消息必须有 thinking
+# content_block 开头, 否则触发 400 "thinking must be passed back to the API". 多 provider
+# 轮询时由 GLM/anthropic 等不发 thinking 的 provider 生成的 assistant 消息回灌到 DeepSeek
+# 时会触发, cc-router 在透传前给缺 thinking 的 assistant 消息插入空 placeholder 解决.
+# 实测 (2026-05-16): 空 placeholder 被 DeepSeek 接受, 用户已有 thinking 上下文保持不变.
+inject_missing_thinking_placeholder: true
+
 model_discovery:
   enabled: true
   # DeepSeek 的 /models 接口位于主站根目录, 不在 Anthropic 兼容端点下

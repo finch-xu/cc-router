@@ -6,6 +6,7 @@ pub mod openai_responses_dispatch;
 pub mod overloaded;
 pub mod pipeline;
 pub mod retry;
+pub mod sanitize;
 pub mod server;
 pub mod sse;
 pub mod sse_framing;

@@ -357,12 +357,115 @@ fn convert_content_blocks(blocks: &[Value], extras: &GeminiExtras) -> Vec<Value>
 fn convert_tool(t: &Value) -> Option<Value> {
     let name = t.get("name").and_then(|v| v.as_str())?;
     let description = t.get("description").and_then(|v| v.as_str()).unwrap_or("");
-    let parameters = t.get("input_schema").cloned().unwrap_or(json!({"type": "object"}));
+    let raw = t
+        .get("input_schema")
+        .cloned()
+        .unwrap_or(json!({"type": "object"}));
+    let parameters = sanitize_schema_for_gemini(raw);
     Some(json!({
         "name": name,
         "description": description,
         "parameters": parameters,
     }))
+}
+
+/// 把 Claude Code 默认输出的 JSON Schema draft-2020-12 子集裁剪成 Gemini API (OpenAPI 3.0 子集)
+/// 接受的子集. Gemini 后端遇到不识别字段会直接 400 拒整个请求, 必须递归清理。
+///
+/// 处理策略 (递归下钻 `properties.*` / `items` / `anyOf[]`):
+/// - **删除**: `$schema`, `$id`, `$ref`, `$defs`, `definitions`, `additionalProperties`,
+///   `propertyNames`, `unevaluatedProperties`, `unevaluatedItems`, `dependentSchemas`,
+///   `dependentRequired`, `if`, `then`, `else`, `not`, `allOf`, `prefixItems`, `contains`,
+///   `patternProperties`, `readOnly`, `writeOnly`
+/// - **转换**:
+///   - `exclusiveMinimum: N` → 整数时 `minimum: N + 1`, 浮点时 `minimum: N` (轻微语义偏差,
+///     模型一般不卡边界值, 比 400 拒整请求好)
+///   - `exclusiveMaximum: N` → 同理
+///   - `const: X` → `enum: [X]` (Gemini 不识 const)
+///   - `oneOf` → `anyOf` (Gemini 不识 oneOf 严格语义, anyOf 行为接近)
+///
+/// 不变: `type`, `properties`, `required`, `items`, `description`, `enum`, `format`, `minimum`,
+/// `maximum`, `minLength`, `maxLength`, `pattern`, `minItems`, `maxItems`, `anyOf`, `nullable` 等。
+pub fn sanitize_schema_for_gemini(schema: Value) -> Value {
+    match schema {
+        Value::Object(mut obj) => {
+            const DROP_KEYS: &[&str] = &[
+                "$schema",
+                "$id",
+                "$ref",
+                "$defs",
+                "definitions",
+                "additionalProperties",
+                "propertyNames",
+                "unevaluatedProperties",
+                "unevaluatedItems",
+                "dependentSchemas",
+                "dependentRequired",
+                "if",
+                "then",
+                "else",
+                "not",
+                "allOf",
+                "prefixItems",
+                "contains",
+                "patternProperties",
+                "readOnly",
+                "writeOnly",
+            ];
+            for k in DROP_KEYS {
+                obj.remove(*k);
+            }
+
+            if let Some(excl) = obj.remove("exclusiveMinimum") {
+                if let Some(n) = excl.as_i64() {
+                    obj.entry("minimum")
+                        .or_insert(Value::from(n.saturating_add(1)));
+                } else if let Some(f) = excl.as_f64() {
+                    obj.entry("minimum").or_insert(json!(f));
+                }
+            }
+            if let Some(excl) = obj.remove("exclusiveMaximum") {
+                if let Some(n) = excl.as_i64() {
+                    obj.entry("maximum")
+                        .or_insert(Value::from(n.saturating_sub(1)));
+                } else if let Some(f) = excl.as_f64() {
+                    obj.entry("maximum").or_insert(json!(f));
+                }
+            }
+
+            if let Some(c) = obj.remove("const") {
+                obj.entry("enum").or_insert(Value::Array(vec![c]));
+            }
+            if let Some(one_of) = obj.remove("oneOf") {
+                obj.entry("anyOf").or_insert(one_of);
+            }
+
+            // 递归下钻常见嵌套点
+            if let Some(props) = obj.get_mut("properties") {
+                if let Some(props_obj) = props.as_object_mut() {
+                    for (_, v) in props_obj.iter_mut() {
+                        let taken = std::mem::take(v);
+                        *v = sanitize_schema_for_gemini(taken);
+                    }
+                }
+            }
+            if let Some(items) = obj.get_mut("items") {
+                let taken = std::mem::take(items);
+                *items = sanitize_schema_for_gemini(taken);
+            }
+            if let Some(any_of) = obj.get_mut("anyOf") {
+                if let Some(arr) = any_of.as_array_mut() {
+                    for v in arr.iter_mut() {
+                        let taken = std::mem::take(v);
+                        *v = sanitize_schema_for_gemini(taken);
+                    }
+                }
+            }
+
+            Value::Object(obj)
+        }
+        other => other,
+    }
 }
 
 fn map_tool_choice(tc: &Value) -> Option<Value> {
@@ -1513,5 +1616,143 @@ mod tests {
         assert_eq!(decode_gemini_thought_signature(sig).unwrap(), "TS_FULL");
         assert_eq!(content[1]["type"], "text");
         assert_eq!(content[1]["text"], "final answer");
+    }
+
+    // ============================================================
+    // schema sanitize 测试 (修 Gemini 400 "Unknown name $schema/additionalProperties/...")
+    // ============================================================
+
+    #[test]
+    fn sanitize_strips_top_level_schema_keyword() {
+        let raw = json!({
+            "$schema": "https://json-schema.org/draft/2020-12/schema",
+            "type": "object",
+            "properties": { "x": { "type": "string" } }
+        });
+        let out = sanitize_schema_for_gemini(raw);
+        assert!(out.get("$schema").is_none());
+        assert_eq!(out["type"], "object");
+        assert_eq!(out["properties"]["x"]["type"], "string");
+    }
+
+    #[test]
+    fn sanitize_strips_additional_properties_recursively() {
+        let raw = json!({
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+                "nested": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "propertyNames": { "pattern": "^[A-Z]" }
+                }
+            }
+        });
+        let out = sanitize_schema_for_gemini(raw);
+        assert!(out.get("additionalProperties").is_none());
+        assert!(out["properties"]["nested"].get("additionalProperties").is_none());
+        assert!(out["properties"]["nested"].get("propertyNames").is_none());
+    }
+
+    #[test]
+    fn sanitize_converts_exclusive_minimum_int() {
+        let raw = json!({ "type": "integer", "exclusiveMinimum": 0 });
+        let out = sanitize_schema_for_gemini(raw);
+        assert!(out.get("exclusiveMinimum").is_none());
+        assert_eq!(out["minimum"], 1);
+    }
+
+    #[test]
+    fn sanitize_converts_exclusive_minimum_float() {
+        let raw = json!({ "type": "number", "exclusiveMinimum": 0.5 });
+        let out = sanitize_schema_for_gemini(raw);
+        assert!(out.get("exclusiveMinimum").is_none());
+        assert_eq!(out["minimum"].as_f64().unwrap(), 0.5);
+    }
+
+    #[test]
+    fn sanitize_keeps_existing_minimum_when_exclusive_also_present() {
+        let raw = json!({ "type": "integer", "minimum": 5, "exclusiveMinimum": 0 });
+        let out = sanitize_schema_for_gemini(raw);
+        assert_eq!(out["minimum"], 5, "已有的 minimum 不能被 exclusive 转换覆盖");
+    }
+
+    #[test]
+    fn sanitize_converts_const_to_enum() {
+        let raw = json!({ "const": "ACTIVE" });
+        let out = sanitize_schema_for_gemini(raw);
+        assert!(out.get("const").is_none());
+        assert_eq!(out["enum"], json!(["ACTIVE"]));
+    }
+
+    #[test]
+    fn sanitize_converts_one_of_to_any_of() {
+        let raw = json!({
+            "oneOf": [{ "type": "string" }, { "type": "number" }]
+        });
+        let out = sanitize_schema_for_gemini(raw);
+        assert!(out.get("oneOf").is_none());
+        assert!(out["anyOf"].is_array());
+        assert_eq!(out["anyOf"].as_array().unwrap().len(), 2);
+    }
+
+    #[test]
+    fn sanitize_recurses_into_items() {
+        let raw = json!({
+            "type": "array",
+            "items": {
+                "type": "object",
+                "$schema": "drop me",
+                "additionalProperties": false
+            }
+        });
+        let out = sanitize_schema_for_gemini(raw);
+        assert!(out["items"].get("$schema").is_none());
+        assert!(out["items"].get("additionalProperties").is_none());
+    }
+
+    #[test]
+    fn sanitize_recurses_into_any_of_branches() {
+        let raw = json!({
+            "anyOf": [
+                { "type": "string", "$schema": "x" },
+                { "const": "OK" }
+            ]
+        });
+        let out = sanitize_schema_for_gemini(raw);
+        assert!(out["anyOf"][0].get("$schema").is_none());
+        assert!(out["anyOf"][1].get("const").is_none());
+        assert_eq!(out["anyOf"][1]["enum"], json!(["OK"]));
+    }
+
+    #[test]
+    fn convert_tool_produces_clean_gemini_parameters_for_read_tool() {
+        // 模拟 dump 里 Claude Code 真实的 Read tool schema
+        let read_tool = json!({
+            "name": "Read",
+            "description": "Reads a file from the local filesystem.",
+            "input_schema": {
+                "$schema": "https://json-schema.org/draft/2020-12/schema",
+                "additionalProperties": false,
+                "type": "object",
+                "required": ["file_path"],
+                "properties": {
+                    "file_path": { "description": "absolute path", "type": "string" },
+                    "limit": {
+                        "description": "The number of lines to read.",
+                        "exclusiveMinimum": 0,
+                        "maximum": 9007199254740991_i64,
+                        "type": "integer"
+                    }
+                }
+            }
+        });
+        let out = convert_tool(&read_tool).unwrap();
+        let params = &out["parameters"];
+        assert!(params.get("$schema").is_none());
+        assert!(params.get("additionalProperties").is_none());
+        assert!(params["properties"]["limit"].get("exclusiveMinimum").is_none());
+        assert_eq!(params["properties"]["limit"]["minimum"], 1);
+        assert_eq!(params["properties"]["limit"]["maximum"], 9007199254740991_i64);
     }
 }

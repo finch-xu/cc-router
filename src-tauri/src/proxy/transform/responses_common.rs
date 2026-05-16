@@ -312,11 +312,18 @@ pub fn anthropic_messages_to_input(
 }
 
 /// Anthropic thinking content_block 的 `signature` 字段编码 schema 版本号。
-/// 编码格式: `base64url(JSON{v:<version>, id, ec})`. 版本升级时 decoder 拒收旧版。
-const REASONING_SIG_VERSION: u64 = 1;
+///
+/// 版本 1: `base64url(JSON{v:1, id, ec})` — 历史格式, 无 provider tag。新 cc-router 仍能解
+/// (向后兼容老 build 包装过的会话历史), 但**新写入**一律用 v=2。
+///
+/// 版本 2: `base64url(JSON{v:2, p:"openai_responses", id, ec})` — 加 `p` 字段防止
+/// 跨翻译层错喂 (例如 cc-router 的 openai signature 被 dispatch 透传给 xiaomi/deepseek
+/// 后上游 400)。与 [`gemini.rs::GEMINI_SIG_PROVIDER`] (`"gemini"`) 物理隔离。
+const REASONING_SIG_VERSION: u64 = 2;
+const REASONING_SIG_PROVIDER: &str = "openai_responses";
 
 /// Anthropic thinking content_block 的 `signature` 字段编码方案:
-/// `base64url(JSON{v, id: "rs_xxx", ec: "<encrypted_content>"})`.
+/// `base64url(JSON{v:2, p:"openai_responses", id: "rs_xxx", ec: "<encrypted_content>"})`.
 ///
 /// 流式 (`output_item.done(reasoning)`) 和非流式 (`responses_json_to_anthropic`) 路径
 /// 写入 signature; 客户端回传后 [`anthropic_messages_to_input`] 解码还原成 input items 里的 reasoning item。
@@ -324,6 +331,7 @@ pub fn encode_reasoning_signature(id: &str, encrypted_content: &str) -> String {
     use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine as _};
     let payload = json!({
         "v": REASONING_SIG_VERSION,
+        "p": REASONING_SIG_PROVIDER,
         "id": id,
         "ec": encrypted_content,
     });
@@ -332,6 +340,9 @@ pub fn encode_reasoning_signature(id: &str, encrypted_content: &str) -> String {
 }
 
 /// 与 [`encode_reasoning_signature`] 配对的解码器, 返回 (id, encrypted_content). 失败 → None。
+///
+/// 兼容性: v=1 (老 build 包装的, 无 `p` 字段) 仍接受; v=2 必须 `p == "openai_responses"` 才解。
+/// 其他 v 或 p 不匹配 → None (例如 gemini wrap 喂进来会被拒)。
 pub fn decode_reasoning_signature(signature: &str) -> Option<(String, String)> {
     use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine as _};
     if signature.is_empty() {
@@ -339,12 +350,47 @@ pub fn decode_reasoning_signature(signature: &str) -> Option<(String, String)> {
     }
     let bytes = URL_SAFE_NO_PAD.decode(signature.as_bytes()).ok()?;
     let v: Value = serde_json::from_slice(&bytes).ok()?;
-    if v.get("v").and_then(|x| x.as_u64()) != Some(REASONING_SIG_VERSION) {
-        return None;
+    let ver = v.get("v").and_then(|x| x.as_u64())?;
+    match ver {
+        1 => {
+            // 老 cc-router (v=1) 包装的 openai_responses signature 无 `p` 字段。但 gemini wrap 也是
+            // v=1 且有 `p:"gemini"`, 必须显式拒绝以避免误识别为 openai_responses。
+            if let Some(p) = v.get("p").and_then(|x| x.as_str()) {
+                if p != REASONING_SIG_PROVIDER {
+                    return None;
+                }
+            }
+        }
+        2 => {
+            if v.get("p").and_then(|x| x.as_str()) != Some(REASONING_SIG_PROVIDER) {
+                return None;
+            }
+        }
+        _ => return None,
     }
     let id = v.get("id").and_then(|x| x.as_str()).unwrap_or("").to_string();
     let ec = v.get("ec").and_then(|x| x.as_str()).unwrap_or("").to_string();
     Some((id, ec))
+}
+
+/// 跨 transform 层的 signature 来源识别. 用于 Anthropic 协议透传分支 (xiaomi/deepseek/zhipu/
+/// anthropic/minimax/moonshot/alibaba 等) 在 dispatch 前剥离 cc-router 自家包装的 thinking
+/// block —— 这些 block 的 signature 是给 cc-router 内部翻译层用的, 上游 Anthropic 协议
+/// provider 不认识, 透传会触发 400。
+///
+/// 返回 `Some("openai_responses")` 或 `Some("gemini")` 表示 cc-router 包装; 空串、Anthropic
+/// 原生 UUID signature 或解码失败一律 `None`。
+pub fn looks_like_cc_router_signature(signature: &str) -> Option<&'static str> {
+    if signature.is_empty() {
+        return None;
+    }
+    if decode_reasoning_signature(signature).is_some() {
+        return Some("openai_responses");
+    }
+    if crate::proxy::transform::gemini::decode_gemini_thought_signature(signature).is_some() {
+        return Some("gemini");
+    }
+    None
 }
 
 fn flush_text_parts(out: &mut Vec<Value>, role: &str, text_parts: &mut Vec<Value>) {
@@ -1320,5 +1366,72 @@ mod tests {
         });
         let out = build_responses_body(&body, &ResponsesTransformConfig::openai_official(false)).unwrap();
         assert!(out.get("include").is_none(), "openai 路径默认不注入 include");
+    }
+
+    // ============================================================
+    // signature 编码/解码 兼容性测试 (修跨 provider thinking 错喂)
+    // ============================================================
+
+    #[test]
+    fn encode_decode_signature_v2_roundtrip() {
+        let sig = encode_reasoning_signature("rs_xyz", "encrypted_blob");
+        let decoded = decode_reasoning_signature(&sig).unwrap();
+        assert_eq!(decoded.0, "rs_xyz");
+        assert_eq!(decoded.1, "encrypted_blob");
+    }
+
+    #[test]
+    fn decode_v1_signature_backwards_compatible() {
+        // 老 cc-router (v=1, 无 p 字段) 包装的 signature, 新 cc-router 必须仍能解
+        use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine as _};
+        let legacy_payload = json!({ "v": 1, "id": "rs_legacy", "ec": "old_ec" });
+        let legacy_sig = URL_SAFE_NO_PAD.encode(legacy_payload.to_string().as_bytes());
+        let decoded = decode_reasoning_signature(&legacy_sig).unwrap();
+        assert_eq!(decoded.0, "rs_legacy");
+        assert_eq!(decoded.1, "old_ec");
+    }
+
+    #[test]
+    fn decode_v2_with_wrong_provider_tag_fails() {
+        // 假装 gemini 的 signature 喂到 openai_responses decoder → 必须拒绝
+        use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine as _};
+        let foreign = json!({ "v": 2, "p": "gemini", "id": "rs_x", "ec": "y" });
+        let sig = URL_SAFE_NO_PAD.encode(foreign.to_string().as_bytes());
+        assert!(decode_reasoning_signature(&sig).is_none());
+    }
+
+    #[test]
+    fn decode_v3_or_unknown_version_fails() {
+        use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine as _};
+        let future = json!({ "v": 99, "p": "openai_responses", "id": "x", "ec": "y" });
+        let sig = URL_SAFE_NO_PAD.encode(future.to_string().as_bytes());
+        assert!(decode_reasoning_signature(&sig).is_none());
+    }
+
+    #[test]
+    fn looks_like_cc_router_signature_dispatch() {
+        // v=2 openai 包装
+        let openai_sig = encode_reasoning_signature("rs_a", "ec_a");
+        assert_eq!(
+            looks_like_cc_router_signature(&openai_sig),
+            Some("openai_responses")
+        );
+
+        // gemini 包装
+        let gemini_sig =
+            crate::proxy::transform::gemini::encode_gemini_thought_signature("ts_blob");
+        assert_eq!(
+            looks_like_cc_router_signature(&gemini_sig),
+            Some("gemini")
+        );
+
+        // 空字符串
+        assert_eq!(looks_like_cc_router_signature(""), None);
+
+        // Anthropic 原生 UUID 不是 base64url 合法 JSON, 应该 None
+        assert_eq!(
+            looks_like_cc_router_signature("03ea0953-5ece-4386-afea-31404f331c5f"),
+            None
+        );
     }
 }
