@@ -1,3 +1,4 @@
+pub mod client_fingerprint;
 pub mod gemini_dispatch;
 pub mod handler;
 pub mod middleware;

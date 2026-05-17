@@ -6,6 +6,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
+import { ClientToolBadge } from "@/components/ClientToolBadge";
 import { useT } from "@/i18n";
 import { fmtTime } from "@/lib/format";
 import type { RequestLogDto } from "@/types";
@@ -118,6 +119,45 @@ export function RequestDetailDialog({ request, onClose }: Props) {
                   request.total_latency_ms != null
                     ? `${(request.total_latency_ms / 1000).toFixed(2)}s`
                     : "-"
+                }
+              />
+              <KV
+                k={t("requestLogs.detail.clientTool")}
+                v={<ClientToolBadge toolId={request.client_tool} />}
+              />
+              <KV
+                k={t("requestLogs.detail.clientVersion")}
+                v={
+                  request.client_version ? (
+                    <span className="mono">{request.client_version}</span>
+                  ) : (
+                    <span className="muted">—</span>
+                  )
+                }
+              />
+              <KV
+                k={t("requestLogs.detail.clientIp")}
+                v={
+                  request.client_ip ? (
+                    <span className="mono">{request.client_ip}</span>
+                  ) : (
+                    <span className="muted">—</span>
+                  )
+                }
+              />
+              <KV
+                k={t("requestLogs.detail.userAgent")}
+                v={
+                  request.client_user_agent ? (
+                    <span
+                      className="mono"
+                      style={{ fontSize: 11.5, wordBreak: "break-all" }}
+                    >
+                      {request.client_user_agent}
+                    </span>
+                  ) : (
+                    <span className="muted">—</span>
+                  )
                 }
               />
             </div>

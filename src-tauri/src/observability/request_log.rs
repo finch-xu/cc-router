@@ -64,6 +64,14 @@ pub struct RequestLogEntry {
     pub error_message: Option<String>,
     /// 仅错误路径填充, 截断至 4KB
     pub upstream_response_body: Option<String>,
+    /// 客户端识别 (Claude Code / Zed / Codex CLI / ...), None 表示未识别 → 前端展示 "unk"
+    pub client_tool: Option<&'static str>,
+    /// 客户端原始 User-Agent (识别成功时也保留, 用于详情抽屉)
+    pub client_user_agent: Option<String>,
+    /// 从 UA 或 stainless headers 提取的版本号
+    pub client_version: Option<String>,
+    /// TCP 对端 IP (来自 axum ConnectInfo, 非 X-Forwarded-For). listen_all=true 时是核心排查信息.
+    pub client_ip: Option<String>,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -205,8 +213,9 @@ pub(crate) async fn flush_batch(
                 http_status, ttft_ms, total_latency_ms,
                 upstream_input_tokens, upstream_output_tokens,
                 upstream_cache_creation, upstream_cache_read,
-                retry_count, error_message, upstream_response_body)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                retry_count, error_message, upstream_response_body,
+                client_tool, client_user_agent, client_version, client_ip)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
         )
         .bind(entry.id.to_string())
         .bind(entry.timestamp_ms)
@@ -228,6 +237,10 @@ pub(crate) async fn flush_batch(
         .bind(entry.retry_count as i64)
         .bind(entry.error_message)
         .bind(entry.upstream_response_body)
+        .bind(entry.client_tool)
+        .bind(entry.client_user_agent)
+        .bind(entry.client_version)
+        .bind(entry.client_ip)
         .execute(&mut *tx)
         .await;
         if let Err(e) = result {
@@ -344,6 +357,10 @@ mod tests {
             retry_count: 0,
             error_message: None,
             upstream_response_body: None,
+            client_tool: None,
+            client_user_agent: None,
+            client_version: None,
+            client_ip: None,
         }
     }
 

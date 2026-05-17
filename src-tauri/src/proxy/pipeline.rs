@@ -17,6 +17,7 @@ use crate::observability::body_dump::{BodyDumpEntry, BodyDumpKind};
 use crate::observability::events::{self, Severity};
 use crate::observability::request_log::{RequestLogEntry, RequestStatus};
 use crate::provider::model::AuthType;
+use crate::proxy::client_fingerprint::ClientContext;
 use crate::proxy::gemini_dispatch;
 use crate::proxy::openai_responses_dispatch;
 use crate::proxy::transform::gemini::{resolve_thinking_budget, GeminiExtras};
@@ -98,6 +99,7 @@ pub async fn dispatch(
     request_body: Value,
     client_headers: HeaderMap,
     is_streaming: bool,
+    ctx: &ClientContext,
 ) -> AppResult<Response> {
     // 1. 解析虚拟模型; 非三个虚拟名走 fallback（透传原始 model）
     let vm_name = VirtualModelName::parse(model).unwrap_or(VirtualModelName::Fallback);
@@ -267,6 +269,7 @@ pub async fn dispatch(
                         state.db.clone(),
                         state.app_handle.clone(),
                         rt.clone(),
+                        ctx.clone(),
                     ));
                 }
                 Err(err) => {
@@ -317,6 +320,10 @@ pub async fn dispatch(
                         retry_count,
                         error_message: Some(err_msg.clone()),
                         upstream_response_body: Some(truncate_body(&err_msg, ERROR_BODY_LIMIT)),
+                        client_tool: ctx.info.tool,
+                        client_user_agent: ctx.info.user_agent.clone(),
+                        client_version: ctx.info.version.clone(),
+                        client_ip: ctx.ip.clone(),
                     };
                     let _ = state.request_log_tx.try_send(entry);
                     events::record_request(
@@ -385,6 +392,7 @@ pub async fn dispatch(
                         state.db.clone(),
                         state.app_handle.clone(),
                         rt.clone(),
+                        ctx.clone(),
                     ));
                 }
                 Err(err) => {
@@ -435,6 +443,10 @@ pub async fn dispatch(
                         retry_count,
                         error_message: Some(err_msg.clone()),
                         upstream_response_body: Some(truncate_body(&err_msg, ERROR_BODY_LIMIT)),
+                        client_tool: ctx.info.tool,
+                        client_user_agent: ctx.info.user_agent.clone(),
+                        client_version: ctx.info.version.clone(),
+                        client_ip: ctx.ip.clone(),
                     };
                     let _ = state.request_log_tx.try_send(entry);
                     events::record_request(
@@ -511,6 +523,7 @@ pub async fn dispatch(
                         state.db.clone(),
                         state.app_handle.clone(),
                         rt.clone(),
+                        ctx.clone(),
                     ));
                 }
                 Err(err) => {
@@ -561,6 +574,10 @@ pub async fn dispatch(
                         retry_count,
                         error_message: Some(err_msg.clone()),
                         upstream_response_body: Some(truncate_body(&err_msg, ERROR_BODY_LIMIT)),
+                        client_tool: ctx.info.tool,
+                        client_user_agent: ctx.info.user_agent.clone(),
+                        client_version: ctx.info.version.clone(),
+                        client_ip: ctx.ip.clone(),
                     };
                     let _ = state.request_log_tx.try_send(entry);
                     events::record_request(
@@ -643,6 +660,7 @@ pub async fn dispatch(
                         state.db.clone(),
                         state.app_handle.clone(),
                         rt.clone(),
+                        ctx.clone(),
                     ));
                 }
                 Err(err) => {
@@ -693,6 +711,10 @@ pub async fn dispatch(
                         retry_count,
                         error_message: Some(err_msg.clone()),
                         upstream_response_body: Some(truncate_body(&err_msg, ERROR_BODY_LIMIT)),
+                        client_tool: ctx.info.tool,
+                        client_user_agent: ctx.info.user_agent.clone(),
+                        client_version: ctx.info.version.clone(),
+                        client_ip: ctx.ip.clone(),
                     };
                     let _ = state.request_log_tx.try_send(entry);
                     events::record_request(
@@ -914,6 +936,10 @@ pub async fn dispatch(
                     retry_count,
                     error_message: error_message.clone(),
                     upstream_response_body: upstream_body_log,
+                    client_tool: ctx.info.tool,
+                    client_user_agent: ctx.info.user_agent.clone(),
+                    client_version: ctx.info.version.clone(),
+                    client_ip: ctx.ip.clone(),
                 };
                 let _ = state.request_log_tx.try_send(entry);
 
@@ -1036,6 +1062,10 @@ pub async fn dispatch(
                                 &String::from_utf8_lossy(&raw_bytes),
                                 ERROR_BODY_LIMIT,
                             )),
+                            client_tool: ctx.info.tool,
+                            client_user_agent: ctx.info.user_agent.clone(),
+                            client_version: ctx.info.version.clone(),
+                            client_ip: ctx.ip.clone(),
                         };
                         let _ = state.request_log_tx.try_send(entry);
                         events::record_request(
@@ -1088,6 +1118,10 @@ pub async fn dispatch(
                             retry_count,
                             error_message: Some(err_msg.clone()),
                             upstream_response_body: None,
+                            client_tool: ctx.info.tool,
+                            client_user_agent: ctx.info.user_agent.clone(),
+                            client_version: ctx.info.version.clone(),
+                            client_ip: ctx.ip.clone(),
                         };
                         let _ = state.request_log_tx.try_send(entry);
                         events::record_request(
@@ -1172,6 +1206,7 @@ pub async fn dispatch(
                             rt.clone(),
                             dump_tx,
                             Some(first_byte_at),
+                            ctx.clone(),
                         );
                         return Ok(response);
                     }
@@ -1211,6 +1246,10 @@ pub async fn dispatch(
                     retry_count,
                     error_message: Some(err_msg.clone()),
                     upstream_response_body: None,
+                    client_tool: ctx.info.tool,
+                    client_user_agent: ctx.info.user_agent.clone(),
+                    client_version: ctx.info.version.clone(),
+                    client_ip: ctx.ip.clone(),
                 };
                 let _ = state.request_log_tx.try_send(entry);
 

@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { useSearchParams } from "react-router-dom";
 import { RefreshCw, ScrollText, X } from "lucide-react";
+import { ClientToolBadge } from "@/components/ClientToolBadge";
 import { EmptyState } from "@/components/EmptyState";
 import { Pagination } from "@/components/Pagination";
 import { ProviderLogo } from "@/components/ProviderLogo";
@@ -11,11 +12,13 @@ import { useSubscriptions } from "@/hooks/useSubscriptions";
 import { useT } from "@/i18n";
 import { fmtNum, fmtTime } from "@/lib/format";
 import { VM_META } from "@/lib/virtualModels";
-import type {
-  RequestLogDto,
-  RequestLogFilters,
-  RequestStatus,
-  VirtualModelName,
+import { CLIENT_TOOLS } from "@/lib/clientTools";
+import {
+  CLIENT_TOOL_UNKNOWN_SENTINEL,
+  type RequestLogDto,
+  type RequestLogFilters,
+  type RequestStatus,
+  type VirtualModelName,
 } from "@/types";
 
 const PAGE_SIZE = 10;
@@ -35,6 +38,7 @@ export function RequestLogsPage() {
   const [vmFilter, setVmFilter] = useState<VirtualModelName | undefined>();
   const [providerFilter, setProviderFilter] = useState<string | undefined>();
   const [statusFilter, setStatusFilter] = useState<RequestStatus | undefined>();
+  const [clientFilter, setClientFilter] = useState<string | undefined>();
   const subscriptionFilter = searchParams.get("subscription_id") ?? undefined;
   const [activeRequest, setActiveRequest] = useState<RequestLogDto | null>(null);
   const subs = useSubscriptions();
@@ -43,14 +47,16 @@ export function RequestLogsPage() {
     : undefined;
 
   const filters = useMemo<RequestLogFilters | undefined>(() => {
-    if (!vmFilter && !providerFilter && !statusFilter && !subscriptionFilter) return undefined;
+    if (!vmFilter && !providerFilter && !statusFilter && !clientFilter && !subscriptionFilter)
+      return undefined;
     return {
       virtual_model_name: vmFilter,
       provider_id: providerFilter,
       status: statusFilter,
+      client_tool: clientFilter,
       subscription_id: subscriptionFilter,
     };
-  }, [vmFilter, providerFilter, statusFilter, subscriptionFilter]);
+  }, [vmFilter, providerFilter, statusFilter, clientFilter, subscriptionFilter]);
 
   const query = useRequests(page, PAGE_SIZE, filters);
   const providers = useProviders();
@@ -69,6 +75,7 @@ export function RequestLogsPage() {
     setVmFilter(undefined);
     setProviderFilter(undefined);
     setStatusFilter(undefined);
+    setClientFilter(undefined);
     setSearchParams({});
     setPage(1);
   }
@@ -150,6 +157,26 @@ export function RequestLogsPage() {
           ))}
         </select>
 
+        <select
+          className="select"
+          value={clientFilter ?? ALL}
+          onChange={(e) => {
+            const v = e.target.value;
+            setClientFilter(v === ALL ? undefined : v);
+            setPage(1);
+          }}
+        >
+          <option value={ALL}>{t("requestLogs.filter.allClient")}</option>
+          {CLIENT_TOOLS.map((c) => (
+            <option key={c.id} value={c.id}>
+              {t(c.i18nKey)}
+            </option>
+          ))}
+          <option value={CLIENT_TOOL_UNKNOWN_SENTINEL}>
+            {t("requestLogs.filter.clientUnknown")}
+          </option>
+        </select>
+
         {subscriptionFilter && (
           <span className="pill accent" style={{ display: "inline-flex", alignItems: "center", gap: 4 }}>
             <span className="dot" />
@@ -202,6 +229,7 @@ export function RequestLogsPage() {
               <tr>
                 <th style={{ width: 150 }}>{t("requestLogs.col.time")}</th>
                 <th style={{ width: 110 }}>{t("requestLogs.col.status")}</th>
+                <th style={{ width: 130 }}>{t("requestLogs.col.client")}</th>
                 <th style={{ width: 130 }}>{t("requestLogs.col.virtualModel")}</th>
                 <th style={{ width: 200 }}>{t("requestLogs.col.realModel")}</th>
                 <th>{t("requestLogs.col.responseModel")}</th>
@@ -239,6 +267,12 @@ export function RequestLogsPage() {
                           </span>
                         )}
                       </div>
+                    </td>
+                    <td>
+                      <ClientToolBadge
+                        toolId={row.client_tool}
+                        userAgent={row.client_user_agent}
+                      />
                     </td>
                     <td className="mono">{row.virtual_model_name}</td>
                     <td className="mono strong">{row.real_model_name}</td>

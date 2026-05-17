@@ -35,6 +35,7 @@ use uuid::Uuid;
 
 use crate::observability::events::{self, EventEntry, Severity};
 use crate::observability::request_log::{RequestLogEntry, RequestStatus};
+use crate::proxy::client_fingerprint::ClientContext;
 use crate::proxy::oauth_dispatch::{OAuthDispatchError, OAuthDispatchOk};
 use crate::proxy::sse_framing::find_sse_frame_boundary;
 use crate::proxy::transform::gemini::{
@@ -207,6 +208,7 @@ pub fn finalize_gemini_response(
     pool: SqlitePool,
     app: AppHandle,
     sub_rt: Arc<RwLock<SubscriptionRuntime>>,
+    ctx: ClientContext,
 ) -> Response {
     let emit_thoughts = ok.gemini_emit_thoughts;
     if ok.client_wants_streaming {
@@ -226,6 +228,7 @@ pub fn finalize_gemini_response(
             pool,
             app,
             sub_rt,
+            ctx,
         )
     } else {
         let fut = collect_gemini_to_json_response(
@@ -244,6 +247,7 @@ pub fn finalize_gemini_response(
             pool,
             app,
             sub_rt,
+            ctx,
         );
         let stream = futures::stream::once(async move {
             let resp = fut.await;
@@ -282,6 +286,7 @@ fn finalize_gemini_streaming(
     pool: SqlitePool,
     app: AppHandle,
     sub_rt: Arc<RwLock<SubscriptionRuntime>>,
+    ctx: ClientContext,
 ) -> Response {
     let (client_tx, client_rx) = mpsc::channel::<Result<Bytes, std::io::Error>>(64);
 
@@ -382,6 +387,10 @@ fn finalize_gemini_streaming(
             retry_count,
             error_message: None,
             upstream_response_body: None,
+            client_tool: ctx.info.tool,
+            client_user_agent: ctx.info.user_agent.clone(),
+            client_version: ctx.info.version.clone(),
+            client_ip: ctx.ip.clone(),
         };
         let _ = log_tx.try_send(entry);
         events::record_request(
@@ -426,6 +435,7 @@ async fn collect_gemini_to_json_response(
     pool: SqlitePool,
     app: AppHandle,
     sub_rt: Arc<RwLock<SubscriptionRuntime>>,
+    ctx: ClientContext,
 ) -> Response {
     let start = std::time::Instant::now();
     let mut collector = NonStreamingCollector::new_with_extras(&real_model, emit_thoughts);
@@ -498,6 +508,10 @@ async fn collect_gemini_to_json_response(
         retry_count,
         error_message: None,
         upstream_response_body: None,
+        client_tool: ctx.info.tool,
+        client_user_agent: ctx.info.user_agent.clone(),
+        client_version: ctx.info.version.clone(),
+        client_ip: ctx.ip.clone(),
     };
     let _ = log_tx.try_send(entry);
     events::record_request(

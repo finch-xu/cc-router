@@ -36,7 +36,7 @@ pub async fn start(state: AppState) -> AppResult<()> {
         info!(%host, port, mode = ?mode, "proxy HTTP listening");
         let r = router.clone();
         tasks.push(tokio::spawn(async move {
-            axum::serve(listener, r)
+            axum::serve(listener, r.into_make_service_with_connect_info::<SocketAddr>())
                 .await
                 .map_err(|e| AppError::internal(format!("axum http: {e}")))
         }));
@@ -61,7 +61,7 @@ pub async fn start(state: AppState) -> AppResult<()> {
                 std_listener,
                 axum_server::tls_rustls::RustlsConfig::from_config(cfg),
             )
-            .serve(r.into_make_service())
+            .serve(r.into_make_service_with_connect_info::<SocketAddr>())
             .await
             .map_err(|e| AppError::internal(format!("axum-server tls: {e}")))
         }));

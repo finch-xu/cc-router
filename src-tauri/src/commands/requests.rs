@@ -29,6 +29,14 @@ pub struct RequestLogDto {
     pub error_message: Option<String>,
     /// 上游错误响应 body 截断, 仅在错误路径有值, 用于前端排障详情抽屉
     pub upstream_response_body: Option<String>,
+    /// 客户端识别结果 (Claude Code / Zed / Codex CLI / ...). NULL → 未识别 (前端展示 "unk")
+    pub client_tool: Option<String>,
+    /// 客户端原始 User-Agent. 详情抽屉展示
+    pub client_user_agent: Option<String>,
+    /// 从 UA 或 stainless headers 提取的客户端版本号
+    pub client_version: Option<String>,
+    /// TCP 对端 IP (来自 axum ConnectInfo). listen_all=true 场景下区分本机/局域网设备的关键
+    pub client_ip: Option<String>,
 }
 
 #[derive(Debug, Serialize)]
@@ -44,6 +52,9 @@ pub struct RequestLogFilters {
     pub provider_id: Option<String>,
     pub status: Option<String>,
     pub subscription_id: Option<String>,
+    /// 按客户端工具筛选。特殊值 `__unknown__` 映射到 `client_tool IS NULL`
+    /// (前端筛选器的「未识别」选项), 其余值走 `client_tool = ?` 精确匹配。
+    pub client_tool: Option<String>,
 }
 
 #[tauri::command]
@@ -65,21 +76,38 @@ pub async fn list_requests(
         ("provider_id", filters.provider_id.as_deref()),
         ("status", filters.status.as_deref()),
         ("subscription_id", filters.subscription_id.as_deref()),
+        ("client_tool", filters.client_tool.as_deref()),
     ]
     .into_iter()
     .filter_map(|(col, val)| val.map(|v| (col, v)))
     .collect();
 
+    // client_tool 特殊值 → 拼 `IS NULL` 而非 `= ?`. 与前端
+    // `src/types.ts::CLIENT_TOOL_UNKNOWN_SENTINEL` 必须保持同值, 否则筛选「未识别」会静默失效.
+    const UNKNOWN_SENTINEL: &str = "__unknown__";
+
     let where_clause = if active.is_empty() {
         String::new()
     } else {
-        let conds: Vec<String> = active.iter().map(|(c, _)| format!("{} = ?", c)).collect();
+        let conds: Vec<String> = active
+            .iter()
+            .map(|(c, v)| {
+                if *c == "client_tool" && *v == UNKNOWN_SENTINEL {
+                    format!("{} IS NULL", c)
+                } else {
+                    format!("{} = ?", c)
+                }
+            })
+            .collect();
         format!(" WHERE {}", conds.join(" AND "))
     };
 
     let count_sql = format!("SELECT COUNT(*) AS c FROM requests{}", where_clause);
     let mut count_q = sqlx::query(&count_sql);
-    for (_, v) in &active {
+    for (c, v) in &active {
+        if *c == "client_tool" && *v == UNKNOWN_SENTINEL {
+            continue;
+        }
         count_q = count_q.bind(*v);
     }
     let total: i64 = count_q.fetch_one(&state.db).await?.try_get("c")?;
@@ -90,14 +118,18 @@ pub async fn list_requests(
                 http_status, total_latency_ms,
                 upstream_input_tokens, upstream_output_tokens,
                 upstream_cache_creation, upstream_cache_read, error_message,
-                upstream_response_body
+                upstream_response_body,
+                client_tool, client_user_agent, client_version, client_ip
          FROM requests{}
          ORDER BY timestamp DESC
          LIMIT ? OFFSET ?",
         where_clause
     );
     let mut select_q = sqlx::query(&select_sql);
-    for (_, v) in &active {
+    for (c, v) in &active {
+        if *c == "client_tool" && *v == UNKNOWN_SENTINEL {
+            continue;
+        }
         select_q = select_q.bind(*v);
     }
     let rows = select_q
@@ -127,8 +159,20 @@ pub async fn list_requests(
             cache_read_tokens: r.try_get("upstream_cache_read").ok(),
             error_message: r.try_get("error_message").ok(),
             upstream_response_body: r.try_get("upstream_response_body").ok(),
+            client_tool: r.try_get("client_tool").ok(),
+            client_user_agent: r.try_get("client_user_agent").ok(),
+            client_version: r.try_get("client_version").ok(),
+            client_ip: r.try_get("client_ip").ok(),
         })
         .collect();
 
     Ok(ListRequestsResult { items, total })
+}
+
+/// 返回前端可在筛选器里展示的「已支持识别的 client tool」白名单。
+/// 数据源是 [`crate::proxy::client_fingerprint::SUPPORTED_TOOLS`], 后端单一信息源,
+/// 前端硬编码的 i18n 文案需手工同步 (类比 `ProviderLogo BRAND_MAP`).
+#[tauri::command]
+pub async fn list_supported_client_tools() -> AppResult<Vec<&'static str>> {
+    Ok(crate::proxy::client_fingerprint::SUPPORTED_TOOLS.to_vec())
 }

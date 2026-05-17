@@ -1,11 +1,14 @@
+use std::net::SocketAddr;
+
 use axum::body::Bytes;
-use axum::extract::State;
+use axum::extract::{ConnectInfo, State};
 use axum::http::{HeaderMap, StatusCode};
 use axum::response::{IntoResponse, Response};
 use axum::Json;
 use serde_json::json;
 use tracing::{error, info};
 
+use crate::proxy::client_fingerprint::{self, ClientContext};
 use crate::proxy::pipeline;
 use crate::state::AppState;
 
@@ -17,6 +20,7 @@ pub async fn health() -> &'static str {
 /// 入口：把 Claude Code 的请求解析成 UnifiedRequest 后交给 pipeline。
 pub async fn messages(
     State(state): State<AppState>,
+    ConnectInfo(peer): ConnectInfo<SocketAddr>,
     headers: HeaderMap,
     body: Bytes,
 ) -> Response {
@@ -47,9 +51,21 @@ pub async fn messages(
         .and_then(|v| v.as_bool())
         .unwrap_or(false);
 
-    info!(%model, is_streaming, "proxy received request");
+    // 识别一次客户端 (UA + stainless headers) + 记录 TCP 对端 IP, 沿 dispatch 链透传给所有 RequestLogEntry.
+    let ctx = ClientContext {
+        info: client_fingerprint::identify(&headers),
+        ip: Some(peer.ip().to_string()),
+    };
 
-    match pipeline::dispatch(&state, &model, parsed, headers, is_streaming).await {
+    info!(
+        %model,
+        is_streaming,
+        client_tool = ?ctx.info.tool,
+        client_ip = ?ctx.ip,
+        "proxy received request"
+    );
+
+    match pipeline::dispatch(&state, &model, parsed, headers, is_streaming, &ctx).await {
         Ok(resp) => resp,
         Err(e) => {
             error!(?e, "pipeline dispatch failed");

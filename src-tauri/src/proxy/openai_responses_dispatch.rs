@@ -41,6 +41,7 @@ use uuid::Uuid;
 use crate::observability::events::{self, EventEntry, Severity};
 use crate::observability::request_log::{RequestLogEntry, RequestStatus};
 use crate::provider::model::AuthHeaderFormat;
+use crate::proxy::client_fingerprint::ClientContext;
 use crate::proxy::handler::error_response;
 use crate::proxy::oauth_dispatch::OAuthDispatchError;
 use crate::proxy::sse_framing::find_sse_frame_boundary;
@@ -252,6 +253,7 @@ pub fn finalize_openai_responses(
     pool: SqlitePool,
     app: AppHandle,
     sub_rt: Arc<RwLock<SubscriptionRuntime>>,
+    ctx: ClientContext,
 ) -> Response {
     let OpenaiResponsesDispatchOk { transform_config, payload } = ok;
     match payload {
@@ -271,6 +273,7 @@ pub fn finalize_openai_responses(
             pool,
             app,
             sub_rt,
+            ctx,
         ),
         OpenaiResponsesPayload::NonStreaming(body) => finalize_non_streaming(
             body,
@@ -288,6 +291,7 @@ pub fn finalize_openai_responses(
             pool,
             app,
             sub_rt,
+            ctx,
         ),
     }
 }
@@ -309,6 +313,7 @@ fn finalize_streaming(
     pool: SqlitePool,
     app: AppHandle,
     sub_rt: Arc<RwLock<SubscriptionRuntime>>,
+    ctx: ClientContext,
 ) -> Response {
     let (client_tx, client_rx) = mpsc::channel::<Result<Bytes, std::io::Error>>(64);
 
@@ -423,6 +428,10 @@ fn finalize_streaming(
             retry_count,
             error_message: None,
             upstream_response_body: None,
+            client_tool: ctx.info.tool,
+            client_user_agent: ctx.info.user_agent.clone(),
+            client_version: ctx.info.version.clone(),
+            client_ip: ctx.ip.clone(),
         };
         let _ = log_tx.try_send(entry);
         events::record_request(
@@ -472,6 +481,7 @@ fn finalize_non_streaming(
     pool: SqlitePool,
     app: AppHandle,
     sub_rt: Arc<RwLock<SubscriptionRuntime>>,
+    ctx: ClientContext,
 ) -> Response {
     let start = std::time::Instant::now();
 
@@ -550,6 +560,10 @@ fn finalize_non_streaming(
             retry_count,
             error_message: None,
             upstream_response_body: None,
+            client_tool: ctx.info.tool,
+            client_user_agent: ctx.info.user_agent.clone(),
+            client_version: ctx.info.version.clone(),
+            client_ip: ctx.ip.clone(),
         };
         let _ = log_tx.try_send(entry);
         events::record_request(

@@ -379,6 +379,28 @@ export interface OnboardingState {
 
 export type RequestStatus = "success" | "error" | "timeout";
 
+/**
+ * 客户端识别短标签. 与 Rust 侧 `proxy::client_fingerprint::SUPPORTED_TOOLS`
+ * 手工同步; `list_supported_client_tools` command 返回的值必须落在此 union 内。
+ * Backend 返回 NULL → 前端展示 "unk" (未识别).
+ */
+export type ClientToolId =
+  | "claude-code"
+  | "claude-desktop"
+  | "codex-cli"
+  | "cc-router"
+  | "zed"
+  | "cursor"
+  | "opencode"
+  | "anthropic-sdk-python"
+  | "anthropic-sdk-js";
+
+/**
+ * 筛选器 sentinel: 选 "未识别" 时前端发送此值, 后端拼 `client_tool IS NULL`.
+ * 必须与 Rust 侧 `commands/requests.rs::UNKNOWN_SENTINEL` 保持同值, 漂移会让筛选静默失效。
+ */
+export const CLIENT_TOOL_UNKNOWN_SENTINEL = "__unknown__";
+
 export interface RequestLogDto {
   id: string;
   timestamp: number;
@@ -400,6 +422,12 @@ export interface RequestLogDto {
   error_message?: string;
   /** 上游错误响应 body 截断(最多 4KB), 仅错误路径有值 */
   upstream_response_body?: string;
+  /** 未识别为 undefined → 前端展示 "unk" */
+  client_tool?: ClientToolId;
+  client_user_agent?: string;
+  client_version?: string;
+  /** TCP 对端 IP. listen_all=true 时区分本机 vs 局域网设备 */
+  client_ip?: string;
 }
 
 export interface ListRequestsResult {
@@ -412,6 +440,8 @@ export interface RequestLogFilters {
   provider_id?: string;
   status?: RequestStatus;
   subscription_id?: string;
+  /** ClientToolId 或 CLIENT_TOOL_UNKNOWN_SENTINEL */
+  client_tool?: string;
 }
 
 // ===== 统计聚合 (commands/statistics.rs) =====

@@ -33,6 +33,7 @@ pub const ZHIPU_ERR_RATE_LIMITED: &str = "1302";
 use crate::observability::body_dump::{BodyDumpEntry, BodyDumpKind};
 use crate::observability::events::{self, EventEntry, Severity};
 use crate::observability::request_log::{RequestLogEntry, RequestStatus};
+use crate::proxy::client_fingerprint::ClientContext;
 use crate::subscription::model::SubscriptionRuntime;
 use crate::subscription::state_machine;
 use crate::virtual_model::VirtualModelName;
@@ -60,6 +61,7 @@ pub fn stream_response(
     // 流首 lookahead 已捕获的真实首字节时刻; 不传则按本函数收到第一个 chunk 的时刻计.
     // 单独传是为了避免 peek + state_machine apply 的耗时被错算到 TTFT 里.
     peek_first_byte_at: Option<Instant>,
+    ctx: ClientContext,
 ) -> Response {
     let (client_tx, client_rx) = mpsc::channel::<Result<Bytes, std::io::Error>>(64);
 
@@ -209,6 +211,10 @@ pub fn stream_response(
             retry_count,
             error_message: error_message.clone(),
             upstream_response_body: None,
+            client_tool: ctx.info.tool,
+            client_user_agent: ctx.info.user_agent.clone(),
+            client_version: ctx.info.version.clone(),
+            client_ip: ctx.ip.clone(),
         };
         let _ = log_tx.try_send(entry);
 

@@ -43,6 +43,7 @@ use crate::oauth::kiro::{
 };
 use crate::observability::events::{self, EventEntry, Severity};
 use crate::observability::request_log::{RequestLogEntry, RequestStatus};
+use crate::proxy::client_fingerprint::ClientContext;
 use crate::proxy::handler::error_body;
 use crate::proxy::sse_framing::find_sse_frame_boundary;
 use crate::proxy::transform::aws_event_stream::EventStreamDecoder;
@@ -252,6 +253,7 @@ pub fn finalize_oauth_response(
     pool: SqlitePool,
     app: AppHandle,
     sub_rt: Arc<RwLock<SubscriptionRuntime>>,
+    ctx: ClientContext,
 ) -> Response {
     let transform_config = ok
         .transform_config
@@ -273,6 +275,7 @@ pub fn finalize_oauth_response(
             pool,
             app,
             sub_rt,
+            ctx,
         )
     } else {
         // 非流式: tokio task 收完, 然后返回 oneshot. 但 axum 需要同步返回 Response,
@@ -293,6 +296,7 @@ pub fn finalize_oauth_response(
             pool,
             app,
             sub_rt,
+            ctx,
         );
         // axum::response::Response 不能 hold a future. 需要 spawn 然后用 oneshot 返回.
         // 简单做法: block_on 是错的. 改用 streamed body 包一个一次性 chunk.
@@ -335,6 +339,7 @@ fn finalize_streaming(
     pool: SqlitePool,
     app: AppHandle,
     sub_rt: Arc<RwLock<SubscriptionRuntime>>,
+    ctx: ClientContext,
 ) -> Response {
     let (client_tx, client_rx) = mpsc::channel::<Result<Bytes, std::io::Error>>(64);
 
@@ -436,6 +441,10 @@ fn finalize_streaming(
             retry_count,
             error_message: None,
             upstream_response_body: None,
+            client_tool: ctx.info.tool,
+            client_user_agent: ctx.info.user_agent.clone(),
+            client_version: ctx.info.version.clone(),
+            client_ip: ctx.ip.clone(),
         };
         let _ = log_tx.try_send(entry);
         events::record_request(
@@ -483,6 +492,7 @@ async fn collect_to_json_response(
     pool: SqlitePool,
     app: AppHandle,
     sub_rt: Arc<RwLock<SubscriptionRuntime>>,
+    ctx: ClientContext,
 ) -> Response {
     let start = std::time::Instant::now();
     let mut collector = NonStreamingCollector::new_with_config(transform_config);
@@ -554,6 +564,10 @@ async fn collect_to_json_response(
         retry_count,
         error_message: None,
         upstream_response_body: None,
+        client_tool: ctx.info.tool,
+        client_user_agent: ctx.info.user_agent.clone(),
+        client_version: ctx.info.version.clone(),
+        client_ip: ctx.ip.clone(),
     };
     let _ = log_tx.try_send(entry);
     events::record_request(
@@ -755,16 +769,17 @@ pub fn finalize_kiro_response(
     pool: SqlitePool,
     app: AppHandle,
     sub_rt: Arc<RwLock<SubscriptionRuntime>>,
+    ctx: ClientContext,
 ) -> Response {
     if ok.client_wants_streaming {
         finalize_kiro_streaming(
             ok.upstream_stream, vm_name, attempt_id, sub_id, provider_id, endpoint_id,
-            real_model, display_name, retry_count, log_tx, event_log_tx, pool, app, sub_rt,
+            real_model, display_name, retry_count, log_tx, event_log_tx, pool, app, sub_rt, ctx,
         )
     } else {
         let fut = collect_kiro_to_json_response(
             ok.upstream_stream, vm_name, attempt_id, sub_id, provider_id, endpoint_id,
-            real_model, display_name, retry_count, log_tx, event_log_tx, pool, app, sub_rt,
+            real_model, display_name, retry_count, log_tx, event_log_tx, pool, app, sub_rt, ctx,
         );
         let stream = futures::stream::once(async move {
             let resp = fut.await;
@@ -802,6 +817,7 @@ fn finalize_kiro_streaming(
     pool: SqlitePool,
     app: AppHandle,
     sub_rt: Arc<RwLock<SubscriptionRuntime>>,
+    ctx: ClientContext,
 ) -> Response {
     let (client_tx, client_rx) = mpsc::channel::<Result<Bytes, std::io::Error>>(64);
 
@@ -895,6 +911,10 @@ fn finalize_kiro_streaming(
             retry_count,
             error_message: None,
             upstream_response_body: None,
+            client_tool: ctx.info.tool,
+            client_user_agent: ctx.info.user_agent.clone(),
+            client_version: ctx.info.version.clone(),
+            client_ip: ctx.ip.clone(),
         };
         let _ = log_tx.try_send(entry);
         events::record_request(
@@ -938,6 +958,7 @@ async fn collect_kiro_to_json_response(
     pool: SqlitePool,
     app: AppHandle,
     sub_rt: Arc<RwLock<SubscriptionRuntime>>,
+    ctx: ClientContext,
 ) -> Response {
     let start = std::time::Instant::now();
     let mut decoder = EventStreamDecoder::new();
@@ -1003,6 +1024,10 @@ async fn collect_kiro_to_json_response(
         retry_count,
         error_message: None,
         upstream_response_body: None,
+        client_tool: ctx.info.tool,
+        client_user_agent: ctx.info.user_agent.clone(),
+        client_version: ctx.info.version.clone(),
+        client_ip: ctx.ip.clone(),
     };
     let _ = log_tx.try_send(entry);
     events::record_request(

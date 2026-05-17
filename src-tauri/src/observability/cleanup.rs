@@ -103,6 +103,10 @@ mod tests {
             retry_count: 0,
             error_message: None,
             upstream_response_body: None,
+            client_tool: None,
+            client_user_agent: None,
+            client_version: None,
+            client_ip: None,
         }
     }
 
