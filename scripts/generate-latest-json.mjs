@@ -48,7 +48,12 @@ for (const sigName of files) {
 
   let key = null;
   if (baseName.endsWith(".app.tar.gz")) {
-    key = "darwin-aarch64";
+    // macOS 双架构: 按文件名 macOS-arm64 / macOS-x64 分流
+    if (baseName.includes("macOS-arm64")) {
+      key = "darwin-aarch64";
+    } else if (baseName.includes("macOS-x64")) {
+      key = "darwin-x86_64";
+    }
   } else if (baseName.endsWith(".exe")) {
     // Tauri 2 直接对 NSIS .exe installer 签名,不再生成 v1 的 .nsis.zip
     key = "windows-x86_64";
@@ -65,7 +70,12 @@ for (const sigName of files) {
   platforms[key] = { signature: sigContent, url };
 }
 
-const required = ["darwin-aarch64", "windows-x86_64", "linux-x86_64"];
+const required = [
+  "darwin-aarch64",
+  "darwin-x86_64",
+  "windows-x86_64",
+  "linux-x86_64",
+];
 for (const k of required) {
   if (!platforms[k]) {
     throw new Error(
