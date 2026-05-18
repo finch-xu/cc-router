@@ -622,12 +622,26 @@ jobs:
           fi
           # latest.json 里 platforms.{plat}.url 是绝对 GitHub URL,
           # 国内版必须把前缀改成 OSS,否则客户端拿到 manifest 后还是回 GitHub 拉二进制。
+          # latest/ 是覆盖式的"最新版下载目录",不按版本号归档(历史版本由 GitHub Releases 兜底)。
           gh_prefix="https://github.com/${REPO}/releases/download/${RELEASE_TAG}/"
-          oss_prefix="https://${OSS_BUCKET}.${OSS_ENDPOINT}/${RELEASE_TAG}/"
+          oss_prefix="https://${OSS_BUCKET}.${OSS_ENDPOINT}/latest/"
           # 用 # 作 sed 分隔符,避免 URL 里的 / 干扰
           sed "s#${gh_prefix}#${oss_prefix}#g" "$src" > latest-cn.json
           echo "--- latest-cn.json (rewritten) ---"
           cat latest-cn.json
+
+      - name: Clear oss://cc-router/latest/ before upload
+        if: env.OSS_SKIP != '1'
+        env:
+          OSS_ACCESS_KEY_ID: ${{ secrets.OSS_ACCESS_KEY_ID }}
+          OSS_ACCESS_KEY_SECRET: ${{ secrets.OSS_ACCESS_KEY_SECRET }}
+        run: |
+          # 上传前清空 latest/ 目录,防止文件命名调整时(例如某次 release 改了 deb 命名 / 加新平台)
+          # 旧文件残留冒充"最新版"。release 期间会有 ~30s OSS 上 latest/ 为空的窗口,
+          # 但 release 是低频操作,撞上概率极低,可接受。
+          # -r 递归, -f 跳过确认提示。目录不存在时 ossutil 会非零退出,用 || true 兜底——
+          # 真实 OSS 故障下游 cp step 会继续报错暴露问题,不会被这里静默吞掉。
+          ossutil rm -rf "oss://${OSS_BUCKET}/latest/" || true
 
       - name: Upload binaries + sigs to OSS
         if: env.OSS_SKIP != '1'
@@ -636,16 +650,16 @@ jobs:
           OSS_ACCESS_KEY_SECRET: ${{ secrets.OSS_ACCESS_KEY_SECRET }}
         run: |
           set -euo pipefail
-          # 上传所有 release 资产 (binary + .sig + .dmg + .deb 等) 到 oss://cc-router/<tag>/
+          # 上传所有 release 资产 (binary + .sig + .dmg + .deb 等) 到 oss://cc-router/latest/
+          # 不按版本号归档:这个目录定位是"国内最新版加速下载",历史版本由 GitHub Releases 兜底。
           # latest.json 不直接传 (用 latest-cn.json 替代,放根目录)
-          # --update: 相同对象不重传(校验 ETag)
           # ossutil v2 自动从 OSS_ACCESS_KEY_ID/SECRET/ENDPOINT 环境变量读认证, 无需 -e/-i/-k
           for f in assets/*; do
             name="$(basename "$f")"
             if [ "$name" = "latest.json" ]; then
               continue
             fi
-            ossutil cp --update "$f" "oss://${OSS_BUCKET}/${RELEASE_TAG}/${name}"
+            ossutil cp -f "$f" "oss://${OSS_BUCKET}/latest/${name}"
           done
 
       - name: Upload latest-cn.json to OSS root (覆盖)
@@ -663,4 +677,4 @@ jobs:
         run: |
           echo "✅ 已镜像到 OSS:"
           echo "  manifest: https://${OSS_BUCKET}.${OSS_ENDPOINT}/latest.json"
-          echo "  binaries: https://${OSS_BUCKET}.${OSS_ENDPOINT}/${RELEASE_TAG}/<file>"
+          echo "  binaries: https://${OSS_BUCKET}.${OSS_ENDPOINT}/latest/<file>"
