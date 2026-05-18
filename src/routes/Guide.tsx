@@ -109,6 +109,7 @@ function ClaudeCodeTab() {
         CLAUDE_CODE_SUBAGENT_MODEL: "model-opus",
         CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC: "1",
         CLAUDE_CODE_DISABLE_NONSTREAMING_FALLBACK: "1",
+        CLAUDE_CODE_ATTRIBUTION_HEADER: "0",
         CLAUDE_CODE_EFFORT_LEVEL: "max"
       },
     },
@@ -238,6 +239,7 @@ function CcSwitchTab() {
         ANTHROPIC_DEFAULT_SONNET_MODEL: "model-sonnet",
         ANTHROPIC_DEFAULT_HAIKU_MODEL: "model-haiku",
         CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC: "1",
+        CLAUDE_CODE_ATTRIBUTION_HEADER: "0",
       },
     },
     null,

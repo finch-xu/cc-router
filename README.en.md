@@ -117,6 +117,7 @@ The **Settings** page renders the full env snippet dynamically — if the defaul
     "CLAUDE_CODE_SUBAGENT_MODEL": "model-opus",
     "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC": "1",
     "CLAUDE_CODE_DISABLE_NONSTREAMING_FALLBACK": "1",
+    "CLAUDE_CODE_ATTRIBUTION_HEADER": "0",
     "CLAUDE_CODE_EFFORT_LEVEL": "max"
   }
 }
