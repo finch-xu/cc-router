@@ -62,6 +62,17 @@
         }
       }
     },
+    "balance_discovery": {
+      "type": "object",
+      "required": ["url", "parser"],
+      "properties": {
+        "enabled": { "type": "boolean" },
+        "url": { "type": "string", "format": "uri" },
+        "method": { "enum": ["GET", "POST"] },
+        "parser": { "type": "string" },
+        "cache_ttl_minutes": { "type": "integer", "minimum": 1 }
+      }
+    },
     "expose_reasoning": { "type": "boolean" },
     "default_reasoning_effort": { "type": "string", "enum": ["minimal", "low", "medium", "high", "xhigh", "max"] },
     "inject_missing_thinking_placeholder": { "type": "boolean" }

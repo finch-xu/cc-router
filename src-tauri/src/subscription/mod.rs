@@ -1,3 +1,4 @@
+pub mod balance_discovery;
 pub mod model;
 pub mod model_discovery;
 pub mod ping;

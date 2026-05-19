@@ -12,9 +12,11 @@ use crate::error::{AppError, AppResult};
 use crate::provider::model::{AuthHeaderFormat, AuthType, ModelDiscovery};
 use crate::state::AppState;
 use crate::subscription::{
+    balance_discovery,
     model::{
-        ModelCache, ModelInfo, ModelSlots, OAuthMetadata, SubscriptionDto, SubscriptionRow,
-        SubscriptionRuntime, CUSTOM_GEMINI_SOURCE_MARKER, CUSTOM_OPENAI_SOURCE_MARKER, CUSTOM_SOURCE_MARKER,
+        BalanceSnapshot, ModelCache, ModelInfo, ModelSlots, OAuthMetadata, SubscriptionDto,
+        SubscriptionRow, SubscriptionRuntime, CUSTOM_GEMINI_SOURCE_MARKER,
+        CUSTOM_OPENAI_SOURCE_MARKER, CUSTOM_SOURCE_MARKER,
     },
     model_discovery, ping, state_machine, store,
 };
@@ -192,6 +194,7 @@ pub async fn create_subscription(
                 required_headers: provider.required_headers.clone(),
                 forward_headers: provider.forward_headers.clone(),
                 model_discovery: provider.model_discovery.clone(),
+                balance_discovery: provider.balance_discovery.clone(),
                 provider_display_name: provider.display_name.clone(),
                 provider_icon: provider.icon.clone().unwrap_or_default(),
                 is_user_defined: false,
@@ -274,6 +277,7 @@ pub async fn create_subscription(
                 required_headers: BTreeMap::new(),
                 forward_headers: Vec::new(),
                 model_discovery: discovery,
+                balance_discovery: None,
                 provider_display_name,
                 provider_icon: icon,
                 is_user_defined: true,
@@ -579,6 +583,65 @@ pub async fn refresh_model_list(
             })
         }
         Err(e) => Ok(RefreshModelListResult::ManualFallback {
+            reason: e.to_string(),
+        }),
+    }
+}
+
+/// 余额刷新结果. 前端按 kind 分发渲染.
+///
+/// - `success`: 成功拉到余额, 数据已写 DB + runtime, UI 同步更新
+/// - `failed`: 网络/HTTP/解析失败, UI 显示 reason, 旧缓存值仍可见 (不擦)
+/// - `unsupported`: provider yaml 没声明 balance_discovery, UI 不应展示余额卡片
+#[derive(Debug, Serialize)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum RefreshBalanceResult {
+    Success {
+        snapshot: BalanceSnapshot,
+        fetched_at: i64,
+    },
+    Failed {
+        reason: String,
+    },
+    Unsupported,
+}
+
+#[tauri::command]
+pub async fn refresh_subscription_balance(
+    state: State<'_, AppState>,
+    id: String,
+) -> AppResult<RefreshBalanceResult> {
+    let id = Uuid::parse_str(&id).map_err(|_| AppError::BadRequest("无效 id".into()))?;
+    let rt = {
+        let subs = state.subscriptions.read().await;
+        subs.get(&id)
+            .cloned()
+            .ok_or_else(|| AppError::SubscriptionNotFound(id.to_string()))?
+    };
+    let row = {
+        let g = rt.read().await;
+        g.row.clone()
+    };
+
+    // 早返 Unsupported, 避免发出空请求
+    if row.balance_discovery.is_none() {
+        return Ok(RefreshBalanceResult::Unsupported);
+    }
+
+    match balance_discovery::fetch_and_cache(&state.db, &state.http_client, &row).await {
+        Ok(snapshot) => {
+            let fetched_at = snapshot.fetched_at.timestamp_millis();
+            // 写回 runtime, 下一次前端 list_subscriptions 就拿到新值
+            {
+                let mut guard = rt.write().await;
+                guard.balance_cache = Some(snapshot.clone());
+            }
+            Ok(RefreshBalanceResult::Success {
+                snapshot,
+                fetched_at,
+            })
+        }
+        Err(e) => Ok(RefreshBalanceResult::Failed {
             reason: e.to_string(),
         }),
     }

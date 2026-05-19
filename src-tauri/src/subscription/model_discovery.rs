@@ -69,12 +69,7 @@ pub async fn fetch(
         None => join_base_path(&row.base_url, &row.model_discovery.path),
     };
 
-    let mut req = client.get(&url);
-    req = req.header(&row.auth_header_name, row.auth_header_value());
-    for (k, v) in row.required_headers.iter() {
-        req = req.header(k, v);
-    }
-
+    let req = row.apply_auth_and_required_headers(client.get(&url));
     let resp = req.send().await?;
     let status = resp.status();
     if !status.is_success() {

@@ -478,6 +478,21 @@
   "subscriptionEdit.deleteDialog.noRef": "删除订阅会同时清除存储的 API Key。",
   "subscriptionEdit.deleteDialog.confirm": "确认删除",
 
+  "common.relativeTime.justNow": "刚刚",
+  "common.relativeTime.minutesAgo": " 分钟前",
+  "common.relativeTime.hoursAgo": " 小时前",
+  "common.relativeTime.daysAgo": " 天前",
+
+  "subscriptionBalance.title": "余额",
+  "subscriptionBalance.refresh": "刷新余额",
+  "subscriptionBalance.refreshing": "查询中…",
+  "subscriptionBalance.lastUpdatedPrefix": "上次更新于 ",
+  "subscriptionBalance.neverFetched": "尚未查询,点击右侧按钮拉取最新余额",
+  "subscriptionBalance.errPrefix": "余额查询失败: ",
+  "subscriptionBalance.accountUnavailable": "账户当前不可用 (欠费或被限制)",
+  "subscriptionBalance.severityLow": "余额偏低",
+  "subscriptionBalance.severityCritical": "余额不足",
+
   "modelSlot.label": "模型槽位",
   "modelSlot.modeAuto": "自动",
   "modelSlot.modeManual": "手动",

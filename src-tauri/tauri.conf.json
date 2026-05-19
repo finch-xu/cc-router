@@ -76,6 +76,7 @@
       "migrations/006_add_request_stats_daily.sql",
       "migrations/007_drop_supports_thinking_blocks.sql",
       "migrations/008_add_subscription_oauth.sql",
+      "migrations/010_add_subscription_balance.sql",
       "../LICENSE"
     ],
     "category": "DeveloperTool",

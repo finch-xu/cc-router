@@ -10,9 +10,10 @@ use uuid::Uuid;
 use std::str::FromStr;
 
 use crate::error::{AppError, AppResult};
-use crate::provider::model::{AuthHeaderFormat, AuthType, ModelDiscovery};
+use crate::provider::model::{AuthHeaderFormat, AuthType, BalanceDiscovery, ModelDiscovery};
 use crate::subscription::model::{
-    ModelCache, ModelInfo, ModelSlots, OAuthMetadata, SubscriptionRow, SubscriptionRuntime,
+    BalanceSnapshot, ModelCache, ModelInfo, ModelSlots, OAuthMetadata, SubscriptionRow,
+    SubscriptionRuntime,
 };
 
 /// 启动时从 DB 加载全部订阅，并初始化运行时状态。
@@ -29,7 +30,7 @@ pub async fn load_runtime(
                 enabled, is_auth_failed, last_error_message,
                 created_at, updated_at,
                 base_url, messages_path, auth_header_name, auth_header_format,
-                required_headers, forward_headers, model_discovery,
+                required_headers, forward_headers, model_discovery, balance_discovery,
                 provider_display_name, provider_icon, is_user_defined,
                 auth_type, oauth_metadata
          FROM subscriptions",
@@ -54,8 +55,10 @@ pub async fn load_runtime(
             }
         };
         let cache = load_model_cache(pool, &sub.id, &sub.endpoint_id).await?;
+        let balance = load_balance_cache(pool, &sub.id).await?;
         let mut rt = SubscriptionRuntime::from_row(sub);
         rt.model_cache = cache;
+        rt.balance_cache = balance;
         out.insert(rt.row.id, Arc::new(RwLock::new(rt)));
     }
     Ok(out)
@@ -76,6 +79,19 @@ fn row_to_row(row: &sqlx::sqlite::SqliteRow) -> AppResult<SubscriptionRow> {
     // ModelDiscovery 各字段均带 #[serde(default)], 空对象 "{}" 自然得到 default。
     let model_discovery: ModelDiscovery = serde_json::from_str(&discovery_json)
         .map_err(|e| AppError::internal(format!("model_discovery JSON 解析失败: {e}")))?;
+    // balance_discovery 列在 migration 010 加, 老订阅或不支持的 provider 是 NULL.
+    // 非空时含必填字段 (url/parser), 反序列化失败视为该订阅暂时不支持余额查询 (warn skip).
+    let balance_discovery_json: Option<String> = row.try_get("balance_discovery")?;
+    let balance_discovery: Option<BalanceDiscovery> = match balance_discovery_json {
+        None => None,
+        Some(json) => match serde_json::from_str::<BalanceDiscovery>(&json) {
+            Ok(bd) => Some(bd),
+            Err(e) => {
+                warn!(error = %e, "balance_discovery JSON 解析失败, 余额查询将不可用");
+                None
+            }
+        },
+    };
     let auth_type_str: String = row.try_get("auth_type")?;
     let auth_type = AuthType::from_str(&auth_type_str).map_err(AppError::internal)?;
     let oauth_metadata_json: String = row.try_get("oauth_metadata")?;
@@ -113,6 +129,7 @@ fn row_to_row(row: &sqlx::sqlite::SqliteRow) -> AppResult<SubscriptionRow> {
         required_headers,
         forward_headers,
         model_discovery,
+        balance_discovery,
         provider_display_name: row.try_get("provider_display_name")?,
         provider_icon: row.try_get("provider_icon")?,
         is_user_defined: {
@@ -126,22 +143,27 @@ fn ms_to_dt(ms: i64) -> DateTime<Utc> {
     Utc.timestamp_millis_opt(ms).single().unwrap_or_else(Utc::now)
 }
 
+fn opt_to_json<T: serde::Serialize>(v: Option<&T>) -> serde_json::Result<Option<String>> {
+    v.map(serde_json::to_string).transpose()
+}
+
 pub async fn insert(pool: &SqlitePool, sub: &SubscriptionRow) -> AppResult<()> {
     let required_json = serde_json::to_string(&sub.required_headers)?;
     let forward_json = serde_json::to_string(&sub.forward_headers)?;
     let discovery_json = serde_json::to_string(&sub.model_discovery)?;
+    let balance_discovery_json = opt_to_json(sub.balance_discovery.as_ref())?;
     let oauth_json = serde_json::to_string(&sub.oauth_metadata)?;
     sqlx::query(
         "INSERT INTO subscriptions (id, provider_id, endpoint_id, display_name, api_key,
             model_slot_opus, model_slot_sonnet, model_slot_haiku,
             enabled, is_auth_failed, last_error_message, created_at, updated_at,
             base_url, messages_path, auth_header_name, auth_header_format,
-            required_headers, forward_headers, model_discovery,
+            required_headers, forward_headers, model_discovery, balance_discovery,
             provider_display_name, provider_icon, is_user_defined,
             auth_type, oauth_metadata)
          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
                  ?, ?, ?, ?,
-                 ?, ?, ?,
+                 ?, ?, ?, ?,
                  ?, ?, ?,
                  ?, ?)",
     )
@@ -165,6 +187,7 @@ pub async fn insert(pool: &SqlitePool, sub: &SubscriptionRow) -> AppResult<()> {
     .bind(required_json)
     .bind(forward_json)
     .bind(discovery_json)
+    .bind(balance_discovery_json)
     .bind(&sub.provider_display_name)
     .bind(&sub.provider_icon)
     .bind(sub.is_user_defined as i64)
@@ -210,13 +233,14 @@ pub async fn update_row(pool: &SqlitePool, sub: &SubscriptionRow) -> AppResult<(
     let required_json = serde_json::to_string(&sub.required_headers)?;
     let forward_json = serde_json::to_string(&sub.forward_headers)?;
     let discovery_json = serde_json::to_string(&sub.model_discovery)?;
+    let balance_discovery_json = opt_to_json(sub.balance_discovery.as_ref())?;
     sqlx::query(
         "UPDATE subscriptions SET
             endpoint_id = ?, display_name = ?,
             model_slot_opus = ?, model_slot_sonnet = ?, model_slot_haiku = ?,
             enabled = ?, is_auth_failed = ?, last_error_message = ?, updated_at = ?,
             base_url = ?, messages_path = ?, auth_header_name = ?, auth_header_format = ?,
-            required_headers = ?, forward_headers = ?, model_discovery = ?,
+            required_headers = ?, forward_headers = ?, model_discovery = ?, balance_discovery = ?,
             provider_display_name = ?, provider_icon = ?, is_user_defined = ?
          WHERE id = ?",
     )
@@ -236,6 +260,7 @@ pub async fn update_row(pool: &SqlitePool, sub: &SubscriptionRow) -> AppResult<(
     .bind(required_json)
     .bind(forward_json)
     .bind(discovery_json)
+    .bind(balance_discovery_json)
     .bind(&sub.provider_display_name)
     .bind(&sub.provider_icon)
     .bind(sub.is_user_defined as i64)
@@ -281,6 +306,10 @@ pub async fn delete(pool: &SqlitePool, id: &Uuid) -> AppResult<()> {
         .execute(pool)
         .await?;
     sqlx::query("DELETE FROM model_list_cache WHERE subscription_id = ?")
+        .bind(id.to_string())
+        .execute(pool)
+        .await?;
+    sqlx::query("DELETE FROM subscription_balance_cache WHERE subscription_id = ?")
         .bind(id.to_string())
         .execute(pool)
         .await?;
@@ -332,6 +361,51 @@ pub async fn save_model_cache(
     .bind(subscription_id.to_string())
     .bind(endpoint_id)
     .bind(cache.fetched_at.timestamp_millis())
+    .bind(json)
+    .execute(pool)
+    .await?;
+    Ok(())
+}
+
+/// 读取订阅余额缓存. 反序列化失败 (例如老 schema 不兼容) 视为无缓存, warn skip,
+/// 避免单条坏数据导致整个订阅加载失败.
+pub async fn load_balance_cache(
+    pool: &SqlitePool,
+    subscription_id: &Uuid,
+) -> AppResult<Option<BalanceSnapshot>> {
+    let row = sqlx::query(
+        "SELECT payload_json FROM subscription_balance_cache WHERE subscription_id = ?",
+    )
+    .bind(subscription_id.to_string())
+    .fetch_optional(pool)
+    .await?;
+
+    let Some(row) = row else { return Ok(None) };
+    let json: String = row.try_get("payload_json")?;
+    match serde_json::from_str::<BalanceSnapshot>(&json) {
+        Ok(snapshot) => Ok(Some(snapshot)),
+        Err(e) => {
+            warn!(error = %e, subscription_id = %subscription_id, "balance_cache 反序列化失败, 视为无缓存");
+            Ok(None)
+        }
+    }
+}
+
+pub async fn save_balance_cache(
+    pool: &SqlitePool,
+    subscription_id: &Uuid,
+    snapshot: &BalanceSnapshot,
+) -> AppResult<()> {
+    let json = serde_json::to_string(snapshot)?;
+    sqlx::query(
+        "INSERT INTO subscription_balance_cache (subscription_id, fetched_at, payload_json)
+         VALUES (?, ?, ?)
+         ON CONFLICT(subscription_id) DO UPDATE SET
+           fetched_at = excluded.fetched_at,
+           payload_json = excluded.payload_json",
+    )
+    .bind(subscription_id.to_string())
+    .bind(snapshot.fetched_at.timestamp_millis())
     .bind(json)
     .execute(pool)
     .await?;

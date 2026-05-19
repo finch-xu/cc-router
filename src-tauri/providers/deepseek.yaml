@@ -47,3 +47,13 @@ model_discovery:
     - "deepseek-v4-pro"
     - "deepseek-v4-flash"
 
+# 余额查询: 本期仅 DeepSeek 接入. 响应 {is_available, balance_infos[]} 多币种数组,
+# Rust 侧 balance_discovery::parse_deepseek 翻译成统一 BalanceSnapshot.
+# 接口位于主站根目录, 与 messages (anthropic 兼容端点) 不同域, 故用完整 URL.
+balance_discovery:
+  enabled: true
+  url: "https://api.deepseek.com/user/balance"
+  method: GET
+  parser: deepseek
+  cache_ttl_minutes: 10
+

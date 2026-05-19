@@ -68,3 +68,13 @@ model_discovery:
     - "deepseek/deepseek-chat-v3.1"
     - "x-ai/grok-4"
     - "meta-llama/llama-4-maverick"
+
+# 余额查询: GET https://openrouter.ai/api/v1/credits
+# 响应 {data: {total_credits, total_usage}}, 余额 = total_credits - total_usage (USD).
+# parse_openrouter 在 balance_discovery.rs 里做减法 + 阈值分级.
+balance_discovery:
+  enabled: true
+  url: "https://openrouter.ai/api/v1/credits"
+  method: GET
+  parser: openrouter
+  cache_ttl_minutes: 10

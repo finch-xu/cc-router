@@ -164,6 +164,43 @@ export interface ModelDiscoveryDto {
   example_models: string[];
 }
 
+export type BalanceSeverity = "normal" | "low" | "critical";
+
+/** 单条余额展示项. 一个订阅可能有多条 (DeepSeek 多币种, 或未来 token 配额 + 充值余额). */
+export interface BalanceEntry {
+  /** 主标签, 例 "余额 (CNY)" */
+  label: string;
+  /** 数值字符串, 保留原始精度 ("39.28") */
+  value_text: string;
+  /** 单位, 例 "CNY" / "USD" / "tokens" */
+  unit: string;
+  /** 副标题, 例 "充值 ¥39.28, 赠送 ¥0.00" */
+  hint?: string;
+  severity: BalanceSeverity;
+}
+
+/** 余额快照. 异构 provider 响应在 Rust 翻译后的 UI-ready 结构. */
+export interface BalanceSnapshot {
+  /** 账户是否可用 (DeepSeek 提供; 不提供则 undefined). false 时 UI 警示账户欠费/封号. */
+  is_available?: boolean;
+  entries: BalanceEntry[];
+  /** ISO 8601 字符串 (来自 chrono::DateTime<Utc>). 通常用 BalanceCacheDto.fetched_at 取 ms. */
+  fetched_at: string;
+}
+
+/** 余额缓存 DTO (持久化在 subscription_balance_cache 表). */
+export interface BalanceCacheDto {
+  /** Unix ms */
+  fetched_at: number;
+  snapshot: BalanceSnapshot;
+}
+
+/** refresh_subscription_balance command 返回. */
+export type RefreshBalanceResult =
+  | { kind: "success"; snapshot: BalanceSnapshot; fetched_at: number }
+  | { kind: "failed"; reason: string }
+  | { kind: "unsupported" };
+
 export interface SubscriptionDto {
   id: string;
   /** 来源标记: 内置 yaml id 或 "__custom__" */
@@ -194,6 +231,10 @@ export interface SubscriptionDto {
   required_headers: Record<string, string>;
   forward_headers: string[];
   model_discovery: ModelDiscoveryDto;
+  /** true 表示该 provider 声明且启用了余额查询接口. */
+  balance_supported: boolean;
+  /** 余额缓存 (上次拉到的值). undefined 表示从未查过或不支持. */
+  balance_cache?: BalanceCacheDto;
   provider_display_name: string;
   provider_icon: string;
   is_user_defined: boolean;

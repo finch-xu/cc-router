@@ -27,6 +27,7 @@ import { Alert, AlertDescription } from "@/components/ui/alert";
 import { StatusBadge } from "@/components/StatusBadge";
 import { ProviderIcon } from "@/components/ProviderIcon";
 import { ModelSlotPicker } from "@/components/ModelSlotPicker";
+import { SubscriptionBalanceCard } from "@/components/SubscriptionBalanceCard";
 import { api } from "@/api/tauri";
 import { validateConnection } from "@/lib/connectionValidation";
 import { useProviders } from "@/hooks/useProviders";
@@ -348,6 +349,14 @@ export function SubscriptionEditPage() {
           </div>
         </CardContent>
       </Card>
+
+      <SubscriptionBalanceCard
+        subscription={sub}
+        onChanged={() => {
+          queryClient.invalidateQueries({ queryKey: ["subscription", id] });
+          queryClient.invalidateQueries({ queryKey: ["subscriptions"] });
+        }}
+      />
 
       <Card>
         <CardHeader>

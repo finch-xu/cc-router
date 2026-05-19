@@ -4,7 +4,9 @@ use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
-use crate::provider::model::{join_base_path, AuthHeaderFormat, AuthType, ModelDiscovery};
+use crate::provider::model::{
+    join_base_path, AuthHeaderFormat, AuthType, BalanceDiscovery, ModelDiscovery,
+};
 use crate::virtual_model::model::SubscriptionSlot;
 
 /// OAuth 凭据元数据, 持久化为 `subscriptions.oauth_metadata` 列 (JSON 字符串).
@@ -178,6 +180,8 @@ pub struct SubscriptionRow {
     pub required_headers: BTreeMap<String, String>,
     pub forward_headers: Vec<String>,
     pub model_discovery: ModelDiscovery,
+    /// 余额查询配置 snapshot. provider yaml 不声明则为 None, UI 不显示余额卡片.
+    pub balance_discovery: Option<BalanceDiscovery>,
 
     pub provider_display_name: String,
     pub provider_icon: String,
@@ -191,6 +195,20 @@ impl SubscriptionRow {
 
     pub fn auth_header_value(&self) -> String {
         self.auth_header_format.apply(&self.api_key)
+    }
+
+    /// Apply the auth header + all `required_headers` from the provider snapshot
+    /// onto a `RequestBuilder`. Shared by every "introspection" endpoint
+    /// (model_discovery, balance_discovery, future usage probes).
+    pub fn apply_auth_and_required_headers(
+        &self,
+        req: reqwest::RequestBuilder,
+    ) -> reqwest::RequestBuilder {
+        let mut req = req.header(&self.auth_header_name, self.auth_header_value());
+        for (k, v) in self.required_headers.iter() {
+            req = req.header(k, v);
+        }
+        req
     }
 }
 
@@ -224,12 +242,55 @@ pub struct SubscriptionRuntime {
     pub transient_error_level: u32,
     pub last_error_message: Option<String>,
     pub model_cache: Option<ModelCache>,
+    /// 余额查询缓存 (运行时). None = 从未查过或 provider 不支持. 持久化在
+    /// `subscription_balance_cache` 表, 启动时通过 store::load_balance_cache 装填.
+    pub balance_cache: Option<BalanceSnapshot>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ModelCache {
     pub fetched_at: DateTime<Utc>,
     pub models: Vec<ModelInfo>,
+}
+
+/// 余额查询的统一 UI-ready 结构. 异构 provider 响应在 parser 里翻译成此结构,
+/// 前端只渲染不处理 provider 差异.
+///
+/// 设计:
+/// - `entries: Vec`: 支持多币种 (DeepSeek 国际版可能 USD + CNY 两条) 或多额度类型
+///   (Token 配额 + 充值余额)
+/// - 字段全部是 UI-ready 字符串, parser 已计算好 severity 阈值 (provider 专属知识)
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct BalanceSnapshot {
+    /// 账户是否可用 (DeepSeek `is_available`). None 表示该 provider 不报告此字段.
+    /// false 时账户可能欠费/封号, UI 提示警告.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub is_available: Option<bool>,
+    pub entries: Vec<BalanceEntry>,
+    pub fetched_at: DateTime<Utc>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct BalanceEntry {
+    /// 主标签, 中文优先 (例: "余额", "Token 配额").
+    pub label: String,
+    /// 数值, 字符串保留原始精度 (避免 f64 精度坑, 例 DeepSeek 返回 "39.28").
+    pub value_text: String,
+    /// 单位 (例: "CNY", "USD", "tokens", "credits"). UI 与 value_text 拼显示.
+    pub unit: String,
+    /// 副标题, 例 "充值 ¥39.28, 赠送 ¥0.00".
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub hint: Option<String>,
+    /// UI 着色级别, parser 根据 provider 专属阈值计算 (DeepSeek CNY <10 = Low 等).
+    pub severity: BalanceSeverity,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum BalanceSeverity {
+    Normal,
+    Low,
+    Critical,
 }
 
 impl SubscriptionRuntime {
@@ -251,6 +312,7 @@ impl SubscriptionRuntime {
             transient_error_level: 0,
             last_error_message,
             model_cache: None,
+            balance_cache: None,
         }
     }
 
@@ -296,6 +358,14 @@ pub struct SubscriptionDto {
     pub required_headers: BTreeMap<String, String>,
     pub forward_headers: Vec<String>,
     pub model_discovery: ModelDiscovery,
+    /// Whether this subscription's provider exposes a balance/quota endpoint.
+    /// Derived from `balance_discovery.is_some_and(|b| b.enabled)` server-side;
+    /// the full `BalanceDiscovery` (url/parser/etc) stays out of the wire format.
+    #[serde(default)]
+    pub balance_supported: bool,
+    /// Last cached balance payload. `None` when never fetched or unsupported.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub balance_cache: Option<BalanceCacheDto>,
     pub provider_display_name: String,
     pub provider_icon: String,
     pub is_user_defined: bool,
@@ -328,6 +398,14 @@ pub struct ModelCacheDto {
     pub models: Vec<ModelInfo>,
 }
 
+/// 余额缓存的前端 DTO. fetched_at 用 Unix ms (与 ModelCacheDto 风格一致).
+/// snapshot 内层也带 fetched_at 但外层这个用 i64 方便前端 Date.parse.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct BalanceCacheDto {
+    pub fetched_at: i64,
+    pub snapshot: BalanceSnapshot,
+}
+
 #[cfg(test)]
 impl SubscriptionRow {
     /// 测试用 fixture: 生成一个连接信息全空但字段齐全的 row, 调用方可后续覆盖关心的字段。
@@ -357,6 +435,7 @@ impl SubscriptionRow {
             required_headers: BTreeMap::new(),
             forward_headers: Vec::new(),
             model_discovery: ModelDiscovery::default(),
+            balance_discovery: None,
             provider_display_name: String::new(),
             provider_icon: String::new(),
             is_user_defined: false,
@@ -390,6 +469,15 @@ impl SubscriptionDto {
             required_headers: rt.row.required_headers.clone(),
             forward_headers: rt.row.forward_headers.clone(),
             model_discovery: rt.row.model_discovery.clone(),
+            balance_supported: rt
+                .row
+                .balance_discovery
+                .as_ref()
+                .is_some_and(|b| b.enabled),
+            balance_cache: rt.balance_cache.as_ref().map(|s| BalanceCacheDto {
+                fetched_at: s.fetched_at.timestamp_millis(),
+                snapshot: s.clone(),
+            }),
             provider_display_name: rt.row.provider_display_name.clone(),
             provider_icon: rt.row.provider_icon.clone(),
             is_user_defined: rt.row.is_user_defined,

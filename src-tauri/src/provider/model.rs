@@ -164,6 +164,59 @@ fn default_cache_ttl() -> u32 {
     24
 }
 
+/// 订阅余额/套餐余量查询配置 (provider yaml `balance_discovery` 字段).
+///
+/// 设计原则与 `ModelDiscovery` 一致: yaml 声明 endpoint + parser 名字,
+/// 真正的响应解析硬编码在 `subscription::balance_discovery::parse_<parser>` 里,
+/// 各 provider 响应字段差异太大 (DeepSeek 多币种数组 / Minimax token 配额),
+/// 声明式表达不够灵活, 所以保留 dispatch in Rust 的范式.
+///
+/// Provider 不声明此字段时, `Provider.balance_discovery = None`, UI 不显示余额卡片.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct BalanceDiscovery {
+    #[serde(default = "default_true")]
+    pub enabled: bool,
+    /// Full URL; balance endpoint often lives on a different domain than messages
+    /// (DeepSeek: balance at `api.deepseek.com/user/balance`, messages at
+    /// `.com/anthropic/v1/messages`), so we keep the full URL instead of base+path.
+    pub url: String,
+    #[serde(default)]
+    pub method: BalanceHttpMethod,
+    pub parser: BalanceParser,
+    #[serde(default = "default_balance_cache_ttl")]
+    pub cache_ttl_minutes: u32,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Default)]
+#[serde(rename_all = "UPPERCASE")]
+pub enum BalanceHttpMethod {
+    #[default]
+    Get,
+    Post,
+}
+
+impl BalanceHttpMethod {
+    pub fn as_reqwest(self) -> reqwest::Method {
+        match self {
+            Self::Get => reqwest::Method::GET,
+            Self::Post => reqwest::Method::POST,
+        }
+    }
+}
+
+/// Known parsers. yaml load fails (via serde) if a provider declares an unknown
+/// parser — moves the error from runtime "refresh balance" click to app startup.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum BalanceParser {
+    Deepseek,
+    Openrouter,
+}
+
+fn default_balance_cache_ttl() -> u32 {
+    10
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Provider {
     pub id: String,
@@ -196,6 +249,11 @@ pub struct Provider {
 
     #[serde(default)]
     pub model_discovery: ModelDiscovery,
+
+    /// 余额/套餐余量查询配置 (可选). 大多数 provider 不声明此字段, UI 不显示余额卡片.
+    /// 声明的 provider 由 `subscription::balance_discovery` 模块按 `parser` 字段分发解析.
+    #[serde(default)]
+    pub balance_discovery: Option<BalanceDiscovery>,
 
     /// OpenAI Responses 翻译路径专用 (auth_type=OpenaiResponsesApiKey / ChatgptOauth):
     /// 是否在响应翻译时把 reasoning 内容暴露成 Anthropic thinking content_block。

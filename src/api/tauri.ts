@@ -22,6 +22,7 @@ import type {
   ProxyStatus,
   ReceiptDto,
   ReceiptRange,
+  RefreshBalanceResult,
   RefreshModelListResult,
   RequestLogFilters,
   Settings,
@@ -59,6 +60,8 @@ export const api = {
     invoke<TestConnectionResult>("test_connection", { id }),
   refreshModelList: (id: string) =>
     invoke<RefreshModelListResult>("refresh_model_list", { id }),
+  refreshSubscriptionBalance: (id: string) =>
+    invoke<RefreshBalanceResult>("refresh_subscription_balance", { id }),
 
   // ChatGPT OAuth (Phase 1, OpenAI Codex provider)
   startChatGptDeviceFlow: () =>

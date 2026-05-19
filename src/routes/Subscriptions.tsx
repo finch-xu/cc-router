@@ -3,6 +3,7 @@ import { Plus, Key } from "lucide-react";
 import { StatusBadge } from "@/components/StatusBadge";
 import { ProviderLogo } from "@/components/ProviderLogo";
 import { EmptyState } from "@/components/EmptyState";
+import { BalanceBadge } from "@/components/SubscriptionBalanceCard";
 import { useSubscriptions } from "@/hooks/useSubscriptions";
 import { useT } from "@/i18n";
 import { fmtTimeShort } from "@/lib/format";
@@ -80,6 +81,7 @@ export function SubscriptionsPage() {
                             🔧 {t("subscriptions.custom")}
                           </span>
                         )}
+                        <BalanceBadge subscription={sub} />
                       </div>
                     </td>
                     <td>{sub.display_name}</td>

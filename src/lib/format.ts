@@ -45,3 +45,14 @@ export function fmtBytes(n: number): string {
   if (n < 1024 * 1024) return `${(n / 1024).toFixed(1)} KB`;
   return `${(n / 1024 / 1024).toFixed(2)} MB`;
 }
+
+/** "刚刚 / N 分钟前 / N 小时前 / N 天前" with i18n. `t` resolves keys under `common.relativeTime.*`. */
+export function fmtRelativeTime(ms: number, t: (k: string) => string): string {
+  const diff = Date.now() - ms;
+  if (diff < 60_000) return t("common.relativeTime.justNow");
+  if (diff < 3_600_000)
+    return `${Math.floor(diff / 60_000)}${t("common.relativeTime.minutesAgo")}`;
+  if (diff < 86_400_000)
+    return `${Math.floor(diff / 3_600_000)}${t("common.relativeTime.hoursAgo")}`;
+  return `${Math.floor(diff / 86_400_000)}${t("common.relativeTime.daysAgo")}`;
+}

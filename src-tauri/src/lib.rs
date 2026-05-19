@@ -81,6 +81,7 @@ pub fn run() {
             commands::subscriptions::set_subscription_enabled,
             commands::subscriptions::test_connection,
             commands::subscriptions::refresh_model_list,
+            commands::subscriptions::refresh_subscription_balance,
             commands::virtual_models::list_virtual_models,
             commands::virtual_models::update_virtual_model,
             commands::requests::list_requests,
