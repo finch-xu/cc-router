@@ -478,6 +478,21 @@
   "subscriptionEdit.deleteDialog.noRef": "サブスクリプションを削除すると保存済みの API Key も同時に消去されます。",
   "subscriptionEdit.deleteDialog.confirm": "削除を確認",
 
+  "common.relativeTime.justNow": "たった今",
+  "common.relativeTime.minutesAgo": "分前",
+  "common.relativeTime.hoursAgo": "時間前",
+  "common.relativeTime.daysAgo": "日前",
+
+  "subscriptionBalance.title": "残高",
+  "subscriptionBalance.refresh": "残高を更新",
+  "subscriptionBalance.refreshing": "取得中…",
+  "subscriptionBalance.lastUpdatedPrefix": "最終更新 ",
+  "subscriptionBalance.neverFetched": "未取得 — 右のボタンをクリックして最新の残高を取得",
+  "subscriptionBalance.errPrefix": "残高取得失敗: ",
+  "subscriptionBalance.accountUnavailable": "アカウントが現在利用できません (残高不足または制限中)",
+  "subscriptionBalance.severityLow": "残高が少なめ",
+  "subscriptionBalance.severityCritical": "残高不足",
+
   "modelSlot.label": "モデルスロット",
   "modelSlot.modeAuto": "自動",
   "modelSlot.modeManual": "手動",

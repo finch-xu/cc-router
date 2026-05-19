@@ -478,6 +478,21 @@
   "subscriptionEdit.deleteDialog.noRef": "Deleting a subscription also removes the stored API key.",
   "subscriptionEdit.deleteDialog.confirm": "Confirm delete",
 
+  "common.relativeTime.justNow": "Just now",
+  "common.relativeTime.minutesAgo": " minutes ago",
+  "common.relativeTime.hoursAgo": " hours ago",
+  "common.relativeTime.daysAgo": " days ago",
+
+  "subscriptionBalance.title": "Balance",
+  "subscriptionBalance.refresh": "Refresh balance",
+  "subscriptionBalance.refreshing": "Loading…",
+  "subscriptionBalance.lastUpdatedPrefix": "Last updated ",
+  "subscriptionBalance.neverFetched": "Not fetched yet — click the button to load the latest balance",
+  "subscriptionBalance.errPrefix": "Balance query failed: ",
+  "subscriptionBalance.accountUnavailable": "Account is currently unavailable (out of credit or restricted)",
+  "subscriptionBalance.severityLow": "Balance is low",
+  "subscriptionBalance.severityCritical": "Balance is critical",
+
   "modelSlot.label": "Model slots",
   "modelSlot.modeAuto": "Auto",
   "modelSlot.modeManual": "Manual",
