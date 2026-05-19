@@ -24,6 +24,9 @@ interface Props {
   /** 选中的 provider id 集合; 空集合 = 全选 */
   selectedProviderIds: Set<string>;
   onSelectedProvidersChange: (s: Set<string>) => void;
+  /** 勾选后从小票里剔除已删除订阅(subscription_display_name 为 nullish 的 sub_item)的用量 */
+  excludeDeleted: boolean;
+  onExcludeDeletedChange: (v: boolean) => void;
   isFetching: boolean;
   onRefresh: () => void;
   onExport: (kind: "png" | "pdf" | "html") => void;
@@ -40,6 +43,8 @@ export function ReceiptControls({
   onSelectedSubscriptionsChange,
   selectedProviderIds,
   onSelectedProvidersChange,
+  excludeDeleted,
+  onExcludeDeletedChange,
   isFetching,
   onRefresh,
   onExport,
@@ -198,6 +203,12 @@ export function ReceiptControls({
           options={providerOptions}
           selected={selectedProviderIds}
           onChange={onSelectedProvidersChange}
+        />
+        <CheckboxRow
+          checked={excludeDeleted}
+          label={t("receipts.controls.filter.excludeDeleted")}
+          desc={t("receipts.controls.filter.excludeDeletedDesc")}
+          onChange={onExcludeDeletedChange}
         />
       </Section>
     </div>

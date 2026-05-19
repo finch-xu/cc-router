@@ -1,6 +1,7 @@
 import {
   Github,
   ExternalLink,
+  Globe,
   RefreshCw,
   Download,
   RotateCw,
@@ -18,7 +19,8 @@ import { openReleasePage } from "@/lib/updater";
 import { fmtBytes } from "@/lib/format";
 
 const REPO_URL = "https://github.com/finch-xu/cc-router";
-const DOCS_URL = "https://github.com/finch-xu/cc-router#readme";
+const DOCS_URL = "https://ccrouter.app/docs/";
+const SITE_URL = "https://ccrouter.app";
 
 export function AboutPage() {
   const { t } = useT();
@@ -53,6 +55,13 @@ export function AboutPage() {
             onClick={() => openShell(DOCS_URL).catch(() => {})}
           >
             <ExternalLink size={12} /> {t("about.docs")}
+          </button>
+          <button
+            className="btn"
+            type="button"
+            onClick={() => openShell(SITE_URL).catch(() => {})}
+          >
+            <Globe size={13} /> {t("about.site")}
           </button>
         </div>
         <div className="about-meta">

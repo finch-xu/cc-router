@@ -20,7 +20,8 @@ import type {
 import { version as VERSION } from "../../../package.json";
 import logoUrl from "@/assets/logo.png";
 
-const REPO_URL = "https://github.com/finch-xu/cc-router";
+const SITE_URL = "https://ccrouter.app";
+const SITE_LABEL = "ccrouter.app";
 const REPO_LABEL = "github.com/finch-xu/cc-router";
 
 export type ReceiptColorMode = "mono" | "color";
@@ -261,7 +262,7 @@ export const ReceiptSlip = forwardRef<HTMLDivElement, Props>(function ReceiptSli
         {t("receipts.slip.thanks")}
       </div>
 
-      {/* QR — 扫码跳仓库 */}
+      {/* QR — 扫码进官网 */}
       <div style={{ display: "flex", justifyContent: "center", marginTop: 10 }}>
         <div
           style={{
@@ -272,7 +273,7 @@ export const ReceiptSlip = forwardRef<HTMLDivElement, Props>(function ReceiptSli
           }}
         >
           <QRCodeSVG
-            value={REPO_URL}
+            value={SITE_URL}
             size={68}
             bgColor={palette.bg}
             fgColor={palette.accent}
@@ -288,6 +289,18 @@ export const ReceiptSlip = forwardRef<HTMLDivElement, Props>(function ReceiptSli
           fontSize: 9,
           color: palette.muted,
           marginTop: 8,
+          letterSpacing: 0.5,
+        }}
+      >
+        {SITE_LABEL}
+      </div>
+      <div
+        style={{
+          textAlign: "center",
+          fontSize: 8,
+          color: palette.muted,
+          marginTop: 2,
+          opacity: 0.6,
           letterSpacing: 0.5,
         }}
       >
