@@ -26,7 +26,7 @@
   <a href="https://ccrouter.app" target="_blank" rel="noopener">🌐 公式サイト ccrouter.app</a>
 </p>
 
-複数の LLM ベンダーのサブスクリプションを契約しているのに、Claude Code は 1 社しか指せない——cc-router は DeepSeek・Qwen（通義千問）・Kimi・MiMo・MiniMax・GLM・Claude の Token Plan / Coding Plan / 従量課金 API を 1 つの仮想プランに統合します。opus / sonnet / haiku の 3 スロットに自由に割り当て、順次（sequential）またはラウンドロビン（round_robin）でディスパッチ。レート制限や障害時には自動でフォールバックするので、契約したクォータを余すことなく使い切れます。
+バラバラの `Token Plan`、`Coding Plan`、LLM API クォータを 1 つの仮想 Plan にまとめ、Claude Code、Claude Desktop App、OpenClaw、OpenCode などのツールにワンクリックで接続——コスト削減！トークン節約！完全ローカル動作！
 
 > ⚠️ 注意: 本ツールは「すでに保有しているサブスクリプションプラン間の自動切り替え」のみを目的としています。リクエストボディはほぼそのまま透過するだけで、リバースエンジニアリングや脱獄、回避行為は一切含みません。各プランの利用規約は利用者ご自身で遵守してください。Claude Code などのコーディングツール用途専用であり、それ以外の用途には使用しないでください。
 >
