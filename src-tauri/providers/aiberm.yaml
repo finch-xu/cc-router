@@ -14,6 +14,7 @@
 id: aiberm
 display_name: "Aiberm"
 icon: aiberm
+category: aggregator
 description: "Aiberm API 聚合服务,按 token 计费,模型清单按 API Key 所属 token group 动态返回"
 homepage: "https://aiberm.com"
 docs_url: "https://aiberm.com/docs/en/claude-code/"

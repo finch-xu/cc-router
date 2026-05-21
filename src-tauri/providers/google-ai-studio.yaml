@@ -1,6 +1,7 @@
 id: google_ai_studio
 display_name: "Google AI Studio (Gemini)"
 icon: google
+category: first_party
 description: "Google AI Studio Gemini API, 通过协议翻译适配 Anthropic Messages 接口"
 homepage: "https://aistudio.google.com"
 docs_url: "https://ai.google.dev/gemini-api/docs"

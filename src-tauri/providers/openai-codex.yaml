@@ -1,6 +1,7 @@
 id: openai_codex
 display_name: "OpenAI Codex (ChatGPT 订阅)"
 icon: openai
+category: second_party
 description: "复用本机 ChatGPT Plus/Pro 的 Codex 订阅额度。需在 cc-router UI 内独立完成 OAuth 登录。"
 homepage: "https://openai.com/chatgpt/pricing"
 docs_url: "https://platform.openai.com/docs/api-reference/responses"

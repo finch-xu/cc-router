@@ -18,6 +18,7 @@
 id: tencent
 display_name: "腾讯云大模型"
 icon: tencent
+category: first_party
 description: "腾讯云大模型服务平台,Token Plan 订阅 + TokenHub 按量付费,聚合 Hy3/HunyuanX/DeepSeek/GLM/Kimi/MiniMax"
 homepage: "https://cloud.tencent.com/product/lkeap"
 docs_url: "https://cloud.tencent.com/document/product/1823/130070"

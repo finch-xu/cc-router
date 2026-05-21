@@ -4,6 +4,7 @@
 id: moonshot
 display_name: "Moonshot Kimi"
 icon: moonshot
+category: first_party
 description: "Moonshot AI 官方 Anthropic 兼容端点"
 homepage: "https://www.moonshot.cn"
 docs_url: "https://platform.moonshot.cn/docs"

@@ -17,6 +17,7 @@
 id: fireworks
 display_name: "Fireworks AI"
 icon: fireworks
+category: aggregator
 description: "Fireworks AI 推理平台，覆盖 DeepSeek / Qwen / Llama / Kimi 等开源模型"
 homepage: "https://fireworks.ai"
 docs_url: "https://docs.fireworks.ai/api-reference/anthropic-messages"

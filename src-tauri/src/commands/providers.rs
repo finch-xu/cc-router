@@ -2,7 +2,7 @@ use serde::Serialize;
 use tauri::State;
 
 use crate::error::AppResult;
-use crate::provider::model::{Auth, Compatibility, ModelDiscovery, ProviderEndpoint};
+use crate::provider::model::{Auth, Compatibility, ModelDiscovery, ProviderCategory, ProviderEndpoint};
 use crate::state::AppState;
 
 #[derive(Debug, Serialize)]
@@ -16,6 +16,7 @@ pub struct ProviderInfo {
     pub icon: Option<String>,
     pub compatibility: Compatibility,
     pub compatibility_notes: Option<String>,
+    pub category: ProviderCategory,
     pub endpoints: Vec<ProviderEndpoint>,
     pub default_endpoint: Option<String>,
     pub auth: Auth,
@@ -37,6 +38,7 @@ pub async fn list_providers(state: State<'_, AppState>) -> AppResult<Vec<Provide
             icon: p.icon.clone(),
             compatibility: p.compatibility.clone(),
             compatibility_notes: p.compatibility_notes.clone(),
+            category: p.category,
             endpoints: p.endpoints.clone(),
             default_endpoint: p.default_endpoint.clone(),
             auth: p.auth.clone(),

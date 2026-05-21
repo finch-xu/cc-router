@@ -16,6 +16,7 @@
 id: openrouter
 display_name: "OpenRouter"
 icon: openrouter
+category: aggregator
 description: "OpenRouter 模型路由聚合平台，覆盖 Anthropic / OpenAI / Google / Meta / DeepSeek 等数百款模型"
 homepage: "https://openrouter.ai"
 docs_url: "https://openrouter.ai/docs/api/api-reference/anthropic-messages/create-messages"

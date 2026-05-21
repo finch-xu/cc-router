@@ -1,6 +1,7 @@
 id: openai
 display_name: "OpenAI 官方 API"
 icon: openai
+category: first_party
 description: "openai.com 官方 /v1/responses, 使用 platform.openai.com 控制台生成的 sk-... API Key. cc-router 做 Anthropic Messages ↔ OpenAI Responses 协议翻译, 客户端 stream 决定上游 stream, reasoning 双向支持 (Claude Code 看到 thinking 块 + 多轮 reasoning 上下文延续)."
 homepage: "https://openai.com"
 docs_url: "https://platform.openai.com/docs/api-reference/responses"

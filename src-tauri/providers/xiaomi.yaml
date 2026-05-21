@@ -1,6 +1,7 @@
 id: xiaomi
 display_name: "小米 MiMo"
 icon: xiaomi
+category: first_party
 description: "小米 MiMo 开放平台 · 按量付费 + Token Plan 订阅（Anthropic 兼容）"
 homepage: "https://platform.xiaomimimo.com"
 docs_url: "https://platform.xiaomimimo.com/docs/api/chat/anthropic-api"

@@ -6,6 +6,7 @@
 id: ucloud
 display_name: "优云智算 UCloud"
 icon: ""
+category: aggregator
 description: "优云智算 Modelverse · Anthropic 兼容端点 (Coding Plan 订阅 + 按量付费 API)"
 homepage: "https://www.compshare.cn"
 docs_url: "https://www.compshare.cn/docs/modelverse/models/quick-start"

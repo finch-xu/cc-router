@@ -1,6 +1,7 @@
 id: ollama
 display_name: "Ollama"
 icon: ollama
+category: aggregator
 description: "Ollama 本地推理服务（Anthropic 兼容端点）"
 homepage: "https://ollama.com"
 docs_url: "https://docs.ollama.com/api/anthropic-compatibility"

@@ -1,6 +1,7 @@
 id: baidu
 display_name: "百度千帆"
 icon: baidu
+category: first_party
 description: "百度智能云千帆 Coding Plan 订阅, Anthropic 兼容端点"
 homepage: "https://qianfan.cloud.baidu.com"
 docs_url: "https://cloud.baidu.com/doc/qianfan/s/0mn2mnemj"

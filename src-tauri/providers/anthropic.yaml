@@ -1,6 +1,7 @@
 id: anthropic
 display_name: "Anthropic"
 icon: anthropic
+category: first_party
 description: "Anthropic 官方 API（按量付费）"
 homepage: "https://www.anthropic.com"
 docs_url: "https://docs.anthropic.com"

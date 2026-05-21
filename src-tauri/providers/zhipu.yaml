@@ -1,6 +1,7 @@
 id: zhipu
 display_name: "智谱 GLM"
 icon: zhipu
+category: first_party
 description: "智谱 AI 官方 Anthropic 兼容端点"
 homepage: "https://open.bigmodel.cn"
 docs_url: "https://open.bigmodel.cn/dev/api"

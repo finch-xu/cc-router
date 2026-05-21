@@ -1,6 +1,7 @@
 id: kiro
 display_name: "Kiro (Amazon AWS)"
 icon: ""
+category: second_party
 description: "复用 Kiro IDE / kiro-cli 的免费 Claude 额度 (走 AWS CodeWhisperer 后端)。需在 cc-router UI 内独立完成凭据导入或 AWS Builder ID 登录。"
 homepage: "https://kiro.dev/"
 docs_url: "https://kiro.dev/docs"

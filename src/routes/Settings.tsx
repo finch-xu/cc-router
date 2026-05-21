@@ -258,15 +258,6 @@ export function SettingsPage() {
               aria-label={t("settings.proxy.autostart.label")}
             />
           </div>
-        </div>
-      </div>
-
-      {/* 更新设置 */}
-      <div className="card section">
-        <div className="card-head">
-          <div className="card-title">{t("settings.section.update")}</div>
-        </div>
-        <div className="card-body">
           <div className="setting-row">
             <div className="label-col">
               {t("settings.update.source.label")}
@@ -282,6 +273,115 @@ export function SettingsPage() {
               </option>
               <option value="china">{t("settings.update.source.china")}</option>
             </select>
+          </div>
+        </div>
+      </div>
+
+      {/* 鉴权与跨域 */}
+      <div className="card section">
+        <div className="card-head">
+          <div className="card-title">{t("settings.section.auth")}</div>
+        </div>
+        <div className="card-body">
+          <div className="setting-row">
+            <div className="label-col">
+              {t("settings.auth.token.label")}
+              <div className="desc">{t("settings.auth.token.desc")}</div>
+            </div>
+            <div>
+              <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 10 }}>
+                <Toggle
+                  checked={authEnabled}
+                  onChange={(v) => void changeAuthEnabled(v)}
+                  aria-label={t("settings.auth.token.label")}
+                />
+                <span style={{ fontSize: 12, color: "var(--ink-2)" }}>
+                  {authEnabled
+                    ? t("settings.auth.token.enabled")
+                    : t("settings.auth.token.disabled")}
+                </span>
+              </div>
+              {authEnabled && settings.data && (
+                <div style={{ display: "flex", gap: 8 }}>
+                  <input
+                    className="input mono"
+                    value={settings.data.auth_token}
+                    readOnly
+                    style={{ fontSize: 11.5, color: "var(--ink-2)" }}
+                  />
+                  <button
+                    className="btn"
+                    onClick={regenerateToken}
+                    disabled={generateTokenMut.isPending}
+                    type="button"
+                  >
+                    {generateTokenMut.isPending ? (
+                      <Spinner />
+                    ) : tokenJustRegenerated ? (
+                      <Check size={12} style={{ color: "var(--ok)" }} />
+                    ) : (
+                      <RefreshCw size={12} />
+                    )}
+                    {tokenJustRegenerated
+                      ? t("settings.auth.token.regenerated")
+                      : t("settings.auth.token.regenerate")}
+                  </button>
+                </div>
+              )}
+            </div>
+          </div>
+
+          <div className="setting-row">
+            <div className="label-col">
+              {t("settings.auth.cors.label")}
+              <div className="desc">
+                {corsEnabled
+                  ? t("settings.auth.cors.descEnabled")
+                  : t("settings.auth.cors.descDisabled")}
+              </div>
+            </div>
+            <div>
+              <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 10 }}>
+                <Toggle
+                  checked={corsEnabled}
+                  onChange={(v) => void changeCorsEnabled(v)}
+                  aria-label={t("settings.auth.cors.label")}
+                />
+                <span style={{ fontSize: 12, color: "var(--ink-2)" }}>
+                  {corsEnabled
+                    ? t("settings.auth.cors.statusEnabled")
+                    : t("settings.auth.cors.statusDisabled")}
+                </span>
+              </div>
+              {corsEnabled && (
+                <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+                  <input
+                    className="input mono"
+                    value={corsAllowOrigin}
+                    onChange={(e) => setCorsAllowOrigin(e.target.value)}
+                    onBlur={() => {
+                      if (
+                        settings.data &&
+                        corsAllowOrigin !== settings.data.cors_allow_origin
+                      ) {
+                        void changeCorsOrigin(corsAllowOrigin);
+                      }
+                    }}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter") (e.target as HTMLInputElement).blur();
+                    }}
+                    placeholder="*"
+                    style={{ maxWidth: 280 }}
+                  />
+                  <span
+                    className="mono"
+                    style={{ fontSize: 11.5, color: "var(--ink-4)" }}
+                  >
+                    Access-Control-Allow-Origin
+                  </span>
+                </div>
+              )}
+            </div>
           </div>
         </div>
       </div>
@@ -466,115 +566,6 @@ export function SettingsPage() {
 
       {/* HTTPS 证书 (cc-router 自签 CA) — 仅 proxy_mode 包含 https 时显示 */}
       {httpsEnabled && <HttpsCertSection />}
-
-      {/* 鉴权与跨域 */}
-      <div className="card section">
-        <div className="card-head">
-          <div className="card-title">{t("settings.section.auth")}</div>
-        </div>
-        <div className="card-body">
-          <div className="setting-row">
-            <div className="label-col">
-              {t("settings.auth.token.label")}
-              <div className="desc">{t("settings.auth.token.desc")}</div>
-            </div>
-            <div>
-              <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 10 }}>
-                <Toggle
-                  checked={authEnabled}
-                  onChange={(v) => void changeAuthEnabled(v)}
-                  aria-label={t("settings.auth.token.label")}
-                />
-                <span style={{ fontSize: 12, color: "var(--ink-2)" }}>
-                  {authEnabled
-                    ? t("settings.auth.token.enabled")
-                    : t("settings.auth.token.disabled")}
-                </span>
-              </div>
-              {authEnabled && settings.data && (
-                <div style={{ display: "flex", gap: 8 }}>
-                  <input
-                    className="input mono"
-                    value={settings.data.auth_token}
-                    readOnly
-                    style={{ fontSize: 11.5, color: "var(--ink-2)" }}
-                  />
-                  <button
-                    className="btn"
-                    onClick={regenerateToken}
-                    disabled={generateTokenMut.isPending}
-                    type="button"
-                  >
-                    {generateTokenMut.isPending ? (
-                      <Spinner />
-                    ) : tokenJustRegenerated ? (
-                      <Check size={12} style={{ color: "var(--ok)" }} />
-                    ) : (
-                      <RefreshCw size={12} />
-                    )}
-                    {tokenJustRegenerated
-                      ? t("settings.auth.token.regenerated")
-                      : t("settings.auth.token.regenerate")}
-                  </button>
-                </div>
-              )}
-            </div>
-          </div>
-
-          <div className="setting-row">
-            <div className="label-col">
-              {t("settings.auth.cors.label")}
-              <div className="desc">
-                {corsEnabled
-                  ? t("settings.auth.cors.descEnabled")
-                  : t("settings.auth.cors.descDisabled")}
-              </div>
-            </div>
-            <div>
-              <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 10 }}>
-                <Toggle
-                  checked={corsEnabled}
-                  onChange={(v) => void changeCorsEnabled(v)}
-                  aria-label={t("settings.auth.cors.label")}
-                />
-                <span style={{ fontSize: 12, color: "var(--ink-2)" }}>
-                  {corsEnabled
-                    ? t("settings.auth.cors.statusEnabled")
-                    : t("settings.auth.cors.statusDisabled")}
-                </span>
-              </div>
-              {corsEnabled && (
-                <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
-                  <input
-                    className="input mono"
-                    value={corsAllowOrigin}
-                    onChange={(e) => setCorsAllowOrigin(e.target.value)}
-                    onBlur={() => {
-                      if (
-                        settings.data &&
-                        corsAllowOrigin !== settings.data.cors_allow_origin
-                      ) {
-                        void changeCorsOrigin(corsAllowOrigin);
-                      }
-                    }}
-                    onKeyDown={(e) => {
-                      if (e.key === "Enter") (e.target as HTMLInputElement).blur();
-                    }}
-                    placeholder="*"
-                    style={{ maxWidth: 280 }}
-                  />
-                  <span
-                    className="mono"
-                    style={{ fontSize: 11.5, color: "var(--ink-4)" }}
-                  >
-                    Access-Control-Allow-Origin
-                  </span>
-                </div>
-              )}
-            </div>
-          </div>
-        </div>
-      </div>
 
       {/* 数据存储 */}
       <div className="card section">

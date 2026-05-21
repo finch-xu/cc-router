@@ -2,6 +2,7 @@
 // 约定：Rust 侧 serde 使用 serde(rename_all = "snake_case") 序列化。
 
 export type Compatibility = "verified" | "partial" | "untested";
+export type ProviderCategory = "first_party" | "second_party" | "aggregator";
 export type AuthType =
   | "api_key"
   | "chatgpt_oauth"
@@ -130,6 +131,7 @@ export interface ProviderInfo {
   icon?: string;
   compatibility: Compatibility;
   compatibility_notes?: string;
+  category?: ProviderCategory;
   endpoints: ProviderEndpointInfo[];
   default_endpoint?: string;
   auth: {

@@ -1,6 +1,7 @@
 id: minimax
 display_name: "MiniMax"
 icon: minimax
+category: first_party
 description: "MiniMax M2 系列模型"
 homepage: "https://platform.minimax.io"
 docs_url: "https://platform.minimax.io/docs"

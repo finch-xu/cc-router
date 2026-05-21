@@ -4,6 +4,7 @@
 id: stepfun
 display_name: "阶跃星辰 Stepfun"
 icon: stepfun
+category: first_party
 description: "阶跃星辰官方 Anthropic 兼容端点（Step Plan 订阅 + 按量付费 API）"
 homepage: "https://www.stepfun.com"
 docs_url: "https://platform.stepfun.com/docs/zh/api-reference/chat/messages-create"

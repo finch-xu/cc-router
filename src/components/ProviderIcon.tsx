@@ -1,6 +1,7 @@
 import type { ComponentType } from "react";
 import { Bot, Boxes } from "lucide-react";
 import Anthropic from "@lobehub/icons/es/Anthropic";
+import Claude from "@lobehub/icons/es/Claude";
 import DeepSeek from "@lobehub/icons/es/DeepSeek";
 import Moonshot from "@lobehub/icons/es/Moonshot";
 import Zhipu from "@lobehub/icons/es/Zhipu";
@@ -28,6 +29,7 @@ type BrandIcon = IconVariant & {
 
 const BRAND_MAP: Record<string, BrandIcon> = {
   anthropic: Anthropic as unknown as BrandIcon,
+  claude: Claude as unknown as BrandIcon,
   deepseek: DeepSeek as unknown as BrandIcon,
   moonshot: Moonshot as unknown as BrandIcon,
   zhipu: Zhipu as unknown as BrandIcon,

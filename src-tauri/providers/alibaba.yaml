@@ -1,6 +1,7 @@
 id: alibaba
 display_name: "阿里云百炼"
 icon: alibaba
+category: first_party
 description: "阿里云 Model Studio（DashScope）· Anthropic 兼容端点"
 homepage: "https://bailian.console.aliyun.com"
 docs_url: "https://help.aliyun.com/zh/model-studio/anthropic-api-messages"

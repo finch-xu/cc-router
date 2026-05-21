@@ -1,6 +1,7 @@
 id: modelscope
 display_name: "魔搭 ModelScope"
 icon: modelscope
+category: aggregator
 description: "阿里达摩院魔搭社区 API-Inference, Anthropic 兼容端点 (OpenAI/Anthropic 双协议, 仅用 Anthropic 路径)"
 homepage: "https://modelscope.cn"
 docs_url: "https://modelscope.cn/docs/model-service/API-Inference/intro"

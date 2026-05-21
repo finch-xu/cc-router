@@ -1,6 +1,7 @@
 id: deepseek
 display_name: "DeepSeek"
 icon: deepseek
+category: first_party
 description: "DeepSeek 官方 Anthropic 兼容端点"
 homepage: "https://www.deepseek.com"
 docs_url: "https://api-docs.deepseek.com/zh-cn/guides/anthropic_api"

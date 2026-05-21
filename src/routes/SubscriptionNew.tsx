@@ -1,6 +1,6 @@
 import { useState, useMemo, useRef } from "react";
 import { Link, useNavigate, useSearchParams } from "react-router-dom";
-import { ArrowLeft, ArrowRight, ExternalLink, Check, Plus, Boxes } from "lucide-react";
+import { ArrowLeft, ArrowRight, ExternalLink, Check } from "lucide-react";
 import { invoke } from "@tauri-apps/api/core";
 import { open as openShell } from "@tauri-apps/plugin-shell";
 import { useQueryClient } from "@tanstack/react-query";
@@ -13,7 +13,9 @@ import { KiroAuthDialog, type KiroAuthSuccessPayload } from "@/components/KiroAu
 import {
   Select,
   SelectContent,
+  SelectGroup,
   SelectItem,
+  SelectLabel,
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
@@ -151,7 +153,7 @@ export function SubscriptionNewPage() {
     if (isCustom) {
       return (
         <span style={{ display: "inline-flex", alignItems: "center", gap: 8, minWidth: 0 }}>
-          <Boxes size={20} />
+          <ProviderLogo iconId="claude" size={20} />
           {t("subscriptionNew.customProvider")}
         </span>
       );
@@ -211,6 +213,8 @@ export function SubscriptionNewPage() {
         setCustomBaseUrl(preset.baseUrl);
         setCustomMessagesPath(preset.messagesPath);
       } else {
+        // Anthropic 兼容自定义路径: 默认填官方 base_url, 避免之前切过 OpenAI/Gemini 预设的残留值
+        setCustomBaseUrl("https://api.anthropic.com");
         setCustomMessagesPath("/v1/messages");
       }
       return;
@@ -606,33 +610,78 @@ export function SubscriptionNewPage() {
                       {renderProviderTriggerLabel()}
                     </SelectTrigger>
                     <SelectContent>
-                      {providers.data?.map((p) => (
-                        <SelectItem key={p.id} value={p.id}>
-                          <span style={{ display: "inline-flex", alignItems: "center", gap: 8 }}>
-                            <ProviderLogo iconId={p.icon} size={20} />
-                            {p.display_name}
-                          </span>
-                        </SelectItem>
-                      ))}
-                      <div style={{ height: 1, background: "var(--line)", margin: "4px 0" }} />
-                      <SelectItem value={CUSTOM_VALUE}>
-                        <span style={{ display: "inline-flex", alignItems: "center", gap: 8 }}>
-                          <Plus size={20} />
-                          {t("subscriptionNew.customProvider")}
-                        </span>
-                      </SelectItem>
-                      <SelectItem value={CUSTOM_GEMINI_VALUE}>
-                        <span style={{ display: "inline-flex", alignItems: "center", gap: 8 }}>
-                          <ProviderLogo iconId="google" size={20} />
-                          {t("subscriptionNew.customGeminiProvider")}
-                        </span>
-                      </SelectItem>
-                      <SelectItem value={CUSTOM_OPENAI_VALUE}>
-                        <span style={{ display: "inline-flex", alignItems: "center", gap: 8 }}>
-                          <ProviderLogo iconId="openai" size={20} />
-                          {t("subscriptionNew.customOpenaiProvider")}
-                        </span>
-                      </SelectItem>
+                      {(() => {
+                        const firstParty =
+                          providers.data?.filter(
+                            (p) => (p.category ?? "first_party") === "first_party",
+                          ) ?? [];
+                        const secondParty =
+                          providers.data?.filter((p) => p.category === "second_party") ?? [];
+                        const aggregators =
+                          providers.data?.filter((p) => p.category === "aggregator") ?? [];
+                        return (
+                          <>
+                            <SelectGroup>
+                              <SelectLabel>{t("subscriptionNew.group.firstParty")}</SelectLabel>
+                              {firstParty.map((p) => (
+                                <SelectItem key={p.id} value={p.id}>
+                                  <span style={{ display: "inline-flex", alignItems: "center", gap: 8 }}>
+                                    <ProviderLogo iconId={p.icon} size={20} />
+                                    {p.display_name}
+                                  </span>
+                                </SelectItem>
+                              ))}
+                            </SelectGroup>
+                            {secondParty.length > 0 && (
+                              <SelectGroup>
+                                <SelectLabel>{t("subscriptionNew.group.secondParty")}</SelectLabel>
+                                {secondParty.map((p) => (
+                                  <SelectItem key={p.id} value={p.id}>
+                                    <span style={{ display: "inline-flex", alignItems: "center", gap: 8 }}>
+                                      <ProviderLogo iconId={p.icon} size={20} />
+                                      {p.display_name}
+                                    </span>
+                                  </SelectItem>
+                                ))}
+                              </SelectGroup>
+                            )}
+                            {aggregators.length > 0 && (
+                              <SelectGroup>
+                                <SelectLabel>{t("subscriptionNew.group.aggregator")}</SelectLabel>
+                                {aggregators.map((p) => (
+                                  <SelectItem key={p.id} value={p.id}>
+                                    <span style={{ display: "inline-flex", alignItems: "center", gap: 8 }}>
+                                      <ProviderLogo iconId={p.icon} size={20} />
+                                      {p.display_name}
+                                    </span>
+                                  </SelectItem>
+                                ))}
+                              </SelectGroup>
+                            )}
+                            <SelectGroup>
+                              <SelectLabel>{t("subscriptionNew.group.custom")}</SelectLabel>
+                              <SelectItem value={CUSTOM_VALUE}>
+                                <span style={{ display: "inline-flex", alignItems: "center", gap: 8 }}>
+                                  <ProviderLogo iconId="claude" size={20} />
+                                  {t("subscriptionNew.customProvider")}
+                                </span>
+                              </SelectItem>
+                              <SelectItem value={CUSTOM_GEMINI_VALUE}>
+                                <span style={{ display: "inline-flex", alignItems: "center", gap: 8 }}>
+                                  <ProviderLogo iconId="google" size={20} />
+                                  {t("subscriptionNew.customGeminiProvider")}
+                                </span>
+                              </SelectItem>
+                              <SelectItem value={CUSTOM_OPENAI_VALUE}>
+                                <span style={{ display: "inline-flex", alignItems: "center", gap: 8 }}>
+                                  <ProviderLogo iconId="openai" size={20} />
+                                  {t("subscriptionNew.customOpenaiProvider")}
+                                </span>
+                              </SelectItem>
+                            </SelectGroup>
+                          </>
+                        );
+                      })()}
                     </SelectContent>
                   </Select>
                   {provider && !isCustom && (

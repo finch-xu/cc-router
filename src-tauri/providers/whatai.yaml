@@ -14,6 +14,7 @@
 id: whatai
 display_name: "神马中转 API"
 icon: whatai
+category: aggregator
 description: "神马中转 API 聚合服务,按 token 计费,同时支持 OpenAI 与 Anthropic 双协议(本 provider 仅用 Anthropic 路径)"
 homepage: "https://api.whatai.cc"
 docs_url: "https://gpt-best.apifox.cn/api-287780941"

@@ -10,6 +10,22 @@ pub enum Compatibility {
     Untested,
 }
 
+/// 用于 UI 在 provider 下拉里分组展示. 不影响调度/翻译, 纯展示层语义。
+/// 默认 `FirstParty` 让现有 yaml 无需改动也能继续加载 (serde default).
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum ProviderCategory {
+    /// 大模型原厂 (Anthropic / OpenAI / DeepSeek / 智谱 / Moonshot 等).
+    #[default]
+    FirstParty,
+    /// AI 应用订阅 (Kiro / Cursor / Copilot 等). 不卖按 token 计费的模型 API,
+    /// 而是基于他家(或自家)大模型做上层产品对终端用户卖订阅, 通常走 OAuth 接入.
+    SecondParty,
+    /// API 分发 / 聚合站 (OpenRouter / whatai / aiberm 等). 不直接提供模型推理,
+    /// 而是把多家原厂模型聚合成统一 API.
+    Aggregator,
+}
+
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub enum AuthType {
@@ -235,6 +251,10 @@ pub struct Provider {
     pub compatibility: Compatibility,
     #[serde(default)]
     pub compatibility_notes: Option<String>,
+
+    /// UI 分组展示用 (大模型原厂 / API 分发站). 默认 first_party.
+    #[serde(default)]
+    pub category: ProviderCategory,
 
     pub endpoints: Vec<ProviderEndpoint>,
     #[serde(default)]
