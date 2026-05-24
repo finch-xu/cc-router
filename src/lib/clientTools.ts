@@ -30,6 +30,7 @@ export const CLIENT_TOOLS: ClientToolMeta[] = [
   { id: "claude-code", i18nKey: "clientTool.claudeCode", icon: ClaudeCode as IconVariant },
   { id: "claude-desktop", i18nKey: "clientTool.claudeDesktop", icon: Claude as IconVariant },
   { id: "codex-cli", i18nKey: "clientTool.codexCli", icon: Codex as IconVariant },
+  { id: "codex-desktop", i18nKey: "clientTool.codexDesktop", icon: Codex as IconVariant },
   { id: "cc-router", i18nKey: "clientTool.ccRouter", icon: Box },
   { id: "zed", i18nKey: "clientTool.zed", icon: Box },
   { id: "cursor", i18nKey: "clientTool.cursor", icon: Cursor as IconVariant },

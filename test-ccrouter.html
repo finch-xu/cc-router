@@ -33,6 +33,11 @@
   .modebar { display:flex; gap:6px; margin-bottom:12px; }
   .modebar button { width:auto; padding:6px 14px; font-size:13px; background:#fff; color:var(--muted); border:1px solid var(--b); font-weight:500; }
   .modebar button.active { background:var(--accent); color:#fff; border-color:var(--accent); }
+  .apitabs { display:flex; gap:0; margin-bottom:12px; border-bottom:2px solid var(--b); }
+  .apitabs button { width:auto; padding:8px 18px; font-size:13px; background:transparent; color:var(--muted); border:none; border-bottom:2px solid transparent; margin-bottom:-2px; font-weight:600; }
+  .apitabs button.active { color:var(--accent); border-bottom-color:var(--accent); }
+  .apitabs .badge { display:inline-block; margin-left:6px; padding:1px 6px; border-radius:8px; background:var(--b); color:var(--muted); font-size:10px; font-weight:500; vertical-align:1px; }
+  .apitabs button.active .badge { background:var(--accent); color:#fff; }
   .convo { border:1px solid var(--b); border-radius:6px; padding:8px; background:#fff; max-height:340px; overflow-y:auto; margin-top:6px; }
   .convo:empty::before { content:"（暂无对话，发送消息开始）"; color:var(--muted); font-size:12px; }
   .turn { margin-bottom:8px; }
@@ -53,6 +58,12 @@
 <body>
 
 <h1>cc-router 调试台</h1>
+
+<div class="apitabs">
+  <button data-api="anthropic" class="active">Anthropic Messages <span class="badge">/v1/messages</span></button>
+  <button data-api="responses">OpenAI Responses <span class="badge">/v1/responses</span></button>
+</div>
+
 <div class="hint">本地调试用 · 直接打 <code id="hintUrl">http://127.0.0.1:23456/v1/messages</code></div>
 <div id="httpsTip" class="hint" style="display:none;color:#b45309;background:#fffbeb;border:1px solid #fde68a;border-radius:6px;padding:6px 10px;margin-top:-6px;margin-bottom:12px">
   HTTPS 模式: 需先在 cc-router「设置 → HTTPS 证书」<strong>导出 CA</strong> 并装入系统/浏览器信任库。<br>
@@ -97,14 +108,11 @@
       <div>
         <label>Model</label>
         <select id="modelPreset">
-          <option value="model-sonnet">model-sonnet</option>
-          <option value="model-opus">model-opus</option>
-          <option value="model-haiku">model-haiku</option>
-          <option value="__custom__">自定义(走 fallback 透传)</option>
+          <!-- Anthropic 模式下用 model-* 别名; 切到 Responses 模式 JS 自动替换为 gpt-* 别名 -->
         </select>
       </div>
       <div>
-        <label>max_tokens</label>
+        <label id="maxTokensLabel">max_tokens</label>
         <input id="maxTokens" type="number" value="1024">
       </div>
     </div>
@@ -116,7 +124,7 @@
 
     <label><input type="checkbox" id="stream" style="width:auto"> 流式响应 (stream: true)</label>
 
-    <label>System (可选)</label>
+    <label id="systemLabel">System (可选)</label>
     <input id="system" placeholder="You are a helpful assistant.">
 
     <div id="paneSingle">
@@ -130,18 +138,8 @@
 
     <div id="paneMulti" style="display:none">
       <div id="toolsConfigWrap" style="display:none">
-        <label>tools 定义 (JSON 数组,Anthropic 格式)</label>
-        <textarea id="toolsJson" style="min-height:120px">[
-  {
-    "name": "get_weather",
-    "description": "Get weather for a city.",
-    "input_schema": {
-      "type": "object",
-      "properties": { "city": { "type": "string" } },
-      "required": ["city"]
-    }
-  }
-]</textarea>
+        <label id="toolsJsonLabel">tools 定义 (JSON 数组, Anthropic 格式)</label>
+        <textarea id="toolsJson" style="min-height:120px"></textarea>
       </div>
 
       <label>对话历史</label>
@@ -191,18 +189,88 @@
 const $ = id => document.getElementById(id);
 const panes = { text:$('paneText'), raw:$('paneRaw'), req:$('paneReq'), msgs:$('paneMsgs') };
 
+// ============================================================
+// API 接口配置: anthropic vs responses
+// ============================================================
+const API_PROFILES = {
+  anthropic: {
+    path: '/v1/messages',
+    models: ['model-sonnet', 'model-opus', 'model-haiku'],
+    customLabel: '自定义(走 fallback 透传)',
+    customPlaceholder: 'claude-sonnet-4-5',
+    systemLabel: 'System (可选)',
+    maxTokensLabel: 'max_tokens',
+    toolsJsonLabel: 'tools 定义 (JSON 数组, Anthropic 格式)',
+    toolsJsonTemplate: `[
+  {
+    "name": "get_weather",
+    "description": "Get weather for a city.",
+    "input_schema": {
+      "type": "object",
+      "properties": { "city": { "type": "string" } },
+      "required": ["city"]
+    }
+  }
+]`,
+  },
+  responses: {
+    path: '/v1/responses',
+    // gpt-5.5 → model-opus, gpt-5.4 → model-sonnet, gpt-5.4-mini → model-haiku
+    models: ['gpt-5.4', 'gpt-5.5', 'gpt-5.4-mini'],
+    customLabel: '自定义 model 字符串',
+    customPlaceholder: 'openai/gpt-5.4',
+    systemLabel: 'Instructions (可选)',
+    maxTokensLabel: 'max_output_tokens',
+    toolsJsonLabel: 'tools 定义 (JSON 数组, OpenAI Responses 格式)',
+    toolsJsonTemplate: `[
+  {
+    "type": "function",
+    "name": "get_weather",
+    "description": "Get weather for a city.",
+    "parameters": {
+      "type": "object",
+      "properties": { "city": { "type": "string" } },
+      "required": ["city"]
+    }
+  }
+]`,
+  },
+};
+
+// ============================================================
+// 全局状态
+// 对话历史按 apiMode 隔离 (两种协议字段差异大, 不能共用), 但内部都用 Anthropic 风格 content blocks 存储,
+// 让渲染层零改动 — 协议翻译只在「发请求/收响应」边界发生。
+// ============================================================
 const state = {
+  apiMode: 'anthropic',
   mode: 'single',
-  chatMessages: [],
-  toolMessages: [],
-  pendingToolUses: [],
+  history: {
+    anthropic: { chat: [], tool: [], pendingToolUses: [] },
+    responses: { chat: [], tool: [], pendingToolUses: [] },
+  },
   abortCtrl: null,
 };
+
+function profile() { return API_PROFILES[state.apiMode]; }
+function curHistory() { return state.history[state.apiMode]; }
+function currentMessages() {
+  const h = curHistory();
+  return state.mode === 'tools' ? h.tool : h.chat;
+}
+function setCurrentMessages(arr) {
+  const h = curHistory();
+  if (state.mode === 'tools') h.tool = arr;
+  else h.chat = arr;
+}
 
 function clearChildren(el) {
   while (el.firstChild) el.removeChild(el.firstChild);
 }
 
+// ============================================================
+// Tab / 模式 切换
+// ============================================================
 document.querySelectorAll('.tabs button').forEach(btn => {
   btn.addEventListener('click', () => {
     document.querySelectorAll('.tabs button').forEach(b => b.classList.remove('active'));
@@ -217,6 +285,27 @@ document.querySelectorAll('.modebar button').forEach(btn => {
   btn.addEventListener('click', () => switchMode(btn.dataset.mode));
 });
 
+document.querySelectorAll('.apitabs button').forEach(btn => {
+  btn.addEventListener('click', () => switchApi(btn.dataset.api));
+});
+
+function switchApi(api) {
+  if (state.apiMode === api) return;
+  state.apiMode = api;
+  document.querySelectorAll('.apitabs button').forEach(b => {
+    b.classList.toggle('active', b.dataset.api === api);
+  });
+  applyProfile();
+  renderConvo();
+  renderMessagesJson();
+  renderToolFill();
+  panes.text.textContent = '';
+  panes.raw.textContent = '';
+  panes.req.textContent = '';
+  setStatus(`已切换到 ${api === 'anthropic' ? 'Anthropic Messages' : 'OpenAI Responses'} 接口`);
+  updateHintUrl();
+}
+
 function switchMode(mode) {
   state.mode = mode;
   document.querySelectorAll('.modebar button').forEach(b => {
@@ -230,18 +319,43 @@ function switchMode(mode) {
   renderToolFill();
 }
 
+// 把当前 apiMode 的配置应用到 UI: model 下拉、各字段 label、tools 模板。
+function applyProfile() {
+  const p = profile();
+  const sel = $('modelPreset');
+  const prev = sel.value;
+  clearChildren(sel);
+  for (const m of p.models) {
+    const opt = document.createElement('option');
+    opt.value = m;
+    opt.textContent = m;
+    sel.appendChild(opt);
+  }
+  const customOpt = document.createElement('option');
+  customOpt.value = '__custom__';
+  customOpt.textContent = p.customLabel;
+  sel.appendChild(customOpt);
+  // 保留用户的「自定义」选择, 否则跳第一个
+  if (prev === '__custom__') sel.value = '__custom__';
+  $('customModel').placeholder = p.customPlaceholder;
+  $('customModelWrap').style.display = sel.value === '__custom__' ? '' : 'none';
+
+  $('systemLabel').textContent = p.systemLabel;
+  $('maxTokensLabel').textContent = p.maxTokensLabel;
+  $('toolsJsonLabel').textContent = p.toolsJsonLabel;
+  // 只在 textarea 为空或仍是另一个 profile 模板时重置, 不覆盖用户改过的内容
+  const ta = $('toolsJson');
+  const otherTpl = state.apiMode === 'anthropic'
+    ? API_PROFILES.responses.toolsJsonTemplate
+    : API_PROFILES.anthropic.toolsJsonTemplate;
+  if (!ta.value.trim() || ta.value.trim() === otherTpl.trim()) {
+    ta.value = p.toolsJsonTemplate;
+  }
+}
+
 $('modelPreset').addEventListener('change', () => {
   $('customModelWrap').style.display = $('modelPreset').value === '__custom__' ? '' : 'none';
 });
-
-function currentMessages() {
-  return state.mode === 'tools' ? state.toolMessages : state.chatMessages;
-}
-
-function setCurrentMessages(arr) {
-  if (state.mode === 'tools') state.toolMessages = arr;
-  else state.chatMessages = arr;
-}
 
 function renderConvo() {
   const el = $('convo');
@@ -304,11 +418,52 @@ function renderMessagesJson() {
   panes.msgs.textContent = JSON.stringify(currentMessages(), null, 2);
 }
 
-function commonRequestFields() {
-  const modelPreset = $('modelPreset').value;
-  const model = modelPreset === '__custom__' ? $('customModel').value.trim() : modelPreset;
+// ============================================================
+// 请求构造: 按 apiMode 分叉 Anthropic / OpenAI Responses 协议
+// ============================================================
+function currentModel() {
+  const preset = $('modelPreset').value;
+  return preset === '__custom__' ? $('customModel').value.trim() : preset;
+}
+
+function buildSingleRequest() {
+  if (state.apiMode === 'anthropic') {
+    return buildAnthropicSingle();
+  }
+  return buildResponsesSingle();
+}
+
+function buildMultiRequest(extraUserText) {
+  // 内部统一用 Anthropic 风格 messages 存储; 这里在出口翻译.
+  const baseMsgs = [...currentMessages()];
+  if (extraUserText !== undefined && extraUserText !== null) {
+    baseMsgs.push({ role: 'user', content: extraUserText });
+  }
+  if (state.apiMode === 'anthropic') {
+    return buildAnthropicMulti(baseMsgs);
+  }
+  return buildResponsesMulti(baseMsgs);
+}
+
+// ---- Anthropic Messages 协议 ----
+function buildAnthropicSingle() {
+  const body = anthropicCommon();
+  body.messages = [{ role: 'user', content: $('userMsg').value }];
+  return body;
+}
+
+function buildAnthropicMulti(msgs) {
+  const body = anthropicCommon();
+  body.messages = msgs;
+  if (state.mode === 'tools') {
+    body.tools = parseToolsJson();
+  }
+  return body;
+}
+
+function anthropicCommon() {
   const body = {
-    model,
+    model: currentModel(),
     max_tokens: parseInt($('maxTokens').value, 10) || 1024,
   };
   const sys = $('system').value.trim();
@@ -317,27 +472,87 @@ function commonRequestFields() {
   return body;
 }
 
-function buildSingleRequest() {
-  const body = commonRequestFields();
-  body.messages = [{ role: 'user', content: $('userMsg').value }];
+// ---- OpenAI Responses 协议 ----
+function buildResponsesSingle() {
+  const body = responsesCommon();
+  body.input = [{
+    type: 'message',
+    role: 'user',
+    content: [{ type: 'input_text', text: $('userMsg').value }],
+  }];
   return body;
 }
 
-function buildMultiRequest(extraUserText) {
-  const body = commonRequestFields();
-  const msgs = [...currentMessages()];
-  if (extraUserText !== undefined && extraUserText !== null) {
-    msgs.push({ role: 'user', content: extraUserText });
-  }
-  body.messages = msgs;
+function buildResponsesMulti(msgs) {
+  const body = responsesCommon();
+  body.input = anthropicMessagesToOpenAiInput(msgs);
   if (state.mode === 'tools') {
-    try {
-      body.tools = JSON.parse($('toolsJson').value);
-    } catch (e) {
-      throw new Error('tools JSON 解析失败: ' + e.message);
-    }
+    body.tools = parseToolsJson();
   }
   return body;
+}
+
+function responsesCommon() {
+  const body = {
+    model: currentModel(),
+    max_output_tokens: parseInt($('maxTokens').value, 10) || 1024,
+  };
+  const instr = $('system').value.trim();
+  if (instr) body.instructions = instr;
+  if ($('stream').checked) body.stream = true;
+  return body;
+}
+
+// 把内部 Anthropic messages 翻译成 OpenAI Responses input items 数组.
+// 镜像 cc-router 里 responses_inbound.rs::input_items_to_messages 的反向逻辑。
+function anthropicMessagesToOpenAiInput(messages) {
+  const input = [];
+  for (const m of messages) {
+    const role = m.role;
+    const blocks = Array.isArray(m.content)
+      ? m.content
+      : [{ type: 'text', text: m.content }];
+    const textParts = [];
+    const flushText = () => {
+      if (textParts.length === 0) return;
+      input.push({ type: 'message', role, content: textParts.slice() });
+      textParts.length = 0;
+    };
+    for (const b of blocks) {
+      if (b.type === 'text') {
+        textParts.push({
+          type: role === 'assistant' ? 'output_text' : 'input_text',
+          text: b.text || '',
+        });
+      } else if (b.type === 'tool_use') {
+        flushText();
+        input.push({
+          type: 'function_call',
+          call_id: b.id,
+          name: b.name,
+          arguments: JSON.stringify(b.input ?? {}),
+        });
+      } else if (b.type === 'tool_result') {
+        flushText();
+        input.push({
+          type: 'function_call_output',
+          call_id: b.tool_use_id,
+          output: typeof b.content === 'string' ? b.content : JSON.stringify(b.content),
+        });
+      }
+      // thinking 块本地 demo 不回灌 (signature 是 cc-router 内部编码, 我们不解码), 直接 drop
+    }
+    flushText();
+  }
+  return input;
+}
+
+function parseToolsJson() {
+  try {
+    return JSON.parse($('toolsJson').value);
+  } catch (e) {
+    throw new Error('tools JSON 解析失败: ' + e.message);
+  }
 }
 
 function setStatus(text, kind) {
@@ -359,13 +574,18 @@ async function sendRequest(body) {
   $('usageInfo').textContent = '';
   $('timeInfo').textContent = '';
 
-  const url = `${$('scheme').value}://${$('host').value}:${$('port').value}/v1/messages`;
-  const headers = {
-    'Content-Type': 'application/json',
-    'anthropic-version': '2023-06-01',
-  };
+  const url = `${$('scheme').value}://${$('host').value}:${$('port').value}${profile().path}`;
+  const headers = { 'Content-Type': 'application/json' };
+  if (state.apiMode === 'anthropic') {
+    headers['anthropic-version'] = '2023-06-01';
+  }
   const key = $('apiKey').value.trim();
-  if (key) headers['x-api-key'] = key;
+  if (key) {
+    // 两个接口都走 cc-router 的同一套 auth_layer; Anthropic SDK 习惯用 x-api-key, OpenAI SDK 用 Bearer.
+    // 同时带, cc-router 中间件认任一即可。
+    headers['x-api-key'] = key;
+    headers['Authorization'] = `Bearer ${key}`;
+  }
 
   state.abortCtrl = new AbortController();
   setBusy(true);
@@ -392,13 +612,26 @@ async function sendRequest(body) {
       const text = await resp.text();
       panes.raw.textContent = text;
       const json = JSON.parse(text);
-      assistantMessage = { role: 'assistant', content: json.content || [] };
-      usage = json.usage || null;
-      const flat = (json.content || [])
-        .filter(b => b.type === 'text').map(b => b.text).join('');
-      panes.text.textContent = flat;
+      if (state.apiMode === 'anthropic') {
+        assistantMessage = { role: 'assistant', content: json.content || [] };
+        usage = json.usage || null;
+        const flat = (json.content || [])
+          .filter(b => b.type === 'text').map(b => b.text).join('');
+        panes.text.textContent = flat;
+      } else {
+        // OpenAI Responses 非流式 JSON: 顶层 {id, object:"response", output:[items], usage:{input_tokens,output_tokens,total_tokens}}
+        const blocks = openaiOutputItemsToBlocks(json.output || []);
+        assistantMessage = { role: 'assistant', content: blocks };
+        usage = json.usage
+          ? { input_tokens: json.usage.input_tokens, output_tokens: json.usage.output_tokens }
+          : null;
+        const flat = blocks.filter(b => b.type === 'text').map(b => b.text).join('');
+        panes.text.textContent = flat;
+      }
     } else {
-      const result = await consumeSSE(resp.body, panes.raw, panes.text);
+      const result = state.apiMode === 'anthropic'
+        ? await consumeAnthropicSSE(resp.body, panes.raw, panes.text)
+        : await consumeResponsesSSE(resp.body, panes.raw, panes.text);
       assistantMessage = { role: 'assistant', content: result.contentBlocks };
       usage = result.usage;
     }
@@ -419,71 +652,191 @@ async function sendRequest(body) {
   }
 }
 
-async function consumeSSE(stream, rawPane, textPane) {
+// 把 OpenAI Responses 的 output items 数组翻译成内部 Anthropic 风格 content blocks (供 UI 渲染).
+function openaiOutputItemsToBlocks(items) {
+  const blocks = [];
+  for (const it of items) {
+    if (it.type === 'message') {
+      for (const part of it.content || []) {
+        if (part.type === 'output_text' || part.type === 'input_text') {
+          blocks.push({ type: 'text', text: part.text || '' });
+        }
+      }
+    } else if (it.type === 'function_call') {
+      let input = {};
+      try { input = JSON.parse(it.arguments || '{}'); } catch {}
+      blocks.push({ type: 'tool_use', id: it.call_id, name: it.name, input });
+    } else if (it.type === 'reasoning') {
+      const sumText = (it.summary || [])
+        .map(s => s.text || '').join('');
+      blocks.push({
+        type: 'thinking',
+        thinking: sumText,
+        // signature 来自 cc-router 编码 (v=2/p=openai_responses), 浏览器侧不解码也不回灌
+        signature: '',
+      });
+    }
+  }
+  return blocks;
+}
+
+// 通用: 按 \n\n 切 SSE 帧, 解 event:/data: 行. 调 handler(name, jsonData) 处理.
+async function consumeSseStream(stream, rawPane, handler) {
   const reader = stream.getReader();
   const decoder = new TextDecoder();
   let buf = '';
-  let usage = null;
-  const blocksByIndex = new Map();
-
   while (true) {
     const { done, value } = await reader.read();
     if (done) break;
     const chunk = decoder.decode(value, { stream: true });
     rawPane.textContent += chunk;
     buf += chunk;
-
     const events = buf.split('\n\n');
     buf = events.pop() || '';
     for (const evt of events) {
-      const dataLines = evt.split('\n').filter(l => l.startsWith('data:'));
-      for (const line of dataLines) {
-        const payload = line.slice(5).trim();
-        if (!payload) continue;
-        let j;
-        try { j = JSON.parse(payload); } catch { continue; }
-
-        if (j.type === 'message_start' && j.message?.usage) usage = j.message.usage;
-        if (j.type === 'message_delta' && j.usage) usage = { ...usage, ...j.usage };
-
-        if (j.type === 'content_block_start') {
-          const cb = j.content_block || {};
-          const init = { type: cb.type };
-          if (cb.type === 'text') init.text = cb.text || '';
-          else if (cb.type === 'thinking') { init.thinking = ''; init.signature = ''; }
-          else if (cb.type === 'tool_use') { init.id = cb.id; init.name = cb.name; init._inputJson = ''; init.input = {}; }
-          else if (cb.type === 'redacted_thinking') { init.data = cb.data || ''; }
-          blocksByIndex.set(j.index, init);
-        }
-
-        if (j.type === 'content_block_delta') {
-          const block = blocksByIndex.get(j.index);
-          if (!block) continue;
-          const d = j.delta || {};
-          if (d.type === 'text_delta') {
-            block.text = (block.text || '') + (d.text || '');
-            textPane.textContent += d.text || '';
-          } else if (d.type === 'thinking_delta') {
-            block.thinking = (block.thinking || '') + (d.thinking || '');
-          } else if (d.type === 'signature_delta') {
-            block.signature = (block.signature || '') + (d.signature || '');
-          } else if (d.type === 'input_json_delta') {
-            block._inputJson = (block._inputJson || '') + (d.partial_json || '');
-          }
-        }
-
-        if (j.type === 'content_block_stop') {
-          const block = blocksByIndex.get(j.index);
-          if (block && block.type === 'tool_use' && block._inputJson) {
-            try { block.input = JSON.parse(block._inputJson); } catch {}
-            delete block._inputJson;
-          }
-        }
+      let eventName = null;
+      let dataStr = null;
+      for (const line of evt.split('\n')) {
+        if (line.startsWith('event:')) eventName = line.slice(6).trim();
+        else if (line.startsWith('data:')) dataStr = line.slice(5).trim();
       }
+      if (!dataStr) continue;
+      let j;
+      try { j = JSON.parse(dataStr); } catch { continue; }
+      handler(eventName, j);
     }
   }
+}
+
+// ---- Anthropic SSE 解析 ----
+async function consumeAnthropicSSE(stream, rawPane, textPane) {
+  let usage = null;
+  const blocksByIndex = new Map();
+  await consumeSseStream(stream, rawPane, (_name, j) => {
+    if (j.type === 'message_start' && j.message?.usage) usage = j.message.usage;
+    if (j.type === 'message_delta' && j.usage) usage = { ...usage, ...j.usage };
+
+    if (j.type === 'content_block_start') {
+      const cb = j.content_block || {};
+      const init = { type: cb.type };
+      if (cb.type === 'text') init.text = cb.text || '';
+      else if (cb.type === 'thinking') { init.thinking = ''; init.signature = ''; }
+      else if (cb.type === 'tool_use') { init.id = cb.id; init.name = cb.name; init._inputJson = ''; init.input = {}; }
+      else if (cb.type === 'redacted_thinking') { init.data = cb.data || ''; }
+      blocksByIndex.set(j.index, init);
+    }
+
+    if (j.type === 'content_block_delta') {
+      const block = blocksByIndex.get(j.index);
+      if (!block) return;
+      const d = j.delta || {};
+      if (d.type === 'text_delta') {
+        block.text = (block.text || '') + (d.text || '');
+        textPane.textContent += d.text || '';
+      } else if (d.type === 'thinking_delta') {
+        block.thinking = (block.thinking || '') + (d.thinking || '');
+      } else if (d.type === 'signature_delta') {
+        block.signature = (block.signature || '') + (d.signature || '');
+      } else if (d.type === 'input_json_delta') {
+        block._inputJson = (block._inputJson || '') + (d.partial_json || '');
+      }
+    }
+
+    if (j.type === 'content_block_stop') {
+      const block = blocksByIndex.get(j.index);
+      if (block && block.type === 'tool_use' && block._inputJson) {
+        try { block.input = JSON.parse(block._inputJson); } catch {}
+        delete block._inputJson;
+      }
+    }
+  });
 
   const contentBlocks = [...blocksByIndex.entries()]
+    .sort((a, b) => a[0] - b[0])
+    .map(([, v]) => v);
+  return { contentBlocks, usage };
+}
+
+// ---- OpenAI Responses SSE 解析 ----
+// 关键事件:
+//   response.created / response.in_progress           - 初始化, 取 response.id/model
+//   response.output_item.added (item.type=message)    - 新 text block
+//   response.output_item.added (item.type=function_call) - 新 tool_use, 记录 call_id+name
+//   response.output_item.added (item.type=reasoning)  - 新 thinking block
+//   response.output_text.delta                        - 给当前 text block 追加
+//   response.function_call_arguments.delta            - 累积 arguments JSON 字符串
+//   response.reasoning_summary_text.delta             - 累积 thinking 文本
+//   response.output_item.done                         - 完成块 (tool_use 时 parse arguments)
+//   response.completed                                - 拿最终 usage
+async function consumeResponsesSSE(stream, rawPane, textPane) {
+  const blocksByOutputIndex = new Map(); // output_index -> {type, ...}
+  let usage = null;
+  await consumeSseStream(stream, rawPane, (name, j) => {
+    switch (name) {
+      case 'response.created':
+      case 'response.in_progress':
+        // 不需要落地 UI; 状态记 usage 兜底从 response.completed 拿
+        return;
+      case 'response.output_item.added': {
+        const idx = j.output_index;
+        const item = j.item || {};
+        if (item.type === 'message') {
+          blocksByOutputIndex.set(idx, { type: 'text', text: '' });
+        } else if (item.type === 'function_call') {
+          blocksByOutputIndex.set(idx, {
+            type: 'tool_use', id: item.call_id, name: item.name,
+            _inputJson: '', input: {},
+          });
+        } else if (item.type === 'reasoning') {
+          blocksByOutputIndex.set(idx, { type: 'thinking', thinking: '', signature: '' });
+        }
+        return;
+      }
+      case 'response.output_text.delta': {
+        const block = blocksByOutputIndex.get(j.output_index);
+        if (!block || block.type !== 'text') return;
+        const d = j.delta || '';
+        block.text += d;
+        textPane.textContent += d;
+        return;
+      }
+      case 'response.function_call_arguments.delta': {
+        const block = blocksByOutputIndex.get(j.output_index);
+        if (!block || block.type !== 'tool_use') return;
+        block._inputJson += j.delta || '';
+        return;
+      }
+      case 'response.reasoning_summary_text.delta': {
+        const block = blocksByOutputIndex.get(j.output_index);
+        if (!block || block.type !== 'thinking') return;
+        block.thinking += j.delta || '';
+        return;
+      }
+      case 'response.output_item.done': {
+        const block = blocksByOutputIndex.get(j.output_index);
+        if (!block) return;
+        if (block.type === 'tool_use' && block._inputJson) {
+          try { block.input = JSON.parse(block._inputJson); } catch {}
+          delete block._inputJson;
+        }
+        // reasoning done 时 item.encrypted_content / item.summary 已经在 added 之后通过 delta 累积过文本.
+        // 本地 demo 不回灌 signature, 不需要保留 encrypted_content。
+        return;
+      }
+      case 'response.completed': {
+        const u = j.response?.usage;
+        if (u) {
+          usage = {
+            input_tokens: u.input_tokens,
+            output_tokens: u.output_tokens,
+          };
+        }
+        return;
+      }
+    }
+  });
+
+  const contentBlocks = [...blocksByOutputIndex.entries()]
     .sort((a, b) => a[0] - b[0])
     .map(([, v]) => v);
   return { contentBlocks, usage };
@@ -495,7 +848,7 @@ $('sendSingleBtn').addEventListener('click', async () => {
 
 $('sendMultiBtn').addEventListener('click', async () => {
   const text = $('multiInput').value.trim();
-  if (!text && state.pendingToolUses.length === 0) {
+  if (!text && curHistory().pendingToolUses.length === 0) {
     setStatus('请输入消息', 'err');
     return;
   }
@@ -524,7 +877,7 @@ $('sendMultiBtn').addEventListener('click', async () => {
 
     if (state.mode === 'tools') {
       const tus = (assistantMessage.content || []).filter(b => b.type === 'tool_use');
-      state.pendingToolUses = tus;
+      curHistory().pendingToolUses = tus;
       renderToolFill();
     }
   } catch {}
@@ -532,7 +885,7 @@ $('sendMultiBtn').addEventListener('click', async () => {
 
 $('clearConvoBtn').addEventListener('click', () => {
   setCurrentMessages([]);
-  state.pendingToolUses = [];
+  curHistory().pendingToolUses = [];
   renderConvo();
   renderMessagesJson();
   renderToolFill();
@@ -555,16 +908,16 @@ $('copyMessagesBtn').addEventListener('click', async () => {
 function renderToolFill() {
   const area = $('toolFillArea');
   clearChildren(area);
-  if (state.pendingToolUses.length === 0) return;
+  if (curHistory().pendingToolUses.length === 0) return;
 
   const box = document.createElement('div');
   box.className = 'toolfill';
   const h = document.createElement('h4');
-  h.textContent = `模型请求调用 ${state.pendingToolUses.length} 个工具,填入返回结果继续:`;
+  h.textContent = `模型请求调用 ${curHistory().pendingToolUses.length} 个工具,填入返回结果继续:`;
   box.appendChild(h);
 
   const inputs = [];
-  for (const tu of state.pendingToolUses) {
+  for (const tu of curHistory().pendingToolUses) {
     const item = document.createElement('div');
     item.className = 'item';
 
@@ -602,7 +955,7 @@ function renderToolFill() {
     const msgs = currentMessages();
     msgs.push({ role: 'user', content: toolResults });
     setCurrentMessages(msgs);
-    state.pendingToolUses = [];
+    curHistory().pendingToolUses = [];
     renderConvo();
     renderMessagesJson();
     renderToolFill();
@@ -615,7 +968,7 @@ function renderToolFill() {
       renderConvo();
       renderMessagesJson();
       const tus = (assistantMessage.content || []).filter(b => b.type === 'tool_use');
-      state.pendingToolUses = tus;
+      curHistory().pendingToolUses = tus;
       renderToolFill();
     } catch {}
   });
@@ -625,10 +978,10 @@ function renderToolFill() {
 
 $('abortBtn').addEventListener('click', () => state.abortCtrl?.abort());
 
-// scheme / host / port 联动: 顶部 hint URL 实时跟随; 切换协议时若 port 仍为另一协议默认值,
+// scheme / host / port / apiMode 联动: 顶部 hint URL 实时跟随; 切换协议时若 port 仍为另一协议默认值,
 // 自动切到本协议默认 (23456 ↔ 23457), 用户已自定义的 port 不覆盖.
 function updateHintUrl() {
-  const url = `${$('scheme').value}://${$('host').value}:${$('port').value}/v1/messages`;
+  const url = `${$('scheme').value}://${$('host').value}:${$('port').value}${profile().path}`;
   $('hintUrl').textContent = url;
   $('httpsTip').style.display = $('scheme').value === 'https' ? '' : 'none';
 }
@@ -640,6 +993,9 @@ $('scheme').addEventListener('change', () => {
 });
 $('host').addEventListener('input', updateHintUrl);
 $('port').addEventListener('input', updateHintUrl);
+
+// 初始化: 应用 anthropic profile (默认 apiMode) 到 UI, 更新 hint URL
+applyProfile();
 updateHintUrl();
 </script>
 

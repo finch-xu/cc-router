@@ -25,12 +25,14 @@ impl VirtualModelName {
     }
 
     pub fn parse(s: &str) -> Option<Self> {
-        // Accept LiteLLM-style `anthropic/<model-name>` prefix (issue #5).
+        // LiteLLM-style 厂商前缀 (issue #5): anthropic/ 用于 Anthropic 兼容入口,
+        // openai/ 用于 OpenAI Responses 兼容入口 (POST /v1/responses, v2.3+).
         let s = s.strip_prefix("anthropic/").unwrap_or(s);
+        let s = s.strip_prefix("openai/").unwrap_or(s);
         match s {
-            "model-opus" | "claude-opus-4-7" => Some(Self::Opus),
-            "model-sonnet" | "claude-sonnet-4-6" => Some(Self::Sonnet),
-            "model-haiku" | "claude-haiku-4-5" => Some(Self::Haiku),
+            "model-opus" | "claude-opus-4-7" | "gpt-5.5" => Some(Self::Opus),
+            "model-sonnet" | "claude-sonnet-4-6" | "gpt-5.4" => Some(Self::Sonnet),
+            "model-haiku" | "claude-haiku-4-5" | "gpt-5.4-mini" => Some(Self::Haiku),
             "model-fallback" => Some(Self::Fallback),
             _ => None,
         }
@@ -122,8 +124,22 @@ mod tests {
     #[test]
     fn parse_unknown_returns_none() {
         assert_eq!(VirtualModelName::parse("anthropic/unknown"), None);
-        // Only `anthropic/` is stripped; other vendor prefixes pass through unchanged.
-        assert_eq!(VirtualModelName::parse("openai/model-opus"), None);
+        assert_eq!(VirtualModelName::parse("openai/unknown"), None);
+        assert_eq!(VirtualModelName::parse("google/model-opus"), None);
         assert_eq!(VirtualModelName::parse("model-unknown"), None);
+    }
+
+    #[test]
+    fn parse_recognizes_openai_responses_aliases() {
+        // 无前缀
+        assert_eq!(VirtualModelName::parse("gpt-5.5"), Some(VirtualModelName::Opus));
+        assert_eq!(VirtualModelName::parse("gpt-5.4"), Some(VirtualModelName::Sonnet));
+        assert_eq!(VirtualModelName::parse("gpt-5.4-mini"), Some(VirtualModelName::Haiku));
+        // openai/ 前缀
+        assert_eq!(VirtualModelName::parse("openai/gpt-5.5"), Some(VirtualModelName::Opus));
+        assert_eq!(VirtualModelName::parse("openai/gpt-5.4"), Some(VirtualModelName::Sonnet));
+        assert_eq!(VirtualModelName::parse("openai/gpt-5.4-mini"), Some(VirtualModelName::Haiku));
+        // 交叉前缀 (openai/ 把 model- 别名也带过来) - 仍然能 parse, 因为 openai/ 只是被 strip 掉
+        assert_eq!(VirtualModelName::parse("openai/model-sonnet"), Some(VirtualModelName::Sonnet));
     }
 }

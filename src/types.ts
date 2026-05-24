@@ -436,6 +436,7 @@ export type ClientToolId =
   | "claude-code"
   | "claude-desktop"
   | "codex-cli"
+  | "codex-desktop"
   | "cc-router"
   | "zed"
   | "cursor"

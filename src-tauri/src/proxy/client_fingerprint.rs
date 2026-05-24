@@ -36,6 +36,7 @@ pub const SUPPORTED_TOOLS: &[&str] = &[
     "claude-code",
     "claude-desktop",
     "codex-cli",
+    "codex-desktop",
     "cc-router",
     "zed",
     "cursor",
@@ -124,10 +125,25 @@ fn classify(
         return (Some("cc-router"), ver);
     }
 
-    // 4. UA 含 codex_cli_rs/ → Codex CLI (OpenAI 官方 Rust CLI)
+    // 4. UA 含 codex_cli_rs/ → Codex CLI (OpenAI 官方 Rust CLI 旧 UA)
     if ua_lower_ref.is_some_and(|u| u.contains("codex_cli_rs/")) {
         let ver = ua.and_then(|u| extract_version_after(u, "codex_cli_rs/"));
         return (Some("codex-cli"), ver);
+    }
+
+    // 4b. UA 含 codex-tui/ → Codex CLI 新 frontend (ghostty 引擎, 与 codex_cli_rs 同源)
+    if ua_lower_ref.is_some_and(|u| u.contains("codex-tui/")) {
+        let ver = ua.and_then(|u| extract_version_after(u, "codex-tui/"));
+        return (Some("codex-cli"), ver);
+    }
+
+    // 4c. UA 含 "codex desktop/" → Codex Desktop 桌面客户端 (独立标识便于统计区分)
+    if ua_lower_ref.is_some_and(|u| u.contains("codex desktop/")) {
+        let ver = ua.and_then(|u| {
+            extract_version_after(u, "Codex Desktop/")
+                .or_else(|| extract_version_after(u, "codex desktop/"))
+        });
+        return (Some("codex-desktop"), ver);
     }
 
     // 5. Zed 编辑器
@@ -252,6 +268,26 @@ mod tests {
     }
 
     #[test]
+    fn codex_tui_new_frontend() {
+        let info = identify(&h(&[(
+            "user-agent",
+            "codex-tui/0.133.0 (Mac OS 26.4.1; arm64) ghostty/1.3.1 (codex-tui; 0.133.0)",
+        )]));
+        assert_eq!(info.tool, Some("codex-cli"));
+        assert_eq!(info.version.as_deref(), Some("0.133.0"));
+    }
+
+    #[test]
+    fn codex_desktop_with_prerelease_version() {
+        let info = identify(&h(&[(
+            "user-agent",
+            "Codex Desktop/0.133.0-alpha.1 (Mac OS 26.4.1; arm64) unknown (Codex Desktop; 26.519.41501)",
+        )]));
+        assert_eq!(info.tool, Some("codex-desktop"));
+        assert_eq!(info.version.as_deref(), Some("0.133.0-alpha.1"));
+    }
+
+    #[test]
     fn zed_editor() {
         let info = identify(&h(&[("user-agent", "Zed/0.158.2 (macos arm64)")]));
         assert_eq!(info.tool, Some("zed"));
@@ -367,6 +403,6 @@ mod tests {
         // 防呆: 若新增 classify 返回值忘记加进 SUPPORTED_TOOLS, 这条不会失败 (静态保证不了),
         // 但可以反向校验 SUPPORTED_TOOLS 里每个值至少有一个 fixture 能命中——靠人工或独立 lint 工具.
         // 这里仅断言常量数量, 改动时 force review.
-        assert_eq!(SUPPORTED_TOOLS.len(), 9);
+        assert_eq!(SUPPORTED_TOOLS.len(), 10);
     }
 }

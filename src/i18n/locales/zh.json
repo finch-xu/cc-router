@@ -311,6 +311,7 @@
   "clientTool.claudeCode": "Claude Code",
   "clientTool.claudeDesktop": "Claude Desktop",
   "clientTool.codexCli": "Codex CLI",
+  "clientTool.codexDesktop": "Codex Desktop",
   "clientTool.ccRouter": "cc-router (转发)",
   "clientTool.zed": "Zed",
   "clientTool.cursor": "Cursor",

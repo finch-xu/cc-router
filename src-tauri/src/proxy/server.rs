@@ -91,6 +91,7 @@ pub async fn start(state: AppState) -> AppResult<()> {
 fn build_router(state: AppState) -> Router {
     Router::new()
         .route("/v1/messages", post(handler::messages))
+        .route("/v1/responses", post(handler::responses))
         .route("/v1/models", axum::routing::get(handler::models))
         .route("/health", axum::routing::get(handler::health))
         .layer(axum::middleware::from_fn_with_state(
