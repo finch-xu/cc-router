@@ -83,6 +83,7 @@
 | `カスタム` | Anthropic プロトコル準拠の任意の API を自前で追加 | ✅ | ✅ | verified |
 | `カスタム (Gemini 互換)` | Gemini generateContent 互換の任意のエンドポイント（中継など）を追加。`messages_path` に `{model}` プレースホルダを含める必要があります | ❌ | ✅ | tested |
 | `カスタム (OpenAI Responses 互換)` | OpenAI `/v1/responses` 互換の任意のエンドポイント（one-api / new-api などの中継）を追加、プロトコル自動変換 | ❌ | ✅ | tested |
+| `カスタム (OpenAI Chat Completions 互換)` | OpenAI `/v1/chat/completions` 互換の任意のエンドポイント（DeepSeek、Together、Groq、Ollama、one-api / new-api などの中継）を追加、プロトコル自動変換。DeepSeek R1 などの `reasoning_content` を Claude Code の thinking ブロックとして表示 | ❌ | ✅ | tested |
 
 > 「Token Plan」列はサブスクリプション形式のクォータ全般（Token Plan / Coding Plan / Agent Plan 等）を指し、「API」列は従量課金の Anthropic Messages 互換エンドポイントを指します。
 

@@ -83,6 +83,7 @@
 | `自定义` | 自定义任意Anthropic协议API | ✅ | ✅ | verified |
 | `自定义 (Gemini 兼容)` | 接入任意 Gemini generateContent 兼容端点（中转站等），messages_path 用 `{model}` 占位符 | ❌ | ✅ | tested |
 | `自定义 (OpenAI Responses 兼容)` | 接入任意 OpenAI `/v1/responses` 兼容端点（one-api / new-api 等中转站），自动协议翻译 | ❌ | ✅ | tested |
+| `自定义 (OpenAI Chat Completions 兼容)` | 接入任意 OpenAI `/v1/chat/completions` 兼容端点（DeepSeek / Together / Groq / Ollama / one-api / new-api 等中转站），自动协议翻译，DeepSeek R1 等模型的 reasoning_content 暴露为 Claude Code thinking 块 | ❌ | ✅ | tested |
 
 > Token Plan 列包含各厂商的套餐订阅形态（Token Plan / Coding Plan / Agent Plan 等）；API 列指按量付费的 Anthropic Messages 兼容端点。
 

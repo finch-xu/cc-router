@@ -83,6 +83,7 @@ Highlights:
 | `Custom` | Bring your own Anthropic-compatible endpoint | ✅ | ✅ | verified |
 | `Custom (Gemini compatible)` | Bring your own Gemini generateContent-compatible endpoint (relay, etc.); `messages_path` must contain the `{model}` placeholder | ❌ | ✅ | tested |
 | `Custom (OpenAI Responses compatible)` | Bring your own OpenAI `/v1/responses`-compatible endpoint (one-api / new-api relays, etc.); auto protocol translation | ❌ | ✅ | tested |
+| `Custom (OpenAI Chat Completions compatible)` | Bring your own OpenAI `/v1/chat/completions`-compatible endpoint (DeepSeek, Together, Groq, Ollama, one-api / new-api relays, etc.); auto protocol translation; DeepSeek R1's `reasoning_content` is surfaced as Claude Code thinking blocks | ❌ | ✅ | tested |
 
 > The "Token Plan" column covers any subscription-style quota (Token Plan / Coding Plan / Agent Plan, etc.); "API" denotes pay-as-you-go Anthropic Messages-compatible endpoints.
 
