@@ -782,11 +782,15 @@ function HttpsCertSection() {
   async function onExportCa() {
     try {
       const dest = await save({
-        defaultPath: "cc-router-ca.pem",
-        filters: [{ name: "PEM", extensions: ["pem", "crt"] }],
+        defaultPath: "cc-router-ca.crt",
+        filters: [{ name: "Certificate", extensions: ["crt", "pem"] }],
       });
       if (!dest) return;
-      await api.tlsExportCaPem(dest);
+      // Windows 把 .crt 关联到证书安装向导, .pem 默认无关联. 三平台都接受 PEM 文本内容,
+      // 同一份字节流落两份后缀, 用户拿到的哪份都能用.
+      const stem = dest.replace(/\.(pem|crt)$/i, "");
+      await api.tlsExportCaPem(`${stem}.pem`);
+      await api.tlsExportCaPem(`${stem}.crt`);
       alert(t("settings.https.cert.exportOk"));
     } catch (e) {
       alert(`${t("settings.https.cert.exportFailed")}: ${e}`);
