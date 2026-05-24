@@ -25,6 +25,9 @@ pub enum AppError {
     UnknownVirtualModel(String),
     #[error("请求内容错误: {0}")]
     BadRequest(String),
+    /// 上游响应不合预期 (协议偏差 / 翻译层无法解析). 映射 HTTP 502, 区别于 BadRequest (客户端错).
+    #[error("上游响应异常: {0}")]
+    BadGateway(String),
     #[error("内部错误: {0}")]
     Internal(String),
 }
@@ -65,6 +68,7 @@ impl Serialize for AppError {
             AppError::NoHealthySubscription(_) => "no_healthy_subscription",
             AppError::UnknownVirtualModel(_) => "unknown_virtual_model",
             AppError::BadRequest(_) => "bad_request",
+            AppError::BadGateway(_) => "bad_gateway",
             AppError::Internal(_) => "internal",
         };
         AppErrorDto {

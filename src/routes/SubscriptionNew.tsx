@@ -40,6 +40,7 @@ type Step = 1 | 2;
 const CUSTOM_VALUE = "__custom__";
 const CUSTOM_GEMINI_VALUE = "__custom_gemini__";
 const CUSTOM_OPENAI_VALUE = "__custom_openai__";
+const CUSTOM_OPENAI_CHAT_VALUE = "__custom_openai_chat__";
 
 /** 自定义 Anthropic 兼容路径的鉴权方式预设: 选一个就同时确定 header_name + header_format */
 type AuthPreset = "bearer" | "x_api_key";
@@ -50,9 +51,18 @@ const AUTH_PRESETS: Record<AuthPreset, { name: string; format: AuthHeaderFormat;
 
 type CustomProtocolValue =
   | typeof CUSTOM_GEMINI_VALUE
-  | typeof CUSTOM_OPENAI_VALUE;
+  | typeof CUSTOM_OPENAI_VALUE
+  | typeof CUSTOM_OPENAI_CHAT_VALUE;
 
-/** 锁定连接参数的自定义协议预设 (Gemini / OpenAI Responses 走这里; Anthropic 兼容走 AUTH_PRESETS dropdown). */
+/** 所有走 LOCKED_CUSTOM_PRESETS 的 sentinel 列表 (避免链式 || 判断, 后续加协议时只动这一行). */
+const LOCKED_CUSTOM_VALUES: readonly string[] = [
+  CUSTOM_GEMINI_VALUE,
+  CUSTOM_OPENAI_VALUE,
+  CUSTOM_OPENAI_CHAT_VALUE,
+];
+
+/** 锁定连接参数的自定义协议预设 (Gemini / OpenAI Responses / OpenAI Chat Completions 走这里;
+ *  Anthropic 兼容走 AUTH_PRESETS dropdown). */
 const LOCKED_CUSTOM_PRESETS: Record<CustomProtocolValue, {
   baseUrl: string;
   messagesPath: string;
@@ -65,7 +75,7 @@ const LOCKED_CUSTOM_PRESETS: Record<CustomProtocolValue, {
   messagesPathHintKey: string;
   authLockedHintKey: string;
   authLockedDisplay: string;
-  protocol: "gemini" | "openai_responses";
+  protocol: "gemini" | "openai_responses" | "openai_chat_completions";
 }> = {
   [CUSTOM_GEMINI_VALUE]: {
     baseUrl: "https://generativelanguage.googleapis.com",
@@ -94,6 +104,21 @@ const LOCKED_CUSTOM_PRESETS: Record<CustomProtocolValue, {
     authLockedHintKey: "subscriptionNew.openaiAuthLocked",
     authLockedDisplay: "Authorization: Bearer <key>",
     protocol: "openai_responses",
+  },
+  [CUSTOM_OPENAI_CHAT_VALUE]: {
+    // 默认引导值给 OpenAI 官方, 实际更常用的是 DeepSeek/Together/Groq/Ollama (用户在 hint 里看到示例后改 base_url 一项即可)
+    baseUrl: "https://api.openai.com",
+    messagesPath: "/v1/chat/completions",
+    authHeaderName: "Authorization",
+    authHeaderFormat: "bearer",
+    iconId: "openai",
+    triggerLabelKey: "subscriptionNew.customOpenaiChatProvider",
+    hintKey: "subscriptionNew.customOpenaiChatHint",
+    baseUrlHintKey: "subscriptionNew.openaiChatBaseUrlHint",
+    messagesPathHintKey: "subscriptionNew.openaiChatMessagesPathHint",
+    authLockedHintKey: "subscriptionNew.openaiChatAuthLocked",
+    authLockedDisplay: "Authorization: Bearer <key>",
+    protocol: "openai_chat_completions",
   },
 };
 
@@ -128,10 +153,9 @@ export function SubscriptionNewPage() {
   const [customAuthPreset, setCustomAuthPreset] = useState<AuthPreset>("bearer");
 
   const isCustomAnthropic = providerId === CUSTOM_VALUE;
-  const lockedPreset =
-    providerId === CUSTOM_GEMINI_VALUE || providerId === CUSTOM_OPENAI_VALUE
-      ? LOCKED_CUSTOM_PRESETS[providerId]
-      : null;
+  const lockedPreset = LOCKED_CUSTOM_VALUES.includes(providerId)
+    ? LOCKED_CUSTOM_PRESETS[providerId as CustomProtocolValue]
+    : null;
   // gemini 的 {model} 占位符校验依赖此专属判断 — 其余路径 (logo / 默认值 / 锁定 UI) 都走 lockedPreset
   const isCustomGemini = lockedPreset?.protocol === "gemini";
   const isCustom = isCustomAnthropic || lockedPreset !== null;
@@ -196,7 +220,7 @@ export function SubscriptionNewPage() {
   function handleProviderChange(v: string) {
     setProviderId(v);
     setSubmitError(null);
-    if (v === CUSTOM_VALUE || v === CUSTOM_GEMINI_VALUE || v === CUSTOM_OPENAI_VALUE) {
+    if (v === CUSTOM_VALUE || LOCKED_CUSTOM_VALUES.includes(v)) {
       setEndpointId("");
       // 自定义路径备注名自动: <自定义厂商名> <随机后缀>
       // 等用户填了 customProviderName 再生成,这里清掉旧值
@@ -204,11 +228,11 @@ export function SubscriptionNewPage() {
         setDisplayName("");
         autoGenNameRef.current = "";
       }
-      // 锁定预设 (Gemini / OpenAI) 一次性预填 base+path; 普通 anthropic 自定义只设默认 path
-      const preset =
-        v === CUSTOM_GEMINI_VALUE || v === CUSTOM_OPENAI_VALUE
-          ? LOCKED_CUSTOM_PRESETS[v]
-          : null;
+      // 锁定预设 (Gemini / OpenAI Responses / OpenAI Chat Completions) 一次性预填 base+path;
+      // 普通 anthropic 自定义只设默认 path
+      const preset = LOCKED_CUSTOM_VALUES.includes(v)
+        ? LOCKED_CUSTOM_PRESETS[v as CustomProtocolValue]
+        : null;
       if (preset) {
         setCustomBaseUrl(preset.baseUrl);
         setCustomMessagesPath(preset.messagesPath);
@@ -676,6 +700,12 @@ export function SubscriptionNewPage() {
                                 <span style={{ display: "inline-flex", alignItems: "center", gap: 8 }}>
                                   <ProviderLogo iconId="openai" size={20} />
                                   {t("subscriptionNew.customOpenaiProvider")}
+                                </span>
+                              </SelectItem>
+                              <SelectItem value={CUSTOM_OPENAI_CHAT_VALUE}>
+                                <span style={{ display: "inline-flex", alignItems: "center", gap: 8 }}>
+                                  <ProviderLogo iconId="openai" size={20} />
+                                  {t("subscriptionNew.customOpenaiChatProvider")}
                                 </span>
                               </SelectItem>
                             </SelectGroup>

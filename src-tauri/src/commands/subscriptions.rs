@@ -16,7 +16,7 @@ use crate::subscription::{
     model::{
         BalanceSnapshot, ModelCache, ModelInfo, ModelSlots, OAuthMetadata, SubscriptionDto,
         SubscriptionRow, SubscriptionRuntime, CUSTOM_GEMINI_SOURCE_MARKER,
-        CUSTOM_OPENAI_SOURCE_MARKER, CUSTOM_SOURCE_MARKER,
+        CUSTOM_OPENAI_CHAT_SOURCE_MARKER, CUSTOM_OPENAI_SOURCE_MARKER, CUSTOM_SOURCE_MARKER,
     },
     model_discovery, ping, state_machine, store,
 };
@@ -31,6 +31,10 @@ pub enum CustomProtocol {
     /// OpenAI Responses (官方 / 兼容中转), 走 Anthropic ↔ Responses 翻译 + API key 鉴权.
     /// dispatch 走 [`crate::proxy::openai_responses_dispatch`].
     OpenaiResponses,
+    /// OpenAI Chat Completions (官方 / DeepSeek / Together / Groq / Ollama / 各类 one-api 中转),
+    /// 走 Anthropic ↔ Chat Completions 翻译 + API key 鉴权.
+    /// dispatch 走 [`crate::proxy::openai_chat_completions_dispatch`].
+    OpenaiChatCompletions,
 }
 
 /// 创建订阅时的 source 区分: 内置 yaml 模板 vs 用户自定义。
@@ -212,6 +216,7 @@ pub async fn create_subscription(
             validate_messages_path(&messages_path)?;
             let is_gemini = protocol == CustomProtocol::Gemini;
             let is_openai = protocol == CustomProtocol::OpenaiResponses;
+            let is_openai_chat = protocol == CustomProtocol::OpenaiChatCompletions;
             if is_gemini && !messages_path.contains("{model}") {
                 return Err(AppError::BadRequest(
                     "Gemini 兼容订阅的 messages_path 必须包含 {model} 占位符".into(),
@@ -237,6 +242,19 @@ pub async fn create_subscription(
                     AuthType::OpenaiResponsesApiKey,
                     "openai".to_string(),
                     // OpenAI 兼容 endpoint 普遍提供 /v1/models, 默认启用自动发现
+                    ModelDiscovery {
+                        enabled: true,
+                        path: "/v1/models".into(),
+                        ..ModelDiscovery::default()
+                    },
+                )
+            } else if is_openai_chat {
+                (
+                    CUSTOM_OPENAI_CHAT_SOURCE_MARKER.to_string(),
+                    CUSTOM_OPENAI_CHAT_SOURCE_MARKER.to_string(),
+                    AuthType::OpenaiChatCompletionsApiKey,
+                    "openai".to_string(),
+                    // OpenAI Chat Completions 兼容生态 (DeepSeek/Together/Groq 等) 普遍提供 /v1/models, 默认启用
                     ModelDiscovery {
                         enabled: true,
                         path: "/v1/models".into(),

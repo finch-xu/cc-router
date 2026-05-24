@@ -47,6 +47,12 @@ pub enum AuthType {
     /// (Anthropic Messages ↔ OpenAI Responses). 客户端 stream 决定上游 stream;
     /// 支持 reasoning 双向 (thinking ↔ reasoning encrypted_content 多轮回灌)。
     OpenaiResponsesApiKey,
+    /// OpenAI Chat Completions API key: 普通 `sk-...` 形式 (Bearer header), 上游协议为
+    /// OpenAI `/v1/chat/completions` (官方 api.openai.com 或 DeepSeek/Together/Groq/Ollama/
+    /// 各类 one-api/new-api 中转), 需协议翻译 (Anthropic Messages ↔ OpenAI Chat Completions).
+    /// 客户端 stream 决定上游 stream; 上游 `reasoning_content` (DeepSeek R1 风格) 单向暴露为
+    /// Anthropic thinking content_block (Phase 1 不做多轮回灌, 由 Phase 2 决定).
+    OpenaiChatCompletionsApiKey,
 }
 
 impl AuthType {
@@ -57,6 +63,7 @@ impl AuthType {
             Self::KiroOauth => "kiro_oauth",
             Self::GeminiApiKey => "gemini_api_key",
             Self::OpenaiResponsesApiKey => "openai_responses_api_key",
+            Self::OpenaiChatCompletionsApiKey => "openai_chat_completions_api_key",
         }
     }
 }
@@ -70,6 +77,7 @@ impl FromStr for AuthType {
             "kiro_oauth" => Ok(Self::KiroOauth),
             "gemini_api_key" => Ok(Self::GeminiApiKey),
             "openai_responses_api_key" => Ok(Self::OpenaiResponsesApiKey),
+            "openai_chat_completions_api_key" => Ok(Self::OpenaiChatCompletionsApiKey),
             other => Err(format!("无效 auth_type: {other}")),
         }
     }

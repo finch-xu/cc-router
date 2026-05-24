@@ -123,6 +123,11 @@ pub const CUSTOM_GEMINI_SOURCE_MARKER: &str = "__custom_gemini__";
 /// 与 `CUSTOM_SOURCE_MARKER` 平级, 但走 [`AuthType::OpenaiResponsesApiKey`] 翻译分支.
 pub const CUSTOM_OPENAI_SOURCE_MARKER: &str = "__custom_openai__";
 
+/// 自定义 OpenAI Chat Completions 订阅的来源标记常量。
+/// 与 `CUSTOM_SOURCE_MARKER` 平级, 但走 [`AuthType::OpenaiChatCompletionsApiKey`] 翻译分支.
+/// 覆盖 DeepSeek/Together/Groq/Ollama/各类 one-api 中转等 OpenAI Chat Completions 兼容生态。
+pub const CUSTOM_OPENAI_CHAT_SOURCE_MARKER: &str = "__custom_openai_chat__";
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ModelSlots {
     pub opus: String,

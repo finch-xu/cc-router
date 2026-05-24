@@ -13,6 +13,9 @@
 //!   入口: `anthropic_to_codewhisperer`, `KiroSseConverter`, `NonStreamingCollector`.
 //! - [`gemini`] - Anthropic Messages ↔ Google Gemini generateContent. 用于 `auth_type=GeminiApiKey`.
 //!   入口: `anthropic_to_gemini`, `GeminiSseConverter`, `NonStreamingCollector`.
+//! - [`openai_chat_completions`] - Anthropic Messages ↔ OpenAI Chat Completions (`/v1/chat/completions`).
+//!   用于 `auth_type=OpenaiChatCompletionsApiKey`. 入口: `anthropic_to_openai_chat`,
+//!   `chat_json_to_anthropic`, `ChatCompletionsSseConverter`. 覆盖 DeepSeek/Together/Groq/Ollama/各类 one-api 中转.
 
 pub mod responses_common;
 pub mod openai_responses;
@@ -20,3 +23,4 @@ pub mod openai;
 pub mod aws_event_stream;
 pub mod kiro_codewhisperer;
 pub mod gemini;
+pub mod openai_chat_completions;

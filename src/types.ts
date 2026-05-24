@@ -8,7 +8,8 @@ export type AuthType =
   | "chatgpt_oauth"
   | "kiro_oauth"
   | "gemini_api_key"
-  | "openai_responses_api_key";
+  | "openai_responses_api_key"
+  | "openai_chat_completions_api_key";
 export type AuthHeaderFormat = "raw" | "bearer";
 
 // ===== Kiro OAuth DTO (与 oauth/kiro.rs + subscription/model.rs 对齐) =====
@@ -266,8 +267,12 @@ export type CreateSource =
       messages_path: string;
       auth_header_name: string;
       auth_header_format: AuthHeaderFormat;
-      /** 协议家族 — 缺省=anthropic 透传; "gemini"=走 Gemini 翻译分支; "openai_responses"=走 OpenAI Responses 翻译分支 */
-      protocol?: "anthropic" | "gemini" | "openai_responses";
+      /** 协议家族 — 缺省=anthropic 透传; "gemini"=Gemini 翻译; "openai_responses"=OpenAI Responses 翻译; "openai_chat_completions"=OpenAI Chat Completions 翻译 (DeepSeek/Together/Groq/Ollama 等兼容生态) */
+      protocol?:
+        | "anthropic"
+        | "gemini"
+        | "openai_responses"
+        | "openai_chat_completions";
     };
 
 export interface CreateSubscriptionInput {

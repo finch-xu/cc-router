@@ -61,14 +61,20 @@ use crate::virtual_model::VirtualModelName;
 const MAX_UPSTREAM_ERROR_BODY: usize = 4 * 1024;
 
 fn truncate_error_body(s: String) -> String {
-    if s.len() > MAX_UPSTREAM_ERROR_BODY {
-        let total = s.len();
-        let mut head = s;
-        head.truncate(MAX_UPSTREAM_ERROR_BODY);
-        format!("{head} ...(truncated, total {total} bytes)")
-    } else {
-        s
+    if s.len() <= MAX_UPSTREAM_ERROR_BODY {
+        return s;
     }
+    let total = s.len();
+    // Walk back to the nearest UTF-8 char boundary <= MAX. String::truncate panics
+    // if the cut lands mid-codepoint, common for upstream HTML error pages with
+    // Chinese / emoji (single char = 3-4 bytes).
+    let mut cutoff = MAX_UPSTREAM_ERROR_BODY;
+    while cutoff > 0 && !s.is_char_boundary(cutoff) {
+        cutoff -= 1;
+    }
+    let mut head = s;
+    head.truncate(cutoff);
+    format!("{head} ...(truncated, total {total} bytes)")
 }
 
 /// dispatch_openai_responses_attempt 的成功返回, transform_config 在外层统一保管。
