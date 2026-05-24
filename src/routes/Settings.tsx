@@ -62,6 +62,7 @@ export function SettingsPage() {
     proxy_mode: ProxyMode;
     https_port: number;
     tls_extra_sans: string[];
+    https_enable_h2: boolean;
   } | null>(null);
 
   const generateTokenMut = useGenerateNewToken();
@@ -81,6 +82,7 @@ export function SettingsPage() {
       proxy_mode: settings.data.proxy_mode ?? "http",
       https_port: settings.data.https_port ?? 23457,
       tls_extra_sans: settings.data.tls_extra_sans ?? [],
+      https_enable_h2: settings.data.https_enable_h2 ?? true,
     };
     setPort(settings.data.proxy_port);
     setProxyMode(settings.data.proxy_mode ?? "http");
@@ -106,7 +108,9 @@ export function SettingsPage() {
       !arraysEqual(
         settings.data?.tls_extra_sans ?? [],
         baselineRef.current.tls_extra_sans,
-      ));
+      ) ||
+      (settings.data?.https_enable_h2 ?? true) !==
+        baselineRef.current.https_enable_h2);
 
   const httpsEnabled = proxyMode === "https" || proxyMode === "both";
 
@@ -817,6 +821,25 @@ function HttpsCertSection() {
         <div className="card-title">{t("settings.section.https")}</div>
       </div>
       <div className="card-body">
+        <div className="setting-row">
+          <div className="label-col">
+            {t("settings.https.h2.label")}
+            <div className="desc">{t("settings.https.h2.desc")}</div>
+          </div>
+          <Toggle
+            checked={settings.data?.https_enable_h2 ?? true}
+            onChange={(v) => {
+              void (async () => {
+                try {
+                  await updateMut.mutateAsync({ https_enable_h2: v });
+                } catch (e) {
+                  alert(`${t("settings.saveFailed")}: ${e}`);
+                }
+              })();
+            }}
+            aria-label={t("settings.https.h2.label")}
+          />
+        </div>
         <div className="setting-row">
           <div className="label-col">
             {t("settings.https.cert.fingerprint.label")}

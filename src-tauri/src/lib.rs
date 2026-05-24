@@ -197,7 +197,14 @@ async fn bootstrap(
     // TLS 初始化: 只在 proxy_mode 包含 HTTPS 时加载/生成证书. HTTP-only 模式下 None,
     // 切到 HTTPS 后由用户重启 app 触发. 失败 fatal (HTTPS 模式但起不来比 fallback 到 HTTP 更安全).
     let tls_config = if settings.proxy_mode.includes_https() {
-        Some(tls::load_or_init_server_config(&app_data_dir, &settings.tls_extra_sans).await?)
+        Some(
+            tls::load_or_init_server_config(
+                &app_data_dir,
+                &settings.tls_extra_sans,
+                settings.https_enable_h2,
+            )
+            .await?,
+        )
     } else {
         None
     };

@@ -53,6 +53,8 @@
   "settings.proxy.httpsPort.desc": "默认 23457, 被占用时自动 +1 递增。与 HTTP 端口冲突时也会自动避开。",
 
   "settings.section.https": "HTTPS 证书",
+  "settings.https.h2.label": "HTTP/2 协议",
+  "settings.https.h2.desc": "勾选后 HTTPS 端口在 TLS 握手时通过 ALPN 协商 HTTP/2, 失败自动回退 HTTP/1.1; 关闭则强制 HTTP/1.1。修改后需重启 cc-router 才生效。",
   "settings.https.cert.fingerprint.label": "CA 证书指纹 (SHA-256)",
   "settings.https.cert.fingerprint.desc": "用于核对导入系统信任库的是不是同一张 CA。指纹一致才算导入成功。",
   "settings.https.cert.export.label": "导出 CA 证书",

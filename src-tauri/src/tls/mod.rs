@@ -28,9 +28,13 @@ pub use config::TlsStatus;
 ///
 /// `extra_sans` 仅影响新生成的 leaf 证书; 如果磁盘上已有 leaf, 这里不会因 SAN 变化而重签
 /// (避免每次启动覆盖用户已固定的证书). 改动后需显式调 `regenerate_leaf`.
+///
+/// `enable_h2` 控制是否在 TLS ALPN 中通告 h2; true 时 client 可协商 HTTP/2, false 时
+/// 强制 HTTP/1.1. 切换需重启 app (axum-server 已绑定 listener 无法运行时换 TLS config).
 pub async fn load_or_init_server_config(
     app_data_dir: &Path,
     extra_sans: &[String],
+    enable_h2: bool,
 ) -> AppResult<Arc<rustls::ServerConfig>> {
     let tls_dir = tls_dir(app_data_dir);
     tokio::fs::create_dir_all(&tls_dir)
@@ -38,7 +42,7 @@ pub async fn load_or_init_server_config(
         .map_err(AppError::Io)?;
     let ca_material = ca::ensure(&tls_dir).await?;
     let leaf_material = leaf::ensure(&tls_dir, &ca_material, extra_sans).await?;
-    config::build_server_config(&leaf_material)
+    config::build_server_config(&leaf_material, enable_h2)
 }
 
 /// 仅确保 CA 存在 (不签 leaf, 不建 rustls ServerConfig).

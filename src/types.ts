@@ -339,6 +339,12 @@ export interface Settings {
   tls_extra_sans: string[];
   /** true: 监听 0.0.0.0（局域网可访问）；false: 仅 127.0.0.1 */
   listen_all: boolean;
+  /**
+   * HTTPS 端口是否启用 HTTP/2 (通过 TLS ALPN 协商). 默认 true.
+   * true: 客户端按 ALPN 协商选 h2 或 h1; false: 强制 HTTP/1.1.
+   * 切换需重启 app。
+   */
+  https_enable_h2: boolean;
   autostart: boolean;
   log_retention_days: number;
   db_size_limit_mb: number;
@@ -374,6 +380,7 @@ export interface SettingsPatch {
   https_port?: number;
   tls_extra_sans?: string[];
   listen_all?: boolean;
+  https_enable_h2?: boolean;
   autostart?: boolean;
   log_retention_days?: number;
   db_size_limit_mb?: number;

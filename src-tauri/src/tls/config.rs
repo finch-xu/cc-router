@@ -21,7 +21,10 @@ pub struct TlsStatus {
     pub ca_pem_path: Option<String>,
 }
 
-pub fn build_server_config(leaf: &LeafMaterial) -> AppResult<Arc<rustls::ServerConfig>> {
+pub fn build_server_config(
+    leaf: &LeafMaterial,
+    enable_h2: bool,
+) -> AppResult<Arc<rustls::ServerConfig>> {
     // 安装一次性默认 crypto provider (ring). 多次调用幂等, 已设置时 install_default 返回 Err,
     // 我们安全忽略 — 这一调用只是确保 provider 被初始化, 不是状态切换.
     let _ = rustls::crypto::ring::default_provider().install_default();
@@ -40,10 +43,17 @@ pub fn build_server_config(leaf: &LeafMaterial) -> AppResult<Arc<rustls::ServerC
             .ok_or_else(|| AppError::internal("leaf key PEM 无 PKCS#8 私钥"))?
             .map_err(|e| AppError::internal(format!("解析 leaf key PEM: {e}")))?;
 
-    let config = rustls::ServerConfig::builder()
+    let mut config = rustls::ServerConfig::builder()
         .with_no_client_auth()
         .with_single_cert(cert_chain, PrivateKeyDer::Pkcs8(key_der))
         .map_err(|e| AppError::internal(format!("rustls ServerConfig: {e}")))?;
+    // ALPN: 仅 enable_h2=true 时通告 ["h2", "http/1.1"], 双方按 RFC 7301 协商;
+    // 不设时 rustls 不返 ALPN extension, 客户端按 default protocol 走 HTTP/1.1.
+    // axum-server `from_tcp_rustls` + `RustlsConfig::from_config(cfg)` 不会自动注入 ALPN,
+    // 必须在这里显式设置 (见 axum-server 0.7 tls_rustls/mod.rs:165 注释).
+    if enable_h2 {
+        config.alpn_protocols = vec![b"h2".to_vec(), b"http/1.1".to_vec()];
+    }
     Ok(Arc::new(config))
 }
 
@@ -84,7 +94,7 @@ mod tests {
     #[tokio::test]
     async fn ca_and_leaf_roundtrip_then_build_config() {
         let dir = tempdir().unwrap();
-        let _cfg = crate::tls::load_or_init_server_config(dir.path(), &[])
+        let _cfg = crate::tls::load_or_init_server_config(dir.path(), &[], true)
             .await
             .unwrap();
         let tls_dir = dir.path().join("tls");
@@ -97,11 +107,11 @@ mod tests {
     #[tokio::test]
     async fn second_load_reuses_existing_ca() {
         let dir = tempdir().unwrap();
-        crate::tls::load_or_init_server_config(dir.path(), &[]).await.unwrap();
+        crate::tls::load_or_init_server_config(dir.path(), &[], true).await.unwrap();
         let ca_pem_1 = tokio::fs::read_to_string(dir.path().join("tls/ca.pem"))
             .await
             .unwrap();
-        crate::tls::load_or_init_server_config(dir.path(), &[]).await.unwrap();
+        crate::tls::load_or_init_server_config(dir.path(), &[], true).await.unwrap();
         let ca_pem_2 = tokio::fs::read_to_string(dir.path().join("tls/ca.pem"))
             .await
             .unwrap();
@@ -111,7 +121,7 @@ mod tests {
     #[tokio::test]
     async fn regenerate_leaf_keeps_ca() {
         let dir = tempdir().unwrap();
-        crate::tls::load_or_init_server_config(dir.path(), &[]).await.unwrap();
+        crate::tls::load_or_init_server_config(dir.path(), &[], true).await.unwrap();
         let ca_before = tokio::fs::read_to_string(dir.path().join("tls/ca.pem"))
             .await
             .unwrap();
@@ -127,5 +137,25 @@ mod tests {
             .unwrap();
         assert_eq!(ca_before, ca_after, "regenerate_leaf 不应动 CA");
         assert_ne!(leaf_before, leaf_after, "leaf 应被替换");
+    }
+
+    #[tokio::test]
+    async fn build_server_config_enable_h2_sets_alpn() {
+        let dir = tempdir().unwrap();
+        let cfg = crate::tls::load_or_init_server_config(dir.path(), &[], true)
+            .await
+            .unwrap();
+        // enable_h2=true: alpn_protocols = ["h2", "http/1.1"]
+        assert_eq!(cfg.alpn_protocols, vec![b"h2".to_vec(), b"http/1.1".to_vec()]);
+    }
+
+    #[tokio::test]
+    async fn build_server_config_disable_h2_leaves_alpn_empty() {
+        let dir = tempdir().unwrap();
+        let cfg = crate::tls::load_or_init_server_config(dir.path(), &[], false)
+            .await
+            .unwrap();
+        // enable_h2=false: 不通告 ALPN, rustls 默认行为客户端退回 HTTP/1.1
+        assert!(cfg.alpn_protocols.is_empty());
     }
 }

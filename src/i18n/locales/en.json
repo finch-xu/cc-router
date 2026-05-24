@@ -53,6 +53,8 @@
   "settings.proxy.httpsPort.desc": "Default 23457. Auto-increments when the port is in use, and also steps around HTTP port conflicts.",
 
   "settings.section.https": "HTTPS certificate",
+  "settings.https.h2.label": "HTTP/2 protocol",
+  "settings.https.h2.desc": "When enabled, the HTTPS port advertises HTTP/2 via TLS ALPN — clients can negotiate h2, falling back to HTTP/1.1 on failure. When disabled, HTTP/1.1 is forced. Takes effect after restarting cc-router.",
   "settings.https.cert.fingerprint.label": "CA fingerprint (SHA-256)",
   "settings.https.cert.fingerprint.desc": "Use this to verify the cert in your system trust store is the same CA. A matching fingerprint means the import succeeded.",
   "settings.https.cert.export.label": "Export CA certificate",

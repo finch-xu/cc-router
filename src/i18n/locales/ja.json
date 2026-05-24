@@ -53,6 +53,8 @@
   "settings.proxy.httpsPort.desc": "デフォルトは 23457。使用中の場合は自動で +1 増分し、HTTP ポートとの衝突も自動で回避します。",
 
   "settings.section.https": "HTTPS 証明書",
+  "settings.https.h2.label": "HTTP/2 プロトコル",
+  "settings.https.h2.desc": "オンにすると HTTPS ポートが TLS ハンドシェイク時に ALPN で HTTP/2 をネゴシエートします (失敗時は HTTP/1.1 にフォールバック)。オフにすると HTTP/1.1 を強制します。cc-router を再起動すると反映されます。",
   "settings.https.cert.fingerprint.label": "CA 証明書フィンガープリント (SHA-256)",
   "settings.https.cert.fingerprint.desc": "システム信頼ストアに取り込んだ CA と同一かを照合するために使います。フィンガープリントが一致して初めてインポート成功です。",
   "settings.https.cert.export.label": "CA 証明書をエクスポート",

@@ -48,6 +48,12 @@ pub struct Settings {
     /// true: 监听 0.0.0.0（局域网可访问）；false: 监听 127.0.0.1（仅本机）。
     #[serde(default)]
     pub listen_all: bool,
+    /// HTTPS 端口是否启用 HTTP/2 (通过 TLS ALPN 协商). 默认 true.
+    /// true: ServerConfig.alpn_protocols = ["h2","http/1.1"], 客户端按 ALPN 协商选 h2 或 h1.
+    /// false: 不设 alpn_protocols, rustls 不返 ALPN extension, 双方退回 HTTP/1.1.
+    /// 切换需重启 app (axum-server 已绑定 listener 无法运行时换 TLS config).
+    #[serde(default = "default_https_enable_h2")]
+    pub https_enable_h2: bool,
     #[serde(default)]
     pub autostart: bool,
     #[serde(default = "default_retention")]
@@ -107,6 +113,9 @@ fn default_cors_origin() -> String {
 fn default_preferred_language() -> String {
     "system".to_string()
 }
+fn default_https_enable_h2() -> bool {
+    true
+}
 
 impl Default for Settings {
     fn default() -> Self {
@@ -116,6 +125,7 @@ impl Default for Settings {
             https_port: default_https_port(),
             tls_extra_sans: Vec::new(),
             listen_all: false,
+            https_enable_h2: default_https_enable_h2(),
             autostart: false,
             log_retention_days: default_retention(),
             db_size_limit_mb: default_db_limit(),
@@ -137,6 +147,7 @@ pub struct SettingsPatch {
     pub https_port: Option<u16>,
     pub tls_extra_sans: Option<Vec<String>>,
     pub listen_all: Option<bool>,
+    pub https_enable_h2: Option<bool>,
     pub autostart: Option<bool>,
     pub log_retention_days: Option<u32>,
     pub db_size_limit_mb: Option<u32>,
@@ -164,6 +175,9 @@ impl Settings {
         }
         if let Some(p) = patch.listen_all {
             self.listen_all = p;
+        }
+        if let Some(p) = patch.https_enable_h2 {
+            self.https_enable_h2 = p;
         }
         if let Some(p) = patch.autostart {
             self.autostart = p;
@@ -321,5 +335,39 @@ mod tests {
             s.tls_extra_sans,
             vec!["192.168.1.5".to_string(), "my-laptop.local".to_string()]
         );
+    }
+
+    #[test]
+    fn default_https_enable_h2_is_true() {
+        assert!(Settings::default().https_enable_h2);
+    }
+
+    #[test]
+    fn legacy_settings_json_without_https_enable_h2_deserializes_to_true() {
+        // 老用户的 settings.json 没有 https_enable_h2 字段, serde(default) 应该填 true.
+        let raw = r#"{
+            "proxy_port": 23456, "proxy_mode": "http", "https_port": 23457,
+            "listen_all": false, "autostart": false,
+            "log_retention_days": 30, "db_size_limit_mb": 500,
+            "auth_enabled": true, "auth_token": "",
+            "cors_enabled": true, "cors_allow_origin": "*",
+            "preferred_language": "system"
+        }"#;
+        let s: Settings = serde_json::from_str(raw).unwrap();
+        assert!(s.https_enable_h2);
+    }
+
+    #[test]
+    fn apply_patch_sets_https_enable_h2() {
+        let mut s = Settings::default();
+        assert!(s.https_enable_h2);
+        s.apply_patch(SettingsPatch {
+            https_enable_h2: Some(false),
+            ..Default::default()
+        });
+        assert!(!s.https_enable_h2);
+        // 未传时不重置
+        s.apply_patch(SettingsPatch::default());
+        assert!(!s.https_enable_h2);
     }
 }
