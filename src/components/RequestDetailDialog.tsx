@@ -160,6 +160,26 @@ export function RequestDetailDialog({ request, onClose }: Props) {
                   )
                 }
               />
+              <KV
+                k={t("requestLogs.detail.entryKind")}
+                v={
+                  request.entry_kind ? (
+                    <span className="mono">/v1/{request.entry_kind}</span>
+                  ) : (
+                    <span className="muted">—</span>
+                  )
+                }
+              />
+              <KV
+                k={t("requestLogs.detail.httpVersion")}
+                v={
+                  request.downstream_http_version ? (
+                    <span className="mono">{request.downstream_http_version}</span>
+                  ) : (
+                    <span className="muted">—</span>
+                  )
+                }
+              />
             </div>
 
             {isError && request.error_message && (

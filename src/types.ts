@@ -484,6 +484,10 @@ export interface RequestLogDto {
   client_version?: string;
   /** TCP 对端 IP. listen_all=true 时区分本机 vs 局域网设备 */
   client_ip?: string;
+  /** 请求入口端点: "messages" / "responses". 老日志为 undefined → 前端展示 "—" */
+  entry_kind?: string;
+  /** 下游 (CC ↔ cc-router) HTTP 协议版本, 形如 "HTTP/1.1" / "HTTP/2.0" */
+  downstream_http_version?: string;
 }
 
 export interface ListRequestsResult {

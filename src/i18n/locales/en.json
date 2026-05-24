@@ -309,6 +309,8 @@
   "requestLogs.detail.clientVersion": "Client version",
   "requestLogs.detail.clientIp": "Caller IP",
   "requestLogs.detail.userAgent": "User-Agent",
+  "requestLogs.detail.entryKind": "Entry endpoint",
+  "requestLogs.detail.httpVersion": "Downstream HTTP",
   "requestLogs.client.unknown": "Unrecognized",
   "clientTool.claudeCode": "Claude Code",
   "clientTool.claudeDesktop": "Claude Desktop",

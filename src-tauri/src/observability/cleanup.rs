@@ -107,6 +107,8 @@ mod tests {
             client_user_agent: None,
             client_version: None,
             client_ip: None,
+            entry_kind: None,
+            downstream_http_version: None,
         }
     }
 

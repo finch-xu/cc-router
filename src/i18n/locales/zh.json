@@ -309,6 +309,8 @@
   "requestLogs.detail.clientVersion": "客户端版本",
   "requestLogs.detail.clientIp": "请求方 IP",
   "requestLogs.detail.userAgent": "User-Agent",
+  "requestLogs.detail.entryKind": "入口接口",
+  "requestLogs.detail.httpVersion": "下游协议",
   "requestLogs.client.unknown": "未识别",
   "clientTool.claudeCode": "Claude Code",
   "clientTool.claudeDesktop": "Claude Desktop",

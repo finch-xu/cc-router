@@ -10,7 +10,8 @@ use serde_json::{json, Value};
 use tokio::sync::mpsc;
 use tracing::{error, info, warn};
 
-use crate::proxy::client_fingerprint::{self, ClientContext};
+use crate::proxy::client_fingerprint::{self, ClientContext, RequestEntryKind};
+use crate::proxy::extractors::{format_http_version, HttpVersion};
 use crate::proxy::pipeline;
 use crate::proxy::transform::responses_inbound::{
     request_to_anthropic, response_to_responses_json, AnthropicToResponsesSseConverter,
@@ -26,6 +27,7 @@ pub async fn health() -> &'static str {
 pub async fn messages(
     State(state): State<AppState>,
     ConnectInfo(peer): ConnectInfo<SocketAddr>,
+    HttpVersion(version): HttpVersion,
     headers: HeaderMap,
     body: Bytes,
 ) -> Response {
@@ -56,10 +58,13 @@ pub async fn messages(
         .and_then(|v| v.as_bool())
         .unwrap_or(false);
 
-    // 识别一次客户端 (UA + stainless headers) + 记录 TCP 对端 IP, 沿 dispatch 链透传给所有 RequestLogEntry.
+    // 识别一次客户端 (UA + stainless headers) + 记录 TCP 对端 IP + 入口端点 + 下游 HTTP 版本,
+    // 沿 dispatch 链透传给所有 RequestLogEntry.
     let ctx = ClientContext {
         info: client_fingerprint::identify(&headers),
         ip: Some(peer.ip().to_string()),
+        entry_kind: RequestEntryKind::Messages,
+        http_version: Some(format_http_version(version)),
     };
 
     info!(
@@ -67,6 +72,7 @@ pub async fn messages(
         is_streaming,
         client_tool = ?ctx.info.tool,
         client_ip = ?ctx.ip,
+        http_version = ?ctx.http_version,
         "proxy received request"
     );
 
@@ -117,6 +123,7 @@ fn responses_error_response(status: StatusCode, type_: &str, message: &str) -> R
 pub async fn responses(
     State(state): State<AppState>,
     ConnectInfo(peer): ConnectInfo<SocketAddr>,
+    HttpVersion(version): HttpVersion,
     headers: HeaderMap,
     body: Bytes,
 ) -> Response {
@@ -163,6 +170,8 @@ pub async fn responses(
     let ctx = ClientContext {
         info: client_fingerprint::identify(&headers),
         ip: Some(peer.ip().to_string()),
+        entry_kind: RequestEntryKind::Responses,
+        http_version: Some(format_http_version(version)),
     };
 
     info!(
@@ -171,6 +180,7 @@ pub async fn responses(
         body_size,
         client_tool = ?ctx.info.tool,
         client_ip = ?ctx.ip,
+        http_version = ?ctx.http_version,
         "proxy received /v1/responses request"
     );
 

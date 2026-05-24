@@ -309,6 +309,8 @@
   "requestLogs.detail.clientVersion": "クライアントバージョン",
   "requestLogs.detail.clientIp": "リクエスト元 IP",
   "requestLogs.detail.userAgent": "User-Agent",
+  "requestLogs.detail.entryKind": "受信エンドポイント",
+  "requestLogs.detail.httpVersion": "下り HTTP",
   "requestLogs.client.unknown": "未識別",
   "clientTool.claudeCode": "Claude Code",
   "clientTool.claudeDesktop": "Claude Desktop",

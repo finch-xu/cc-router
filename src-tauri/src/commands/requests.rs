@@ -37,6 +37,11 @@ pub struct RequestLogDto {
     pub client_version: Option<String>,
     /// TCP 对端 IP (来自 axum ConnectInfo). listen_all=true 场景下区分本机/局域网设备的关键
     pub client_ip: Option<String>,
+    /// 请求入口: "messages" (POST /v1/messages) / "responses" (POST /v1/responses).
+    /// 老日志为 NULL, 前端展示 "—".
+    pub entry_kind: Option<String>,
+    /// 下游 (CC ↔ cc-router) 协商的 HTTP 协议, 形如 "HTTP/1.1" / "HTTP/2.0".
+    pub downstream_http_version: Option<String>,
 }
 
 #[derive(Debug, Serialize)]
@@ -119,7 +124,8 @@ pub async fn list_requests(
                 upstream_input_tokens, upstream_output_tokens,
                 upstream_cache_creation, upstream_cache_read, error_message,
                 upstream_response_body,
-                client_tool, client_user_agent, client_version, client_ip
+                client_tool, client_user_agent, client_version, client_ip,
+                entry_kind, downstream_http_version
          FROM requests{}
          ORDER BY timestamp DESC
          LIMIT ? OFFSET ?",
@@ -163,6 +169,8 @@ pub async fn list_requests(
             client_user_agent: r.try_get("client_user_agent").ok(),
             client_version: r.try_get("client_version").ok(),
             client_ip: r.try_get("client_ip").ok(),
+            entry_kind: r.try_get("entry_kind").ok(),
+            downstream_http_version: r.try_get("downstream_http_version").ok(),
         })
         .collect();
 

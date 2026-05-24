@@ -445,6 +445,8 @@ fn finalize_streaming(
             client_user_agent: ctx.info.user_agent.clone(),
             client_version: ctx.info.version.clone(),
             client_ip: ctx.ip.clone(),
+            entry_kind: Some(ctx.entry_kind.as_str()),
+            downstream_http_version: ctx.http_version.clone(),
         };
         let _ = log_tx.try_send(entry);
         events::record_request(
@@ -568,6 +570,8 @@ async fn collect_to_json_response(
         client_user_agent: ctx.info.user_agent.clone(),
         client_version: ctx.info.version.clone(),
         client_ip: ctx.ip.clone(),
+        entry_kind: Some(ctx.entry_kind.as_str()),
+        downstream_http_version: ctx.http_version.clone(),
     };
     let _ = log_tx.try_send(entry);
     events::record_request(
@@ -915,6 +919,8 @@ fn finalize_kiro_streaming(
             client_user_agent: ctx.info.user_agent.clone(),
             client_version: ctx.info.version.clone(),
             client_ip: ctx.ip.clone(),
+            entry_kind: Some(ctx.entry_kind.as_str()),
+            downstream_http_version: ctx.http_version.clone(),
         };
         let _ = log_tx.try_send(entry);
         events::record_request(
@@ -1028,6 +1034,8 @@ async fn collect_kiro_to_json_response(
         client_user_agent: ctx.info.user_agent.clone(),
         client_version: ctx.info.version.clone(),
         client_ip: ctx.ip.clone(),
+        entry_kind: Some(ctx.entry_kind.as_str()),
+        downstream_http_version: ctx.http_version.clone(),
     };
     let _ = log_tx.try_send(entry);
     events::record_request(

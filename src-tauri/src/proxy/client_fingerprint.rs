@@ -54,13 +54,36 @@ pub struct ClientInfo {
     pub version: Option<String>,
 }
 
-/// 整套客户端上下文 (识别结果 + 对端 IP). 在 handler 入口构造一次,
-/// 沿 pipeline → dispatch 链克隆给每个 RequestLogEntry 构造点.
-/// 用 String 存 IP 避免下游模块到处 import std::net::IpAddr.
+/// cc-router 对外暴露的两个入口端点. 用枚举不是字符串, 避免下游构造 entry 时拼写错.
+/// 默认 Messages: 99% 流量是 /v1/messages, ClientContext::default() 在测试/fallback 路径上有用.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum RequestEntryKind {
+    #[default]
+    Messages,
+    Responses,
+}
+
+impl RequestEntryKind {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Messages => "messages",
+            Self::Responses => "responses",
+        }
+    }
+}
+
+/// 整套客户端上下文 (识别结果 + 对端 IP + 入口端点 + 下游 HTTP 协议版本).
+/// 在 handler 入口构造一次, 沿 pipeline → dispatch 链克隆给每个 RequestLogEntry 构造点.
+/// 用 String 存 IP / http_version 避免下游模块到处 import std::net::IpAddr / axum::http::Version.
 #[derive(Debug, Clone, Default)]
 pub struct ClientContext {
     pub info: ClientInfo,
     pub ip: Option<String>,
+    /// 请求进入的入口: /v1/messages 或 /v1/responses.
+    pub entry_kind: RequestEntryKind,
+    /// 下游 (CC ↔ cc-router) 协商的 HTTP 协议版本字符串, 形如 "HTTP/1.1" / "HTTP/2.0".
+    /// 由 [`super::extractors::format_http_version`] 生成, 落 DB requests.downstream_http_version.
+    pub http_version: Option<String>,
 }
 
 /// 入口: 按规则识别 headers, 返回 ClientInfo.

@@ -72,6 +72,11 @@ pub struct RequestLogEntry {
     pub client_version: Option<String>,
     /// TCP 对端 IP (来自 axum ConnectInfo, 非 X-Forwarded-For). listen_all=true 时是核心排查信息.
     pub client_ip: Option<String>,
+    /// 请求入口: "messages" (POST /v1/messages) 或 "responses" (POST /v1/responses).
+    /// 用 &'static str 不是 String 因为枚举的 as_str() 返回 'static slice, 跟 client_tool 同模式.
+    pub entry_kind: Option<&'static str>,
+    /// 下游 (CC ↔ cc-router) 协商的 HTTP 协议版本, 形如 "HTTP/1.1" / "HTTP/2.0".
+    pub downstream_http_version: Option<String>,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -214,8 +219,9 @@ pub(crate) async fn flush_batch(
                 upstream_input_tokens, upstream_output_tokens,
                 upstream_cache_creation, upstream_cache_read,
                 retry_count, error_message, upstream_response_body,
-                client_tool, client_user_agent, client_version, client_ip)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                client_tool, client_user_agent, client_version, client_ip,
+                entry_kind, downstream_http_version)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
         )
         .bind(entry.id.to_string())
         .bind(entry.timestamp_ms)
@@ -241,6 +247,8 @@ pub(crate) async fn flush_batch(
         .bind(entry.client_user_agent)
         .bind(entry.client_version)
         .bind(entry.client_ip)
+        .bind(entry.entry_kind)
+        .bind(entry.downstream_http_version)
         .execute(&mut *tx)
         .await;
         if let Err(e) = result {
@@ -361,6 +369,8 @@ mod tests {
             client_user_agent: None,
             client_version: None,
             client_ip: None,
+            entry_kind: None,
+            downstream_http_version: None,
         }
     }
 
