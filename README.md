@@ -43,6 +43,7 @@
 - **虚拟模型多别名** —— opus / sonnet / haiku 三个槽位各识别多种命名,以 opus 为例,`model-opus` / `claude-opus-4-7` / `anthropic/model-opus` / `anthropic/claude-opus-4-7` 都路由到同一虚拟模型,工具用什么命名都不挑
 - **本地 HTTPS** —— 一键生成自签 CA 与服务器证书,让只支持 HTTPS 的客户端也能接入 cc-router,详见[配置教程](https://ccrouter.app/docs/claude-desktop-integration/)
 - **接入 Claude Desktop App** —— 借助本地 HTTPS 与虚拟模型别名,Anthropic 官方桌面端可直接走 cc-router 聚合的多家订阅,详见[配置教程](https://ccrouter.app/docs/claude-desktop-integration/)
+- **双协议 API 入口** —— `Anthropic /v1/messages` 与 `OpenAI /v1/responses` 两套端点并行,Claude Code / Codex 等 Anthropic 与 OpenAI 生态的客户端都能一键接入
 
 <table align="center">
   <tr>

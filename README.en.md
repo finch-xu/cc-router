@@ -43,6 +43,7 @@ Highlights:
 - **Virtual model aliases** — each of opus / sonnet / haiku accepts multiple names; for opus that's `model-opus` / `claude-opus-4-7` / `anthropic/model-opus` / `anthropic/claude-opus-4-7`, all routed to the same virtual model — pick whatever naming your tool prefers
 - **Local HTTPS** — generate a self-signed CA and server cert in one click so HTTPS-only clients can talk to cc-router too; see the [setup guide](https://ccrouter.app/docs/claude-desktop-integration/)
 - **Claude Desktop App support** — combine local HTTPS with the virtual-model aliases above and Anthropic's official desktop app can route through cc-router's aggregated subscriptions; see the [setup guide](https://ccrouter.app/docs/claude-desktop-integration/)
+- **Dual-protocol ingress** — `Anthropic /v1/messages` and `OpenAI /v1/responses` are exposed side by side, so clients across both ecosystems — Claude Code, Codex and the like — plug into the same router with a single config
 
 <table align="center">
   <tr>
