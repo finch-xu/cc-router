@@ -26,7 +26,7 @@
   <a href="https://ccrouter.app" target="_blank" rel="noopener">🌐 Official Site ccrouter.app</a>
 </p>
 
-Bundle your scattered `Token Plan`, `Coding Plan`, and LLM API quotas into a single virtual Plan, and plug it into Claude Code, Claude Desktop App, OpenClaw, OpenCode, and more —— save money! save tokens! 100% local!
+Bundle your scattered `Token Plan`, `Coding Plan`, and LLM API quotas into a single virtual Plan, and plug it into Claude Code, Claude Desktop App, OpenClaw, OpenCode, Codex and more —— save money! save tokens! 100% local!
 
 > ⚠️ Notice: this tool only switches between subscription plans you already own. Request bodies are passed through almost verbatim — no reverse engineering, no jailbreak, no circumvention. You are responsible for complying with each plan's terms of service. cc-router is intended for use with coding tools like Claude Code only; do not use it for anything else.
 >
