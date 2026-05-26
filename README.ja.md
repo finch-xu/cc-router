@@ -55,6 +55,17 @@
   </tr>
 </table>
 
+## 連携ガイド
+
+以下の AI Agent / Coding Agent ツールはいずれも cc-router に接続でき、ご契約中のすべての LLM プランを利用できます。
+
+<p>
+<a href="https://ccrouter.app/docs/getting-started/" target="_blank" rel="noopener">Claude Code cli</a> · 
+<a href="https://ccrouter.app/docs/claude-desktop-integration/" target="_blank" rel="noopener">Claude Desktop App</a> · 
+<a href="https://ccrouter.app/docs/codex-integration/" target="_blank" rel="noopener">OpenAI Codex cli</a> · 
+<a href="https://ccrouter.app/docs/codex-integration/" target="_blank" rel="noopener">OpenAI Codex Desktop App</a> · OpenCode · OpenClaw · Kimi code cli · pi coding agent など、ほかにも多数。
+</p>
+
 ## 対応プラン・API 一覧
 
 | id | 名称 | Token Plan | API | 動作確認 |

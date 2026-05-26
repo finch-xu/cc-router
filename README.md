@@ -55,6 +55,17 @@
   </tr>
 </table>
 
+## 接入指南
+
+下方的 AI Agent / Coding Agent 工具都支持接入cc-router并使用你的所有大模型plan。
+
+<p>
+<a href="https://ccrouter.app/docs/getting-started/" target="_blank" rel="noopener">Claude Code cli</a> · 
+<a href="https://ccrouter.app/docs/claude-desktop-integration/" target="_blank" rel="noopener">Claude Desktop App</a> · 
+<a href="https://ccrouter.app/docs/codex-integration/" target="_blank" rel="noopener">OpenAI Codex cli</a> · 
+<a href="https://ccrouter.app/docs/codex-integration/" target="_blank" rel="noopener">OpenAI Codex Desktop App</a> · OpenCode · OpenClaw · Kimi code cli · pi coding agent 等等还有好多。
+</p>
+
 ## 支持的编程套餐和API
 
 | id | 名称 | Token Plan | API | 兼容性 |
