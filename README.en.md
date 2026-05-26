@@ -37,7 +37,7 @@ Bundle your scattered `Token Plan`, `Coding Plan`, and LLM API quotas into a sin
 Highlights:
 
 - **19 providers, one router** — built-in routing for DeepSeek, Qwen, Kimi, MiMo, MiniMax, GLM, Claude, Gemini, etc., across Token Plans / Coding Plans / pay-as-you-go APIs; mix and match opus / sonnet / haiku slots with sequential or round-robin dispatch
-- **Bring your own endpoint** — when the built-in providers don't cover what you need, plug any Anthropic Messages-compatible or Gemini generateContent-compatible API in directly, dispatched alongside the built-in subscriptions
+- **Bring your own endpoint** — when the built-in providers don't cover what you need, plug any Anthropic Messages-compatible or Gemini generateContent-compatible or OpenAI Responses-compatible API in directly, dispatched alongside the built-in subscriptions
 - **Usage receipts** — export your token-spend snapshot as PNG / PDF / HTML in one click; mono / color modes, no pricing shown by default (usage only), QR code at the bottom links back to the repo
 - **Fully translated UI** — 简体中文 / English / 日本語, follows your system locale or pick manually in Settings
 - **Virtual model aliases** — each of opus / sonnet / haiku accepts multiple names; for opus that's `model-opus` / `claude-opus-4-7` / `anthropic/model-opus` / `anthropic/claude-opus-4-7`, all routed to the same virtual model — pick whatever naming your tool prefers

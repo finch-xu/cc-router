@@ -37,7 +37,7 @@
 機能ハイライト：
 
 - **19 プロバイダーを 1 つのルーターで** —— DeepSeek・Qwen・Kimi・MiMo・MiniMax・GLM・Claude・Gemini などの Token Plan / Coding Plan / 従量課金 API を内蔵対応。opus / sonnet / haiku の 3 スロットに自由に割り当て、順次（sequential）またはラウンドロビン（round_robin）で自動切替
-- **任意のエンドポイントを追加可能** —— 内蔵プロバイダーで足りない場合、Anthropic Messages 互換 / Gemini generateContent 互換 API なら何でも直接接続でき、内蔵サブスクと同等にディスパッチ
+- **任意のエンドポイントを追加可能** —— 内蔵プロバイダーで足りない場合、Anthropic Messages 互換 / Gemini generateContent 互換 / OpenAI Responses 互換 API なら何でも直接接続でき、内蔵サブスクと同等にディスパッチ
 - **利用レシート** —— トークン消費スナップショットを PNG / PDF / HTML へワンクリックでエクスポート。モノクロ / カラーの 2 モード、既定では料金非表示で利用量のみ、フッターの QR コードからリポジトリへジャンプ
 - **3 言語完全翻訳** —— 简体中文 / English / 日本語、システム言語追従または設定画面で手動切替
 - **仮想モデルのエイリアス対応** —— opus / sonnet / haiku の各スロットが複数の命名を識別。opus を例にすると `model-opus` / `claude-opus-4-7` / `anthropic/model-opus` / `anthropic/claude-opus-4-7` がすべて同じ仮想モデルにルーティングされ、ツール側の命名規約に左右されません
