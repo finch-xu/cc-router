@@ -17,7 +17,16 @@ pub async fn factory_reset(state: State<'_, AppState>, app: AppHandle) -> AppRes
     // 1. 关闭 DB pool（让 wal checkpoint 和连接释放）
     state.db.close().await;
 
-    // 2. 删除 DB / settings 文件
+    // 2. 顺便禁用 OS 级登录项 (LaunchAgent / Registry / .desktop), 否则 settings.json 已删
+    //    但下次开机仍会自启动, 与 UI 显示的 false 背离.
+    {
+        use tauri_plugin_autostart::ManagerExt;
+        if let Err(e) = app.autolaunch().disable() {
+            warn!(?e, "factory reset: failed to disable autostart");
+        }
+    }
+
+    // 3. 删除 DB / settings 文件
     let app_data_dir = paths::app_data_dir(&app)?;
     for name in ["config.db", "config.db-wal", "config.db-shm", "settings.json"] {
         let path = app_data_dir.join(name);

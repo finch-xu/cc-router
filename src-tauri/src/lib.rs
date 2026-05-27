@@ -52,6 +52,10 @@ pub fn run() {
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_clipboard_manager::init())
         .plugin(tauri_plugin_updater::Builder::new().build())
+        .plugin(tauri_plugin_autostart::init(
+            tauri_plugin_autostart::MacosLauncher::LaunchAgent,
+            None,
+        ))
         .setup(|app| {
             // 日志初始化
             let app_data_dir = app
@@ -166,6 +170,23 @@ async fn bootstrap(
     let mut settings = settings::load_or_default(&app_data_dir).await?;
     // 首次启动或老用户升级时,auth_token 为空 → 生成并立即 save。
     settings::ensure_auth_token(&app_data_dir, &mut settings).await?;
+
+    // 3b. autostart 反向同步: plugin 真实状态 (LaunchAgent / Registry / .desktop) 为真相源,
+    //     不一致就写回 settings.json. 用户从 macOS 系统设置「登录项」手动移除 cc-router 后,
+    //     settings 应跟随更新, 而不是被沉默地补回去.
+    {
+        use tauri_plugin_autostart::ManagerExt;
+        let plugin_enabled = handle.autolaunch().is_enabled().unwrap_or(false);
+        if settings.autostart != plugin_enabled {
+            info!(
+                settings_value = settings.autostart,
+                plugin_value = plugin_enabled,
+                "autostart drift detected, syncing settings.json to plugin truth"
+            );
+            settings.autostart = plugin_enabled;
+            settings::save(&app_data_dir, &settings).await?;
+        }
+    }
 
     // 4. 订阅运行时状态初始化
     let subscription_map = subscription::store::load_runtime(&pool).await?;
