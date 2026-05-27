@@ -27,6 +27,9 @@ import type { ProxyMode, TlsStatus, UpdateSource } from "@/types";
 import { save } from "@tauri-apps/plugin-dialog";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 
+const IS_MACOS =
+  typeof navigator !== "undefined" && /Mac/i.test(navigator.platform ?? "");
+
 export function SettingsPage() {
   const { t } = useT();
   const settings = useSettings();
@@ -45,6 +48,7 @@ export function SettingsPage() {
   const [corsAllowOrigin, setCorsAllowOrigin] = useState("*");
   const [preferredLanguage, setPreferredLanguage] = useState<LanguagePref>("system");
   const [debugMode, setDebugMode] = useState(false);
+  const [hideDockIcon, setHideDockIcon] = useState(false);
   const [clearDumpsDialog, setClearDumpsDialog] = useState(false);
   const [clearingDumps, setClearingDumps] = useState(false);
   const [resetDialog, setResetDialog] = useState(false);
@@ -96,6 +100,7 @@ export function SettingsPage() {
     setCorsAllowOrigin(settings.data.cors_allow_origin);
     setPreferredLanguage(settings.data.preferred_language ?? "system");
     setDebugMode(settings.data.debug_mode ?? false);
+    setHideDockIcon(settings.data.hide_dock_icon ?? false);
     initializedRef.current = true;
   }, [settings.data]);
 
@@ -136,6 +141,13 @@ export function SettingsPage() {
   async function changeDebugMode(next: boolean) {
     setDebugMode(next);
     await patch({ debug_mode: next });
+  }
+
+  // macOS dock 显隐即时生效: 后端 update_settings 在保存后调用
+  // apply_dock_visibility 切换 NSApplication activationPolicy.
+  async function changeHideDockIcon(next: boolean) {
+    setHideDockIcon(next);
+    await patch({ hide_dock_icon: next });
   }
 
   async function changeListenAll(next: boolean) {
@@ -262,6 +274,19 @@ export function SettingsPage() {
               aria-label={t("settings.proxy.autostart.label")}
             />
           </div>
+          {IS_MACOS && (
+            <div className="setting-row">
+              <div className="label-col">
+                {t("settings.appearance.hideDock.label")}
+                <div className="desc">{t("settings.appearance.hideDock.desc")}</div>
+              </div>
+              <Toggle
+                checked={hideDockIcon}
+                onChange={(v) => void changeHideDockIcon(v)}
+                aria-label={t("settings.appearance.hideDock.label")}
+              />
+            </div>
+          )}
           <div className="setting-row">
             <div className="label-col">
               {t("settings.update.source.label")}

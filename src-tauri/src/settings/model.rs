@@ -87,6 +87,12 @@ pub struct Settings {
     /// 用于排查协议适配类问题. 默认关闭(file IO 与磁盘占用代价).
     #[serde(default)]
     pub debug_mode: bool,
+    /// macOS 专属: 是否把 app 从 Dock 隐藏 (NSApplication activationPolicy=Accessory).
+    /// 默认 false 保留 Dock 图标, 与 macOS 同类成熟 app 惯例一致.
+    /// 切换立即生效 (commands::settings::update_settings 内调 apply_dock_visibility),
+    /// 启动时按本字段自动应用 (lib.rs setup). 非 macOS 平台后端 helper 为 no-op.
+    #[serde(default)]
+    pub hide_dock_icon: bool,
 }
 
 fn default_port() -> u16 {
@@ -136,6 +142,7 @@ impl Default for Settings {
             preferred_language: default_preferred_language(),
             update_source: None,
             debug_mode: false,
+            hide_dock_icon: false,
         }
     }
 }
@@ -157,6 +164,7 @@ pub struct SettingsPatch {
     pub preferred_language: Option<String>,
     pub update_source: Option<String>,
     pub debug_mode: Option<bool>,
+    pub hide_dock_icon: Option<bool>,
 }
 
 impl Settings {
@@ -205,6 +213,9 @@ impl Settings {
         }
         if let Some(p) = patch.debug_mode {
             self.debug_mode = p;
+        }
+        if let Some(p) = patch.hide_dock_icon {
+            self.hide_dock_icon = p;
         }
     }
 }

@@ -26,6 +26,25 @@ use tracing::{error, info};
 
 use crate::state::AppState;
 
+/// macOS: 切换 NSApplication activationPolicy 实现 Dock 图标显示/隐藏.
+/// Accessory = 仅菜单栏 (Dock 无图标), Regular = 常规前台 app.
+/// 启动时由 setup 闭包调用; 运行时由 commands::settings::update_settings 在
+/// patch 含 hide_dock_icon 时调用. 非 macOS 平台是 no-op.
+#[cfg(target_os = "macos")]
+pub fn apply_dock_visibility<R: tauri::Runtime>(app: &tauri::AppHandle<R>, hide: bool) {
+    let policy = if hide {
+        tauri::ActivationPolicy::Accessory
+    } else {
+        tauri::ActivationPolicy::Regular
+    };
+    if let Err(e) = app.set_activation_policy(policy) {
+        tracing::warn!(error = %e, "failed to set macOS activation policy");
+    }
+}
+
+#[cfg(not(target_os = "macos"))]
+pub fn apply_dock_visibility<R: tauri::Runtime>(_app: &tauri::AppHandle<R>, _hide: bool) {}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
@@ -53,6 +72,8 @@ pub fn run() {
             tauri::async_runtime::block_on(async move {
                 match bootstrap(handle.clone(), app_data_dir, resource_dir).await {
                     Ok(state) => {
+                        let hide_dock = state.settings.read().await.hide_dock_icon;
+                        apply_dock_visibility(&handle, hide_dock);
                         handle.manage(state);
                     }
                     Err(e) => {

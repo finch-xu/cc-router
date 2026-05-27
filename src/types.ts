@@ -370,6 +370,12 @@ export interface Settings {
    * 默认关闭。
    */
   debug_mode: boolean;
+  /**
+   * macOS 专属: 是否把 app 从 Dock 隐藏 (NSApplication activationPolicy=Accessory).
+   * 默认 false 保留 Dock 图标。toggle 立即生效, 启动时自动应用。
+   * 非 macOS 平台后端为 no-op, 前端 UI 只在 macOS 上显示该开关。
+   */
+  hide_dock_icon: boolean;
 }
 
 export type UpdateSource = "international" | "china";
@@ -390,6 +396,7 @@ export interface SettingsPatch {
   preferred_language?: "system" | "zh" | "en" | "ja";
   update_source?: UpdateSource;
   debug_mode?: boolean;
+  hide_dock_icon?: boolean;
   // 注意: auth_token 不在 patch 里,必须通过 generateNewToken() 改
 }
 

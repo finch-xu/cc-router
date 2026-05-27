@@ -99,6 +99,8 @@
   "settings.language.label": "UI 言語",
   "settings.language.desc": "cc-router の UI 表示言語を選択します。「システムに従う」はシステムロケールを参照します: 中国語 → 中文、日本語 → 日本語、それ以外 → English。",
   "settings.language.system": "システムに従う",
+  "settings.appearance.hideDock.label": "Dock からアイコンを隠す",
+  "settings.appearance.hideDock.desc": "オンにすると cc-router は Dock に表示されず、メニューバーからのみアクセスできます。即時に反映され、次回起動時にも自動適用されます。",
   "settings.section.debug": "デバッグ",
   "settings.debug.mode.label": "デバッグモード",
   "settings.debug.mode.desc": "有効にすると、毎回のアウトバウンドリクエストでクライアントリクエストボディ、cc-router 書き換え後のリクエストボディ、上流レスポンスボディの 3 セットを debug-dumps ディレクトリにそれぞれ .txt として書き出し、プロトコル適合の問題を切り分けるのに使えます。ファイルには会話の全内容が含まれるため、デバッグ後は無効化してクリーンアップしてください。",

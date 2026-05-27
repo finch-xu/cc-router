@@ -99,6 +99,8 @@
   "settings.language.label": "UI language",
   "settings.language.desc": "Choose the cc-router UI display language. \"Follow system\" reads your system locale: Chinese → 中文, Japanese → 日本語, otherwise → English.",
   "settings.language.system": "Follow system",
+  "settings.appearance.hideDock.label": "Hide icon from Dock",
+  "settings.appearance.hideDock.desc": "When enabled, cc-router stays out of the Dock and is reachable only from the menu bar. Takes effect immediately and applies on next launch.",
   "settings.section.debug": "Debug",
   "settings.debug.mode.label": "Debug mode",
   "settings.debug.mode.desc": "When on, every outbound request writes three .txt files to the debug-dumps directory: the client request body, cc-router's rewritten request body, and the upstream response body. Useful for protocol adaptation issues. Files contain full conversation content — turn off and clean up after debugging.",

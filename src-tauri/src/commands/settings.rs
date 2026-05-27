@@ -16,11 +16,19 @@ pub async fn update_settings(
     state: State<'_, AppState>,
     patch: SettingsPatch,
 ) -> AppResult<Settings> {
+    let dock_change = patch.hide_dock_icon;
     let mut guard = state.settings.write().await;
     guard.apply_patch(patch);
     let app_data_dir = paths::app_data_dir(&state.app_handle)?;
     save(&app_data_dir, &guard).await?;
-    Ok(guard.clone())
+    let snapshot = guard.clone();
+    drop(guard);
+
+    if let Some(hide) = dock_change {
+        crate::apply_dock_visibility(&state.app_handle, hide);
+    }
+
+    Ok(snapshot)
 }
 
 /// 重新生成 auth_token 并立即持久化。返回新 settings 让前端拿到新 token 显示。

@@ -99,6 +99,8 @@
   "settings.language.label": "界面语言",
   "settings.language.desc": "选择 cc-router 界面显示语言。「跟随系统」会读取系统语言:中文 → 中文,日语 → 日本語,其他 → English。",
   "settings.language.system": "跟随系统",
+  "settings.appearance.hideDock.label": "在 Dock 隐藏图标",
+  "settings.appearance.hideDock.desc": "开启后 cc-router 不在 Dock 出现,仅保留菜单栏图标。设置立即生效,下次启动自动应用。",
   "settings.section.debug": "调试",
   "settings.debug.mode.label": "调试模式",
   "settings.debug.mode.desc": "开启后每次出站请求会把客户端请求体、cc-router 改写后的真实请求体、上游响应体三段,各写一个 .txt 文件到 debug-dumps 目录,用于排查协议适配类问题。文件包含完整对话内容,调试完请关闭并清理。",
