@@ -4,7 +4,7 @@ version = "3.0.2"
 description = "多订阅聚合代理 · 让 Claude Code 无缝调用多家厂商订阅"
 authors = ["cc-router"]
 edition = "2021"
-rust-version = "1.77"
+rust-version = "1.77.2"
 
 [lib]
 name = "cc_router_lib"
@@ -20,6 +20,8 @@ tauri-plugin-dialog = "2"
 tauri-plugin-shell = "2"
 tauri-plugin-updater = "2"
 tauri-plugin-autostart = "2"
+# 仅前端用: @tauri-apps/plugin-os::platform() 取代 deprecated navigator.platform 判断 macOS.
+tauri-plugin-os = "2"
 
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"

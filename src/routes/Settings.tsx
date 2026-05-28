@@ -25,10 +25,8 @@ import {
 import { useT, type LanguagePref } from "@/i18n";
 import type { ProxyMode, TlsStatus, UpdateSource } from "@/types";
 import { save } from "@tauri-apps/plugin-dialog";
+import { platform } from "@tauri-apps/plugin-os";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-
-const IS_MACOS =
-  typeof navigator !== "undefined" && /Mac/i.test(navigator.platform ?? "");
 
 export function SettingsPage() {
   const { t } = useT();
@@ -49,6 +47,8 @@ export function SettingsPage() {
   const [preferredLanguage, setPreferredLanguage] = useState<LanguagePref>("system");
   const [debugMode, setDebugMode] = useState(false);
   const [hideDockIcon, setHideDockIcon] = useState(false);
+  // Tauri 官方 OS 插件取代 deprecated navigator.platform. 同步 API, 取一次即可.
+  const [isMacos] = useState(() => platform() === "macos");
   const [clearDumpsDialog, setClearDumpsDialog] = useState(false);
   const [clearingDumps, setClearingDumps] = useState(false);
   const [resetDialog, setResetDialog] = useState(false);
@@ -274,7 +274,7 @@ export function SettingsPage() {
               aria-label={t("settings.proxy.autostart.label")}
             />
           </div>
-          {IS_MACOS && (
+          {isMacos && (
             <div className="setting-row">
               <div className="label-col">
                 {t("settings.appearance.hideDock.label")}

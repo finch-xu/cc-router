@@ -57,6 +57,7 @@ pub fn run() {
             tauri_plugin_autostart::MacosLauncher::LaunchAgent,
             None,
         ))
+        .plugin(tauri_plugin_os::init())
         .setup(|app| {
             // 日志初始化
             let app_data_dir = app
