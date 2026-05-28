@@ -670,14 +670,22 @@ export interface RouteAttemptFinishedEvent {
 
 export type RouteFlashKind = "attempt" | "success" | "error";
 
-// ===== Claude Code 集成 (commands/integrations.rs) =====
+// ===== 客户端集成共享 (claude_code / codex / 未来 ollama 等) =====
 
-export type ClaudeCodeSyncStatus =
+/**
+ * 配置文件同步状态. 五态对应后端 SyncStatus / CodexSyncStatus enum (字面量需保持一致).
+ * 各 integration 模块可继续 export 别名 (`ClaudeCodeSyncStatus = SyncStatus`) 以兼容老 import.
+ */
+export type SyncStatus =
   | "in_sync"
   | "needs_apply"
   | "never_applied"
   | "file_missing"
   | "parse_error";
+
+// ===== Claude Code 集成 (commands/integrations.rs) =====
+
+export type ClaudeCodeSyncStatus = SyncStatus;
 
 export interface ClaudeCodeReadResult {
   path: string;
@@ -695,6 +703,40 @@ export interface ClaudeCodeInspectResult {
 export interface ClaudeCodeWriteOutcome {
   path: string;
   /** Some=触发了备份; null=未触发或已有 .bak */
+  backup_path: string | null;
+  bytes_written: number;
+}
+
+// ===== Codex CLI / Desktop 集成 (commands/integrations.rs::*_codex_*) =====
+// Codex CLI 与 Codex Desktop 共用 ~/.codex/ 目录, 双文件: config.toml + auth.json.
+
+export type CodexSyncStatus = SyncStatus;
+
+export interface CodexReadResult {
+  path: string;
+  /** null = 文件不存在 */
+  content: string | null;
+}
+
+export interface CodexConfigInspectResult {
+  path: string;
+  status: CodexSyncStatus;
+  /** 当前 [model_providers.cc-router] 的 base_url, 用于「指向了什么」展示. */
+  current_base_url: string | null;
+}
+
+export interface CodexAuthInspectResult {
+  path: string;
+  status: CodexSyncStatus;
+  /** 检测到 ChatGPT OAuth 凭据 (tokens.access_token 存在). 写入会触发备份. */
+  has_chatgpt_oauth: boolean;
+  /** 当前 OPENAI_API_KEY 是否与 cc-router 当前 token 匹配 (auth_enabled=false 时恒 true). */
+  current_token_matches: boolean;
+}
+
+export interface CodexWriteOutcome {
+  path: string;
+  /** Some=触发了备份; null=未触发或已有 .cc-router.bak */
   backup_path: string | null;
   bytes_written: number;
 }

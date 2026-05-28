@@ -3,6 +3,7 @@ import { Link } from "react-router-dom";
 import { Bot, Boxes } from "lucide-react";
 import ClaudeCode from "@lobehub/icons/es/ClaudeCode";
 import Cline from "@lobehub/icons/es/Cline";
+import Codex from "@lobehub/icons/es/Codex";
 import HermesAgent from "@lobehub/icons/es/HermesAgent";
 import KiloCode from "@lobehub/icons/es/KiloCode";
 import OpenClaw from "@lobehub/icons/es/OpenClaw";
@@ -10,13 +11,21 @@ import OpenCode from "@lobehub/icons/es/OpenCode";
 import Qwen from "@lobehub/icons/es/Qwen";
 import RooCode from "@lobehub/icons/es/RooCode";
 import { ClaudeCodeSettingsEditor } from "@/components/ClaudeCodeSettingsEditor";
+import { CodexSettingsEditor } from "@/components/CodexSettingsEditor";
 import { CopyableBlock } from "@/components/CopyableBlock";
 import { useEnvSnippet, useProxyEndpoint } from "@/hooks/useSettings";
 import { buildRecommendedEnv } from "@/lib/recommendedClaudeCodeEnv";
 import { useT } from "@/i18n";
 import { cn } from "@/lib/utils";
 
-type Tab = "claude-code" | "cc-switch" | "openclaw" | "hermes" | "opencode" | "others";
+type Tab =
+  | "claude-code"
+  | "codex"
+  | "cc-switch"
+  | "openclaw"
+  | "hermes"
+  | "opencode"
+  | "others";
 
 const ICON_SIZE = 14;
 const COMING_SOON_SIZE = 28;
@@ -34,6 +43,7 @@ export function GuidePage() {
 
   const TABS: { id: Tab; label: string; icon: ReactNode }[] = [
     { id: "claude-code", label: "Claude Code", icon: <ClaudeCode.Color size={ICON_SIZE} /> },
+    { id: "codex", label: "Codex", icon: <Codex size={ICON_SIZE} /> },
     { id: "cc-switch", label: "cc-switch", icon: <Bot size={ICON_SIZE} /> },
     { id: "openclaw", label: "OpenClaw", icon: <OpenClaw.Color size={ICON_SIZE} /> },
     { id: "hermes", label: "Hermes Agent", icon: <HermesAgent size={ICON_SIZE} /> },
@@ -63,6 +73,7 @@ export function GuidePage() {
       </div>
 
       {tab === "claude-code" && <ClaudeCodeTab />}
+      {tab === "codex" && <CodexTab />}
       {tab === "cc-switch" && <CcSwitchTab />}
       {tab === "openclaw" && <OpenClawTab />}
       {tab === "hermes" && <HermesAgentTab />}
@@ -449,6 +460,70 @@ function HermesAgentTab() {
             {t("guide.hermes.auth.desc")}
           </div>
           <CopyableBlock text={authCmd} />
+        </div>
+      </div>
+    </>
+  );
+}
+
+function CodexTab() {
+  const { t } = useT();
+  const { port, baseUrl, running } = useProxyEndpoint();
+  const effectiveBaseUrl = baseUrl ?? `http://127.0.0.1:${port}`;
+  const usageCmd = `codex -p cc-router "hello"`;
+
+  return (
+    <>
+      <div className="card section">
+        <div className="card-head">
+          <div className="card-title">{t("guide.codex.path.title")}</div>
+          <span className="card-sub mono">
+            {effectiveBaseUrl} ·{" "}
+            {running ? t("settings.proxy.statusRunning") : t("guide.proxy.statusNotStarted")}
+          </span>
+        </div>
+        <div className="card-body">
+          <div className="field-hint" style={{ marginBottom: 10 }}>
+            {t("guide.codex.path.intro")}
+          </div>
+          <table
+            className="table"
+            style={{ marginBottom: 0, fontSize: 12, tableLayout: "fixed" }}
+          >
+            <tbody>
+              <tr>
+                <td style={{ width: 90, color: "var(--ink-3)" }}>macOS</td>
+                <td className="mono">~/.codex/config.toml · ~/.codex/auth.json</td>
+              </tr>
+              <tr>
+                <td style={{ color: "var(--ink-3)" }}>Linux</td>
+                <td className="mono">~/.codex/config.toml · ~/.codex/auth.json</td>
+              </tr>
+              <tr>
+                <td style={{ color: "var(--ink-3)" }}>Windows</td>
+                <td className="mono">
+                  %USERPROFILE%\.codex\config.toml · %USERPROFILE%\.codex\auth.json
+                </td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      <CodexSettingsEditor />
+
+      <div className="card section">
+        <div className="card-head">
+          <div className="card-title">{t("guide.codex.usage.title")}</div>
+        </div>
+        <div className="card-body">
+          <div className="field-hint" style={{ marginBottom: 10 }}>
+            {t("guide.codex.usage.desc")}
+          </div>
+          <CopyableBlock text={usageCmd} />
+          <div className="field-hint" style={{ marginTop: 10 }}>
+            {t("guide.codex.usage.note")}
+          </div>
         </div>
       </div>
     </>

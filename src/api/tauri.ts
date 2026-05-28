@@ -6,6 +6,10 @@ import type {
   ClaudeCodeInspectResult,
   ClaudeCodeReadResult,
   ClaudeCodeWriteOutcome,
+  CodexAuthInspectResult,
+  CodexConfigInspectResult,
+  CodexReadResult,
+  CodexWriteOutcome,
   CreateChatGptOAuthSubscriptionInput,
   CreateKiroSubscriptionInput,
   CreateSubscriptionInput,
@@ -162,4 +166,15 @@ export const api = {
     invoke<ClaudeCodeInspectResult>("inspect_claude_code_settings"),
   writeClaudeCodeSettings: (newContent: string) =>
     invoke<ClaudeCodeWriteOutcome>("write_claude_code_settings", { newContent }),
+
+  // Codex CLI / Desktop 集成 (~/.codex/{config.toml, auth.json})
+  readCodexConfig: () => invoke<CodexReadResult>("read_codex_config"),
+  readCodexAuth: () => invoke<CodexReadResult>("read_codex_auth"),
+  inspectCodexConfig: () =>
+    invoke<CodexConfigInspectResult>("inspect_codex_config"),
+  inspectCodexAuth: () => invoke<CodexAuthInspectResult>("inspect_codex_auth"),
+  writeCodexConfig: (newContent: string) =>
+    invoke<CodexWriteOutcome>("write_codex_config", { newContent }),
+  writeCodexAuth: (newContent: string) =>
+    invoke<CodexWriteOutcome>("write_codex_auth", { newContent }),
 };

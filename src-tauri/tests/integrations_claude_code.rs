@@ -1,7 +1,8 @@
 //! integrations::claude_code 集成测试 — 用 tempfile 注入 HOME, 不污染真实 ~/.claude.
 
-use cc_router_lib::integrations::claude_code::{
-    self, settings_path_in, sibling_with_suffix, SyncStatus, BACKUP_SUFFIX,
+use cc_router_lib::integrations::{
+    claude_code::{self, settings_path_in, SyncStatus, BACKUP_SUFFIX},
+    sibling_with_suffix,
 };
 use tempfile::TempDir;
 

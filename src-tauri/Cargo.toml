@@ -24,6 +24,8 @@ tauri-plugin-autostart = "2"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 serde_yaml = "0.9"
+# 用于 Codex config.toml 编辑器: 保留注释 / 字段顺序 / 空行 (用户可能手写过 profile).
+toml_edit = "0.22"
 
 tokio = { version = "1", features = ["full"] }
 axum = { version = "0.7", features = ["http2", "macros"] }

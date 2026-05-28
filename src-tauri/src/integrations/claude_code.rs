@@ -15,6 +15,7 @@ use std::path::{Path, PathBuf};
 use serde::Serialize;
 use tokio::fs;
 
+use super::{atomic_write, home_dir, sibling_with_suffix};
 use crate::error::{AppError, AppResult};
 
 pub const BACKUP_SUFFIX: &str = ".cc-router.bak";
@@ -27,13 +28,6 @@ pub fn settings_path() -> AppResult<PathBuf> {
 
 pub fn settings_path_in(home: &Path) -> PathBuf {
     home.join(".claude").join("settings.json")
-}
-
-fn home_dir() -> AppResult<PathBuf> {
-    std::env::var_os("HOME")
-        .map(PathBuf::from)
-        .or_else(|| std::env::var_os("USERPROFILE").map(PathBuf::from))
-        .ok_or_else(|| AppError::internal("无法解析用户主目录: HOME/USERPROFILE 均未设置"))
 }
 
 #[derive(Debug, Serialize)]
@@ -218,10 +212,8 @@ pub async fn write_in(
 
     let backup_path = maybe_backup(&path, cc_router_base_url).await?;
 
-    let tmp = sibling_with_suffix(&path, TMP_SUFFIX);
     let bytes = new_content.as_bytes();
-    fs::write(&tmp, bytes).await?;
-    fs::rename(&tmp, &path).await?;
+    atomic_write(&path, bytes, TMP_SUFFIX).await?;
 
     Ok(WriteOutcome {
         path: display,
@@ -250,16 +242,4 @@ async fn maybe_backup(target: &Path, cc_router_base_url: &str) -> AppResult<Opti
     }
     fs::copy(target, &backup).await?;
     Ok(Some(backup))
-}
-
-/// 在同目录下生成一个与 target 同名 + suffix 的兄弟路径.
-/// `target` 必须有 file_name; 否则 fallback 到 "settings.json" + suffix 兜底.
-pub fn sibling_with_suffix(target: &Path, suffix: &str) -> PathBuf {
-    let mut p = target.to_path_buf();
-    let file_name = target
-        .file_name()
-        .and_then(|n| n.to_str())
-        .unwrap_or("settings.json");
-    p.set_file_name(format!("{file_name}{suffix}"));
-    p
 }

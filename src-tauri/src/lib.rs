@@ -151,6 +151,12 @@ pub fn run() {
             commands::integrations::read_claude_code_settings,
             commands::integrations::inspect_claude_code_settings,
             commands::integrations::write_claude_code_settings,
+            commands::integrations::read_codex_config,
+            commands::integrations::read_codex_auth,
+            commands::integrations::inspect_codex_config,
+            commands::integrations::inspect_codex_auth,
+            commands::integrations::write_codex_config,
+            commands::integrations::write_codex_auth,
         ])
         .run(tauri::generate_context!())
         .expect("运行 cc-router 时发生错误");
