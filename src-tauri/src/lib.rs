@@ -6,6 +6,7 @@
 pub mod commands;
 pub mod db;
 pub mod error;
+pub mod integrations;
 pub mod oauth;
 pub mod observability;
 pub mod provider;
@@ -147,6 +148,9 @@ pub fn run() {
             commands::tls::tls_get_ca_pem_path,
             commands::tls::tls_export_ca_pem,
             commands::tls::tls_regenerate_leaf,
+            commands::integrations::read_claude_code_settings,
+            commands::integrations::inspect_claude_code_settings,
+            commands::integrations::write_claude_code_settings,
         ])
         .run(tauri::generate_context!())
         .expect("运行 cc-router 时发生错误");

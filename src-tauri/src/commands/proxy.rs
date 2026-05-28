@@ -17,6 +17,9 @@ pub struct ProxyStatus {
     pub https_port: Option<u16>,
     /// true: 监听 0.0.0.0; false: 仅 127.0.0.1.
     pub listen_all: bool,
+    /// 客户端工具应连接的完整 base URL (含 scheme + port). 由 [`AppState::local_base_url`] 决定.
+    /// 前端硬拼 URL 容易在 HTTPS-only / 端口冲突 +1 时出错, 改由后端给定唯一真相.
+    pub base_url: String,
 }
 
 #[tauri::command]
@@ -28,6 +31,7 @@ pub async fn proxy_status(state: State<'_, AppState>) -> AppResult<ProxyStatus> 
         (g.proxy_mode, g.listen_all)
     };
     let primary = http_port.or(https_port).unwrap_or(0);
+    let base_url = state.local_base_url().await;
     Ok(ProxyStatus {
         port: primary,
         running: primary != 0,
@@ -35,22 +39,14 @@ pub async fn proxy_status(state: State<'_, AppState>) -> AppResult<ProxyStatus> 
         http_port,
         https_port,
         listen_all,
+        base_url,
     })
 }
 
 #[tauri::command]
 pub async fn env_snippet(state: State<'_, AppState>) -> AppResult<String> {
-    let http_port = *state.http_bound_port.read().await;
-    let https_port = *state.https_bound_port.read().await;
+    let base_url = state.local_base_url().await;
     let token = state.settings.read().await.auth_token.clone();
-    // 优先用 HTTP 端口 (更通用); 仅 HTTPS 时给 https:// URL (用户需先导入 CA).
-    let base_url = if let Some(p) = http_port {
-        format!("http://127.0.0.1:{p}")
-    } else if let Some(p) = https_port {
-        format!("https://127.0.0.1:{p}")
-    } else {
-        "http://127.0.0.1:23456".to_string()
-    };
     Ok(format!(
         "export ANTHROPIC_BASE_URL={base_url}\n\
          export ANTHROPIC_AUTH_TOKEN={token}\n\

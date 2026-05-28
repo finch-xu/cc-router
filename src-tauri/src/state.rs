@@ -53,4 +53,20 @@ impl AppState {
         let subs = self.subscriptions.read().await;
         subs.get(id).cloned()
     }
+
+    /// 客户端工具应连接的 cc-router 本地代理 URL.
+    /// 选择顺序: 实际绑定的 HTTP 端口 → 实际绑定的 HTTPS 端口 → settings.proxy_port (尚未起来时的 fallback).
+    /// 单一来源, env_snippet / integrations / proxy_status 全部走它,避免 scheme 与端口漂移.
+    pub async fn local_base_url(&self) -> String {
+        let http_port = *self.http_bound_port.read().await;
+        let https_port = *self.https_bound_port.read().await;
+        if let Some(p) = http_port {
+            format!("http://127.0.0.1:{p}")
+        } else if let Some(p) = https_port {
+            format!("https://127.0.0.1:{p}")
+        } else {
+            let configured = self.settings.read().await.proxy_port;
+            format!("http://127.0.0.1:{configured}")
+        }
+    }
 }

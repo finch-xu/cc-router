@@ -424,6 +424,8 @@ export interface ProxyStatus {
   https_port: number | null;
   /** 监听地址 (0.0.0.0 vs 127.0.0.1) */
   listen_all: boolean;
+  /** 客户端工具应连接的完整 base URL (含 scheme + port). 由后端 AppState::local_base_url 决定. */
+  base_url: string;
 }
 
 /** TLS 状态 (cc-router 自签 CA 信息). 对应 Rust 侧 tls::TlsStatus */
@@ -667,3 +669,32 @@ export interface RouteAttemptFinishedEvent {
 }
 
 export type RouteFlashKind = "attempt" | "success" | "error";
+
+// ===== Claude Code 集成 (commands/integrations.rs) =====
+
+export type ClaudeCodeSyncStatus =
+  | "in_sync"
+  | "needs_apply"
+  | "never_applied"
+  | "file_missing"
+  | "parse_error";
+
+export interface ClaudeCodeReadResult {
+  path: string;
+  /** null 表示 ~/.claude/settings.json 不存在 */
+  content: string | null;
+}
+
+export interface ClaudeCodeInspectResult {
+  path: string;
+  status: ClaudeCodeSyncStatus;
+  current_base_url: string | null;
+  current_token_matches: boolean;
+}
+
+export interface ClaudeCodeWriteOutcome {
+  path: string;
+  /** Some=触发了备份; null=未触发或已有 .bak */
+  backup_path: string | null;
+  bytes_written: number;
+}

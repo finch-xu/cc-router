@@ -54,6 +54,8 @@ export function useProxyEndpoint() {
   const settings = useSettings();
   return {
     port: proxy.data?.port ?? 23456,
+    /** 后端给定的真实 base URL (含 scheme + 真实端口); 未加载完成时为 undefined. */
+    baseUrl: proxy.data?.base_url,
     token: settings.data?.auth_token ?? "",
     running: proxy.data?.running ?? false,
   };

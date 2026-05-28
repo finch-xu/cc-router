@@ -9,8 +9,10 @@ import OpenClaw from "@lobehub/icons/es/OpenClaw";
 import OpenCode from "@lobehub/icons/es/OpenCode";
 import Qwen from "@lobehub/icons/es/Qwen";
 import RooCode from "@lobehub/icons/es/RooCode";
+import { ClaudeCodeSettingsEditor } from "@/components/ClaudeCodeSettingsEditor";
 import { CopyableBlock } from "@/components/CopyableBlock";
 import { useEnvSnippet, useProxyEndpoint } from "@/hooks/useSettings";
+import { buildRecommendedEnv } from "@/lib/recommendedClaudeCodeEnv";
 import { useT } from "@/i18n";
 import { cn } from "@/lib/utils";
 
@@ -93,26 +95,13 @@ function OthersTab() {
 
 function ClaudeCodeTab() {
   const { t } = useT();
-  const { port, token, running } = useProxyEndpoint();
+  const { port, baseUrl, token, running } = useProxyEndpoint();
   const env = useEnvSnippet();
 
+  // snippet 展示用. baseUrl 未到达时(首屏) 用 settings.proxy_port 兜底, 与 Rust local_base_url 同语义.
+  const effectiveBaseUrl = baseUrl ?? `http://127.0.0.1:${port}`;
   const claudeJson = JSON.stringify(
-    {
-      env: {
-        ANTHROPIC_BASE_URL: `http://127.0.0.1:${port}`,
-        ANTHROPIC_AUTH_TOKEN: token,
-        API_TIMEOUT_MS: "3000000",
-        ANTHROPIC_MODEL: "model-opus",
-        ANTHROPIC_DEFAULT_OPUS_MODEL: "model-opus",
-        ANTHROPIC_DEFAULT_SONNET_MODEL: "model-sonnet",
-        ANTHROPIC_DEFAULT_HAIKU_MODEL: "model-haiku",
-        CLAUDE_CODE_SUBAGENT_MODEL: "model-opus",
-        CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC: "1",
-        CLAUDE_CODE_DISABLE_NONSTREAMING_FALLBACK: "1",
-        CLAUDE_CODE_ATTRIBUTION_HEADER: "0",
-        CLAUDE_CODE_EFFORT_LEVEL: "max"
-      },
-    },
+    { env: buildRecommendedEnv({ baseUrl: effectiveBaseUrl, token }) },
     null,
     2,
   );
@@ -145,6 +134,9 @@ function ClaudeCodeTab() {
           </div>
         </div>
       </div>
+
+      {/* 内嵌编辑器: 实时查看与一键写入 ~/.claude/settings.json */}
+      <ClaudeCodeSettingsEditor />
 
       {/* 方式 1: settings.json (推荐) */}
       <div className="card section">

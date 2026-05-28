@@ -3,6 +3,9 @@ import type {
   BreakdownBy,
   BreakdownDto,
   ChatGptAccount,
+  ClaudeCodeInspectResult,
+  ClaudeCodeReadResult,
+  ClaudeCodeWriteOutcome,
   CreateChatGptOAuthSubscriptionInput,
   CreateKiroSubscriptionInput,
   CreateSubscriptionInput,
@@ -151,4 +154,12 @@ export const api = {
   tlsGetCaPemPath: () => invoke<string>("tls_get_ca_pem_path"),
   tlsExportCaPem: (dest: string) => invoke<void>("tls_export_ca_pem", { dest }),
   tlsRegenerateLeaf: () => invoke<TlsStatus>("tls_regenerate_leaf"),
+
+  // Claude Code 集成 (~/.claude/settings.json)
+  readClaudeCodeSettings: () =>
+    invoke<ClaudeCodeReadResult>("read_claude_code_settings"),
+  inspectClaudeCodeSettings: () =>
+    invoke<ClaudeCodeInspectResult>("inspect_claude_code_settings"),
+  writeClaudeCodeSettings: (newContent: string) =>
+    invoke<ClaudeCodeWriteOutcome>("write_claude_code_settings", { newContent }),
 };
