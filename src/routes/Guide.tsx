@@ -41,9 +41,9 @@ export function GuidePage() {
   const { t } = useT();
   const [tab, setTab] = useState<Tab>("claude-code");
 
-  const TABS: { id: Tab; label: string; icon: ReactNode }[] = [
+  const TABS: { id: Tab; label: string; icon: ReactNode; disabled?: boolean }[] = [
     { id: "claude-code", label: "Claude Code", icon: <ClaudeCode.Color size={ICON_SIZE} /> },
-    { id: "codex", label: "Codex", icon: <Codex size={ICON_SIZE} /> },
+    { id: "codex", label: "Codex", icon: <Codex size={ICON_SIZE} />, disabled: true },
     { id: "cc-switch", label: "cc-switch", icon: <Bot size={ICON_SIZE} /> },
     { id: "openclaw", label: "OpenClaw", icon: <OpenClaw.Color size={ICON_SIZE} /> },
     { id: "hermes", label: "Hermes Agent", icon: <HermesAgent size={ICON_SIZE} /> },
@@ -59,11 +59,12 @@ export function GuidePage() {
       </div>
 
       <div className="tabs">
-        {TABS.map(({ id, label, icon }) => (
+        {TABS.map(({ id, label, icon, disabled }) => (
           <button
             key={id}
             className={cn("tab", tab === id && "active")}
             onClick={() => setTab(id)}
+            disabled={disabled}
             type="button"
           >
             {icon}

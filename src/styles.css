@@ -1307,11 +1307,12 @@ input, select, textarea { font: inherit; color: inherit; }
   align-items: center;
   gap: 6px;
 }
-.tab:hover:not(.active) { color: var(--ink-2); }
+.tab:hover:not(.active):not(:disabled) { color: var(--ink-2); }
 .tab.active {
   color: var(--ink);
   border-bottom-color: var(--ink);
 }
+.tab:disabled { opacity: 0.4; cursor: not-allowed; }
 
 .brand-grid {
   display: grid;
