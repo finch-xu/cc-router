@@ -56,7 +56,12 @@ for (const sigName of files) {
     }
   } else if (baseName.endsWith(".exe")) {
     // Tauri 2 直接对 NSIS .exe installer 签名,不再生成 v1 的 .nsis.zip
-    key = "windows-x86_64";
+    // Windows 双架构: 按文件名 windows-arm64 / windows-x64 分流 (否则两个 .exe 撞同一 key 互相覆盖)
+    if (baseName.includes("windows-arm64")) {
+      key = "windows-aarch64";
+    } else {
+      key = "windows-x86_64";
+    }
   } else if (baseName.endsWith(".AppImage")) {
     key = "linux-x86_64";
   }
@@ -74,6 +79,7 @@ const required = [
   "darwin-aarch64",
   "darwin-x86_64",
   "windows-x86_64",
+  "windows-aarch64",
   "linux-x86_64",
 ];
 for (const k of required) {

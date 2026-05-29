@@ -375,6 +375,114 @@ jobs:
             src-tauri/target/x86_64-pc-windows-msvc/release/bundle/nsis/*.exe
             src-tauri/target/x86_64-pc-windows-msvc/release/bundle/nsis/*.exe.sig
 
+  build-windows-arm:
+    name: Build Windows arm64
+    # 原生 arm64 runner (公开仓库免费); 避免从 x64 交叉编译 aws-lc-sys/ring 的 C/汇编坑
+    runs-on: windows-11-arm
+    environment: APPLE_CERTIFICATE
+    env:
+      RELEASE_TAG: ${{ github.ref_name }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 9
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - name: Setup Rust (aarch64-pc-windows-msvc)
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-pc-windows-msvc
+
+      - name: Cache Cargo
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+          key: windows-arm64
+
+      - name: Install frontend deps
+        run: pnpm install --frozen-lockfile
+
+      - name: Verify Tauri signing secrets are present
+        shell: pwsh
+        env:
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+        run: |
+          if ([string]::IsNullOrEmpty($env:TAURI_SIGNING_PRIVATE_KEY)) {
+            Write-Host "::error::TAURI_SIGNING_PRIVATE_KEY secret is empty - .sig files will not be generated."
+            exit 1
+          }
+          if ([string]::IsNullOrEmpty($env:TAURI_SIGNING_PRIVATE_KEY_PASSWORD)) {
+            Write-Host "::error::TAURI_SIGNING_PRIVATE_KEY_PASSWORD secret is empty - bundle signing will fail."
+            exit 1
+          }
+          Write-Host "TAURI signing secrets present."
+
+      - name: Build
+        uses: tauri-apps/tauri-action@v0
+        env:
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+        with:
+          # 仅 nsis: Windows 上 WiX/MSI 不支持 arm64, 用 targets:"all" 会触发 MSI 构建失败拖垮 job
+          args: --target aarch64-pc-windows-msvc --bundles nsis
+
+      - name: List bundle contents (diagnostic)
+        if: always()
+        shell: pwsh
+        run: |
+          $bundleDir = "src-tauri/target/aarch64-pc-windows-msvc/release/bundle"
+          if (Test-Path $bundleDir) {
+            Get-ChildItem -Path $bundleDir -Recurse -File | Select-Object -ExpandProperty FullName | Sort-Object
+          } else {
+            Write-Host "Bundle dir does not exist: $bundleDir"
+          }
+
+      - name: Rename artifacts to versionless names
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $bundleDir = "src-tauri/target/aarch64-pc-windows-msvc/release/bundle"
+
+          # NSIS .exe 是 updater 在 Windows 上下载的产物 (Tauri 2 直接对 .exe 签名)。
+          # arm64 无 MSI (WiX 不支持), 只处理 nsis。.exe 改名时跟随的 .exe.sig 一起改。
+          Get-ChildItem -Path (Join-Path $bundleDir 'nsis') -Filter '*-setup.exe' -ErrorAction SilentlyContinue | ForEach-Object {
+            $oldFull = $_.FullName
+            $oldSig = "$oldFull.sig"
+            $newName = 'cc-router_windows-arm64-setup.exe'
+            Write-Host "Renaming $($_.Name) -> $newName"
+            Rename-Item -LiteralPath $oldFull -NewName $newName
+            if (Test-Path $oldSig) {
+              Rename-Item -LiteralPath $oldSig -NewName "$newName.sig"
+            }
+          }
+
+      - name: Upload .sig artifact (for manifest job)
+        uses: actions/upload-artifact@v4
+        with:
+          name: sig-windows-arm
+          path: src-tauri/target/aarch64-pc-windows-msvc/release/bundle/nsis/*.exe.sig
+          if-no-files-found: error
+          retention-days: 1
+
+      - name: Upload to draft release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ env.RELEASE_TAG }}
+          draft: true
+          files: |
+            src-tauri/target/aarch64-pc-windows-msvc/release/bundle/nsis/*.exe
+            src-tauri/target/aarch64-pc-windows-msvc/release/bundle/nsis/*.exe.sig
+
   build-linux:
     name: Build Linux x64
     runs-on: ubuntu-22.04
@@ -495,7 +603,7 @@ jobs:
 
   generate-manifest:
     name: Generate latest.json
-    needs: [build-macos, build-macos-x64, build-windows, build-linux]
+    needs: [build-macos, build-macos-x64, build-windows, build-windows-arm, build-linux]
     runs-on: ubuntu-latest
     env:
       RELEASE_TAG: ${{ github.ref_name }}
