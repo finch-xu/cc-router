@@ -1,6 +1,6 @@
 [package]
 name = "cc-router"
-version = "3.1.0"
+version = "3.1.1"
 description = "多订阅聚合代理 · 让 Claude Code 无缝调用多家厂商订阅"
 authors = ["cc-router"]
 edition = "2021"
