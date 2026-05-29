@@ -56,7 +56,6 @@ dist-ssr/
 
 # Tauri build artifacts
 src-tauri/gen/schemas/
-src-tauri/Cargo.lock
 
 
 CLAUDE.md
