@@ -724,7 +724,7 @@ jobs:
             --pattern '*'
           ls -la assets
 
-      - name: Generate manifests for both sources (rewrite URLs)
+      - name: Generate domain-source manifest (rewrite URLs)
         if: env.OSS_SKIP != '1'
         run: |
           set -euo pipefail
@@ -734,18 +734,15 @@ jobs:
             exit 1
           fi
           # latest.json 里 platforms.{plat}.url 是绝对 GitHub URL,
-          # 国内源必须把前缀改掉,否则客户端拿到 manifest 后还是回 GitHub 拉二进制。
+          # 国内源必须把前缀改成自有域名,否则客户端拿到 manifest 后还是回 GitHub 拉二进制。
           # latest/ 是覆盖式的"最新版下载目录",不按版本号归档(历史版本由 GitHub Releases 兜底)。
+          # 新桶与旧桶(过渡)共用这一份: 下载统一走域名, 二进制只存新桶。
           # 用 # 作 sed 分隔符,避免 URL 里的 / 干扰。
           gh_prefix="https://github.com/${REPO}/releases/download/${RELEASE_TAG}/"
-          # 新主源: 资产 URL 指自有域名(非 bucket 直访), 客户端只认域名。
+          # 资产 URL 指自有域名(非 bucket 直访), 客户端只认域名。
           new_prefix="${PUBLIC_BASE}/latest/"
           sed "s#${gh_prefix}#${new_prefix}#g" "$src" > latest-new.json
-          # TRANSITION 旧桶: 保持自包含, 资产 URL 指旧 bucket 直访 URL。
-          old_prefix="https://${OSS_BUCKET_OLD}.${OSS_ENDPOINT}/latest/"
-          sed "s#${gh_prefix}#${old_prefix}#g" "$src" > latest-cn.json
-          echo "--- latest-new.json (域名源) ---"; cat latest-new.json
-          echo "--- latest-cn.json (旧桶过渡源) ---"; cat latest-cn.json
+          echo "--- latest-new.json (域名源, 新旧桶共用) ---"; cat latest-new.json
 
       - name: Mirror to new bucket (cc-router-prod, primary)
         if: env.OSS_SKIP != '1'
@@ -772,24 +769,19 @@ jobs:
           ossutil cp -f latest-new.json "oss://${OSS_BUCKET_NEW}/latest.json"
 
       # ===== TRANSITION 开始: 待国内用户多数升级到 ≥ 本次版本后, 整段删除 =====
-      - name: Mirror to old bucket (cc-router, TRANSITION)
+      - name: Mirror manifest to old bucket (cc-router, TRANSITION)
         if: env.OSS_SKIP != '1'
         env:
           OSS_ACCESS_KEY_ID: ${{ secrets.OSS_ACCESS_KEY_ID }}
           OSS_ACCESS_KEY_SECRET: ${{ secrets.OSS_ACCESS_KEY_SECRET }}
         run: |
           set -euo pipefail
-          # 已安装老用户的二进制 baked 了旧桶 URL(改不了), 继续全量上传让他们能收到新版;
-          # 升级到新版后客户端就改轮询新域名了。旧桶自包含, 资产 URL 指旧 bucket。
+          # 老用户二进制 baked 了旧桶 manifest URL(改不了), 旧桶必须继续托管 latest.json。
+          # 但 manifest 内的下载 URL 已指向新域名(共用 latest-new.json), 二进制不再上传旧桶;
+          # 老用户经旧桶 manifest 发现新版后从新域名下载(updater 走 Rust reqwest, 不受 CSP 限制)。
+          # 旧桶 /latest/ 残留的历史二进制已无任何引用, 顺手清掉; 目录不存在时 || true 兜底。
           ossutil rm -rf "oss://${OSS_BUCKET_OLD}/latest/" || true
-          for f in assets/*; do
-            name="$(basename "$f")"
-            if [ "$name" = "latest.json" ]; then
-              continue
-            fi
-            ossutil cp -f "$f" "oss://${OSS_BUCKET_OLD}/latest/${name}"
-          done
-          ossutil cp -f latest-cn.json "oss://${OSS_BUCKET_OLD}/latest.json"
+          ossutil cp -f latest-new.json "oss://${OSS_BUCKET_OLD}/latest.json"
       # ===== TRANSITION 结束 =====
 
       - name: Summary
@@ -798,4 +790,4 @@ jobs:
           echo "✅ 已镜像到 OSS:"
           echo "  [主] 域名源 manifest: ${PUBLIC_BASE}/latest.json"
           echo "  [主] 域名源 binaries: ${PUBLIC_BASE}/latest/<file>  (bucket=${OSS_BUCKET_NEW})"
-          echo "  [过渡] 旧桶 manifest: https://${OSS_BUCKET_OLD}.${OSS_ENDPOINT}/latest.json"
+          echo "  [过渡] 旧桶 manifest(指向域名,无二进制): https://${OSS_BUCKET_OLD}.${OSS_ENDPOINT}/latest.json"
