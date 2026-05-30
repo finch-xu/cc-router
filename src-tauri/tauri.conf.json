@@ -23,7 +23,7 @@
       }
     ],
     "security": {
-      "csp": null
+      "csp": "default-src 'self'; connect-src 'self' data: ipc: http://ipc.localhost https://github.com https://*.githubusercontent.com https://cc-router.oss-cn-shanghai.aliyuncs.com; img-src 'self' data: blob: asset: http://asset.localhost; style-src 'self' 'unsafe-inline'; font-src 'self' data:; script-src 'self'; object-src 'none'; base-uri 'self'"
     },
     "trayIcon": {
       "id": "cc-router-tray",
