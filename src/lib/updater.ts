@@ -6,9 +6,9 @@ import type { UpdateSource } from "@/types";
 // 改这里时记得同步那边。
 export const INTERNATIONAL_MANIFEST_URL =
   "https://github.com/finch-xu/cc-router/releases/latest/download/latest.json";
-// 阿里云 OSS bucket=cc-router (oss-cn-shanghai),bucket 直访 URL,公共读 ACL。
+// 自有域名 d.cc-router.catonthe.top 反代阿里云 OSS bucket=cc-router-prod (oss-cn-shanghai)。
 export const CHINA_MANIFEST_URL =
-  "https://cc-router.oss-cn-shanghai.aliyuncs.com/latest.json";
+  "https://d.cc-router.catonthe.top/latest.json";
 
 const INTERNATIONAL_RELEASE_PAGE = "https://github.com/finch-xu/cc-router/releases/latest";
 // TODO(oss): OSS 部署后给国内用户一个对应的下载列表页(可以是 GitHub Pages 或 OSS 静态站)
