@@ -14,6 +14,19 @@ pub enum VirtualModelName {
     Fallback,
 }
 
+/// Strip trailing date suffix from Anthropic model IDs.
+/// "claude-haiku-4-5-20251001" → "claude-haiku-4-5"
+/// "claude-opus-4-7-20250606" → "claude-opus-4-7"
+/// "model-opus" → "model-opus" (unchanged)
+fn strip_date_suffix(s: &str) -> &str {
+    if let Some((prefix, suffix)) = s.rsplit_once('-') {
+        if suffix.len() == 8 && suffix.bytes().all(|b| b.is_ascii_digit()) {
+            return prefix;
+        }
+    }
+    s
+}
+
 impl VirtualModelName {
     pub fn as_str(&self) -> &'static str {
         match self {
@@ -29,6 +42,9 @@ impl VirtualModelName {
         // openai/ 用于 OpenAI Responses 兼容入口 (POST /v1/responses, v2.3+).
         let s = s.strip_prefix("anthropic/").unwrap_or(s);
         let s = s.strip_prefix("openai/").unwrap_or(s);
+        // Anthropic 官方模型 ID 可能带日期后缀 (如 claude-haiku-4-5-20251001),
+        // 先剥掉再匹配别名表.
+        let s = strip_date_suffix(s);
         match s {
             "model-opus" | "claude-opus-4-7" | "gpt-5.5" => Some(Self::Opus),
             "model-sonnet" | "claude-sonnet-4-6" | "gpt-5.4" => Some(Self::Sonnet),
@@ -127,6 +143,39 @@ mod tests {
         assert_eq!(VirtualModelName::parse("openai/unknown"), None);
         assert_eq!(VirtualModelName::parse("google/model-opus"), None);
         assert_eq!(VirtualModelName::parse("model-unknown"), None);
+    }
+
+    #[test]
+    fn parse_strips_date_suffix() {
+        assert_eq!(VirtualModelName::parse("claude-haiku-4-5-20251001"), Some(VirtualModelName::Haiku));
+        assert_eq!(VirtualModelName::parse("claude-opus-4-7-20250606"), Some(VirtualModelName::Opus));
+        assert_eq!(VirtualModelName::parse("claude-sonnet-4-6-20250514"), Some(VirtualModelName::Sonnet));
+        // 带 anthropic/ 前缀 + 日期后缀
+        assert_eq!(
+            VirtualModelName::parse("anthropic/claude-haiku-4-5-20251001"),
+            Some(VirtualModelName::Haiku)
+        );
+        assert_eq!(
+            VirtualModelName::parse("anthropic/claude-opus-4-7-20250606"),
+            Some(VirtualModelName::Opus)
+        );
+        // 带 openai/ 前缀 + 日期后缀
+        assert_eq!(
+            VirtualModelName::parse("openai/claude-sonnet-4-6-20250514"),
+            Some(VirtualModelName::Sonnet)
+        );
+        // 虚拟模型名本身无日期后缀, 不受影响
+        assert_eq!(VirtualModelName::parse("model-opus"), Some(VirtualModelName::Opus));
+    }
+
+    #[test]
+    fn strip_date_suffix_works() {
+        assert_eq!(strip_date_suffix("claude-haiku-4-5-20251001"), "claude-haiku-4-5");
+        assert_eq!(strip_date_suffix("claude-opus-4-7-20250606"), "claude-opus-4-7");
+        assert_eq!(strip_date_suffix("model-opus"), "model-opus");
+        // 非 8 位数字后缀不剥
+        assert_eq!(strip_date_suffix("claude-haiku-4-5-v2"), "claude-haiku-4-5-v2");
+        assert_eq!(strip_date_suffix("gpt-5.5"), "gpt-5.5");
     }
 
     #[test]
