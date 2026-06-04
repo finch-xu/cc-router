@@ -29,12 +29,28 @@ impl VirtualModelName {
         // openai/ 用于 OpenAI Responses 兼容入口 (POST /v1/responses, v2.3+).
         let s = s.strip_prefix("anthropic/").unwrap_or(s);
         let s = s.strip_prefix("openai/").unwrap_or(s);
+
+        // 虚拟模型名 + OpenAI Responses 别名: 这些不以 claude- 开头, 精确映射.
         match s {
-            "model-opus" | "claude-opus-4-7" | "gpt-5.5" => Some(Self::Opus),
-            "model-sonnet" | "claude-sonnet-4-6" | "gpt-5.4" => Some(Self::Sonnet),
-            "model-haiku" | "claude-haiku-4-5" | "gpt-5.4-mini" => Some(Self::Haiku),
-            "model-fallback" => Some(Self::Fallback),
-            _ => None,
+            "model-opus" | "gpt-5.5" => return Some(Self::Opus),
+            "model-sonnet" | "gpt-5.4" => return Some(Self::Sonnet),
+            "model-haiku" | "gpt-5.4-mini" => return Some(Self::Haiku),
+            "model-fallback" => return Some(Self::Fallback),
+            _ => {}
+        }
+
+        // 官方 Anthropic 模型写法及其变种 (含日期后缀): 前缀匹配 (issue #22).
+        // claude-opus-4-7 / claude-opus-4-7-20250606 / claude-opus-4-1-... 等都归位,
+        // 不必再逐个枚举版本号. 未知厂商前缀 (如 google/claude-opus-...) 不以 claude-
+        // 开头, 自动落 fallback, 保留 issue #5 的厂商路由语义.
+        if s.starts_with("claude-opus") {
+            Some(Self::Opus)
+        } else if s.starts_with("claude-sonnet") {
+            Some(Self::Sonnet)
+        } else if s.starts_with("claude-haiku") {
+            Some(Self::Haiku)
+        } else {
+            None
         }
     }
 
@@ -141,5 +157,25 @@ mod tests {
         assert_eq!(VirtualModelName::parse("openai/gpt-5.4-mini"), Some(VirtualModelName::Haiku));
         // 交叉前缀 (openai/ 把 model- 别名也带过来) - 仍然能 parse, 因为 openai/ 只是被 strip 掉
         assert_eq!(VirtualModelName::parse("openai/model-sonnet"), Some(VirtualModelName::Sonnet));
+    }
+
+    #[test]
+    fn parse_matches_official_model_variants() {
+        // issue #22: 带日期后缀的官方 ID 被前缀匹配兜住
+        assert_eq!(VirtualModelName::parse("claude-haiku-4-5-20251001"), Some(VirtualModelName::Haiku));
+        assert_eq!(VirtualModelName::parse("claude-opus-4-7-20250606"), Some(VirtualModelName::Opus));
+        assert_eq!(VirtualModelName::parse("claude-sonnet-4-6-20250514"), Some(VirtualModelName::Sonnet));
+        // 未来 / 其他版本号同样命中, 无需枚举
+        assert_eq!(VirtualModelName::parse("claude-opus-4-1-20250805"), Some(VirtualModelName::Opus));
+        // anthropic/ 前缀 + 日期后缀
+        assert_eq!(
+            VirtualModelName::parse("anthropic/claude-haiku-4-5-20251001"),
+            Some(VirtualModelName::Haiku)
+        );
+        // 边界: 未知厂商前缀不以 claude- 开头 → fallback(None), 不被前缀匹配误捕
+        assert_eq!(VirtualModelName::parse("google/claude-opus-4-7"), None);
+        // 边界: 非 claude 家族 → fallback(None)
+        assert_eq!(VirtualModelName::parse("deepseek-chat"), None);
+        assert_eq!(VirtualModelName::parse("gpt-4o"), None);
     }
 }
