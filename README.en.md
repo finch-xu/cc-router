@@ -144,9 +144,11 @@ Virtual models and aliases:
 
 | Virtual model | Aliases |
 |---|---|
-|  `model-opus` |  `anthropic/model-opus` `anthropic/claude-opus-4-7`  `claude-opus-4-7` `gpt-5.5` `openai/gpt-5.5` |
-|  `model-sonnet` |  `anthropic/model-sonnet` `anthropic/claude-sonnet-4-6`  `claude-sonnet-4-6` `gpt-5.4` `openai/gpt-5.4` |
-|  `model-haiku` |  `anthropic/model-haiku` `anthropic/claude-haiku-4-5`  `claude-haiku-4-5`  `gpt-5.4-mini` `openai/gpt-5.4-mini` |
+|  `model-opus` |  `anthropic/model-opus` `anthropic/claude-opus*` `claude-opus*` `gpt-5.5` `openai/gpt-5.5` |
+|  `model-sonnet` |  `anthropic/model-sonnet` `anthropic/claude-sonnet*` `claude-sonnet*` `gpt-5.4` `openai/gpt-5.4` |
+|  `model-haiku` |  `anthropic/model-haiku` `anthropic/claude-haiku*` `claude-haiku*`  `gpt-5.4-mini` `openai/gpt-5.4-mini` |
+
+> `claude-opus*` is a wildcard (prefix match): you can pass any model name that fits the pattern and it will be normalized to the `model-opus` virtual model — e.g. `claude-opus-4-8`, `claude-opus-4-7-20260101`, and `claude-opus-100` all work.
 
 ## FAQ & Use Cases
 
