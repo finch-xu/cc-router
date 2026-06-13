@@ -17,6 +17,7 @@ interface Props {
 }
 
 const SLOTS: Array<{ key: keyof ModelSlots; labelKey: string; hintKey: string }> = [
+  { key: "fable",  labelKey: "modelSlot.fable.label",  hintKey: "modelSlot.fable.hint" },
   { key: "opus",   labelKey: "modelSlot.opus.label",   hintKey: "modelSlot.opus.hint" },
   { key: "sonnet", labelKey: "modelSlot.sonnet.label", hintKey: "modelSlot.sonnet.hint" },
   { key: "haiku",  labelKey: "modelSlot.haiku.label",  hintKey: "modelSlot.haiku.hint" },

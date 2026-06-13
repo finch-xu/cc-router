@@ -34,6 +34,7 @@ import type {
   RefreshModelListResult,
   VirtualModelName,
 } from "@/types";
+import { allSlotsFilled, MODEL_SLOT_KEYS, uniformSlots } from "@/lib/modelSlots";
 
 type Step = 1 | 2;
 
@@ -139,7 +140,7 @@ export function SubscriptionNewPage() {
   const [apiKey, setApiKey] = useState<string>("");
   const [displayName, setDisplayName] = useState<string>("");
 
-  const [slots, setSlots] = useState<ModelSlots>({ opus: "", sonnet: "", haiku: "" });
+  const [slots, setSlots] = useState<ModelSlots>(uniformSlots(""));
   const [models, setModels] = useState<ModelInfo[] | null>(null);
   const [modelFetchError, setModelFetchError] = useState<string | null>(null);
   const [fetchingModels, setFetchingModels] = useState(false);
@@ -274,11 +275,7 @@ export function SubscriptionNewPage() {
     setFetchingModels(true);
     setModelFetchError(null);
     try {
-      const placeholderSlots: ModelSlots = {
-        opus: "(pending)",
-        sonnet: "(pending)",
-        haiku: "(pending)",
-      };
+      const placeholderSlots: ModelSlots = uniformSlots("(pending)");
       const created = await api.createChatGptOAuthSubscription({
         device_code: oauthResult.deviceCode,
         provider_id: provider.id,
@@ -296,18 +293,18 @@ export function SubscriptionNewPage() {
           setModels(result.models);
           const first = result.models[0]?.id ?? "";
           if (first) {
-            setSlots({ opus: first, sonnet: first, haiku: first });
+            setSlots(uniformSlots(first));
           }
         } else {
           setModels(null);
           setModelFetchError(result.reason);
           const fallback = provider.model_discovery.example_models[0] ?? "";
-          if (fallback) setSlots({ opus: fallback, sonnet: fallback, haiku: fallback });
+          if (fallback) setSlots(uniformSlots(fallback));
         }
       } catch (e) {
         setModelFetchError(String(e));
         const fallback = provider.model_discovery.example_models[0] ?? "";
-        if (fallback) setSlots({ opus: fallback, sonnet: fallback, haiku: fallback });
+        if (fallback) setSlots(uniformSlots(fallback));
       }
 
       setCreatedId(created.id);
@@ -323,7 +320,7 @@ export function SubscriptionNewPage() {
   // 不再调 createChatGptOAuthSubscription —— device_code 已经在 step1 消费.
   async function saveOAuth() {
     if (!createdId || !provider || !endpoint) return;
-    if (!slots.opus || !slots.sonnet || !slots.haiku) {
+    if (!allSlotsFilled(slots)) {
       return setSubmitError(t("subscriptionNew.errFillSlots"));
     }
     setSubmitting(true);
@@ -354,11 +351,7 @@ export function SubscriptionNewPage() {
     setFetchingModels(true);
     setModelFetchError(null);
     try {
-      const placeholderSlots: ModelSlots = {
-        opus: "(pending)",
-        sonnet: "(pending)",
-        haiku: "(pending)",
-      };
+      const placeholderSlots: ModelSlots = uniformSlots("(pending)");
       const created = await api.createKiroSubscription({
         session_id: kiroPayload.sessionId,
         device_code: kiroPayload.deviceCode,
@@ -374,7 +367,7 @@ export function SubscriptionNewPage() {
       const example = provider.model_discovery.example_models;
       setModels(null);
       const first = example[0] ?? "";
-      if (first) setSlots({ opus: first, sonnet: first, haiku: first });
+      if (first) setSlots(uniformSlots(first));
 
       setCreatedId(created.id);
       setStep(2);
@@ -387,7 +380,7 @@ export function SubscriptionNewPage() {
 
   async function saveKiro() {
     if (!createdId || !provider || !endpoint) return;
-    if (!slots.opus || !slots.sonnet || !slots.haiku) {
+    if (!allSlotsFilled(slots)) {
       return setSubmitError(t("subscriptionNew.errFillSlots"));
     }
     setSubmitting(true);
@@ -419,11 +412,7 @@ export function SubscriptionNewPage() {
     setFetchingModels(true);
     setModelFetchError(null);
     try {
-      const placeholderSlots: ModelSlots = {
-        opus: "(pending)",
-        sonnet: "(pending)",
-        haiku: "(pending)",
-      };
+      const placeholderSlots: ModelSlots = uniformSlots("(pending)");
       const input: CreateSubscriptionInput = {
         display_name: displayName,
         api_key: apiKey,
@@ -443,7 +432,7 @@ export function SubscriptionNewPage() {
           setModels(result.models);
           if (provider.model_discovery.example_models.length > 0 || result.models.length > 0) {
             const first = result.models[0]?.id ?? "";
-            setSlots({ opus: first, sonnet: first, haiku: first });
+            setSlots(uniformSlots(first));
           }
         } else {
           setModels(null);
@@ -487,6 +476,7 @@ export function SubscriptionNewPage() {
   async function bindToVirtualModelsIfOnboarding(subscriptionId: string) {
     if (!isOnboarding) return;
     const names: VirtualModelName[] = [
+      "model-fable",
       "model-opus",
       "model-sonnet",
       "model-haiku",
@@ -546,7 +536,7 @@ export function SubscriptionNewPage() {
     }
     if (!apiKey) return setSubmitError(t("subscriptionNew.errFillKey"));
     if (!displayName) return setSubmitError(t("subscriptionNew.errFillNote"));
-    if (!slots.opus || !slots.sonnet || !slots.haiku) {
+    if (!allSlotsFilled(slots)) {
       return setSubmitError(t("subscriptionNew.errFillSlots"));
     }
 
@@ -987,28 +977,21 @@ export function SubscriptionNewPage() {
                   <div className="field-hint">{t("subscriptionNew.noteHint")}</div>
                 </div>
 
-                {/* 自定义路径: 单页直接显示 3 slot 输入 */}
+                {/* 自定义路径: 单页直接显示各 slot 输入 */}
                 {isCustom && (
                   <div style={{ marginBottom: 24 }}>
                     <label className="field-label">{t("subscriptionNew.slotsLabel")}</label>
                     <div className="field-hint" style={{ marginBottom: 8 }}>
                       {t("subscriptionNew.slotsHint")}
                     </div>
-                    <SlotInput
-                      label="model-opus →"
-                      value={slots.opus}
-                      onChange={(v) => setSlots({ ...slots, opus: v })}
-                    />
-                    <SlotInput
-                      label="model-sonnet →"
-                      value={slots.sonnet}
-                      onChange={(v) => setSlots({ ...slots, sonnet: v })}
-                    />
-                    <SlotInput
-                      label="model-haiku →"
-                      value={slots.haiku}
-                      onChange={(v) => setSlots({ ...slots, haiku: v })}
-                    />
+                    {MODEL_SLOT_KEYS.map((key) => (
+                      <SlotInput
+                        key={key}
+                        label={`model-${key} →`}
+                        value={slots[key]}
+                        onChange={(v) => setSlots({ ...slots, [key]: v })}
+                      />
+                    ))}
                   </div>
                 )}
 
@@ -1110,7 +1093,7 @@ export function SubscriptionNewPage() {
                     className="btn primary"
                     onClick={isChatGptOAuth ? saveOAuth : isKiroOAuth ? saveKiro : save}
                     disabled={
-                      !slots.opus || !slots.sonnet || !slots.haiku || submitting
+                      !allSlotsFilled(slots) || submitting
                     }
                     type="button"
                   >

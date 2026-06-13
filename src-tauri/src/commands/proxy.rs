@@ -52,6 +52,7 @@ pub async fn env_snippet(state: State<'_, AppState>) -> AppResult<String> {
          export ANTHROPIC_AUTH_TOKEN={token}\n\
          export API_TIMEOUT_MS=3000000\n\
          export ANTHROPIC_MODEL=model-opus\n\
+         export ANTHROPIC_DEFAULT_FABLE_MODEL=model-fable\n\
          export ANTHROPIC_DEFAULT_OPUS_MODEL=model-opus\n\
          export ANTHROPIC_DEFAULT_SONNET_MODEL=model-sonnet\n\
          export ANTHROPIC_DEFAULT_HAIKU_MODEL=model-haiku\n\

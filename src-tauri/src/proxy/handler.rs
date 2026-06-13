@@ -508,22 +508,28 @@ mod tests {
 pub async fn models() -> Response {
     const MODEL_IDS: &[&str] = &[
         // Anthropic 风格虚拟模型名 + 版本别名 + anthropic/ 前缀变种
+        "model-fable",
         "model-opus",
         "model-sonnet",
         "model-haiku",
+        "claude-fable-5",
         "claude-opus-4-7",
         "claude-sonnet-4-6",
         "claude-haiku-4-5",
+        "anthropic/claude-fable-5",
         "anthropic/claude-opus-4-7",
         "anthropic/claude-sonnet-4-6",
         "anthropic/claude-haiku-4-5",
+        "anthropic/model-fable",
         "anthropic/model-opus",
         "anthropic/model-sonnet",
         "anthropic/model-haiku",
-        // OpenAI Responses 兼容入口别名 (v2.3+): 映射到 opus/sonnet/haiku
+        // OpenAI Responses 兼容入口别名 (v2.3+): 映射到 fable/opus/sonnet/haiku
+        "gpt-5.6",
         "gpt-5.5",
         "gpt-5.4",
         "gpt-5.4-mini",
+        "openai/gpt-5.6",
         "openai/gpt-5.5",
         "openai/gpt-5.4",
         "openai/gpt-5.4-mini",

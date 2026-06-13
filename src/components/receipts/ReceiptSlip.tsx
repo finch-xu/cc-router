@@ -115,6 +115,7 @@ function formatIssued(ms: number): string {
 }
 
 const VM_DISPLAY: Record<string, string> = {
+  "model-fable": "MODEL-FABLE",
   "model-opus": "MODEL-OPUS",
   "model-sonnet": "MODEL-SONNET",
   "model-haiku": "MODEL-HAIKU",

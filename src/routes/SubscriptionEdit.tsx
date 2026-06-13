@@ -46,6 +46,7 @@ import type {
   SubscriptionPatch,
   TestConnectionResult,
 } from "@/types";
+import { uniformSlots } from "@/lib/modelSlots";
 
 export function SubscriptionEditPage() {
   const { t } = useT();
@@ -75,7 +76,7 @@ export function SubscriptionEditPage() {
 
   const [endpointId, setEndpointId] = useState<string>("");
   const [displayName, setDisplayName] = useState<string>("");
-  const [slots, setSlots] = useState<ModelSlots>({ opus: "", sonnet: "", haiku: "" });
+  const [slots, setSlots] = useState<ModelSlots>(uniformSlots(""));
 
   // 自定义订阅可编辑的连接字段
   const [baseUrl, setBaseUrl] = useState<string>("");

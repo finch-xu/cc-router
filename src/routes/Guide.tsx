@@ -239,6 +239,7 @@ function CcSwitchTab() {
         ANTHROPIC_AUTH_TOKEN: token,
         API_TIMEOUT_MS: "3000000",
         ANTHROPIC_MODEL: "model-opus",
+        ANTHROPIC_DEFAULT_FABLE_MODEL: "model-fable",
         ANTHROPIC_DEFAULT_OPUS_MODEL: "model-opus",
         ANTHROPIC_DEFAULT_SONNET_MODEL: "model-sonnet",
         ANTHROPIC_DEFAULT_HAIKU_MODEL: "model-haiku",
@@ -309,6 +310,12 @@ function CcSwitchTab() {
             style={{ fontSize: 12, tableLayout: "fixed" }}
           >
             <tbody>
+              <tr>
+                <td style={{ width: 200, color: "var(--ink-3)" }}>
+                  {t("guide.ccswitch.method1.modelFable")}
+                </td>
+                <td className="mono">model-fable</td>
+              </tr>
               <tr>
                 <td style={{ width: 200, color: "var(--ink-3)" }}>
                   {t("guide.ccswitch.method1.modelOpus")}
@@ -546,6 +553,7 @@ function OpenCodeTab() {
             apiKey: token,
           },
           models: {
+            "model-fable": { name: "model-fable" },
             "model-opus": { name: "model-opus" },
             "model-sonnet": { name: "model-sonnet" },
             "model-haiku": { name: "model-haiku" },

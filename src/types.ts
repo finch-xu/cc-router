@@ -98,11 +98,12 @@ export interface CreateChatGptOAuthSubscriptionInput {
   model_slots: ModelSlots;
 }
 export type VirtualModelName =
+  | "model-fable"
   | "model-opus"
   | "model-sonnet"
   | "model-haiku"
   | "model-fallback";
-export type SubscriptionSlot = "opus" | "sonnet" | "haiku";
+export type SubscriptionSlot = "fable" | "opus" | "sonnet" | "haiku";
 export type RoutingMode = "sequential" | "round_robin";
 export type SubscriptionState =
   | "healthy"
@@ -149,6 +150,7 @@ export interface ProviderInfo {
 }
 
 export interface ModelSlots {
+  fable: string;
   opus: string;
   sonnet: string;
   haiku: string;

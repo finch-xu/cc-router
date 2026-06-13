@@ -40,7 +40,7 @@ Highlights:
 - **Bring your own endpoint** — when the built-in providers don't cover what you need, plug any Anthropic Messages-compatible or Gemini generateContent-compatible or OpenAI Responses-compatible API in directly, dispatched alongside the built-in subscriptions
 - **Usage receipts** — export your token-spend snapshot as PNG / PDF / HTML in one click; mono / color modes, no pricing shown by default (usage only), QR code at the bottom links back to the repo
 - **Fully translated UI** — 简体中文 / English / 日本語, follows your system locale or pick manually in Settings
-- **Virtual model aliases** — each of opus / sonnet / haiku accepts multiple names; for opus that's `model-opus` / `claude-opus-4-7` / `anthropic/model-opus` / `anthropic/claude-opus-4-7`, all routed to the same virtual model — pick whatever naming your tool prefers
+- **Virtual model aliases** — each of fable / opus / sonnet / haiku accepts multiple names; for opus that's `model-opus` / `claude-opus-4-7` / `anthropic/model-opus` / `anthropic/claude-opus-4-7`, all routed to the same virtual model — pick whatever naming your tool prefers
 - **Local HTTPS** — generate a self-signed CA and server cert in one click so HTTPS-only clients can talk to cc-router too; see the [setup guide](https://ccrouter.app/docs/claude-desktop-integration/)
 - **Claude Desktop App support** — combine local HTTPS with the virtual-model aliases above and Anthropic's official desktop app can route through cc-router's aggregated subscriptions; see the [setup guide](https://ccrouter.app/docs/claude-desktop-integration/)
 - **Dual-protocol ingress** — `Anthropic /v1/messages` and `OpenAI /v1/responses` are exposed side by side, so clients across both ecosystems — Claude Code, Codex and the like — plug into the same router with a single config
@@ -123,7 +123,8 @@ The **Settings** page renders the full env snippet dynamically — if the defaul
     "ANTHROPIC_BASE_URL": "http://127.0.0.1:23456",
     "ANTHROPIC_AUTH_TOKEN": "your token, show in this app settings",
     "API_TIMEOUT_MS": "3000000",
-    "ANTHROPIC_MODEL": "model-opus",
+    "ANTHROPIC_MODEL": "model-fable",
+    "ANTHROPIC_DEFAULT_FABLE_MODEL": "model-fable",
     "ANTHROPIC_DEFAULT_OPUS_MODEL": "model-opus",
     "ANTHROPIC_DEFAULT_SONNET_MODEL": "model-sonnet",
     "ANTHROPIC_DEFAULT_HAIKU_MODEL": "model-haiku",
@@ -144,6 +145,7 @@ Virtual models and aliases:
 
 | Virtual model | Aliases |
 |---|---|
+|  `model-fable` |  `anthropic/model-fable` `anthropic/claude-fable*` `claude-fable*` `gpt-5.6` `openai/gpt-5.6` |
 |  `model-opus` |  `anthropic/model-opus` `anthropic/claude-opus*` `claude-opus*` `gpt-5.5` `openai/gpt-5.5` |
 |  `model-sonnet` |  `anthropic/model-sonnet` `anthropic/claude-sonnet*` `claude-sonnet*` `gpt-5.4` `openai/gpt-5.4` |
 |  `model-haiku` |  `anthropic/model-haiku` `anthropic/claude-haiku*` `claude-haiku*`  `gpt-5.4-mini` `openai/gpt-5.4-mini` |

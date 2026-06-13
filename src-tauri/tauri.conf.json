@@ -78,6 +78,7 @@
       "migrations/008_add_subscription_oauth.sql",
       "migrations/010_add_subscription_balance.sql",
       "migrations/011_add_request_entry_kind_and_http_version.sql",
+      "migrations/012_add_model_slot_fable.sql",
       "../LICENSE"
     ],
     "category": "DeveloperTool",

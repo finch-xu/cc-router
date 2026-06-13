@@ -40,7 +40,7 @@
 - **任意自定义端点** —— 内置厂商不够时,把任何 Anthropic Messages 兼容或 Gemini generateContent 兼容或 OpenAI Responses 兼容的 API 直接配进来,与内置订阅同等调度
 - **用量小票** —— token 消费快照一键导出 PNG / PDF / HTML,黑白 / 彩色双模式,默认不显示价格只展示用量,扫底部二维码即跳仓库
 - **三语完整翻译** —— 简体中文 / English / 日本語,可跟随系统或在设置页手动切换
-- **虚拟模型多别名** —— opus / sonnet / haiku 三个槽位各识别多种命名,以 opus 为例,`model-opus` / `claude-opus-4-7` / `anthropic/model-opus` / `anthropic/claude-opus-4-7` 都路由到同一虚拟模型,工具用什么命名都不挑
+- **虚拟模型多别名** —— fable / opus / sonnet / haiku 四个槽位各识别多种命名,以 opus 为例,`model-opus` / `claude-opus-4-7` / `anthropic/model-opus` / `anthropic/claude-opus-4-7` 都路由到同一虚拟模型,工具用什么命名都不挑
 - **本地 HTTPS** —— 一键生成自签 CA 与服务器证书,让只支持 HTTPS 的客户端也能接入 cc-router,详见[配置教程](https://ccrouter.app/docs/claude-desktop-integration/)
 - **接入 Claude Desktop App** —— 借助本地 HTTPS 与虚拟模型别名,Anthropic 官方桌面端可直接走 cc-router 聚合的多家订阅,详见[配置教程](https://ccrouter.app/docs/claude-desktop-integration/)
 - **双协议 API 入口** —— `Anthropic /v1/messages` 与 `OpenAI /v1/responses` 两套端点并行,Claude Code / Codex 等 Anthropic 与 OpenAI 生态的客户端都能一键接入
@@ -123,7 +123,8 @@
     "ANTHROPIC_BASE_URL": "http://127.0.0.1:23456",
     "ANTHROPIC_AUTH_TOKEN": "your token, show in this app settings",
     "API_TIMEOUT_MS": "3000000",
-    "ANTHROPIC_MODEL": "model-opus",
+    "ANTHROPIC_MODEL": "model-fable",
+    "ANTHROPIC_DEFAULT_FABLE_MODEL": "model-fable",
     "ANTHROPIC_DEFAULT_OPUS_MODEL": "model-opus",
     "ANTHROPIC_DEFAULT_SONNET_MODEL": "model-sonnet",
     "ANTHROPIC_DEFAULT_HAIKU_MODEL": "model-haiku",
@@ -144,6 +145,7 @@
 
 | 虚拟模型 | 别名 |
 |---|---|
+|  `model-fable` |  `anthropic/model-fable` `anthropic/claude-fable*` `claude-fable*` `gpt-5.6` `openai/gpt-5.6` |
 |  `model-opus` |  `anthropic/model-opus` `anthropic/claude-opus*` `claude-opus*` `gpt-5.5` `openai/gpt-5.5` |
 |  `model-sonnet` |  `anthropic/model-sonnet` `anthropic/claude-sonnet*` `claude-sonnet*` `gpt-5.4` `openai/gpt-5.4` |
 |  `model-haiku` |  `anthropic/model-haiku` `anthropic/claude-haiku*` `claude-haiku*`  `gpt-5.4-mini` `openai/gpt-5.4-mini` |

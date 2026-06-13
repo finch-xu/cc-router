@@ -5,6 +5,7 @@ import type {
 } from "@/types";
 
 export const VM_ORDER: VirtualModelName[] = [
+  "model-fable",
   "model-opus",
   "model-sonnet",
   "model-haiku",
@@ -21,6 +22,11 @@ export interface VmMeta {
 }
 
 export const VM_META: Record<VirtualModelName, VmMeta> = {
+  "model-fable": {
+    purposeKey: "vm.fable.purpose",
+    purposeEnKey: "vm.fable.purposeEn",
+    labelKey: "vm.fable.label",
+  },
   "model-opus": {
     purposeKey: "vm.opus.purpose",
     purposeEnKey: "vm.opus.purposeEn",
@@ -45,6 +51,7 @@ export const VM_META: Record<VirtualModelName, VmMeta> = {
 
 /** fallback 走原样透传,不绑 slot */
 const SLOT_BY_VM: Record<VirtualModelName, SubscriptionSlot | null> = {
+  "model-fable": "fable",
   "model-opus": "opus",
   "model-sonnet": "sonnet",
   "model-haiku": "haiku",

@@ -195,7 +195,7 @@ const panes = { text:$('paneText'), raw:$('paneRaw'), req:$('paneReq'), msgs:$('
 const API_PROFILES = {
   anthropic: {
     path: '/v1/messages',
-    models: ['model-sonnet', 'model-opus', 'model-haiku'],
+    models: ['model-sonnet', 'model-opus', 'model-haiku', 'model-fable'],
     customLabel: '自定义(走 fallback 透传)',
     customPlaceholder: 'claude-sonnet-4-5',
     systemLabel: 'System (可选)',
@@ -215,8 +215,8 @@ const API_PROFILES = {
   },
   responses: {
     path: '/v1/responses',
-    // gpt-5.5 → model-opus, gpt-5.4 → model-sonnet, gpt-5.4-mini → model-haiku
-    models: ['gpt-5.4', 'gpt-5.5', 'gpt-5.4-mini'],
+    // gpt-5.6 → model-fable, gpt-5.5 → model-opus, gpt-5.4 → model-sonnet, gpt-5.4-mini → model-haiku
+    models: ['gpt-5.4', 'gpt-5.5', 'gpt-5.4-mini', 'gpt-5.6'],
     customLabel: '自定义 model 字符串',
     customPlaceholder: 'openai/gpt-5.4',
     systemLabel: 'Instructions (可选)',

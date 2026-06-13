@@ -7,10 +7,11 @@
  * 改这里时记得同步更新 env_snippet — 见 CLAUDE.md 第 12 字段表.
  */
 
-/** 5 个核心字段: 决定 cc-router 接入是否生效, 应用时强制覆盖用户原值. */
+/** 6 个核心字段: 决定 cc-router 接入是否生效, 应用时强制覆盖用户原值. */
 export const CLAUDE_CODE_CORE_KEYS = [
   "ANTHROPIC_BASE_URL",
   "ANTHROPIC_AUTH_TOKEN",
+  "ANTHROPIC_DEFAULT_FABLE_MODEL",
   "ANTHROPIC_DEFAULT_OPUS_MODEL",
   "ANTHROPIC_DEFAULT_SONNET_MODEL",
   "ANTHROPIC_DEFAULT_HAIKU_MODEL",
@@ -34,13 +35,14 @@ export interface ClaudeCodeEnvSnapshot {
   token: string;
 }
 
-/** 12 字段全集 (核心 5 + 推荐 7) 的当前推荐值. */
+/** 13 字段全集 (核心 6 + 推荐 7) 的当前推荐值. */
 export function buildRecommendedEnv(
   snap: ClaudeCodeEnvSnapshot,
 ): Record<string, string> {
   return {
     ANTHROPIC_BASE_URL: snap.baseUrl,
     ANTHROPIC_AUTH_TOKEN: snap.token,
+    ANTHROPIC_DEFAULT_FABLE_MODEL: "model-fable",
     ANTHROPIC_DEFAULT_OPUS_MODEL: "model-opus",
     ANTHROPIC_DEFAULT_SONNET_MODEL: "model-sonnet",
     ANTHROPIC_DEFAULT_HAIKU_MODEL: "model-haiku",

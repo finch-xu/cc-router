@@ -3,6 +3,9 @@ use uuid::Uuid;
 
 #[derive(Debug, Clone, Copy, Hash, PartialEq, Eq, Serialize, Deserialize)]
 pub enum VirtualModelName {
+    /// 最强模型 (Claude Fable 5), 对应 ANTHROPIC_DEFAULT_FABLE_MODEL, 用于最难/最长任务。
+    #[serde(rename = "model-fable")]
+    Fable,
     #[serde(rename = "model-opus")]
     Opus,
     #[serde(rename = "model-sonnet")]
@@ -17,6 +20,7 @@ pub enum VirtualModelName {
 impl VirtualModelName {
     pub fn as_str(&self) -> &'static str {
         match self {
+            VirtualModelName::Fable => "model-fable",
             VirtualModelName::Opus => "model-opus",
             VirtualModelName::Sonnet => "model-sonnet",
             VirtualModelName::Haiku => "model-haiku",
@@ -31,7 +35,9 @@ impl VirtualModelName {
         let s = s.strip_prefix("openai/").unwrap_or(s);
 
         // 虚拟模型名 + OpenAI Responses 别名: 这些不以 claude- 开头, 精确映射.
+        // gpt-5.6 给 fable: fable 能力在 opus(gpt-5.5) 之上, 故取更高档号.
         match s {
+            "model-fable" | "gpt-5.6" => return Some(Self::Fable),
             "model-opus" | "gpt-5.5" => return Some(Self::Opus),
             "model-sonnet" | "gpt-5.4" => return Some(Self::Sonnet),
             "model-haiku" | "gpt-5.4-mini" => return Some(Self::Haiku),
@@ -43,7 +49,9 @@ impl VirtualModelName {
         // claude-opus-4-7 / claude-opus-4-7-20250606 / claude-opus-4-1-... 等都归位,
         // 不必再逐个枚举版本号. 未知厂商前缀 (如 google/claude-opus-...) 不以 claude-
         // 开头, 自动落 fallback, 保留 issue #5 的厂商路由语义.
-        if s.starts_with("claude-opus") {
+        if s.starts_with("claude-fable") {
+            Some(Self::Fable)
+        } else if s.starts_with("claude-opus") {
             Some(Self::Opus)
         } else if s.starts_with("claude-sonnet") {
             Some(Self::Sonnet)
@@ -58,6 +66,7 @@ impl VirtualModelName {
     /// 以保持类型签名不变，但正确的调用路径应该先判断 `is_fallback()`。
     pub fn slot(self) -> SubscriptionSlot {
         match self {
+            VirtualModelName::Fable => SubscriptionSlot::Fable,
             VirtualModelName::Opus => SubscriptionSlot::Opus,
             VirtualModelName::Sonnet | VirtualModelName::Fallback => SubscriptionSlot::Sonnet,
             VirtualModelName::Haiku => SubscriptionSlot::Haiku,
@@ -68,13 +77,20 @@ impl VirtualModelName {
         matches!(self, VirtualModelName::Fallback)
     }
 
-    pub fn all() -> [VirtualModelName; 4] {
-        [Self::Opus, Self::Sonnet, Self::Haiku, Self::Fallback]
+    pub fn all() -> [VirtualModelName; 5] {
+        [
+            Self::Fable,
+            Self::Opus,
+            Self::Sonnet,
+            Self::Haiku,
+            Self::Fallback,
+        ]
     }
 }
 
 #[derive(Debug, Clone, Copy)]
 pub enum SubscriptionSlot {
+    Fable,
     Opus,
     Sonnet,
     Haiku,
@@ -102,6 +118,7 @@ mod tests {
 
     #[test]
     fn parse_strips_anthropic_prefix() {
+        assert_eq!(VirtualModelName::parse("anthropic/model-fable"), Some(VirtualModelName::Fable));
         assert_eq!(VirtualModelName::parse("anthropic/model-opus"), Some(VirtualModelName::Opus));
         assert_eq!(VirtualModelName::parse("anthropic/model-sonnet"), Some(VirtualModelName::Sonnet));
         assert_eq!(VirtualModelName::parse("anthropic/model-haiku"), Some(VirtualModelName::Haiku));
@@ -110,6 +127,7 @@ mod tests {
 
     #[test]
     fn parse_without_prefix_still_works() {
+        assert_eq!(VirtualModelName::parse("model-fable"), Some(VirtualModelName::Fable));
         assert_eq!(VirtualModelName::parse("model-opus"), Some(VirtualModelName::Opus));
         assert_eq!(VirtualModelName::parse("model-sonnet"), Some(VirtualModelName::Sonnet));
         assert_eq!(VirtualModelName::parse("model-haiku"), Some(VirtualModelName::Haiku));
@@ -119,6 +137,7 @@ mod tests {
     #[test]
     fn parse_recognizes_versioned_model_aliases() {
         // 无前缀
+        assert_eq!(VirtualModelName::parse("claude-fable-5"), Some(VirtualModelName::Fable));
         assert_eq!(VirtualModelName::parse("claude-opus-4-7"), Some(VirtualModelName::Opus));
         assert_eq!(VirtualModelName::parse("claude-sonnet-4-6"), Some(VirtualModelName::Sonnet));
         assert_eq!(VirtualModelName::parse("claude-haiku-4-5"), Some(VirtualModelName::Haiku));
@@ -148,10 +167,12 @@ mod tests {
     #[test]
     fn parse_recognizes_openai_responses_aliases() {
         // 无前缀
+        assert_eq!(VirtualModelName::parse("gpt-5.6"), Some(VirtualModelName::Fable));
         assert_eq!(VirtualModelName::parse("gpt-5.5"), Some(VirtualModelName::Opus));
         assert_eq!(VirtualModelName::parse("gpt-5.4"), Some(VirtualModelName::Sonnet));
         assert_eq!(VirtualModelName::parse("gpt-5.4-mini"), Some(VirtualModelName::Haiku));
         // openai/ 前缀
+        assert_eq!(VirtualModelName::parse("openai/gpt-5.6"), Some(VirtualModelName::Fable));
         assert_eq!(VirtualModelName::parse("openai/gpt-5.5"), Some(VirtualModelName::Opus));
         assert_eq!(VirtualModelName::parse("openai/gpt-5.4"), Some(VirtualModelName::Sonnet));
         assert_eq!(VirtualModelName::parse("openai/gpt-5.4-mini"), Some(VirtualModelName::Haiku));
@@ -162,6 +183,7 @@ mod tests {
     #[test]
     fn parse_matches_official_model_variants() {
         // issue #22: 带日期后缀的官方 ID 被前缀匹配兜住
+        assert_eq!(VirtualModelName::parse("claude-fable-5-20260101"), Some(VirtualModelName::Fable));
         assert_eq!(VirtualModelName::parse("claude-haiku-4-5-20251001"), Some(VirtualModelName::Haiku));
         assert_eq!(VirtualModelName::parse("claude-opus-4-7-20250606"), Some(VirtualModelName::Opus));
         assert_eq!(VirtualModelName::parse("claude-sonnet-4-6-20250514"), Some(VirtualModelName::Sonnet));

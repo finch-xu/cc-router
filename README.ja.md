@@ -40,7 +40,7 @@
 - **任意のエンドポイントを追加可能** —— 内蔵プロバイダーで足りない場合、Anthropic Messages 互換 / Gemini generateContent 互換 / OpenAI Responses 互換 API なら何でも直接接続でき、内蔵サブスクと同等にディスパッチ
 - **利用レシート** —— トークン消費スナップショットを PNG / PDF / HTML へワンクリックでエクスポート。モノクロ / カラーの 2 モード、既定では料金非表示で利用量のみ、フッターの QR コードからリポジトリへジャンプ
 - **3 言語完全翻訳** —— 简体中文 / English / 日本語、システム言語追従または設定画面で手動切替
-- **仮想モデルのエイリアス対応** —— opus / sonnet / haiku の各スロットが複数の命名を識別。opus を例にすると `model-opus` / `claude-opus-4-7` / `anthropic/model-opus` / `anthropic/claude-opus-4-7` がすべて同じ仮想モデルにルーティングされ、ツール側の命名規約に左右されません
+- **仮想モデルのエイリアス対応** —— fable / opus / sonnet / haiku の各スロットが複数の命名を識別。opus を例にすると `model-opus` / `claude-opus-4-7` / `anthropic/model-opus` / `anthropic/claude-opus-4-7` がすべて同じ仮想モデルにルーティングされ、ツール側の命名規約に左右されません
 - **ローカル HTTPS** —— ワンクリックで自己署名 CA とサーバー証明書を生成し、HTTPS しか受け付けないクライアントからも cc-router を呼び出せます。詳細は[設定ガイド](https://ccrouter.app/docs/claude-desktop-integration/)を参照
 - **Claude Desktop App 対応** —— ローカル HTTPS と仮想モデルエイリアスを組み合わせることで、Anthropic 公式デスクトップアプリから cc-router で集約した複数サブスクへ直接接続できます。詳細は[設定ガイド](https://ccrouter.app/docs/claude-desktop-integration/)を参照
 - **デュアルプロトコル API エンドポイント** —— `Anthropic /v1/messages` と `OpenAI /v1/responses` を並行して公開。Claude Code / Codex など Anthropic・OpenAI 両エコシステムのクライアントが同じ cc-router にワンクリックで接続可能
@@ -123,7 +123,8 @@
     "ANTHROPIC_BASE_URL": "http://127.0.0.1:23456",
     "ANTHROPIC_AUTH_TOKEN": "your token, show in this app settings",
     "API_TIMEOUT_MS": "3000000",
-    "ANTHROPIC_MODEL": "model-opus",
+    "ANTHROPIC_MODEL": "model-fable",
+    "ANTHROPIC_DEFAULT_FABLE_MODEL": "model-fable",
     "ANTHROPIC_DEFAULT_OPUS_MODEL": "model-opus",
     "ANTHROPIC_DEFAULT_SONNET_MODEL": "model-sonnet",
     "ANTHROPIC_DEFAULT_HAIKU_MODEL": "model-haiku",
@@ -144,6 +145,7 @@ LiteLLM 形式の `anthropic/` プレフィックスにも対応しています:
 
 | 仮想モデル | エイリアス |
 |---|---|
+|  `model-fable` |  `anthropic/model-fable` `anthropic/claude-fable*` `claude-fable*` `gpt-5.6` `openai/gpt-5.6` |
 |  `model-opus` |  `anthropic/model-opus` `anthropic/claude-opus*` `claude-opus*` `gpt-5.5` `openai/gpt-5.5` |
 |  `model-sonnet` |  `anthropic/model-sonnet` `anthropic/claude-sonnet*` `claude-sonnet*` `gpt-5.4` `openai/gpt-5.4` |
 |  `model-haiku` |  `anthropic/model-haiku` `anthropic/claude-haiku*` `claude-haiku*`  `gpt-5.4-mini` `openai/gpt-5.4-mini` |

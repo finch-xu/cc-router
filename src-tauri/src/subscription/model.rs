@@ -130,6 +130,7 @@ pub const CUSTOM_OPENAI_CHAT_SOURCE_MARKER: &str = "__custom_openai_chat__";
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ModelSlots {
+    pub fable: String,
     pub opus: String,
     pub sonnet: String,
     pub haiku: String,
@@ -138,6 +139,7 @@ pub struct ModelSlots {
 impl ModelSlots {
     pub fn get(&self, slot: SubscriptionSlot) -> &str {
         match slot {
+            SubscriptionSlot::Fable => &self.fable,
             SubscriptionSlot::Opus => &self.opus,
             SubscriptionSlot::Sonnet => &self.sonnet,
             SubscriptionSlot::Haiku => &self.haiku,
@@ -424,6 +426,7 @@ impl SubscriptionRow {
             auth_type: AuthType::ApiKey,
             oauth_metadata: OAuthMetadata::default(),
             model_slots: ModelSlots {
+                fable: "d".into(),
                 opus: "a".into(),
                 sonnet: "b".into(),
                 haiku: "c".into(),
