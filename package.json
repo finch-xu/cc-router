@@ -59,7 +59,7 @@
     "tailwindcss": "^3.4.15",
     "tailwindcss-animate": "^1.0.7",
     "typescript": "^5.6.3",
-    "vite": "^6.0.1"
+    "vite": "^6.4.3"
   },
   "pnpm": {
     "overrides": {
@@ -67,7 +67,8 @@
       "js-cookie": ">=3.0.7",
       "uuid@11": ">=11.1.1",
       "uuid@13": ">=13.0.1",
-      "dompurify": ">=3.4.11"
+      "dompurify": ">=3.4.11",
+      "@babel/core": "^7.29.6"
     }
   }
 }
