@@ -9,6 +9,7 @@ overrides:
   js-cookie: '>=3.0.7'
   uuid@11: '>=11.1.1'
   uuid@13: '>=13.0.1'
+  dompurify: '>=3.4.11'
 
 importers:
 
@@ -111,8 +112,8 @@ importers:
         specifier: ^19.0.0
         version: 19.2.5(react@19.2.5)
       react-router-dom:
-        specifier: ^6.28.0
-        version: 6.30.3(react-dom@19.2.5(react@19.2.5))(react@19.2.5)
+        specifier: ^6.30.4
+        version: 6.30.4(react-dom@19.2.5(react@19.2.5))(react@19.2.5)
       recharts:
         specifier: ^3.8.1
         version: 3.8.1(@types/react@19.2.14)(react-dom@19.2.5(react@19.2.5))(react-is@18.3.1)(react@19.2.5)(redux@5.0.1)
@@ -1456,8 +1457,8 @@ packages:
       react-redux:
         optional: true
 
-  '@remix-run/router@1.23.2':
-    resolution: {integrity: sha512-Ic6m2U/rMjTkhERIa/0ZtXJP17QUi2CbWE7cqx4J58M8aA3QTfW+2UlQ4psvTX9IO1RfNVhK3pcpdjej7L+t2w==}
+  '@remix-run/router@1.23.3':
+    resolution: {integrity: sha512-4An71tdz9X8+3sI4Qqqd2LWd9vS39J7sqd9EU4Scw7TJE/qB10Flv/UuqbPVgfQV9XoK8Np6jNquZitnZq5i+Q==}
     engines: {node: '>=14.0.0'}
 
   '@rolldown/pluginutils@1.0.0-beta.27':
@@ -2380,11 +2381,8 @@ packages:
   dlv@1.1.3:
     resolution: {integrity: sha512-+HlytyjlPKnIG8XuRG8WvmBP8xs8P71y+SKKS6ZXWoEgLuePxtDoUEiH7WkdePWrQ5JBpE6aoVqfZfJUQkjXwA==}
 
-  dompurify@3.4.1:
-    resolution: {integrity: sha512-JahakDAIg1gyOm7dlgWSDjV4n7Ip2PKR55NIT6jrMfIgLFgWo81vdr1/QGqWtFNRqXP9UV71oVePtjqS2ebnPw==}
-
-  dompurify@3.4.7:
-    resolution: {integrity: sha512-2jBxDJY4RR06tQNy4w5FlFH7kfxsQZlufd0sbv+chfHCxeJwrFw2baUDsSwvBISD4K4RDbd0PTfy3uNXsR6siA==}
+  dompurify@3.4.11:
+    resolution: {integrity: sha512-zhlUV12GsaRzMsf9q5M254YhA4+VuF0fG+QFqu6aYpoGlKtz+w8//jBcGVYBgQkR5GHjUomejY84AV+/uPbWdw==}
 
   electron-to-chromium@1.5.344:
     resolution: {integrity: sha512-4MxfbmNDm+KPh066EZy+eUnkcDPcZ35wNmOWzFuh/ijvHsve6kbLTLURy88uCNK5FbpN+yk2nQY6BYh1GEt+wg==}
@@ -3412,15 +3410,15 @@ packages:
       react: '>=16.3.0'
       react-dom: '>=16.3.0'
 
-  react-router-dom@6.30.3:
-    resolution: {integrity: sha512-pxPcv1AczD4vso7G4Z3TKcvlxK7g7TNt3/FNGMhfqyntocvYKj+GCatfigGDjbLozC4baguJ0ReCigoDJXb0ag==}
+  react-router-dom@6.30.4:
+    resolution: {integrity: sha512-q4HvNl+mmDdkS0g+MqiBZNteQJCuimWoOyHMy4T/RQLAn9Z29+E91QXRaxOujeMl2HTzRSS0KFPd7lxX3PjV0Q==}
     engines: {node: '>=14.0.0'}
     peerDependencies:
       react: '>=16.8'
       react-dom: '>=16.8'
 
-  react-router@6.30.3:
-    resolution: {integrity: sha512-XRnlbKMTmktBkjCLE8/XcZFlnHvr2Ltdr1eJX4idL55/9BbORzyZEaIkBFDhFGCEWBBItsVrDxwx3gnisMitdw==}
+  react-router@6.30.4:
+    resolution: {integrity: sha512-SVUsDe+DybHM/WmYKIVYhZh1o5Dcuf16yM6WjG02Q9XVFMZIJyHYhwrr6bFBXZkVP6z69kNkMyBCujt8FaFLJA==}
     engines: {node: '>=14.0.0'}
     peerDependencies:
       react: '>=16.8'
@@ -5474,7 +5472,7 @@ snapshots:
       react: 19.2.5
       react-redux: 9.2.0(@types/react@19.2.14)(react@19.2.5)(redux@5.0.1)
 
-  '@remix-run/router@1.23.2': {}
+  '@remix-run/router@1.23.3': {}
 
   '@rolldown/pluginutils@1.0.0-beta.27': {}
 
@@ -6440,12 +6438,7 @@ snapshots:
 
   dlv@1.1.3: {}
 
-  dompurify@3.4.1:
-    optionalDependencies:
-      '@types/trusted-types': 2.0.7
-    optional: true
-
-  dompurify@3.4.7:
+  dompurify@3.4.11:
     optionalDependencies:
       '@types/trusted-types': 2.0.7
 
@@ -6898,7 +6891,7 @@ snapshots:
     optionalDependencies:
       canvg: 3.0.11
       core-js: 3.49.0
-      dompurify: 3.4.1
+      dompurify: 3.4.11
       html2canvas: 1.4.1
 
   katex@0.16.47:
@@ -7193,7 +7186,7 @@ snapshots:
       d3-sankey: 0.12.3
       dagre-d3-es: 7.0.14
       dayjs: 1.11.21
-      dompurify: 3.4.7
+      dompurify: 3.4.11
       es-toolkit: 1.47.0
       katex: 0.16.47
       khroma: 2.1.0
@@ -7880,16 +7873,16 @@ snapshots:
       react-draggable: 4.6.0(react-dom@19.2.5(react@19.2.5))(react@19.2.5)
       tslib: 2.6.2
 
-  react-router-dom@6.30.3(react-dom@19.2.5(react@19.2.5))(react@19.2.5):
+  react-router-dom@6.30.4(react-dom@19.2.5(react@19.2.5))(react@19.2.5):
     dependencies:
-      '@remix-run/router': 1.23.2
+      '@remix-run/router': 1.23.3
       react: 19.2.5
       react-dom: 19.2.5(react@19.2.5)
-      react-router: 6.30.3(react@19.2.5)
+      react-router: 6.30.4(react@19.2.5)
 
-  react-router@6.30.3(react@19.2.5):
+  react-router@6.30.4(react@19.2.5):
     dependencies:
-      '@remix-run/router': 1.23.2
+      '@remix-run/router': 1.23.3
       react: 19.2.5
 
   react-style-singleton@2.2.3(@types/react@19.2.14)(react@19.2.5):
