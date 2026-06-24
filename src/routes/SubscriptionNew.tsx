@@ -40,6 +40,7 @@ type Step = 1 | 2;
 
 const CUSTOM_VALUE = "__custom__";
 const CUSTOM_GEMINI_VALUE = "__custom_gemini__";
+const CUSTOM_GEMINI_INTERACTIONS_VALUE = "__custom_gemini_interactions__";
 const CUSTOM_OPENAI_VALUE = "__custom_openai__";
 const CUSTOM_OPENAI_CHAT_VALUE = "__custom_openai_chat__";
 
@@ -52,12 +53,14 @@ const AUTH_PRESETS: Record<AuthPreset, { name: string; format: AuthHeaderFormat;
 
 type CustomProtocolValue =
   | typeof CUSTOM_GEMINI_VALUE
+  | typeof CUSTOM_GEMINI_INTERACTIONS_VALUE
   | typeof CUSTOM_OPENAI_VALUE
   | typeof CUSTOM_OPENAI_CHAT_VALUE;
 
 /** 所有走 LOCKED_CUSTOM_PRESETS 的 sentinel 列表 (避免链式 || 判断, 后续加协议时只动这一行). */
 const LOCKED_CUSTOM_VALUES: readonly string[] = [
   CUSTOM_GEMINI_VALUE,
+  CUSTOM_GEMINI_INTERACTIONS_VALUE,
   CUSTOM_OPENAI_VALUE,
   CUSTOM_OPENAI_CHAT_VALUE,
 ];
@@ -76,7 +79,7 @@ const LOCKED_CUSTOM_PRESETS: Record<CustomProtocolValue, {
   messagesPathHintKey: string;
   authLockedHintKey: string;
   authLockedDisplay: string;
-  protocol: "gemini" | "openai_responses" | "openai_chat_completions";
+  protocol: "gemini" | "gemini_interactions" | "openai_responses" | "openai_chat_completions";
 }> = {
   [CUSTOM_GEMINI_VALUE]: {
     baseUrl: "https://generativelanguage.googleapis.com",
@@ -91,6 +94,20 @@ const LOCKED_CUSTOM_PRESETS: Record<CustomProtocolValue, {
     authLockedHintKey: "subscriptionNew.geminiAuthLocked",
     authLockedDisplay: "x-goog-api-key: <key>",
     protocol: "gemini",
+  },
+  [CUSTOM_GEMINI_INTERACTIONS_VALUE]: {
+    baseUrl: "https://generativelanguage.googleapis.com",
+    messagesPath: "/v1beta/interactions",
+    authHeaderName: "x-goog-api-key",
+    authHeaderFormat: "raw",
+    iconId: "google",
+    triggerLabelKey: "subscriptionNew.customGeminiInteractionsProvider",
+    hintKey: "subscriptionNew.customGeminiInteractionsHint",
+    baseUrlHintKey: "subscriptionNew.geminiInteractionsBaseUrlHint",
+    messagesPathHintKey: "subscriptionNew.geminiInteractionsMessagesPathHint",
+    authLockedHintKey: "subscriptionNew.geminiInteractionsAuthLocked",
+    authLockedDisplay: "x-goog-api-key: <key>",
+    protocol: "gemini_interactions",
   },
   [CUSTOM_OPENAI_VALUE]: {
     baseUrl: "https://api.openai.com",
@@ -684,6 +701,12 @@ export function SubscriptionNewPage() {
                                 <span style={{ display: "inline-flex", alignItems: "center", gap: 8 }}>
                                   <ProviderLogo iconId="google" size={20} />
                                   {t("subscriptionNew.customGeminiProvider")}
+                                </span>
+                              </SelectItem>
+                              <SelectItem value={CUSTOM_GEMINI_INTERACTIONS_VALUE}>
+                                <span style={{ display: "inline-flex", alignItems: "center", gap: 8 }}>
+                                  <ProviderLogo iconId="google" size={20} />
+                                  {t("subscriptionNew.customGeminiInteractionsProvider")}
                                 </span>
                               </SelectItem>
                               <SelectItem value={CUSTOM_OPENAI_VALUE}>

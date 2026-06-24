@@ -68,6 +68,7 @@
       "providers/openai.yaml",
       "providers/kiro.yaml",
       "providers/google-ai-studio.yaml",
+      "providers/google-gemini-interactions.yaml",
       "migrations/001_init.sql",
       "migrations/002_add_supports_thinking_blocks.sql",
       "migrations/003_add_events_and_diagnostics.sql",

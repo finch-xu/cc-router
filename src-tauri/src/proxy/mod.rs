@@ -1,6 +1,7 @@
 pub mod client_fingerprint;
 pub mod extractors;
 pub mod gemini_dispatch;
+pub mod gemini_interactions_dispatch;
 pub mod handler;
 pub mod middleware;
 pub mod oauth_dispatch;

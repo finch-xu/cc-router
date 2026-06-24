@@ -4,7 +4,7 @@
 //!
 //! Envelope 解析按 `auth_type` 分发:
 //! - `ApiKey` / `ChatgptOauth` / `KiroOauth` → OpenAI 风格 `{data:[{id,model,display_name}]}`
-//! - `GeminiApiKey` → Gemini 风格 `{models:[{name:"models/gemini-...", displayName, supportedGenerationMethods}]}`
+//! - `GeminiApiKey` / `GeminiInteractionsApiKey` → Gemini 风格 `{models:[{name:"models/gemini-...", displayName, supportedGenerationMethods}]}`
 
 use chrono::Utc;
 use serde::Deserialize;
@@ -78,7 +78,8 @@ pub async fn fetch(
     let text = resp.text().await?;
 
     match row.auth_type {
-        AuthType::GeminiApiKey => parse_gemini_envelope(&text),
+        // Gemini generateContent 与 Interactions 都用 /v1beta/models (Gemini envelope 格式)。
+        AuthType::GeminiApiKey | AuthType::GeminiInteractionsApiKey => parse_gemini_envelope(&text),
         _ => parse_openai_envelope(&text),
     }
 }

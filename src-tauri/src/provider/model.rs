@@ -53,6 +53,11 @@ pub enum AuthType {
     /// 客户端 stream 决定上游 stream; 上游 `reasoning_content` (DeepSeek R1 风格) 单向暴露为
     /// Anthropic thinking content_block (Phase 1 不做多轮回灌, 由 Phase 2 决定).
     OpenaiChatCompletionsApiKey,
+    /// Google Gemini Interactions API (新统一接口): 用户输入 Google API key (x-goog-api-key header),
+    /// 上游协议为 `/v1beta/interactions` (与旧 generateContent 完全不同), 需协议翻译
+    /// (Anthropic Messages ↔ Interactions step_list). model 在 **body** 里 (不像 generateContent 嵌 URL),
+    /// dispatch 层 URL 固定 + 强制 `?alt=sse`. 支持 thinking 双向 (thought signature 多轮回灌)。
+    GeminiInteractionsApiKey,
 }
 
 impl AuthType {
@@ -64,6 +69,7 @@ impl AuthType {
             Self::GeminiApiKey => "gemini_api_key",
             Self::OpenaiResponsesApiKey => "openai_responses_api_key",
             Self::OpenaiChatCompletionsApiKey => "openai_chat_completions_api_key",
+            Self::GeminiInteractionsApiKey => "gemini_interactions_api_key",
         }
     }
 }
@@ -78,6 +84,7 @@ impl FromStr for AuthType {
             "gemini_api_key" => Ok(Self::GeminiApiKey),
             "openai_responses_api_key" => Ok(Self::OpenaiResponsesApiKey),
             "openai_chat_completions_api_key" => Ok(Self::OpenaiChatCompletionsApiKey),
+            "gemini_interactions_api_key" => Ok(Self::GeminiInteractionsApiKey),
             other => Err(format!("无效 auth_type: {other}")),
         }
     }

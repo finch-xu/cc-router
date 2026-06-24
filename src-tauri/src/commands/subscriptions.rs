@@ -15,8 +15,9 @@ use crate::subscription::{
     balance_discovery,
     model::{
         BalanceSnapshot, ModelCache, ModelInfo, ModelSlots, OAuthMetadata, SubscriptionDto,
-        SubscriptionRow, SubscriptionRuntime, CUSTOM_GEMINI_SOURCE_MARKER,
-        CUSTOM_OPENAI_CHAT_SOURCE_MARKER, CUSTOM_OPENAI_SOURCE_MARKER, CUSTOM_SOURCE_MARKER,
+        SubscriptionRow, SubscriptionRuntime, CUSTOM_GEMINI_INTERACTIONS_SOURCE_MARKER,
+        CUSTOM_GEMINI_SOURCE_MARKER, CUSTOM_OPENAI_CHAT_SOURCE_MARKER, CUSTOM_OPENAI_SOURCE_MARKER,
+        CUSTOM_SOURCE_MARKER,
     },
     model_discovery, ping, state_machine, store,
 };
@@ -35,6 +36,10 @@ pub enum CustomProtocol {
     /// 走 Anthropic ↔ Chat Completions 翻译 + API key 鉴权.
     /// dispatch 走 [`crate::proxy::openai_chat_completions_dispatch`].
     OpenaiChatCompletions,
+    /// Google Gemini Interactions API (`/v1beta/interactions`, 新统一接口), 走 Anthropic ↔ Interactions
+    /// step_list 翻译 + `auth_type=GeminiInteractionsApiKey` + `__custom_gemini_interactions__` provider_id.
+    /// dispatch 走 [`crate::proxy::gemini_interactions_dispatch`].
+    GeminiInteractions,
 }
 
 /// 创建订阅时的 source 区分: 内置 yaml 模板 vs 用户自定义。
@@ -217,11 +222,14 @@ pub async fn create_subscription(
             let is_gemini = protocol == CustomProtocol::Gemini;
             let is_openai = protocol == CustomProtocol::OpenaiResponses;
             let is_openai_chat = protocol == CustomProtocol::OpenaiChatCompletions;
+            let is_gemini_interactions = protocol == CustomProtocol::GeminiInteractions;
             if is_gemini && !messages_path.contains("{model}") {
                 return Err(AppError::BadRequest(
                     "Gemini 兼容订阅的 messages_path 必须包含 {model} 占位符".into(),
                 ));
             }
+            // Interactions API 的 model 在 body 里, messages_path 是固定 /v1beta/interactions,
+            // 不需要 (也不应有) {model} 占位符 — 与旧 generateContent 的 Gemini 分支区别。
             let (provider_id, endpoint_id, auth_type_choice, icon, discovery) = if is_gemini {
                 (
                     CUSTOM_GEMINI_SOURCE_MARKER.to_string(),
@@ -258,6 +266,19 @@ pub async fn create_subscription(
                     ModelDiscovery {
                         enabled: true,
                         path: "/v1/models".into(),
+                        ..ModelDiscovery::default()
+                    },
+                )
+            } else if is_gemini_interactions {
+                (
+                    CUSTOM_GEMINI_INTERACTIONS_SOURCE_MARKER.to_string(),
+                    CUSTOM_GEMINI_INTERACTIONS_SOURCE_MARKER.to_string(),
+                    AuthType::GeminiInteractionsApiKey,
+                    "google".to_string(),
+                    // Gemini 端点 (含 Interactions) 都在 generativelanguage.googleapis.com, 复用 /v1beta/models 自动发现.
+                    ModelDiscovery {
+                        enabled: true,
+                        path: "/v1beta/models".into(),
                         ..ModelDiscovery::default()
                     },
                 )

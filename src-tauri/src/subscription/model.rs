@@ -128,6 +128,11 @@ pub const CUSTOM_OPENAI_SOURCE_MARKER: &str = "__custom_openai__";
 /// 覆盖 DeepSeek/Together/Groq/Ollama/各类 one-api 中转等 OpenAI Chat Completions 兼容生态。
 pub const CUSTOM_OPENAI_CHAT_SOURCE_MARKER: &str = "__custom_openai_chat__";
 
+/// 自定义 Gemini Interactions 订阅的来源标记常量。
+/// 与 `CUSTOM_SOURCE_MARKER` 平级, 但走 [`AuthType::GeminiInteractionsApiKey`] 翻译分支.
+/// 对应 Google 新的 `/v1beta/interactions` 接口 (区别于 `CUSTOM_GEMINI_SOURCE_MARKER` 的旧 generateContent)。
+pub const CUSTOM_GEMINI_INTERACTIONS_SOURCE_MARKER: &str = "__custom_gemini_interactions__";
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ModelSlots {
     pub fable: String,

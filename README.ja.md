@@ -74,6 +74,7 @@
 | `openai_codex` | **OpenAI Codex（ChatGPT Plus/Pro サブスクリプション）** — アカウント停止リスクあり、推奨しません | ✅ | ❌ | tested |
 | `kiro` | **Kiro IDE（AWS）** — Claude サブスクリプション無料枠、アカウント停止リスクあり、推奨しません | ✅ | ❌ | tested |
 | `google_ai_studio` | **Google AI Studio（Gemini）** 従量課金 + 無料枠 | ❌ | ✅ | verified |
+| `google_gemini_interactions` | **Google Gemini（Interactions API）** 新しい統合エンドポイント `/v1beta/interactions`（プロトコル変換） | ❌ | ✅ | partial |
 | `zhipu` | 智譜 GLM（従量課金 / 中国サブスク） | ✅ | ✅ | verified |
 | `deepseek` | DeepSeek（従量課金） | ❌ | ✅ | verified |
 | `moonshot` | Moonshot Kimi（従量課金 / 中国サブスク / グローバルサブスク） | ✅ | ✅ | untested |

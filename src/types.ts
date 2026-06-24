@@ -9,7 +9,8 @@ export type AuthType =
   | "kiro_oauth"
   | "gemini_api_key"
   | "openai_responses_api_key"
-  | "openai_chat_completions_api_key";
+  | "openai_chat_completions_api_key"
+  | "gemini_interactions_api_key";
 export type AuthHeaderFormat = "raw" | "bearer";
 
 // ===== Kiro OAuth DTO (与 oauth/kiro.rs + subscription/model.rs 对齐) =====
@@ -269,10 +270,11 @@ export type CreateSource =
       messages_path: string;
       auth_header_name: string;
       auth_header_format: AuthHeaderFormat;
-      /** 协议家族 — 缺省=anthropic 透传; "gemini"=Gemini 翻译; "openai_responses"=OpenAI Responses 翻译; "openai_chat_completions"=OpenAI Chat Completions 翻译 (DeepSeek/Together/Groq/Ollama 等兼容生态) */
+      /** 协议家族 — 缺省=anthropic 透传; "gemini"=Gemini generateContent 翻译; "gemini_interactions"=Gemini Interactions API 翻译; "openai_responses"=OpenAI Responses 翻译; "openai_chat_completions"=OpenAI Chat Completions 翻译 (DeepSeek/Together/Groq/Ollama 等兼容生态) */
       protocol?:
         | "anthropic"
         | "gemini"
+        | "gemini_interactions"
         | "openai_responses"
         | "openai_chat_completions";
     };

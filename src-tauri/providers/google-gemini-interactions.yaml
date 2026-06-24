@@ -1,0 +1,46 @@
+id: google_gemini_interactions
+display_name: "Google Gemini (Interactions API)"
+icon: google
+category: first_party
+description: "Google Gemini 新 Interactions API (/v1beta/interactions), 通过协议翻译适配 Anthropic Messages 接口"
+homepage: "https://aistudio.google.com"
+docs_url: "https://ai.google.dev/gemini-api/docs/interactions"
+api_key_url: "https://aistudio.google.com/app/apikey"
+
+compatibility: partial
+compatibility_notes: "Interactions API 较新 (部分模型仍 preview)。cc-router 内部做 Anthropic Messages ↔ Interactions step_list 翻译, 强制走 stream + alt=sse, 客户端非流式时由 cc-router 收齐再吐 JSON。model 在请求 body 里 (不嵌 URL), 与旧 generateContent 的 Google AI Studio provider 各走独立翻译路径。工具结果回传 (function_result) 的精确形态以实测为准。"
+
+endpoints:
+  - id: ai_studio
+    label: "Google AI Studio · Interactions"
+    description: "generativelanguage.googleapis.com /v1beta/interactions, 使用 AI Studio 控制台生成的 API Key. model 在 body 里, 由 cc-router 翻译层填入订阅 slot 的真实模型名。"
+    base_url: "https://generativelanguage.googleapis.com"
+    messages_path: "/v1beta/interactions"
+    region: global
+    billing: pay_as_you_go
+
+default_endpoint: ai_studio
+
+auth:
+  type: gemini_interactions_api_key
+  header_name: "x-goog-api-key"
+  header_format: raw
+
+required_headers: {}
+
+forward_headers: []
+
+model_discovery:
+  enabled: true
+  path: "/v1beta/models"
+  cache_ttl_hours: 168
+  example_models:
+    - "gemini-3.5-flash"
+    - "gemini-3.1-flash-lite"
+    - "gemini-2.5-flash"
+    - "gemini-2.5-pro"
+
+# Interactions 翻译层: 客户端 thinking.{effort, budget_tokens} → generation_config.thinking_level (low/medium/high);
+# 上游 thought step 的 signature → Anthropic thinking content_block (signature 字段携带, provider 标签 gemini_interactions)。
+expose_reasoning: true
+default_reasoning_effort: "medium"

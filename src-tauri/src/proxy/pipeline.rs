@@ -19,9 +19,11 @@ use crate::observability::request_log::{RequestLogEntry, RequestStatus};
 use crate::provider::model::AuthType;
 use crate::proxy::client_fingerprint::ClientContext;
 use crate::proxy::gemini_dispatch;
+use crate::proxy::gemini_interactions_dispatch;
 use crate::proxy::openai_chat_completions_dispatch;
 use crate::proxy::openai_responses_dispatch;
 use crate::proxy::transform::gemini::{resolve_thinking_budget, GeminiExtras};
+use crate::proxy::transform::gemini_interactions::{resolve_thinking_level, InteractionsExtras};
 use crate::proxy::transform::openai::{resolve_reasoning_effort, OpenAiResponsesExtras};
 use crate::proxy::transform::openai_chat_completions::ChatCompletionsExtras;
 use crate::proxy::transform::openai_responses::CodexExtras;
@@ -595,6 +597,136 @@ pub async fn dispatch(
                         Severity::Error,
                         format!(
                             "{} · {} · Gemini · {}",
+                            vm_name.as_str(),
+                            display_name,
+                            err_msg
+                        ),
+                    );
+
+                    if retryable {
+                        retry_count += 1;
+                        continue;
+                    }
+                    return Ok(oauth_dispatch::build_error_response(&err));
+                }
+            }
+        }
+
+        // Gemini Interactions 分支: Google 新 /v1beta/interactions 接口 + 协议翻译 (与旧 generateContent
+        // 完全不同的请求/响应形态). model 在 body 里 (不嵌 URL), URL 固定. fallback 与翻译互斥
+        // (fallback 不改写 model, 但 Interactions 必须翻译协议).
+        if matches!(auth_type, AuthType::GeminiInteractionsApiKey) {
+            if is_fallback {
+                continue;
+            }
+
+            let (yaml_expose_reasoning, yaml_default_effort) =
+                provider_reasoning_defaults(state, &provider_id);
+            let interactions_extras = InteractionsExtras {
+                thinking_level: resolve_thinking_level(&request_body, yaml_default_effort.as_deref()),
+                include_thoughts: yaml_expose_reasoning,
+            };
+
+            emit_attempt_started(state, sub_id, vm_name);
+            let dispatch_res = gemini_interactions_dispatch::dispatch_gemini_interactions_attempt(
+                &state.http_client,
+                auth_header_value.clone(),
+                auth_header_name.clone(),
+                url.clone(),
+                real_model.clone(),
+                &request_body,
+                is_streaming,
+                forward_headers.clone(),
+                client_headers.clone(),
+                required_headers.clone(),
+                interactions_extras,
+            )
+            .await;
+
+            match dispatch_res {
+                Ok(ok) => {
+                    emit_attempt_finished(state, sub_id, vm_name, true);
+                    return Ok(gemini_interactions_dispatch::finalize_gemini_interactions_response(
+                        ok,
+                        vm_name,
+                        attempt_id,
+                        sub_id,
+                        provider_id,
+                        endpoint_id,
+                        real_model,
+                        display_name,
+                        retry_count,
+                        state.request_log_tx.clone(),
+                        state.event_log_tx.clone(),
+                        state.db.clone(),
+                        state.app_handle.clone(),
+                        rt.clone(),
+                        ctx.clone(),
+                    ));
+                }
+                Err(err) => {
+                    emit_attempt_finished(state, sub_id, vm_name, false);
+                    let (event, retryable) = match &err {
+                        OAuthDispatchError::Auth(_) => (state_machine::Event::HttpStatus(401), false),
+                        OAuthDispatchError::Upstream { status, .. } => {
+                            let s = status.unwrap_or(502);
+                            let retryable =
+                                matches!(classify_response(s, None), ShouldRetry::Yes(_));
+                            (state_machine::Event::HttpStatus(s), retryable)
+                        }
+                    };
+                    let _ = state_machine::apply(
+                        &state.db,
+                        &state.app_handle,
+                        &state.event_log_tx,
+                        rt.clone(),
+                        event,
+                    )
+                    .await;
+
+                    let err_msg = match &err {
+                        OAuthDispatchError::Auth(m) => m.clone(),
+                        OAuthDispatchError::Upstream { message, .. } => message.clone(),
+                    };
+                    let entry = RequestLogEntry {
+                        id: attempt_id,
+                        timestamp_ms: chrono::Utc::now().timestamp_millis(),
+                        virtual_model_name: vm_name,
+                        subscription_id: sub_id,
+                        provider_id: provider_id.clone(),
+                        endpoint_id: endpoint_id.clone(),
+                        real_model_name: real_model.clone(),
+                        response_model_name: None,
+                        is_streaming,
+                        status: RequestStatus::Error,
+                        http_status: match &err {
+                            OAuthDispatchError::Upstream { status, .. } => *status,
+                            _ => Some(401),
+                        },
+                        ttft_ms: None,
+                        total_latency_ms: Some(start.elapsed().as_millis() as u64),
+                        upstream_input_tokens: None,
+                        upstream_output_tokens: None,
+                        upstream_cache_creation: None,
+                        upstream_cache_read: None,
+                        retry_count,
+                        error_message: Some(err_msg.clone()),
+                        upstream_response_body: Some(truncate_body(&err_msg, ERROR_BODY_LIMIT)),
+                        client_tool: ctx.info.tool,
+                        client_user_agent: ctx.info.user_agent.clone(),
+                        client_version: ctx.info.version.clone(),
+                        client_ip: ctx.ip.clone(),
+                        entry_kind: Some(ctx.entry_kind.as_str()),
+                        downstream_http_version: ctx.http_version.clone(),
+                    };
+                    let _ = state.request_log_tx.try_send(entry);
+                    events::record_request(
+                        &state.event_log_tx,
+                        attempt_id,
+                        sub_id,
+                        Severity::Error,
+                        format!(
+                            "{} · {} · Gemini Interactions · {}",
                             vm_name.as_str(),
                             display_name,
                             err_msg

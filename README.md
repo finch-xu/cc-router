@@ -74,6 +74,7 @@
 | `openai_codex` | **OpenAI Codex (ChatGPT Plus/Pro 订阅)** 有封号风险，不推荐使用 | ✅ | ❌ | tested |
 | `kiro` | **Kiro IDE (AWS)** 免费 Claude 订阅额度，灰色地带有封号风险，不推荐使用 | ✅ | ❌ | tested |
 | `google_ai_studio` | **Google AI Studio (Gemini)** 按量付费 + 免费 quota | ❌ | ✅ | verified |
+| `google_gemini_interactions` | **Google Gemini (Interactions API)** 新统一接口 `/v1beta/interactions`（协议翻译） | ❌ | ✅ | partial |
 | `zhipu` | 智谱 GLM（按量付费/中国订阅） | ✅ | ✅ | verified |
 | `deepseek` | DeepSeek（按量付费） | ❌ | ✅ | verified |
 | `moonshot` | Moonshot Kimi（按量付费/中国订阅/国际订阅） | ✅ | ✅ | untested |

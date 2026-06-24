@@ -37,7 +37,7 @@
       "type": "object",
       "required": ["type", "header_name", "header_format"],
       "properties": {
-        "type": { "enum": ["api_key", "chatgpt_oauth", "kiro_oauth", "gemini_api_key", "openai_responses_api_key", "openai_chat_completions_api_key"] },
+        "type": { "enum": ["api_key", "chatgpt_oauth", "kiro_oauth", "gemini_api_key", "openai_responses_api_key", "openai_chat_completions_api_key", "gemini_interactions_api_key"] },
         "header_name": { "type": "string" },
         "header_format": { "enum": ["raw", "bearer"] }
       }
