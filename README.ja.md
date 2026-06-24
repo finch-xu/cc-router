@@ -37,7 +37,7 @@
 機能ハイライト：
 
 - **19 プロバイダーを 1 つのルーターで** —— DeepSeek・Qwen・Kimi・MiMo・MiniMax・GLM・Claude・Gemini などの Token Plan / Coding Plan / 従量課金 API を内蔵対応。opus / sonnet / haiku の 3 スロットに自由に割り当て、順次（sequential）またはラウンドロビン（round_robin）で自動切替
-- **任意のエンドポイントを追加可能** —— 内蔵プロバイダーで足りない場合、Anthropic Messages 互換 / Gemini generateContent 互換 / OpenAI Responses 互換 API なら何でも直接接続でき、内蔵サブスクと同等にディスパッチ
+- **任意のエンドポイントを追加可能** —— 内蔵プロバイダーで足りない場合、Anthropic Messages 互換 / Gemini generateContent・Gemini Interactions 互換 / OpenAI Responses・Chat Completions 互換 API なら何でも直接接続でき、内蔵サブスクと同等にディスパッチ
 - **利用レシート** —— トークン消費スナップショットを PNG / PDF / HTML へワンクリックでエクスポート。モノクロ / カラーの 2 モード、既定では料金非表示で利用量のみ、フッターの QR コードからリポジトリへジャンプ
 - **3 言語完全翻訳** —— 简体中文 / English / 日本語、システム言語追従または設定画面で手動切替
 - **仮想モデルのエイリアス対応** —— fable / opus / sonnet / haiku の各スロットが複数の命名を識別。opus を例にすると `model-opus` / `claude-opus-4-7` / `anthropic/model-opus` / `anthropic/claude-opus-4-7` がすべて同じ仮想モデルにルーティングされ、ツール側の命名規約に左右されません
@@ -95,6 +95,7 @@
 | `openai` | **OpenAI 公式 API**（従量課金、GPT-5 / o3 / 4.1 などの reasoning モデル対応、Anthropic thinking ↔ OpenAI reasoning を自動変換） | ❌ | ✅ | untested |
 | `カスタム` | Anthropic プロトコル準拠の任意の API を自前で追加 | ✅ | ✅ | verified |
 | `カスタム (Gemini 互換)` | Gemini generateContent 互換の任意のエンドポイント（中継など）を追加。`messages_path` に `{model}` プレースホルダを含める必要があります | ❌ | ✅ | tested |
+| `カスタム (Gemini Interactions 互換)` | Gemini Interactions API `/v1beta/interactions` 互換の任意のエンドポイント（Google の新しい統合 API / 互換中継）を追加、プロトコル自動変換。旧来の generateContent と異なり、model はリクエスト body 内にあるため、`{model}` プレースホルダは不要 | ❌ | ✅ | partial |
 | `カスタム (OpenAI Responses 互換)` | OpenAI `/v1/responses` 互換の任意のエンドポイント（one-api / new-api などの中継）を追加、プロトコル自動変換 | ❌ | ✅ | tested |
 | `カスタム (OpenAI Chat Completions 互換)` | OpenAI `/v1/chat/completions` 互換の任意のエンドポイント（DeepSeek、Together、Groq、Ollama、one-api / new-api などの中継）を追加、プロトコル自動変換。DeepSeek R1 などの `reasoning_content` を Claude Code の thinking ブロックとして表示 | ❌ | ✅ | tested |
 

@@ -37,7 +37,7 @@ Bundle your scattered `Token Plan`, `Coding Plan`, and LLM API quotas into a sin
 Highlights:
 
 - **19 providers, one router** — built-in routing for DeepSeek, Qwen, Kimi, MiMo, MiniMax, GLM, Claude, Gemini, etc., across Token Plans / Coding Plans / pay-as-you-go APIs; mix and match opus / sonnet / haiku slots with sequential or round-robin dispatch
-- **Bring your own endpoint** — when the built-in providers don't cover what you need, plug any Anthropic Messages-compatible or Gemini generateContent-compatible or OpenAI Responses-compatible API in directly, dispatched alongside the built-in subscriptions
+- **Bring your own endpoint** — when the built-in providers don't cover what you need, plug any Anthropic Messages-compatible, Gemini generateContent / Gemini Interactions-compatible, or OpenAI Responses / Chat Completions-compatible API in directly, dispatched alongside the built-in subscriptions
 - **Usage receipts** — export your token-spend snapshot as PNG / PDF / HTML in one click; mono / color modes, no pricing shown by default (usage only), QR code at the bottom links back to the repo
 - **Fully translated UI** — 简体中文 / English / 日本語, follows your system locale or pick manually in Settings
 - **Virtual model aliases** — each of fable / opus / sonnet / haiku accepts multiple names; for opus that's `model-opus` / `claude-opus-4-7` / `anthropic/model-opus` / `anthropic/claude-opus-4-7`, all routed to the same virtual model — pick whatever naming your tool prefers
@@ -95,6 +95,7 @@ The AI Agent / Coding Agent tools listed below can all connect to cc-router and 
 | `openai` | **OpenAI official API** (pay-as-you-go; includes GPT-5 / o3 / 4.1 reasoning models; auto-translates Anthropic thinking ↔ OpenAI reasoning) | ❌ | ✅ | untested |
 | `Custom` | Bring your own Anthropic-compatible endpoint | ✅ | ✅ | verified |
 | `Custom (Gemini compatible)` | Bring your own Gemini generateContent-compatible endpoint (relay, etc.); `messages_path` must contain the `{model}` placeholder | ❌ | ✅ | tested |
+| `Custom (Gemini Interactions compatible)` | Bring your own Gemini Interactions API `/v1beta/interactions`-compatible endpoint (Google's new unified API / compatible relay); auto protocol translation; unlike the legacy generateContent, the model goes in the request body, so no `{model}` placeholder is needed | ❌ | ✅ | partial |
 | `Custom (OpenAI Responses compatible)` | Bring your own OpenAI `/v1/responses`-compatible endpoint (one-api / new-api relays, etc.); auto protocol translation | ❌ | ✅ | tested |
 | `Custom (OpenAI Chat Completions compatible)` | Bring your own OpenAI `/v1/chat/completions`-compatible endpoint (DeepSeek, Together, Groq, Ollama, one-api / new-api relays, etc.); auto protocol translation; DeepSeek R1's `reasoning_content` is surfaced as Claude Code thinking blocks | ❌ | ✅ | tested |
 
