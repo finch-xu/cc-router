@@ -627,6 +627,13 @@ pub async fn dispatch(
                 include_thoughts: yaml_expose_reasoning,
             };
 
+            // debug_mode 下给 dispatch + finalize 共用同一 channel; 关时传 None 零成本。
+            let dump_tx = if debug_mode {
+                Some(state.body_dump_tx.clone())
+            } else {
+                None
+            };
+
             emit_attempt_started(state, sub_id, vm_name);
             let dispatch_res = gemini_interactions_dispatch::dispatch_gemini_interactions_attempt(
                 &state.http_client,
@@ -640,6 +647,8 @@ pub async fn dispatch(
                 client_headers.clone(),
                 required_headers.clone(),
                 interactions_extras,
+                attempt_id,
+                dump_tx.clone(),
             )
             .await;
 
@@ -662,6 +671,7 @@ pub async fn dispatch(
                         state.app_handle.clone(),
                         rt.clone(),
                         ctx.clone(),
+                        dump_tx,
                     ));
                 }
                 Err(err) => {

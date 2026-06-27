@@ -30,6 +30,7 @@ use tokio::sync::{mpsc, RwLock};
 use tracing::warn;
 use uuid::Uuid;
 
+use crate::observability::body_dump::{BodyDumpEntry, BodyDumpKind};
 use crate::observability::events::{self, EventEntry, Severity};
 use crate::observability::request_log::{RequestLogEntry, RequestStatus};
 use crate::proxy::client_fingerprint::ClientContext;
@@ -61,6 +62,8 @@ pub async fn dispatch_gemini_interactions_attempt(
     client_headers: HeaderMap,
     required_headers: std::collections::BTreeMap<String, String>,
     extras: InteractionsExtras,
+    attempt_id: Uuid,
+    body_dump_tx: Option<mpsc::Sender<BodyDumpEntry>>,
 ) -> Result<OAuthDispatchOk, OAuthDispatchError> {
     // Interactions 的 model 在 body, URL 固定 — 只需拼 ?alt=sse 强制流式。
     let url = if url.contains('?') {
@@ -128,6 +131,21 @@ pub async fn dispatch_gemini_interactions_attempt(
         ReqHeaderValue::from_static("text/event-stream"),
     );
 
+    // 调试模式: 客户端原始 Anthropic 请求体 + 翻译后真正发上游的 Interactions 请求体。
+    // body_bytes 即将被 send move 走, 故 dump 用 clone。
+    if let Some(tx) = body_dump_tx.as_ref() {
+        let _ = tx.try_send(BodyDumpEntry::new(
+            attempt_id,
+            BodyDumpKind::Client,
+            serde_json::to_vec(request_body).unwrap_or_default(),
+        ));
+        let _ = tx.try_send(BodyDumpEntry::new(
+            attempt_id,
+            BodyDumpKind::UpstreamRequest,
+            body_bytes.clone(),
+        ));
+    }
+
     let send_result = upstream::send(http_client, &url, body_bytes, headers, true).await;
     let upstream_response = match send_result {
         Ok(r) => r,
@@ -144,9 +162,18 @@ pub async fn dispatch_gemini_interactions_attempt(
             (status, headers, stream)
         }
         upstream::UpstreamResponse::NonStreaming { status, body_text, .. } => {
+            // 流式请求遇非 2xx 时 upstream::send 降级为 NonStreaming, body_text 带上游完整错误体。
+            let message = body_text.unwrap_or_else(|| format!("HTTP {}", status.as_u16()));
+            if let Some(tx) = body_dump_tx.as_ref() {
+                let _ = tx.try_send(BodyDumpEntry::new(
+                    attempt_id,
+                    BodyDumpKind::UpstreamResponse,
+                    message.clone().into_bytes(),
+                ));
+            }
             return Err(OAuthDispatchError::Upstream {
                 status: Some(status.as_u16()),
-                message: body_text.unwrap_or_else(|| format!("HTTP {}", status.as_u16())),
+                message,
             });
         }
     };
@@ -195,6 +222,7 @@ pub fn finalize_gemini_interactions_response(
     app: AppHandle,
     sub_rt: Arc<RwLock<SubscriptionRuntime>>,
     ctx: ClientContext,
+    body_dump_tx: Option<mpsc::Sender<BodyDumpEntry>>,
 ) -> Response {
     let emit_thoughts = ok.gemini_emit_thoughts;
     if ok.client_wants_streaming {
@@ -215,6 +243,7 @@ pub fn finalize_gemini_interactions_response(
             app,
             sub_rt,
             ctx,
+            body_dump_tx,
         )
     } else {
         let fut = collect_to_json_response(
@@ -234,6 +263,7 @@ pub fn finalize_gemini_interactions_response(
             app,
             sub_rt,
             ctx,
+            body_dump_tx,
         );
         let stream = futures::stream::once(async move {
             let resp = fut.await;
@@ -273,6 +303,7 @@ fn finalize_streaming(
     app: AppHandle,
     sub_rt: Arc<RwLock<SubscriptionRuntime>>,
     ctx: ClientContext,
+    body_dump_tx: Option<mpsc::Sender<BodyDumpEntry>>,
 ) -> Response {
     let (client_tx, client_rx) = mpsc::channel::<Result<Bytes, std::io::Error>>(64);
 
@@ -280,6 +311,10 @@ fn finalize_streaming(
         let start = std::time::Instant::now();
         let mut converter = InteractionsSseConverter::new_with_extras(&real_model, emit_thoughts);
         let mut buffer = BytesMut::with_capacity(8 * 1024);
+        // 调试模式: 累积上游原始 SSE 字节, 流结束后落盘 (仿 sse.rs 范式)。
+        let mut raw_dump_buf: Option<BytesMut> = body_dump_tx
+            .as_ref()
+            .map(|_| BytesMut::with_capacity(8 * 1024));
 
         let mut stream = upstream_stream;
         while let Some(chunk) = stream.next().await {
@@ -295,6 +330,9 @@ fn finalize_streaming(
                     break;
                 }
             };
+            if let Some(dump) = raw_dump_buf.as_mut() {
+                dump.extend_from_slice(&chunk);
+            }
             buffer.extend_from_slice(&chunk);
 
             loop {
@@ -319,6 +357,15 @@ fn finalize_streaming(
                     return;
                 }
             }
+        }
+
+        // 调试模式: 落盘累积的上游原始 SSE 字节。
+        if let (Some(tx), Some(buf)) = (body_dump_tx.as_ref(), raw_dump_buf.take()) {
+            let _ = tx.try_send(BodyDumpEntry::new(
+                attempt_id,
+                BodyDumpKind::UpstreamResponse,
+                buf.to_vec(),
+            ));
         }
 
         // 兜底 message_delta + message_stop
@@ -423,14 +470,22 @@ async fn collect_to_json_response(
     app: AppHandle,
     sub_rt: Arc<RwLock<SubscriptionRuntime>>,
     ctx: ClientContext,
+    body_dump_tx: Option<mpsc::Sender<BodyDumpEntry>>,
 ) -> Response {
     let start = std::time::Instant::now();
     let mut collector = InteractionsNonStreamingCollector::new_with_extras(&real_model, emit_thoughts);
     let mut buffer = BytesMut::with_capacity(8 * 1024);
+    // 调试模式: 累积上游原始 SSE 字节, 流结束后落盘。
+    let mut raw_dump_buf: Option<BytesMut> = body_dump_tx
+        .as_ref()
+        .map(|_| BytesMut::with_capacity(8 * 1024));
 
     let mut stream = upstream_stream;
     while let Some(chunk) = stream.next().await {
         let Ok(chunk) = chunk else { break };
+        if let Some(dump) = raw_dump_buf.as_mut() {
+            dump.extend_from_slice(&chunk);
+        }
         buffer.extend_from_slice(&chunk);
         loop {
             let Some((idx, sep_len)) = find_sse_frame_boundary(&buffer) else {
@@ -443,6 +498,14 @@ async fn collect_to_json_response(
                 collector.feed(&frame_json);
             }
         }
+    }
+    // 调试模式: 落盘累积的上游原始 SSE 字节。
+    if let (Some(tx), Some(buf)) = (body_dump_tx.as_ref(), raw_dump_buf.take()) {
+        let _ = tx.try_send(BodyDumpEntry::new(
+            attempt_id,
+            BodyDumpKind::UpstreamResponse,
+            buf.to_vec(),
+        ));
     }
     let final_msg = collector.finalize();
 
