@@ -17,7 +17,7 @@
 //! | assistant text | `{type:"model_output", content:[{type:"text",text}]}` |
 //! | assistant thinking(signature) | `{type:"thought", signature:<解码原文>}` (排在同条 assistant 的 function_call 前) |
 //! | assistant tool_use | `{type:"function_call", id, name, arguments:<对象>}` |
-//! | user tool_result | `{type:"function_result", name:<查表>, result:<内容>}` |
+//! | user tool_result | `{type:"function_result", name:<查表>, call_id:<tool_use_id>, result:[{type:"text",text}]}` |
 //! | tools[] | `tools:[{type:"function", name, description, parameters}]` (扁平) |
 //! | system | `system_instruction`(string) |
 //! | temperature/top_p/max_tokens | `generation_config.{temperature, top_p, max_output_tokens}` |
@@ -349,23 +349,30 @@ fn push_user_steps(blocks: &[Value], steps: &mut Vec<Value>, tool_names: &HashMa
             }
             "tool_result" => {
                 flush_input(&mut input_content, steps);
-                let name = blk
+                // tool_use_id 既用于查 name, 也作为 call_id (官方文档 required, 须等于对应
+                // function_call.id; 翻译层回灌 function_call 时也用同一 id, turn 内自洽)。
+                let call_id = blk
                     .get("tool_use_id")
                     .and_then(|v| v.as_str())
+                    .filter(|s| !s.is_empty());
+                let name = call_id
                     .and_then(|id| tool_names.get(id).map(String::as_str))
                     .or_else(|| blk.get("name").and_then(|v| v.as_str()))
                     .unwrap_or("")
                     .to_string();
-                // 实测确认 (2026-06-24): function_result 用 `name` (不接受 id) + `result` (字符串)。
-                // 关键: function_call 必须连同前序 thought signature 一起回灌, 否则上游 400
-                // "invalid argument" (Gemini 2.5+ 强制 thoughtSignature)。本翻译层把 assistant 的
-                // thinking 块解码成 thought step 排在 function_call 前 — 依赖 yaml expose_reasoning=true
-                // 时客户端能拿到并回传 thinking 块。
-                steps.push(json!({
+                // 官方 Interactions API + function-calling 文档: function_result 用 `name` +
+                // `call_id` + `result`(内容块数组 [{type:"text",text}], 不是裸字符串)。call_id
+                // 缺失则省略字段。另一硬约束: function_call 必须连同前序 thought signature 一起
+                // 回灌, 否则 Gemini 2.5+ 因缺 thoughtSignature 返 400 — 见上面 "thinking" 分支。
+                let mut fr = json!({
                     "type": "function_result",
                     "name": name,
-                    "result": tool_result_value(blk.get("content")),
-                }));
+                    "result": tool_result_parts(blk.get("content")),
+                });
+                if let Some(id) = call_id {
+                    fr["call_id"] = json!(id);
+                }
+                steps.push(fr);
             }
             _ => {}
         }
@@ -373,21 +380,32 @@ fn push_user_steps(blocks: &[Value], steps: &mut Vec<Value>, tool_names: &HashMa
     flush_input(&mut input_content, steps);
 }
 
-/// 把 Anthropic tool_result.content 渲染成 Interactions function_result.result 值。
-fn tool_result_value(content: Option<&Value>) -> Value {
+/// 把 Anthropic tool_result.content 渲染成 Interactions function_result.result。
+/// 官方要求 result 是内容块数组 [{type:"text", text}]:
+/// - string → 单个 text part
+/// - array  → 每个 text block 一个 text part (image 等块形态待 Phase 0 实测, 暂跳过)
+/// - 空 / 全被跳过 → 单个空 text part (空数组本身可能被上游判 invalid argument, 兜底塞空块)
+fn tool_result_parts(content: Option<&Value>) -> Value {
+    let mut parts: Vec<Value> = Vec::new();
     match content {
-        Some(Value::String(s)) => json!(s),
+        Some(Value::String(s)) => parts.push(json!({"type": "text", "text": s})),
         Some(Value::Array(arr)) => {
-            let text: String = arr
-                .iter()
-                .filter_map(|b| b.get("text").and_then(|t| t.as_str()))
-                .collect::<Vec<_>>()
-                .join("\n");
-            json!(text)
+            for b in arr {
+                if b.get("type").and_then(|v| v.as_str()) == Some("text") {
+                    let t = b.get("text").and_then(|v| v.as_str()).unwrap_or("");
+                    parts.push(json!({"type": "text", "text": t}));
+                }
+                // image 等块: Interactions function_result 内容块形态未实测, 暂跳过
+            }
         }
-        Some(v) => v.clone(),
-        None => json!(""),
+        // 兜底: CC 理论上只发 string/array, 其他形态序列化成文本
+        Some(other) => parts.push(json!({"type": "text", "text": other.to_string()})),
+        None => {}
     }
+    if parts.is_empty() {
+        parts.push(json!({"type": "text", "text": ""}));
+    }
+    json!(parts)
 }
 
 fn convert_tool(t: &Value) -> Option<Value> {
@@ -615,6 +633,42 @@ impl InteractionsSseConverter {
                     .and_then(|v| v.as_str())
                     .map(str::to_string)
                     .unwrap_or_else(|| format!("toolu_{}", Uuid::new_v4().simple()));
+                // 实测 (2026-06-27 dump): Gemini 把 function_call 的 thought signature 挂在
+                // step.start 上 (不像 thought 步骤走 thought_signature delta)。emit 一个独立完整的
+                // thinking 块携带它, 排在 tool_use 前; 客户端回传后下一轮 push_assistant_steps 解码成
+                // function_call 前的 thought step —— Gemini 2.5+ 要求 function_call 前有 thoughtSignature,
+                // 缺失会 400 "invalid argument"。emit_thoughts=false 时无处承载 signature, 只能放弃。
+                if self.emit_thoughts {
+                    if let Some(sig) = step
+                        .and_then(|s| s.get("signature"))
+                        .and_then(|v| v.as_str())
+                        .filter(|s| !s.is_empty())
+                    {
+                        let sig_index = self.next_index;
+                        self.next_index += 1;
+                        let signature = encode_interactions_thought_signature(sig);
+                        out.push(AnthropicEvent {
+                            event: "content_block_start",
+                            data: json!({
+                                "type": "content_block_start",
+                                "index": sig_index,
+                                "content_block": {"type": "thinking", "thinking": ""},
+                            }),
+                        });
+                        out.push(AnthropicEvent {
+                            event: "content_block_delta",
+                            data: json!({
+                                "type": "content_block_delta",
+                                "index": sig_index,
+                                "delta": {"type": "signature_delta", "signature": signature},
+                            }),
+                        });
+                        out.push(AnthropicEvent {
+                            event: "content_block_stop",
+                            data: json!({"type": "content_block_stop", "index": sig_index}),
+                        });
+                    }
+                }
                 (
                     BlockKind::ToolUse,
                     json!({"type": "tool_use", "id": tool_id, "name": name, "input": {}}),
@@ -700,9 +754,9 @@ impl InteractionsSseConverter {
                     }
                 }
             }
-            "arguments" => {
-                // arguments 增量 (ArgumentsDelta). 字段形态待 Phase 0 实测确认 — 兼容
-                // arguments(string) / partial_json 两种字符串来源, 当 partial_json 透传。
+            "arguments" | "arguments_delta" => {
+                // arguments 增量. 实测 (2026-06-27 dump): 上游 delta.type 是 `arguments_delta`,
+                // 值在 delta.arguments (JSON 字符串分片). 同时兼容旧推断的 `arguments` / partial_json。
                 let chunk = delta
                     .get("arguments")
                     .and_then(|v| v.as_str())
@@ -1092,9 +1146,50 @@ mod tests {
         assert_eq!(input[2]["type"], "function_call");
         assert_eq!(input[2]["name"], "get_weather");
         assert_eq!(input[2]["arguments"]["city"], "Tokyo");
-        // function_result 用 tool_use_id 查表得到 name
+        // function_result: name 查表 + call_id=tool_use_id + result 为内容块数组
         assert_eq!(input[3]["type"], "function_result");
         assert_eq!(input[3]["name"], "get_weather");
+        assert_eq!(input[3]["call_id"], "toolu_abc");
+        let result = input[3]["result"].as_array().unwrap();
+        assert_eq!(result.len(), 1);
+        assert_eq!(result[0]["type"], "text");
+        assert_eq!(result[0]["text"], "22C sunny");
+    }
+
+    #[test]
+    fn function_result_array_content_and_missing_id() {
+        // array content → 每个 text block 一个 text part; tool_use_id 缺失 → 省略 call_id
+        let body = json!({
+            "model": "m",
+            "messages": [{"role": "user", "content": [
+                {"type": "tool_result", "content": [
+                    {"type": "text", "text": "line1"},
+                    {"type": "text", "text": "line2"}
+                ]}
+            ]}]
+        });
+        let out = anthropic_to_interactions(&body, "m", &extras(None, true)).unwrap();
+        let fr = &out["input"][0];
+        assert_eq!(fr["type"], "function_result");
+        assert!(fr.get("call_id").is_none()); // 无 tool_use_id → 不加 call_id
+        let result = fr["result"].as_array().unwrap();
+        assert_eq!(result.len(), 2);
+        assert_eq!(result[0]["text"], "line1");
+        assert_eq!(result[1]["text"], "line2");
+
+        // 空内容兜底: 一个空 text part (非空数组)
+        let body2 = json!({
+            "model": "m",
+            "messages": [{"role": "user", "content": [
+                {"type": "tool_result", "tool_use_id": "toolu_x", "content": ""}
+            ]}]
+        });
+        let out2 = anthropic_to_interactions(&body2, "m", &extras(None, true)).unwrap();
+        let fr2 = &out2["input"][0];
+        assert_eq!(fr2["call_id"], "toolu_x");
+        let r2 = fr2["result"].as_array().unwrap();
+        assert_eq!(r2.len(), 1);
+        assert_eq!(r2[0]["text"], "");
     }
 
     #[test]
@@ -1277,5 +1372,63 @@ mod tests {
             && e.data["delta"]["type"] == "input_json_delta"));
         let md = events.iter().find(|e| e.event == "message_delta").unwrap();
         assert_eq!(md.data["delta"]["stop_reason"], "tool_use");
+    }
+
+    #[test]
+    fn sse_converter_arguments_delta_feeds_input_json() {
+        // 实测形态 (2026-06-27 dump): step.start 的 arguments 为空 {}, 真实参数走
+        // step.delta 的 `arguments_delta` (值在 delta.arguments)。验证参数不再丢失。
+        let frames = vec![
+            json!({"interaction":{"model":"m"},"event_type":"interaction.created"}),
+            json!({"index":0,"step":{"type":"function_call","id":"ca1","name":"get_weather","arguments":{}},"event_type":"step.start"}),
+            json!({"index":0,"delta":{"arguments":"{\"city\":\"北京\"}","type":"arguments_delta"},"event_type":"step.delta"}),
+            json!({"index":0,"event_type":"step.stop"}),
+            json!({"interaction":{"status":"requires_action"},"event_type":"interaction.completed"}),
+        ];
+        let mut conv = InteractionsSseConverter::new_with_extras("m", false);
+        let mut events: Vec<AnthropicEvent> = Vec::new();
+        for f in frames {
+            events.extend(conv.feed(&f));
+        }
+        let delta = events
+            .iter()
+            .find(|e| e.event == "content_block_delta"
+                && e.data["delta"]["type"] == "input_json_delta")
+            .expect("arguments_delta 应产出 input_json_delta");
+        assert_eq!(delta.data["delta"]["partial_json"], "{\"city\":\"北京\"}");
+    }
+
+    #[test]
+    fn sse_converter_function_call_signature_becomes_thinking_block() {
+        // 实测形态 (2026-06-27 dump): Gemini 把 function_call 的 thought signature 挂在 step.start 上。
+        // 验证它被 emit 成 tool_use 前的独立 thinking 块, 且 signature 可解码还原 (供下一轮回灌)。
+        let frames = vec![
+            json!({"interaction":{"model":"m"},"event_type":"interaction.created"}),
+            json!({"index":0,"step":{"type":"function_call","id":"ca1","name":"get_weather","signature":"RAWSIG","arguments":{}},"event_type":"step.start"}),
+            json!({"index":0,"event_type":"step.stop"}),
+            json!({"interaction":{"status":"requires_action"},"event_type":"interaction.completed"}),
+        ];
+        let mut conv = InteractionsSseConverter::new_with_extras("m", true);
+        let mut events: Vec<AnthropicEvent> = Vec::new();
+        for f in frames {
+            events.extend(conv.feed(&f));
+        }
+        // 第一个 content_block_start 是 thinking (排在 tool_use 前)
+        let starts: Vec<&AnthropicEvent> =
+            events.iter().filter(|e| e.event == "content_block_start").collect();
+        assert_eq!(starts[0].data["content_block"]["type"], "thinking");
+        assert_eq!(starts[1].data["content_block"]["type"], "tool_use");
+        assert!(starts[0].data["index"].as_u64() < starts[1].data["index"].as_u64());
+        // signature_delta 携带的 signature 可解码回 RAWSIG
+        let sig_delta = events
+            .iter()
+            .find(|e| e.event == "content_block_delta"
+                && e.data["delta"]["type"] == "signature_delta")
+            .expect("function_call signature 应 emit signature_delta");
+        let encoded = sig_delta.data["delta"]["signature"].as_str().unwrap();
+        assert_eq!(
+            decode_interactions_thought_signature(encoded).as_deref(),
+            Some("RAWSIG")
+        );
     }
 }
