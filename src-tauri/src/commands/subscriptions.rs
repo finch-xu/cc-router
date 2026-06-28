@@ -552,7 +552,7 @@ pub async fn test_connection(
         }
     };
 
-    let result = ping::probe(&state.probe_client, &row, &model).await;
+    let result = ping::probe_subscription(&state, &row, &model).await;
 
     let mut state_reset = false;
     if result.ok {

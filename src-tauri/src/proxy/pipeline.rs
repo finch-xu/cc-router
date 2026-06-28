@@ -49,7 +49,8 @@ const DEFAULT_REASONING_EFFORT: &str = "medium";
 
 /// 从 provider yaml 读 (expose_reasoning, default_reasoning_effort), 缺失时落 (true, "medium").
 /// codex/openai_responses/gemini 三个翻译类分支共用此兜底——保证未注册 provider 仍能默认 thinking 双向。
-fn provider_reasoning_defaults(
+/// `pub(crate)`: `subscription::ping::probe_subscription` 探测时复用同一份兜底, 保证与真实 dispatch 一致。
+pub(crate) fn provider_reasoning_defaults(
     state: &AppState,
     provider_id: &str,
 ) -> (bool, Option<String>) {

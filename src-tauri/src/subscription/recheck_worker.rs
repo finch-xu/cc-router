@@ -97,7 +97,7 @@ async fn scan_and_recheck(state: &AppState) {
             continue;
         };
 
-        let result = ping::probe(&state.probe_client, &row, &model).await;
+        let result = ping::probe_subscription(state, &row, &model).await;
         if result.ok {
             match state_machine::apply(
                 &state.db,
