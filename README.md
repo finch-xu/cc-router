@@ -93,6 +93,7 @@
 | `modelscope` | 魔搭 ModelScope（按量付费） | ❌ | ✅ | partial |
 | `ucloud` | 优云智算 UCloud Modelverse（Coding Plan 订阅 + 按量付费 API 国内/海外） | ✅ | ✅ | untested |
 | `openai` | **OpenAI 官方 API**（按量付费，含 GPT-5 / o3 / 4.1 等 reasoning 模型，自动翻译 Anthropic thinking ↔ OpenAI reasoning） | ❌ | ✅ | untested |
+| `xai` | xAI Grok（按量付费，含 Grok 4.5 / 4.3，官方 Anthropic 兼容端点） | ❌ | ✅ | untested |
 | `自定义` | 自定义任意Anthropic协议API | ✅ | ✅ | verified |
 | `自定义 (Gemini 兼容)` | 接入任意 Gemini generateContent 兼容端点（中转站等），messages_path 用 `{model}` 占位符 | ❌ | ✅ | tested |
 | `自定义 (Gemini Interactions 兼容)` | 接入任意 Gemini Interactions API `/v1beta/interactions` 兼容端点（Google 新统一接口 / 兼容中转站），自动协议翻译；与旧 generateContent 不同，model 在请求 body 里，无需 `{model}` 占位符 | ❌ | ✅ | partial |
