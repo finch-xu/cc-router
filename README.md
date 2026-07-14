@@ -147,12 +147,12 @@
 
 | 虚拟模型 | 别名 |
 |---|---|
-|  `model-fable` |  `anthropic/model-fable` `anthropic/claude-fable*` `claude-fable*` `gpt-5.6` `openai/gpt-5.6` |
-|  `model-opus` |  `anthropic/model-opus` `anthropic/claude-opus*` `claude-opus*` `gpt-5.5` `openai/gpt-5.5` |
-|  `model-sonnet` |  `anthropic/model-sonnet` `anthropic/claude-sonnet*` `claude-sonnet*` `gpt-5.4` `openai/gpt-5.4` |
-|  `model-haiku` |  `anthropic/model-haiku` `anthropic/claude-haiku*` `claude-haiku*`  `gpt-5.4-mini` `openai/gpt-5.4-mini` |
+|  `model-fable` |  `anthropic/model-fable` `anthropic/claude-fable*` `claude-fable*` `gpt-5.6` `gpt-*-sol` `openai/gpt-5.6` `openai/gpt-*-sol` |
+|  `model-opus` |  `anthropic/model-opus` `anthropic/claude-opus*` `claude-opus*` `gpt-5.5` `gpt-*-terra` `openai/gpt-5.5` `openai/gpt-*-terra` |
+|  `model-sonnet` |  `anthropic/model-sonnet` `anthropic/claude-sonnet*` `claude-sonnet*` `gpt-5.4` `gpt-*-luna` `openai/gpt-5.4` `openai/gpt-*-luna` |
+|  `model-haiku` |  `anthropic/model-haiku` `anthropic/claude-haiku*` `claude-haiku*`  `gpt-*-mini` `openai/gpt-*-mini` |
 
-> `claude-opus*` 的含义是模糊匹配，你可以传入任意符合规则的模型名，都会被归一为虚拟模型`model-opus`，比如 `claude-opus-4-8` `claude-opus-4-7-20260101` `claude-opus-100` 都没问题。
+> `claude-opus*` 的含义是模糊匹配，你可以传入任意符合规则的模型名，都会被归一为虚拟模型`model-opus`，比如 `claude-opus-4-8` `claude-opus-4-7-20260101` `claude-opus-100` 都没问题。`gpt-*-sol` 这类按档位段匹配：`gpt-5.6-sol` `gpt-6-sol` `gpt-5.6-sol-20261201` 都命中 sol 档（terra/luna/mini 同理）。
 
 ## 常见问题&使用场景
 

@@ -24,15 +24,15 @@ use super::responses_common::{
     self, encode_reasoning_signature, ResponsesTransformConfig,
 };
 
-/// OpenAI Responses `reasoning.effort` 枚举. 接受 6 个输入字符串 (OpenAI 5 个原生 +
-/// Anthropic 独有 `max`), 内部表达 5 个 variant; Anthropic `max` 在 FromStr 解析时饱和到
-/// `Xhigh` (OpenAI 真实上限), 保留客户端最高 effort 意图。
+/// OpenAI Responses `reasoning.effort` 枚举. 接受 6 个输入字符串, 内部 6 个 variant
+/// 一一对应, 全部原样透传上游。
 ///
-/// 取值矩阵 (2026-05 实测):
+/// 取值矩阵:
 /// - `minimal`: OpenAI GPT-5+ 专用 (低 reasoning tokens), Anthropic 不接受
 /// - `low/medium/high`: 两边都接受
-/// - `xhigh`: OpenAI GPT-5.2+ / Anthropic Opus 4.7 共同支持 (真协议交集)
-/// - `max`: Anthropic 独有 (Opus 4.6/4.7 + Sonnet 4.6), OpenAI 上游 400 拒收 → 饱和到 Xhigh
+/// - `xhigh`: OpenAI GPT-5.2+ / Anthropic Opus 4.7 共同支持
+/// - `max`: 两边最高档 (OpenAI gpt-5.6 系起官方支持, 此前会 400 → 曾饱和到 Xhigh,
+///   现原样透传; 老模型/不认 max 的中转由上游报错, 属调用方责任)
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "lowercase")]
 pub enum ReasoningEffort {
@@ -41,6 +41,7 @@ pub enum ReasoningEffort {
     Medium,
     High,
     Xhigh,
+    Max,
 }
 
 impl ReasoningEffort {
@@ -51,14 +52,15 @@ impl ReasoningEffort {
             Self::Medium => "medium",
             Self::High => "high",
             Self::Xhigh => "xhigh",
+            Self::Max => "max",
         }
     }
 
     /// Anthropic deprecated `thinking.budget_tokens` (integer) → OpenAI effort. 阈值与 gpt-5
     /// 系列 reasoning_tokens 经验值对齐。
     ///
-    /// 注: 不映射到 Xhigh — Xhigh 仅通过显式 effort string 触发, budget_tokens 这条路径在
-    /// Opus 4.7 已被弃用, 维持现有 4 档够用。
+    /// 注: 不映射到 Xhigh / Max — 最高两档仅通过显式 effort string 触发, budget_tokens
+    /// 这条路径在 Opus 4.7 已被弃用, 维持现有 4 档够用。
     pub fn from_budget_tokens(budget_tokens: u64) -> Self {
         if budget_tokens < 4096 {
             Self::Minimal
@@ -81,10 +83,7 @@ impl FromStr for ReasoningEffort {
             "medium" => Ok(Self::Medium),
             "high" => Ok(Self::High),
             "xhigh" => Ok(Self::Xhigh),
-            // Anthropic 独有的 max 在 OpenAI 上游会 400, 饱和到 Xhigh (OpenAI 真实上限)
-            // 保留"最高 effort"意图。Anthropic 透传时 cc-router 不消费 effort, 原 body 里
-            // max 字段会被透传给 anthropic.com 自家处理。
-            "max" => Ok(Self::Xhigh),
+            "max" => Ok(Self::Max),
             other => Err(format!("无效 reasoning_effort: {other}")),
         }
     }
@@ -535,7 +534,7 @@ mod tests {
     }
 
     // ============================================================
-    // xhigh / max 兼容性测试 (OpenAI 5.2+ + Anthropic Opus 4.7)
+    // xhigh / max 档位测试 (xhigh: OpenAI 5.2+; max: gpt-5.6 系起官方支持, 原样透传)
     // ============================================================
 
     #[test]
@@ -547,17 +546,15 @@ mod tests {
     }
 
     #[test]
-    fn reasoning_effort_max_saturates_to_xhigh() {
-        // Anthropic 独有的 max 在 OpenAI 上游会 400, cc-router 饱和到 Xhigh 保留意图
-        assert_eq!(
-            ReasoningEffort::from_str("max"),
-            Ok(ReasoningEffort::Xhigh)
-        );
+    fn reasoning_effort_max_parses_to_max_variant() {
+        // OpenAI 官方已支持 max (gpt-5.6 系起), 不再饱和到 Xhigh, 原样透传
+        assert_eq!(ReasoningEffort::from_str("max"), Ok(ReasoningEffort::Max));
     }
 
     #[test]
-    fn reasoning_effort_xhigh_serializes_as_xhigh() {
+    fn reasoning_effort_top_tiers_serialize_as_str() {
         assert_eq!(ReasoningEffort::Xhigh.as_str(), "xhigh");
+        assert_eq!(ReasoningEffort::Max.as_str(), "max");
     }
 
     #[test]
@@ -572,12 +569,12 @@ mod tests {
     }
 
     #[test]
-    fn resolve_reasoning_effort_max_saturates_via_chain() {
-        // 客户端传 max → 饱和到 Xhigh, 不再 silent drop 落回 yaml
+    fn resolve_reasoning_effort_max_passes_through() {
+        // 客户端传 max → Max variant 原样透传, 不落回 yaml 也不降档
         let body = json!({"thinking": {"effort": "max"}});
         assert_eq!(
             resolve_reasoning_effort(&body, None, Some("medium")),
-            Some(ReasoningEffort::Xhigh)
+            Some(ReasoningEffort::Max)
         );
     }
 }

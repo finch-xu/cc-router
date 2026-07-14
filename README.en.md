@@ -147,12 +147,12 @@ Virtual models and aliases:
 
 | Virtual model | Aliases |
 |---|---|
-|  `model-fable` |  `anthropic/model-fable` `anthropic/claude-fable*` `claude-fable*` `gpt-5.6` `openai/gpt-5.6` |
-|  `model-opus` |  `anthropic/model-opus` `anthropic/claude-opus*` `claude-opus*` `gpt-5.5` `openai/gpt-5.5` |
-|  `model-sonnet` |  `anthropic/model-sonnet` `anthropic/claude-sonnet*` `claude-sonnet*` `gpt-5.4` `openai/gpt-5.4` |
-|  `model-haiku` |  `anthropic/model-haiku` `anthropic/claude-haiku*` `claude-haiku*`  `gpt-5.4-mini` `openai/gpt-5.4-mini` |
+|  `model-fable` |  `anthropic/model-fable` `anthropic/claude-fable*` `claude-fable*` `gpt-5.6` `gpt-*-sol` `openai/gpt-5.6` `openai/gpt-*-sol` |
+|  `model-opus` |  `anthropic/model-opus` `anthropic/claude-opus*` `claude-opus*` `gpt-5.5` `gpt-*-terra` `openai/gpt-5.5` `openai/gpt-*-terra` |
+|  `model-sonnet` |  `anthropic/model-sonnet` `anthropic/claude-sonnet*` `claude-sonnet*` `gpt-5.4` `gpt-*-luna` `openai/gpt-5.4` `openai/gpt-*-luna` |
+|  `model-haiku` |  `anthropic/model-haiku` `anthropic/claude-haiku*` `claude-haiku*`  `gpt-*-mini` `openai/gpt-*-mini` |
 
-> `claude-opus*` is a wildcard (prefix match): you can pass any model name that fits the pattern and it will be normalized to the `model-opus` virtual model — e.g. `claude-opus-4-8`, `claude-opus-4-7-20260101`, and `claude-opus-100` all work.
+> `claude-opus*` is a wildcard (prefix match): you can pass any model name that fits the pattern and it will be normalized to the `model-opus` virtual model — e.g. `claude-opus-4-8`, `claude-opus-4-7-20260101`, and `claude-opus-100` all work. `gpt-*-sol`-style aliases match by tier segment: `gpt-5.6-sol`, `gpt-6-sol`, and `gpt-5.6-sol-20261201` all hit the sol tier (same for terra/luna/mini).
 
 ## FAQ & Use Cases
 

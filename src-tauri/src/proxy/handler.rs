@@ -524,15 +524,22 @@ pub async fn models() -> Response {
         "anthropic/model-opus",
         "anthropic/model-sonnet",
         "anthropic/model-haiku",
-        // OpenAI Responses 兼容入口别名 (v2.3+): 映射到 fable/opus/sonnet/haiku
+        // OpenAI Responses 兼容入口别名 (v2.3+): 映射到 fable/opus/sonnet/haiku;
+        // sol/terra/luna 是 ChatGPT 新一代档位命名 (gpt-*-sol/terra/luna/mini 模糊匹配)
         "gpt-5.6",
         "gpt-5.5",
         "gpt-5.4",
         "gpt-5.4-mini",
+        "gpt-5.6-sol",
+        "gpt-5.6-terra",
+        "gpt-5.6-luna",
         "openai/gpt-5.6",
         "openai/gpt-5.5",
         "openai/gpt-5.4",
         "openai/gpt-5.4-mini",
+        "openai/gpt-5.6-sol",
+        "openai/gpt-5.6-terra",
+        "openai/gpt-5.6-luna",
     ];
     const CREATED_AT_ISO: &str = "2026-01-01T00:00:00Z"; // Anthropic 字段 (ISO 字符串)
     const CREATED_UNIX: i64 = 1_767_225_600; // OpenAI 字段 (Unix 秒, 同一时刻)

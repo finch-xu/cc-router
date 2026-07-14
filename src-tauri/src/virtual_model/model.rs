@@ -36,13 +36,29 @@ impl VirtualModelName {
 
         // 虚拟模型名 + OpenAI Responses 别名: 这些不以 claude- 开头, 精确映射.
         // gpt-5.6 给 fable: fable 能力在 opus(gpt-5.5) 之上, 故取更高档号.
+        // gpt-*-mini 类后缀名走下方档位段模糊匹配, 不在此枚举.
         match s {
             "model-fable" | "gpt-5.6" => return Some(Self::Fable),
             "model-opus" | "gpt-5.5" => return Some(Self::Opus),
             "model-sonnet" | "gpt-5.4" => return Some(Self::Sonnet),
-            "model-haiku" | "gpt-5.4-mini" => return Some(Self::Haiku),
+            "model-haiku" => return Some(Self::Haiku),
             "model-fallback" => return Some(Self::Fallback),
             _ => {}
+        }
+
+        // ChatGPT 档位命名模糊匹配: gpt-*-sol / gpt-*-terra / gpt-*-luna / gpt-*-mini,
+        // 含日期后缀变种 (gpt-5.6-sol-20261201)。按 '-' 分段精确比对档位段,
+        // 避免 "gpt-5.6-solaris" 前缀撞名误命中。
+        if s.starts_with("gpt-") {
+            for seg in s.split('-') {
+                match seg {
+                    "sol" => return Some(Self::Fable),
+                    "terra" => return Some(Self::Opus),
+                    "luna" => return Some(Self::Sonnet),
+                    "mini" => return Some(Self::Haiku),
+                    _ => {}
+                }
+            }
         }
 
         // 官方 Anthropic 模型写法及其变种 (含日期后缀): 前缀匹配 (issue #22).
@@ -178,6 +194,31 @@ mod tests {
         assert_eq!(VirtualModelName::parse("openai/gpt-5.4-mini"), Some(VirtualModelName::Haiku));
         // 交叉前缀 (openai/ 把 model- 别名也带过来) - 仍然能 parse, 因为 openai/ 只是被 strip 掉
         assert_eq!(VirtualModelName::parse("openai/model-sonnet"), Some(VirtualModelName::Sonnet));
+    }
+
+    #[test]
+    fn parse_recognizes_gpt_tier_suffixes() {
+        // ChatGPT 新一代档位命名: gpt-*-sol / gpt-*-terra / gpt-*-luna / gpt-*-mini
+        assert_eq!(VirtualModelName::parse("gpt-5.6-sol"), Some(VirtualModelName::Fable));
+        assert_eq!(VirtualModelName::parse("gpt-5.6-terra"), Some(VirtualModelName::Opus));
+        assert_eq!(VirtualModelName::parse("gpt-5.6-luna"), Some(VirtualModelName::Sonnet));
+        assert_eq!(VirtualModelName::parse("gpt-5.6-mini"), Some(VirtualModelName::Haiku));
+        // 原精确别名 gpt-5.4-mini 由模糊规则接管, 行为不变
+        assert_eq!(VirtualModelName::parse("gpt-5.4-mini"), Some(VirtualModelName::Haiku));
+        // openai/ 前缀被 strip 后同样命中
+        assert_eq!(VirtualModelName::parse("openai/gpt-5.6-sol"), Some(VirtualModelName::Fable));
+        // 未来版本号 / 日期后缀变种
+        assert_eq!(VirtualModelName::parse("gpt-6-sol"), Some(VirtualModelName::Fable));
+        assert_eq!(
+            VirtualModelName::parse("gpt-5.6-sol-20261201"),
+            Some(VirtualModelName::Fable)
+        );
+        // 边界: 档位段必须整段相等, 前缀撞名不误命中
+        assert_eq!(VirtualModelName::parse("gpt-5.6-solaris"), None);
+        // 边界: 非 gpt- 开头不进模糊匹配
+        assert_eq!(VirtualModelName::parse("mistral-sol-7b"), None);
+        // 边界: 未知厂商前缀不被 strip → 不以 gpt- 开头 → fallback(None)
+        assert_eq!(VirtualModelName::parse("google/gpt-5.6-sol"), None);
     }
 
     #[test]

@@ -130,13 +130,13 @@ pub fn request_to_anthropic(body: &Value) -> AppResult<Value> {
 /// OpenAI reasoning_effort → Anthropic thinking.budget_tokens.
 ///
 /// 映射依据: 与 [`responses_common`] 里的反向映射 (`resolve_reasoning_effort`) 阈值对称。
-/// minimal=1024 / low=2048 / medium=8192 / high=16384 / xhigh→high。
+/// minimal=1024 / low=2048 / medium=8192 / high=16384 / xhigh、max→high。
 fn effort_to_budget_tokens(effort: &str) -> i64 {
     match effort {
         "minimal" => 1024,
         "low" => 2048,
         "medium" => 8192,
-        "high" | "xhigh" => 16384,
+        "high" | "xhigh" | "max" => 16384,
         _ => 8192,
     }
 }
@@ -1148,6 +1148,14 @@ mod tests {
         });
         let out = request_to_anthropic(&body).unwrap();
         assert_eq!(out["thinking"]["type"], "enabled");
+        assert_eq!(out["thinking"]["budget_tokens"], 16384);
+
+        // max 归最高档, 与 high/xhigh 同值 (曾落 _=>8192 反而比 high 低)
+        let body = json!({
+            "model":"gpt-5.6-sol","input":[],
+            "reasoning": {"effort": "max"},
+        });
+        let out = request_to_anthropic(&body).unwrap();
         assert_eq!(out["thinking"]["budget_tokens"], 16384);
     }
 
