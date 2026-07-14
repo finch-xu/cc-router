@@ -93,6 +93,7 @@ The AI Agent / Coding Agent tools listed below can all connect to cc-router and 
 | `modelscope` | ModelScope (pay-as-you-go) | ❌ | ✅ | partial |
 | `ucloud` | UCloud Modelverse (Coding Plan subscription + pay-as-you-go API in CN/global) | ✅ | ✅ | untested |
 | `openai` | **OpenAI official API** (pay-as-you-go; includes GPT-5 / o3 / 4.1 reasoning models; auto-translates Anthropic thinking ↔ OpenAI reasoning) | ❌ | ✅ | untested |
+| `xai` | xAI Grok (pay-as-you-go; includes Grok 4.5 / 4.3; official Anthropic-compatible endpoint) | ❌ | ✅ | untested |
 | `Custom` | Bring your own Anthropic-compatible endpoint | ✅ | ✅ | verified |
 | `Custom (Gemini compatible)` | Bring your own Gemini generateContent-compatible endpoint (relay, etc.); `messages_path` must contain the `{model}` placeholder | ❌ | ✅ | tested |
 | `Custom (Gemini Interactions compatible)` | Bring your own Gemini Interactions API `/v1beta/interactions`-compatible endpoint (Google's new unified API / compatible relay); auto protocol translation; unlike the legacy generateContent, the model goes in the request body, so no `{model}` placeholder is needed | ❌ | ✅ | partial |

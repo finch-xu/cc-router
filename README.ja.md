@@ -93,6 +93,7 @@
 | `modelscope` | ModelScope 魔搭（従量課金） | ❌ | ✅ | partial |
 | `ucloud` | 優雲智算 UCloud Modelverse（Coding Plan サブスク + 従量課金 API、中国国内/海外） | ✅ | ✅ | untested |
 | `openai` | **OpenAI 公式 API**（従量課金、GPT-5 / o3 / 4.1 などの reasoning モデル対応、Anthropic thinking ↔ OpenAI reasoning を自動変換） | ❌ | ✅ | untested |
+| `xai` | xAI Grok（従量課金、Grok 4.5 / 4.3 対応、公式 Anthropic 互換エンドポイント） | ❌ | ✅ | untested |
 | `カスタム` | Anthropic プロトコル準拠の任意の API を自前で追加 | ✅ | ✅ | verified |
 | `カスタム (Gemini 互換)` | Gemini generateContent 互換の任意のエンドポイント（中継など）を追加。`messages_path` に `{model}` プレースホルダを含める必要があります | ❌ | ✅ | tested |
 | `カスタム (Gemini Interactions 互換)` | Gemini Interactions API `/v1beta/interactions` 互換の任意のエンドポイント（Google の新しい統合 API / 互換中継）を追加、プロトコル自動変換。旧来の generateContent と異なり、model はリクエスト body 内にあるため、`{model}` プレースホルダは不要 | ❌ | ✅ | partial |
