@@ -33,10 +33,13 @@ use crate::proxy::oauth_dispatch::{
 };
 use crate::proxy::overloaded;
 use crate::proxy::retry::{classify_response, ShouldRetry};
-use crate::proxy::sanitize::{inject_missing_thinking_placeholders, strip_foreign_thinking_blocks};
+use crate::proxy::sanitize::{
+    force_anthropic_effort, inject_missing_thinking_placeholders, strip_foreign_thinking_blocks,
+};
 use crate::proxy::sse;
 use crate::proxy::upstream;
 use crate::state::AppState;
+use crate::subscription::model::SlotEfforts;
 use crate::subscription::state_machine;
 use crate::virtual_model::scheduler::build_candidate_order;
 use crate::virtual_model::VirtualModelName;
@@ -59,6 +62,18 @@ pub(crate) fn provider_reasoning_defaults(
         .get(provider_id)
         .map(|p| (p.expose_reasoning, p.default_reasoning_effort.clone()))
         .unwrap_or((true, Some(DEFAULT_REASONING_EFFORT.into())))
+}
+
+/// 取该虚拟模型对应槽位的 forced effort (订阅槽位级强制档位)。
+///
+/// `fallback` 虚拟模型透传原始 model、不走 slot 映射 ([`VirtualModelName::slot`] 对 Fallback
+/// 返回 Sonnet 只是为了满足签名), 因此**没有**对应槽位 → 恒 None, 让 fallback 请求的 effort
+/// 完全不被干预。抽成独立函数是为了让这条不变式可单测。
+fn slot_forced_effort(slot_efforts: &SlotEfforts, vm_name: VirtualModelName) -> Option<String> {
+    if vm_name.is_fallback() {
+        return None;
+    }
+    slot_efforts.get(vm_name.slot()).map(str::to_string)
 }
 
 /// 按 char_indices 找 UTF-8 边界, 避免切坏多字节字符
@@ -190,6 +205,7 @@ pub async fn dispatch(
             forward_headers,
             auth_type,
             oauth_metadata,
+            forced_effort,
         ) = {
             let guard = rt.read().await;
             // fallback 透传原始 model; 其他三个按 slot 映射
@@ -199,6 +215,9 @@ pub async fn dispatch(
                 let slot = vm_name.slot();
                 guard.row.model_slots.get(slot).to_string()
             };
+            // 订阅槽位级 forced effort: 用户给该订阅的该槽位固定了档位时, 丢弃客户端传入的
+            // effort 强制使用它 (fallback 恒 None, 见 [`slot_forced_effort`])。
+            let forced_effort = slot_forced_effort(&guard.row.slot_efforts, vm_name);
             (
                 guard.row.provider_id.clone(),
                 guard.row.endpoint_id.clone(),
@@ -213,6 +232,7 @@ pub async fn dispatch(
                 guard.row.forward_headers.clone(),
                 guard.row.auth_type,
                 guard.row.oauth_metadata.clone(),
+                forced_effort,
             )
         };
         let oauth_refresh_token = oauth_metadata.refresh_token.clone();
@@ -229,11 +249,10 @@ pub async fn dispatch(
 
             let (yaml_expose_reasoning, yaml_default_effort) =
                 provider_reasoning_defaults(state, &provider_id);
-            // 订阅级 effort 暂未做 (待 DB migration 落 reasoning_effort 列后填入)。
             let codex_extras = CodexExtras {
                 reasoning_effort: resolve_reasoning_effort(
                     &request_body,
-                    None,
+                    forced_effort.as_deref(),
                     yaml_default_effort.as_deref(),
                 ),
                 expose_reasoning: yaml_expose_reasoning,
@@ -358,6 +377,10 @@ pub async fn dispatch(
         // Kiro OAuth 分支: 凭据走 AWS Builder ID OIDC 或 Kiro IDE JSON 文件,
         // 上游为 AWS CodeWhisperer (二进制 Event Stream), 协议完全独立, 与 codex 互不污染.
         // fallback 与 OAuth 互斥, 同 codex 规则.
+        //
+        // 本分支刻意不读 forced_effort: CodeWhisperer 协议没有 reasoning 字段 (见 kiro.yaml
+        // 的 expose_reasoning: false 与 kiro_codewhisperer.rs 丢弃客户端 thinking 块的注释)。
+        // 即便订阅的 slot_efforts 里存了值也不读, 前端已把 Kiro 订阅的 effort 下拉灰掉。
         if matches!(auth_type, AuthType::KiroOauth) {
             if is_fallback {
                 // fallback 透传原始 model, Kiro 后端只认 codewhisperer 模型, 必然 400.
@@ -494,7 +517,11 @@ pub async fn dispatch(
             let (yaml_expose_reasoning, yaml_default_effort) =
                 provider_reasoning_defaults(state, &provider_id);
             let gemini_extras = GeminiExtras {
-                thinking_budget: resolve_thinking_budget(&request_body, yaml_default_effort.as_deref()),
+                thinking_budget: resolve_thinking_budget(
+                    &request_body,
+                    forced_effort.as_deref(),
+                    yaml_default_effort.as_deref(),
+                ),
                 include_thoughts: yaml_expose_reasoning,
             };
 
@@ -624,7 +651,11 @@ pub async fn dispatch(
             let (yaml_expose_reasoning, yaml_default_effort) =
                 provider_reasoning_defaults(state, &provider_id);
             let interactions_extras = InteractionsExtras {
-                thinking_level: resolve_thinking_level(&request_body, yaml_default_effort.as_deref()),
+                thinking_level: resolve_thinking_level(
+                    &request_body,
+                    forced_effort.as_deref(),
+                    yaml_default_effort.as_deref(),
+                ),
                 include_thoughts: yaml_expose_reasoning,
             };
 
@@ -771,7 +802,7 @@ pub async fn dispatch(
             let extras = OpenAiResponsesExtras {
                 reasoning_effort: resolve_reasoning_effort(
                     &request_body,
-                    None,
+                    forced_effort.as_deref(),
                     yaml_default_effort.as_deref(),
                 ),
                 expose_reasoning: yaml_expose_reasoning,
@@ -910,7 +941,7 @@ pub async fn dispatch(
             let extras = ChatCompletionsExtras {
                 reasoning_effort: resolve_reasoning_effort(
                     &request_body,
-                    None,
+                    forced_effort.as_deref(),
                     yaml_default_effort.as_deref(),
                 ),
                 expose_reasoning: yaml_expose_reasoning,
@@ -1048,6 +1079,13 @@ pub async fn dispatch(
             if !is_fallback {
                 upstream_body["model"] = Value::String(real_model.clone());
             }
+            // 订阅槽位级 forced effort 双写 (output_config.effort + thinking.effort).
+            // 透传分支没有协议翻译层, 用户设定只能直接改写出站 body。forced_effort 在 snapshot
+            // 时已按 is_fallback 归零, 故此处不必再判。规则见 [`force_anthropic_effort`].
+            let effort_written = match forced_effort.as_deref() {
+                Some(e) => force_anthropic_effort(&mut upstream_body, e),
+                None => 0,
+            };
             // 第一道: 无条件 drop cc-router 翻译层 (openai_responses/gemini) 包装的 thinking blocks
             let dropped_foreign = strip_foreign_thinking_blocks(&mut upstream_body);
             // 第二道: 按 provider yaml inject_missing_thinking_placeholder 给缺 thinking 的
@@ -1063,13 +1101,17 @@ pub async fn dispatch(
             } else {
                 0
             };
-            if dropped_foreign > 0 || injected > 0 {
+            // forced_effort 一起打进日志: 用户设了档位但 effort_written == 0 时 (客户端显式
+            // thinking.type=disabled), 能直接从 Logs 页看出为什么没生效。
+            if dropped_foreign > 0 || injected > 0 || forced_effort.is_some() {
                 info!(
                     %attempt_id,
                     %sub_id,
                     %provider_id,
                     dropped_foreign,
                     injected,
+                    effort_written,
+                    forced_effort = ?forced_effort,
                     "sanitized thinking blocks before anthropic passthrough"
                 );
             }
@@ -1661,3 +1703,54 @@ fn build_error_status(status: reqwest::StatusCode) -> Response {
         .into_response()
 }
 
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn efforts_all_max() -> SlotEfforts {
+        SlotEfforts {
+            fable: Some("max".into()),
+            opus: Some("max".into()),
+            sonnet: Some("max".into()),
+            haiku: Some("max".into()),
+        }
+    }
+
+    #[test]
+    fn slot_forced_effort_reads_matching_slot() {
+        let se = SlotEfforts {
+            opus: Some("max".into()),
+            ..Default::default()
+        };
+        assert_eq!(
+            slot_forced_effort(&se, VirtualModelName::Opus),
+            Some("max".to_string())
+        );
+        // 只设了 opus, sonnet 槽仍是 auto
+        assert_eq!(slot_forced_effort(&se, VirtualModelName::Sonnet), None);
+    }
+
+    /// fallback 透传原始 model、不走 slot 映射, 所以即便订阅四个槽位都设了档位,
+    /// fallback 请求的 effort 也必须完全不被干预。
+    #[test]
+    fn slot_forced_effort_is_none_for_fallback() {
+        assert_eq!(
+            slot_forced_effort(&efforts_all_max(), VirtualModelName::Fallback),
+            None
+        );
+    }
+
+    #[test]
+    fn slot_forced_effort_covers_all_four_slots() {
+        let se = efforts_all_max();
+        for vm in [
+            VirtualModelName::Fable,
+            VirtualModelName::Opus,
+            VirtualModelName::Sonnet,
+            VirtualModelName::Haiku,
+        ] {
+            assert_eq!(slot_forced_effort(&se, vm), Some("max".to_string()));
+        }
+    }
+}

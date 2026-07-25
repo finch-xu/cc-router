@@ -32,6 +32,7 @@ import type {
   ModelInfo,
   ModelSlots,
   RefreshModelListResult,
+  SlotEfforts,
   VirtualModelName,
 } from "@/types";
 import { allSlotsFilled, MODEL_SLOT_KEYS, uniformSlots } from "@/lib/modelSlots";
@@ -158,6 +159,8 @@ export function SubscriptionNewPage() {
   const [displayName, setDisplayName] = useState<string>("");
 
   const [slots, setSlots] = useState<ModelSlots>(uniformSlots(""));
+  // 新建时默认全 auto (空对象)。自定义 provider 单页路径不暴露此项, 保持 {} 即可。
+  const [slotEfforts, setSlotEfforts] = useState<SlotEfforts>({});
   const [models, setModels] = useState<ModelInfo[] | null>(null);
   const [modelFetchError, setModelFetchError] = useState<string | null>(null);
   const [fetchingModels, setFetchingModels] = useState(false);
@@ -345,7 +348,7 @@ export function SubscriptionNewPage() {
     try {
       await invoke("update_subscription", {
         id: createdId,
-        patch: { model_slots: slots },
+        patch: { model_slots: slots, slot_efforts: slotEfforts },
       });
       await queryClient.invalidateQueries({ queryKey: ["subscriptions"] });
       await bindToVirtualModelsIfOnboarding(createdId);
@@ -405,7 +408,7 @@ export function SubscriptionNewPage() {
     try {
       await invoke("update_subscription", {
         id: createdId,
-        patch: { model_slots: slots },
+        patch: { model_slots: slots, slot_efforts: slotEfforts },
       });
       await queryClient.invalidateQueries({ queryKey: ["subscriptions"] });
       await bindToVirtualModelsIfOnboarding(createdId);
@@ -525,7 +528,7 @@ export function SubscriptionNewPage() {
     if (!createdId || !provider || !endpoint) return;
     await invoke("update_subscription", {
       id: createdId,
-      patch: { model_slots: slots },
+      patch: { model_slots: slots, slot_efforts: slotEfforts },
     });
 
     await bindToVirtualModelsIfOnboarding(createdId);
@@ -1087,6 +1090,10 @@ export function SubscriptionNewPage() {
                 <ModelSlotPicker
                   value={slots}
                   onChange={setSlots}
+                  efforts={slotEfforts}
+                  onEffortsChange={setSlotEfforts}
+                  effortDisabled={isKiroOAuth}
+                  effortDisabledReason={t("slotEffort.unsupportedKiro")}
                   models={models}
                   loading={fetchingModels}
                   error={modelFetchError}

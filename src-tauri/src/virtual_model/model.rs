@@ -104,7 +104,7 @@ impl VirtualModelName {
     }
 }
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SubscriptionSlot {
     Fable,
     Opus,

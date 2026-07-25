@@ -12,8 +12,8 @@ use std::str::FromStr;
 use crate::error::{AppError, AppResult};
 use crate::provider::model::{AuthHeaderFormat, AuthType, BalanceDiscovery, ModelDiscovery};
 use crate::subscription::model::{
-    BalanceSnapshot, ModelCache, ModelInfo, ModelSlots, OAuthMetadata, SubscriptionRow,
-    SubscriptionRuntime,
+    BalanceSnapshot, ModelCache, ModelInfo, ModelSlots, OAuthMetadata, SlotEfforts,
+    SubscriptionRow, SubscriptionRuntime,
 };
 
 /// 启动时从 DB 加载全部订阅，并初始化运行时状态。
@@ -32,7 +32,7 @@ pub async fn load_runtime(
                 base_url, messages_path, auth_header_name, auth_header_format,
                 required_headers, forward_headers, model_discovery, balance_discovery,
                 provider_display_name, provider_icon, is_user_defined,
-                auth_type, oauth_metadata
+                auth_type, oauth_metadata, slot_efforts
          FROM subscriptions",
     )
     .fetch_all(pool)
@@ -97,6 +97,23 @@ fn row_to_row(row: &sqlx::sqlite::SqliteRow) -> AppResult<SubscriptionRow> {
     let oauth_metadata_json: String = row.try_get("oauth_metadata")?;
     let oauth_metadata: OAuthMetadata = serde_json::from_str(&oauth_metadata_json)
         .map_err(|e| AppError::internal(format!("oauth_metadata JSON 解析失败: {e}")))?;
+    // slot_efforts 列在 migration 013 加, DEFAULT '{}' (= 全 auto)。
+    // 走 balance_discovery 式的宽容降级而不是 oauth_metadata 式的硬错误: 硬错误会让
+    // load_runtime 跳过整条订阅 (订阅从 UI 消失), 而 effort 覆盖丢失只是回退到透传客户端值 —
+    // 用整条订阅不可用去换一个可选配置字段的完整性不值得。SlotEfforts 全字段 optional,
+    // 只有列里根本不是 JSON object 时才会走到这里 (基本只可能是手工改库)。
+    let slot_efforts_json: String = row.try_get("slot_efforts")?;
+    let slot_efforts: SlotEfforts = match serde_json::from_str::<SlotEfforts>(&slot_efforts_json) {
+        Ok(se) => se,
+        Err(e) => {
+            warn!(
+                error = %e,
+                raw = %slot_efforts_json,
+                "slot_efforts JSON 解析失败, 该订阅所有槽位回退到 auto (透传客户端 effort)"
+            );
+            SlotEfforts::default()
+        }
+    };
     Ok(SubscriptionRow {
         id,
         provider_id: row.try_get("provider_id")?,
@@ -111,6 +128,7 @@ fn row_to_row(row: &sqlx::sqlite::SqliteRow) -> AppResult<SubscriptionRow> {
             sonnet: row.try_get("model_slot_sonnet")?,
             haiku: row.try_get("model_slot_haiku")?,
         },
+        slot_efforts,
         enabled: {
             let v: i64 = row.try_get("enabled")?;
             v != 0
@@ -154,6 +172,7 @@ pub async fn insert(pool: &SqlitePool, sub: &SubscriptionRow) -> AppResult<()> {
     let discovery_json = serde_json::to_string(&sub.model_discovery)?;
     let balance_discovery_json = opt_to_json(sub.balance_discovery.as_ref())?;
     let oauth_json = serde_json::to_string(&sub.oauth_metadata)?;
+    let slot_efforts_json = serde_json::to_string(&sub.slot_efforts)?;
     sqlx::query(
         "INSERT INTO subscriptions (id, provider_id, endpoint_id, display_name, api_key,
             model_slot_fable, model_slot_opus, model_slot_sonnet, model_slot_haiku,
@@ -161,12 +180,12 @@ pub async fn insert(pool: &SqlitePool, sub: &SubscriptionRow) -> AppResult<()> {
             base_url, messages_path, auth_header_name, auth_header_format,
             required_headers, forward_headers, model_discovery, balance_discovery,
             provider_display_name, provider_icon, is_user_defined,
-            auth_type, oauth_metadata)
+            auth_type, oauth_metadata, slot_efforts)
          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
                  ?, ?, ?, ?,
                  ?, ?, ?, ?,
                  ?, ?, ?,
-                 ?, ?)",
+                 ?, ?, ?)",
     )
     .bind(sub.id.to_string())
     .bind(&sub.provider_id)
@@ -195,6 +214,7 @@ pub async fn insert(pool: &SqlitePool, sub: &SubscriptionRow) -> AppResult<()> {
     .bind(sub.is_user_defined as i64)
     .bind(sub.auth_type.as_str())
     .bind(oauth_json)
+    .bind(slot_efforts_json)
     .execute(pool)
     .await?;
     Ok(())
@@ -236,10 +256,12 @@ pub async fn update_row(pool: &SqlitePool, sub: &SubscriptionRow) -> AppResult<(
     let forward_json = serde_json::to_string(&sub.forward_headers)?;
     let discovery_json = serde_json::to_string(&sub.model_discovery)?;
     let balance_discovery_json = opt_to_json(sub.balance_discovery.as_ref())?;
+    let slot_efforts_json = serde_json::to_string(&sub.slot_efforts)?;
     sqlx::query(
         "UPDATE subscriptions SET
             endpoint_id = ?, display_name = ?,
             model_slot_fable = ?, model_slot_opus = ?, model_slot_sonnet = ?, model_slot_haiku = ?,
+            slot_efforts = ?,
             enabled = ?, is_auth_failed = ?, last_error_message = ?, updated_at = ?,
             base_url = ?, messages_path = ?, auth_header_name = ?, auth_header_format = ?,
             required_headers = ?, forward_headers = ?, model_discovery = ?, balance_discovery = ?,
@@ -252,6 +274,7 @@ pub async fn update_row(pool: &SqlitePool, sub: &SubscriptionRow) -> AppResult<(
     .bind(&sub.model_slots.opus)
     .bind(&sub.model_slots.sonnet)
     .bind(&sub.model_slots.haiku)
+    .bind(slot_efforts_json)
     .bind(sub.enabled as i64)
     .bind(sub.is_auth_failed as i64)
     .bind(&sub.last_error_message)
@@ -413,4 +436,97 @@ pub async fn save_balance_cache(
     .execute(pool)
     .await?;
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::subscription::model::SlotEfforts;
+    use crate::virtual_model::SubscriptionSlot;
+    use sqlx::sqlite::SqlitePoolOptions;
+
+    async fn migrated_pool() -> SqlitePool {
+        let pool = SqlitePoolOptions::new()
+            .max_connections(1)
+            .connect("sqlite::memory:")
+            .await
+            .expect("open in-memory db");
+        crate::db::run_migrations(&pool, std::path::Path::new("."))
+            .await
+            .expect("run migrations");
+        pool
+    }
+
+    /// insert → load_runtime → update_row → load_runtime 的完整往返。
+    /// 主要防的是 SQL 列清单与 .bind() 顺序错位 —— 那种错误只会在运行时暴露,
+    /// 且症状是"存进去的是别的字段的值", 很难从日志看出来。
+    #[tokio::test]
+    async fn slot_efforts_roundtrips_through_db() {
+        let pool = migrated_pool().await;
+
+        let mut row = SubscriptionRow::test_fixture("anthropic", "default");
+        row.display_name = "往返测试".into();
+        row.slot_efforts = SlotEfforts {
+            opus: Some("max".into()),
+            haiku: Some("low".into()),
+            ..Default::default()
+        };
+        insert(&pool, &row).await.expect("insert");
+
+        let loaded = load_runtime(&pool).await.expect("load");
+        let rt = loaded.get(&row.id).expect("subscription present");
+        let g = rt.read().await;
+        assert_eq!(g.row.slot_efforts.get(SubscriptionSlot::Opus), Some("max"));
+        assert_eq!(g.row.slot_efforts.get(SubscriptionSlot::Haiku), Some("low"));
+        assert_eq!(g.row.slot_efforts.get(SubscriptionSlot::Sonnet), None);
+        // 相邻字段没被 bind 顺序错位污染
+        assert_eq!(g.row.display_name, "往返测试");
+        assert_eq!(g.row.model_slots.sonnet, "b");
+        drop(g);
+
+        let mut updated = row.clone();
+        updated.slot_efforts = SlotEfforts {
+            sonnet: Some("xhigh".into()),
+            ..Default::default()
+        };
+        update_row(&pool, &updated).await.expect("update");
+
+        let loaded = load_runtime(&pool).await.expect("reload");
+        let g = loaded.get(&row.id).unwrap().read().await;
+        assert_eq!(g.row.slot_efforts.get(SubscriptionSlot::Sonnet), Some("xhigh"));
+        assert_eq!(g.row.slot_efforts.get(SubscriptionSlot::Opus), None);
+        assert_eq!(g.row.display_name, "往返测试");
+    }
+
+    /// 老订阅 (migration 013 的 DEFAULT '{}') 加载成全 auto。
+    #[tokio::test]
+    async fn legacy_row_defaults_to_all_auto() {
+        let pool = migrated_pool().await;
+        let row = SubscriptionRow::test_fixture("anthropic", "default");
+        insert(&pool, &row).await.expect("insert");
+        sqlx::query("UPDATE subscriptions SET slot_efforts = '{}'")
+            .execute(&pool)
+            .await
+            .expect("reset to default");
+
+        let loaded = load_runtime(&pool).await.expect("load");
+        let g = loaded.get(&row.id).unwrap().read().await;
+        assert_eq!(g.row.slot_efforts.get(SubscriptionSlot::Opus), None);
+    }
+
+    /// 坏 JSON 走宽容降级: 订阅仍然加载得出来 (全 auto), 而不是从列表里消失。
+    #[tokio::test]
+    async fn corrupt_slot_efforts_degrades_instead_of_dropping_row() {
+        let pool = migrated_pool().await;
+        let row = SubscriptionRow::test_fixture("anthropic", "default");
+        insert(&pool, &row).await.expect("insert");
+        sqlx::query("UPDATE subscriptions SET slot_efforts = 'not json at all'")
+            .execute(&pool)
+            .await
+            .expect("corrupt");
+
+        let loaded = load_runtime(&pool).await.expect("load");
+        let rt = loaded.get(&row.id).expect("订阅不应被整条跳过");
+        assert_eq!(rt.read().await.row.slot_efforts.get(SubscriptionSlot::Opus), None);
+    }
 }

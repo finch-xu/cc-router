@@ -43,6 +43,7 @@ import type {
   ModelInfo,
   ModelSlots,
   RefreshModelListResult,
+  SlotEfforts,
   SubscriptionPatch,
   TestConnectionResult,
 } from "@/types";
@@ -77,6 +78,7 @@ export function SubscriptionEditPage() {
   const [endpointId, setEndpointId] = useState<string>("");
   const [displayName, setDisplayName] = useState<string>("");
   const [slots, setSlots] = useState<ModelSlots>(uniformSlots(""));
+  const [slotEfforts, setSlotEfforts] = useState<SlotEfforts>({});
 
   // 自定义订阅可编辑的连接字段
   const [baseUrl, setBaseUrl] = useState<string>("");
@@ -99,6 +101,7 @@ export function SubscriptionEditPage() {
       setEndpointId(subQuery.data.endpoint_id);
       setDisplayName(subQuery.data.display_name);
       setSlots(subQuery.data.model_slots);
+      setSlotEfforts(subQuery.data.slot_efforts ?? {});
       setBaseUrl(subQuery.data.base_url);
       setMessagesPath(subQuery.data.messages_path);
       setAuthHeaderName(subQuery.data.auth_header_name);
@@ -137,6 +140,7 @@ export function SubscriptionEditPage() {
     const patch: SubscriptionPatch = {
       display_name: displayName,
       model_slots: slots,
+      slot_efforts: slotEfforts,
     };
     if (sub.is_user_defined) {
       const connErrKey = validateConnection({ base_url: baseUrl, messages_path: messagesPath });
@@ -367,6 +371,10 @@ export function SubscriptionEditPage() {
           <ModelSlotPicker
             value={slots}
             onChange={setSlots}
+            efforts={slotEfforts}
+            onEffortsChange={setSlotEfforts}
+            effortDisabled={sub.auth_type === "kiro_oauth"}
+            effortDisabledReason={t("slotEffort.unsupportedKiro")}
             models={models}
             loading={fetchingModels}
             error={modelError}

@@ -26,8 +26,8 @@ use crate::provider::model::AuthType;
 use crate::state::AppState;
 use crate::subscription::{
     model::{
-        KiroDisguise, KiroOAuthExtras, ModelSlots, OAuthMetadata, SubscriptionDto, SubscriptionRow,
-        SubscriptionRuntime,
+        KiroDisguise, KiroOAuthExtras, ModelSlots, OAuthMetadata, SlotEfforts, SubscriptionDto,
+        SubscriptionRow, SubscriptionRuntime,
     },
     store,
 };
@@ -140,6 +140,7 @@ pub async fn create_chatgpt_oauth_subscription(
         auth_type: AuthType::ChatgptOauth,
         oauth_metadata: metadata,
         model_slots: input.model_slots,
+        slot_efforts: SlotEfforts::default(),
         enabled: true,
         is_auth_failed: false,
         last_error_message: None,
@@ -408,6 +409,7 @@ pub async fn create_kiro_subscription(
         auth_type: AuthType::KiroOauth,
         oauth_metadata: metadata,
         model_slots: input.model_slots,
+        slot_efforts: SlotEfforts::default(),
         enabled: true,
         is_auth_failed: false,
         last_error_message: None,

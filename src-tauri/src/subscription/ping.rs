@@ -37,6 +37,7 @@ use crate::proxy::transform::openai_chat_completions::ChatCompletionsExtras;
 use crate::proxy::transform::openai_responses::CodexExtras;
 use crate::state::AppState;
 use crate::subscription::model::SubscriptionRow;
+use crate::virtual_model::SubscriptionSlot;
 
 #[derive(Debug)]
 pub struct ProbeResult {
@@ -84,12 +85,15 @@ fn dispatch_result_to_probe<T>(res: Result<T, OAuthDispatchError>) -> ProbeResul
 /// 用最小 prompt 探测一次 messages 端点(Anthropic 透传家族专用 leaf)。
 ///
 /// 仅被 `probe_subscription` 的 `ApiKey` 分支调用,故保持私有;调用方需准备好订阅 row
-/// (含 snapshot 连接信息) + 探测用的 model 名 — probe 只负责发请求。
+/// (含 snapshot 连接信息) + 已完成改写的 body — probe 只负责发请求。
 /// `client` 应使用 `state.probe_client`(30s 短超时单例)。
+///
+/// 收 `body` 而不是 `model`: 调用方会先对 body 做与真实 dispatch 同款的改写
+/// (当前是订阅槽位级 forced effort 双写), 若这里自己重新造 body 那些改写就全丢了。
 async fn probe(
     client: &reqwest::Client,
     row: &SubscriptionRow,
-    model: &str,
+    body: &Value,
 ) -> ProbeResult {
     let url = row.messages_url();
 
@@ -110,9 +114,7 @@ async fn probe(
     }
     headers.insert(CONTENT_TYPE, ReqHeaderValue::from_static("application/json"));
 
-    let body = ping_body(model);
-
-    match client.post(&url).headers(headers).json(&body).send().await {
+    match client.post(&url).headers(headers).json(body).send().await {
         Ok(r) => {
             let status = r.status();
             let status_u16 = status.as_u16();
@@ -154,19 +156,39 @@ async fn probe(
 ///
 /// `is_streaming=false` → 各 dispatch 走非流式 collector;无客户端转发头,故
 /// `forward_headers`/`client_headers` 传空。`sub_id` 取自 `row.id`。
-pub async fn probe_subscription(state: &AppState, row: &SubscriptionRow, model: &str) -> ProbeResult {
+///
+/// `slot`: `model` 来自哪个订阅槽位 (由 [`pick_test_model`] 给出)。用来取该槽位的 forced
+/// effort, 让探测的 effort 与真实 dispatch 一致 —— 否则用户给"只接受某一档的模型"固定了档位,
+/// 探测却发 yaml 默认档触发上游 400, UI 就会谎报"连接不通"。example_models 兜底时传 None。
+pub async fn probe_subscription(
+    state: &AppState,
+    row: &SubscriptionRow,
+    model: &str,
+    slot: Option<SubscriptionSlot>,
+) -> ProbeResult {
     let sub_id = row.id;
-    let body = ping_body(model);
+    let mut body = ping_body(model);
+    let forced_effort: Option<String> = slot
+        .and_then(|s| row.slot_efforts.get(s))
+        .map(str::to_string);
 
     match row.auth_type {
         // Anthropic 透传家族: body + auth 与上游兼容, 直接打 messages 端点。
-        AuthType::ApiKey => probe(&state.probe_client, row, model).await,
+        AuthType::ApiKey => {
+            // 与真实 dispatch 的透传分支同款改写。ping_body 既没有 output_config 也没有
+            // thinking, 所以只会写出 output_config.effort (thinking 不凭空创建) —— 与真实
+            // 请求的行为规则一致。
+            if let Some(e) = forced_effort.as_deref() {
+                crate::proxy::sanitize::force_anthropic_effort(&mut body, e);
+            }
+            probe(&state.probe_client, row, &body).await
+        }
 
         // ChatGPT OAuth (codex): refresh access_token + Anthropic→Responses 翻译。
         AuthType::ChatgptOauth => {
             let (expose, default_effort) = provider_reasoning_defaults(state, &row.provider_id);
             let extras = CodexExtras {
-                reasoning_effort: resolve_reasoning_effort(&body, None, default_effort.as_deref()),
+                reasoning_effort: resolve_reasoning_effort(&body, forced_effort.as_deref(), default_effort.as_deref()),
                 expose_reasoning: expose,
             };
             let res = dispatch_oauth_attempt(
@@ -209,7 +231,7 @@ pub async fn probe_subscription(state: &AppState, row: &SubscriptionRow, model: 
         AuthType::GeminiApiKey => {
             let (expose, default_effort) = provider_reasoning_defaults(state, &row.provider_id);
             let extras = GeminiExtras {
-                thinking_budget: resolve_thinking_budget(&body, default_effort.as_deref()),
+                thinking_budget: resolve_thinking_budget(&body, forced_effort.as_deref(), default_effort.as_deref()),
                 include_thoughts: expose,
             };
             let res = dispatch_gemini_attempt(
@@ -233,7 +255,7 @@ pub async fn probe_subscription(state: &AppState, row: &SubscriptionRow, model: 
         AuthType::GeminiInteractionsApiKey => {
             let (expose, default_effort) = provider_reasoning_defaults(state, &row.provider_id);
             let extras = InteractionsExtras {
-                thinking_level: resolve_thinking_level(&body, default_effort.as_deref()),
+                thinking_level: resolve_thinking_level(&body, forced_effort.as_deref(), default_effort.as_deref()),
                 include_thoughts: expose,
             };
             let res = dispatch_gemini_interactions_attempt(
@@ -259,7 +281,7 @@ pub async fn probe_subscription(state: &AppState, row: &SubscriptionRow, model: 
         AuthType::OpenaiResponsesApiKey => {
             let (expose, default_effort) = provider_reasoning_defaults(state, &row.provider_id);
             let extras = OpenAiResponsesExtras {
-                reasoning_effort: resolve_reasoning_effort(&body, None, default_effort.as_deref()),
+                reasoning_effort: resolve_reasoning_effort(&body, forced_effort.as_deref(), default_effort.as_deref()),
                 expose_reasoning: expose,
             };
             let res = dispatch_openai_responses_attempt(
@@ -283,7 +305,7 @@ pub async fn probe_subscription(state: &AppState, row: &SubscriptionRow, model: 
         AuthType::OpenaiChatCompletionsApiKey => {
             let (expose, default_effort) = provider_reasoning_defaults(state, &row.provider_id);
             let extras = ChatCompletionsExtras {
-                reasoning_effort: resolve_reasoning_effort(&body, None, default_effort.as_deref()),
+                reasoning_effort: resolve_reasoning_effort(&body, forced_effort.as_deref(), default_effort.as_deref()),
                 expose_reasoning: expose,
             };
             let res = dispatch_openai_chat_completions_attempt(
@@ -305,17 +327,32 @@ pub async fn probe_subscription(state: &AppState, row: &SubscriptionRow, model: 
     }
 }
 
-/// 选一个 model 名用于探测请求。优先 sonnet → haiku → opus(CC 主用 sonnet),
-/// 都为空时退到订阅 snapshot 的 model_discovery.example_models[0]。
+/// 选一个 model 名用于探测请求, 并一并返回它来自哪个槽位。优先 sonnet → haiku → opus
+/// (CC 主用 sonnet), 都为空时退到订阅 snapshot 的 model_discovery.example_models[0]。
 /// "(pending)" 是 SubscriptionNewPage 两步向导留下的占位, 跳过。
-pub fn pick_test_model(row: &SubscriptionRow) -> Option<String> {
-    for s in [&row.model_slots.sonnet, &row.model_slots.haiku, &row.model_slots.opus] {
+///
+/// 返回槽位是为了让 [`probe_subscription`] 能取该槽位的 forced effort —— 否则用户给"只接受
+/// 某一档的模型"固定了档位, 探测却发 yaml 默认档, 上游 400, UI 谎报"连接不通"。
+/// example_models 兜底时没有对应槽位, 返回 None。
+///
+/// 注: 刻意不遍历 fable (保持既有行为不变) —— 探测只验证连通性, 用最弱可用的槽位即可。
+/// 代价是只给 fable 槽设了 effort 的订阅, 探测不会带上那个 effort。
+pub fn pick_test_model(row: &SubscriptionRow) -> Option<(String, Option<SubscriptionSlot>)> {
+    for (s, slot) in [
+        (&row.model_slots.sonnet, SubscriptionSlot::Sonnet),
+        (&row.model_slots.haiku, SubscriptionSlot::Haiku),
+        (&row.model_slots.opus, SubscriptionSlot::Opus),
+    ] {
         let trimmed = s.trim();
         if !trimmed.is_empty() && trimmed != "(pending)" {
-            return Some(trimmed.to_string());
+            return Some((trimmed.to_string(), Some(slot)));
         }
     }
-    row.model_discovery.example_models.first().cloned()
+    row.model_discovery
+        .example_models
+        .first()
+        .cloned()
+        .map(|m| (m, None))
 }
 
 #[cfg(test)]
@@ -329,6 +366,53 @@ mod tests {
         // 不能是 1: 翻译成 max_output_tokens=1 会让部分 reasoning 模型 400。
         assert_eq!(b["max_tokens"], 16);
         assert_eq!(b["messages"][0]["role"], "user");
+    }
+
+    // ---------- pick_test_model 返回槽位 ----------
+
+    #[test]
+    fn pick_test_model_returns_sonnet_slot() {
+        let row = SubscriptionRow::test_fixture("anthropic", "default");
+        // fixture: fable="d", opus="a", sonnet="b", haiku="c"
+        assert_eq!(
+            pick_test_model(&row),
+            Some(("b".to_string(), Some(SubscriptionSlot::Sonnet)))
+        );
+    }
+
+    #[test]
+    fn pick_test_model_falls_back_to_haiku_slot() {
+        let mut row = SubscriptionRow::test_fixture("anthropic", "default");
+        row.model_slots.sonnet = String::new();
+        assert_eq!(
+            pick_test_model(&row),
+            Some(("c".to_string(), Some(SubscriptionSlot::Haiku)))
+        );
+    }
+
+    #[test]
+    fn pick_test_model_skips_pending_placeholder() {
+        let mut row = SubscriptionRow::test_fixture("anthropic", "default");
+        row.model_slots.sonnet = "(pending)".into();
+        assert_eq!(
+            pick_test_model(&row),
+            Some(("c".to_string(), Some(SubscriptionSlot::Haiku)))
+        );
+    }
+
+    /// example_models 兜底时没有对应槽位 → 探测不带 forced effort。
+    #[test]
+    fn pick_test_model_example_models_has_no_slot() {
+        let mut row = SubscriptionRow::test_fixture("anthropic", "default");
+        row.model_slots.fable = String::new();
+        row.model_slots.opus = String::new();
+        row.model_slots.sonnet = String::new();
+        row.model_slots.haiku = String::new();
+        row.model_discovery.example_models = vec!["example-model".into()];
+        assert_eq!(
+            pick_test_model(&row),
+            Some(("example-model".to_string(), None))
+        );
     }
 
     #[test]

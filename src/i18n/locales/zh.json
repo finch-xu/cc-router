@@ -580,6 +580,10 @@
   "modelSlot.historicalSuffix": "(历史值)",
   "modelSlot.historicalTitle": "{model} 不在自动列表中,可能是历史手动输入。如需修改请切到手动模式。",
   "modelSlot.modelIdPh": "填入厂商提供的模型 ID",
+  "slotEffort.auto": "自动",
+  "slotEffort.aria": "{slot} 思考档位",
+  "slotEffort.hint": "右侧下拉是该槽位的思考档位。「自动」表示原样透传 Claude Code 请求里携带的档位；选定具体档位后会忽略客户端传入值，强制使用该档位（适用于只接受单一档位的模型）。",
+  "slotEffort.unsupportedKiro": "Kiro / CodeWhisperer 上游协议没有 reasoning 字段，无法设置思考档位。需要思考能力请改用 OpenAI / Codex / Gemini 类 provider。",
 
   "providerBadge.verified": "已验证",
   "providerBadge.partial": "部分兼容",

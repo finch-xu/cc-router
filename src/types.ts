@@ -157,6 +157,25 @@ export interface ModelSlots {
   haiku: string;
 }
 
+/**
+ * 单个槽位的 reasoning effort 档位。
+ * 刻意不含 "minimal" —— 它是 OpenAI 系专有档, Anthropic 不接受;
+ * 理由见 src-tauri/src/commands/subscriptions.rs::ALLOWED_SLOT_EFFORTS。
+ */
+export type SlotEffort = "low" | "medium" | "high" | "xhigh" | "max";
+
+/**
+ * 每槽位 reasoning effort 覆盖。字段缺失 = auto (透传 Claude Code 请求携带的 effort);
+ * 有值 = 强制该档位, 丢弃客户端传入值。
+ * 与 Rust `SlotEfforts` 对齐 (每字段 serde skip_serializing_if = Option::is_none)。
+ */
+export interface SlotEfforts {
+  fable?: SlotEffort;
+  opus?: SlotEffort;
+  sonnet?: SlotEffort;
+  haiku?: SlotEffort;
+}
+
 export interface ModelInfo {
   id: string;
   display_name?: string;
@@ -215,6 +234,8 @@ export interface SubscriptionDto {
   endpoint_id: string;
   display_name: string;
   model_slots: ModelSlots;
+  /** 每槽位 reasoning effort 覆盖。字段缺失 = auto。后端总是带这个 key (可以是 {})。 */
+  slot_efforts: SlotEfforts;
   enabled: boolean;
   state: SubscriptionState;
   cooldown_until?: number;
@@ -298,6 +319,8 @@ export interface ConnectionPatch {
 export interface SubscriptionPatch {
   display_name?: string;
   model_slots?: ModelSlots;
+  /** 每槽位 effort 覆盖, 整块替换 (与 model_slots 一致, 无 per-slot patch) */
+  slot_efforts?: SlotEfforts;
   /** 内置订阅: 切换 endpoint, 后端 re-snapshot */
   endpoint_id?: string;
   /** 自定义订阅: 改连接信息 */

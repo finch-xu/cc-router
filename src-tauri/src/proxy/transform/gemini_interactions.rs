@@ -85,15 +85,34 @@ fn budget_to_thinking_level(budget: i64) -> &'static str {
 }
 
 /// thinking_level 优先级链:
-/// 1. `body.thinking.effort` (string) — 直接映射到 level, 最无损, 故置首
-/// 2. `body.thinking.budget_tokens` (整数, 阈值映射)
-/// 3. `body.extra_body.reasoning_effort` (string)
-/// 4. `yaml_default_effort`
+/// 0. `forced_effort` (订阅槽位级强制值, 命中即丢弃客户端所有 effort 信号)
+/// 1. `body.output_config.effort` (string) — Claude Code 2.1+ 原生字段
+/// 2. `body.thinking.effort` (string) — 直接映射到 level, 最无损, 故置于 budget 之前
+/// 3. `body.thinking.budget_tokens` (整数, 阈值映射)
+/// 4. `body.extra_body.reasoning_effort` (string)
+/// 5. `yaml_default_effort`
 ///
 /// 注: 与 [`super::gemini::resolve_thinking_budget`] 的来源集相同, 但**刻意把 effort 置于
 /// budget_tokens 之前** — 这里目标是离散档位 (low/medium/high), effort 字符串直接对应档位无损,
 /// 而 budget_tokens 是阈值近似; budget 版返回整数预算, 故先取 budget_tokens。两者语义不同, 不强求同序。
-pub fn resolve_thinking_level(body: &Value, yaml_default_effort: Option<&str>) -> Option<String> {
+/// `output_config.effort` 置于全部 body 来源之上与该意图同向 (它也是无损的离散档位, 且是
+/// 客户端唯一显式表达用户选择的字段)。
+pub fn resolve_thinking_level(
+    body: &Value,
+    forced_effort: Option<&str>,
+    yaml_default_effort: Option<&str>,
+) -> Option<String> {
+    if let Some(l) = forced_effort
+        .filter(|s| !s.is_empty())
+        .and_then(effort_to_thinking_level)
+    {
+        return Some(l.to_string());
+    }
+    if let Some(l) =
+        super::openai::output_config_effort(body).and_then(effort_to_thinking_level)
+    {
+        return Some(l.to_string());
+    }
     if let Some(thinking) = body.get("thinking") {
         if let Some(s) = thinking.get("effort").and_then(|x| x.as_str()) {
             if let Some(l) = effort_to_thinking_level(s) {
@@ -1242,11 +1261,54 @@ mod tests {
         assert_eq!(effort_to_thinking_level("bogus"), None);
 
         let body = json!({"thinking": {"effort": "high"}});
-        assert_eq!(resolve_thinking_level(&body, None), Some("high".to_string()));
+        assert_eq!(resolve_thinking_level(&body, None, None), Some("high".to_string()));
         let body = json!({"thinking": {"budget_tokens": 30000}});
-        assert_eq!(resolve_thinking_level(&body, None), Some("high".to_string()));
+        assert_eq!(resolve_thinking_level(&body, None, None), Some("high".to_string()));
         let body = json!({});
-        assert_eq!(resolve_thinking_level(&body, Some("low")), Some("low".to_string()));
+        assert_eq!(resolve_thinking_level(&body, None, Some("low")), Some("low".to_string()));
+    }
+
+    #[test]
+    fn resolve_thinking_level_reads_output_config() {
+        // xhigh 走 effort_to_thinking_level 的 xhigh→high 收敛。
+        let body = json!({"output_config": {"effort": "xhigh"}});
+        assert_eq!(
+            resolve_thinking_level(&body, None, None),
+            Some("high".to_string())
+        );
+    }
+
+    #[test]
+    fn resolve_thinking_level_output_config_beats_thinking_effort() {
+        let body = json!({
+            "output_config": {"effort": "low"},
+            "thinking": {"effort": "high"},
+        });
+        assert_eq!(
+            resolve_thinking_level(&body, None, None),
+            Some("low".to_string())
+        );
+    }
+
+    #[test]
+    fn resolve_thinking_level_forced_effort_wins() {
+        let body = json!({
+            "output_config": {"effort": "high"},
+            "thinking": {"effort": "high", "budget_tokens": 30000},
+        });
+        assert_eq!(
+            resolve_thinking_level(&body, Some("low"), Some("high")),
+            Some("low".to_string())
+        );
+    }
+
+    #[test]
+    fn resolve_thinking_level_forced_invalid_falls_through() {
+        let body = json!({"thinking": {"effort": "high"}});
+        assert_eq!(
+            resolve_thinking_level(&body, Some("bogus"), None),
+            Some("high".to_string())
+        );
     }
 
     // ---------- SSE 帧解析 (真实字节) ----------

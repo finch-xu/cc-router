@@ -8,6 +8,9 @@
 //!
 //! 本模块负责在 [`pipeline`](super::pipeline) Anthropic 透传分支序列化 body 之前剥离这些
 //! foreign thinking blocks, 保留空 signature 或真 Anthropic 原生 signature 的 block。
+//!
+//! 本模块同时负责订阅槽位级 forced effort 的写入 ([`force_anthropic_effort`]) —— 透传分支
+//! 没有协议翻译层, 用户设定的 effort 只能直接改写出站 body。
 
 use serde_json::Value;
 
@@ -84,6 +87,76 @@ pub fn inject_missing_thinking_placeholders(body: &mut serde_json::Value) -> usi
         }
     }
     injected
+}
+
+/// 把订阅槽位级 forced effort 写进 Anthropic 透传 body —— **双写** `output_config.effort`
+/// 与 `thinking.effort`, 两处同值。本函数原地修改 body。
+///
+/// 双写理由: Anthropic 兼容中转站实现分裂 —— 有的只认 Claude Code 2.1+ 的
+/// `output_config.effort` (Anthropic 官方字段位置), 有的只认更早的 `thinking.effort` 写法。
+/// 两个字段填同一个值语义无冲突, 上游认哪个都能拿到用户设定。
+///
+/// 三条规则:
+///
+/// 1. **`output_config` 缺失时创建**。它是 Anthropic 官方的 effort 字段位置, 也是 CC 2.1+
+///    每个请求都会带的字段, 所以创建它对绝大多数上游无风险。这是"强制生效"语义的必要条件 ——
+///    只覆盖已存在字段的话, 客户端没发 effort 时用户的设定就静默失效了。
+///    *已知风险*: 极少数严格中转不认 `output_config` 会返回 400 "extra inputs are not
+///    permitted"; 届时的解法是给 provider yaml 加一个写入位置开关, 而不是放弃强制语义。
+///
+/// 2. **`thinking` 缺失时不创建**。凭空造 `thinking` 会把客户端没开的思考打开 (改变行为与
+///    计费), 而且 `type` 填什么都不安全: `enabled` 按老规范要求同时给 `budget_tokens`,
+///    `adaptive` 不认它的上游直接 400。只在父对象已存在时 upsert `effort` 键。
+///
+/// 3. **`thinking.type == "disabled"` 时整体跳过 (两个字段都不写)**。客户端显式关掉了思考,
+///    而 effort 是思考深度控制 —— 此时强制一个档位是语义矛盾; 且 Anthropic 官方端点对
+///    "thinking disabled + effort xhigh/max" 是明确的 400。返回 0 让调用方能记日志。
+///
+/// `thinking.budget_tokens` 保持原样不删: 认 effort 的上游会以 effort 为准 (budget_tokens
+/// 在 Opus 4.7 起已弃用), 而只认 budget_tokens 的老中转被删掉后会因 `type=enabled` 缺
+/// budget_tokens 而 400。留着是两边都安全的选择。
+///
+/// 不碰 `extra_body`: 那是 cc-router 内部约定 (只有自家翻译层读), Anthropic 协议上游不认,
+/// 往透传 body 里注入未知顶层字段只会增加严格中转 400 的面。
+///
+/// 返回实际写入的字段数 (0/1/2), 调用方用于日志。
+pub fn force_anthropic_effort(body: &mut Value, effort: &str) -> usize {
+    use serde_json::json;
+
+    // 规则 3: 客户端显式关掉思考 → 完全不干预。
+    let thinking_disabled = body
+        .get("thinking")
+        .and_then(|t| t.get("type"))
+        .and_then(|t| t.as_str())
+        == Some("disabled");
+    if thinking_disabled {
+        return 0;
+    }
+
+    let Some(obj) = body.as_object_mut() else {
+        return 0;
+    };
+    let mut written = 0usize;
+
+    // 规则 1: output_config 缺失时创建 (非 object 时也覆盖成 object)。
+    let oc = obj
+        .entry("output_config")
+        .or_insert_with(|| json!({}));
+    if !oc.is_object() {
+        *oc = json!({});
+    }
+    if let Some(oc_obj) = oc.as_object_mut() {
+        oc_obj.insert("effort".into(), Value::String(effort.to_string()));
+        written += 1;
+    }
+
+    // 规则 2: thinking 只在已存在且是 object 时 upsert。
+    if let Some(thinking) = obj.get_mut("thinking").and_then(|v| v.as_object_mut()) {
+        thinking.insert("effort".into(), Value::String(effort.to_string()));
+        written += 1;
+    }
+
+    written
 }
 
 #[cfg(test)]
@@ -320,5 +393,93 @@ mod tests {
         let mut body = json!({ "model": "deepseek-v4-flash" });
         let injected = inject_missing_thinking_placeholders(&mut body);
         assert_eq!(injected, 0);
+    }
+
+    // ---------- force_anthropic_effort ----------
+
+    /// 「双写」需求的直接断言。
+    #[test]
+    fn force_effort_dual_writes_when_both_present() {
+        let mut body = json!({
+            "output_config": {"effort": "low"},
+            "thinking": {"type": "adaptive", "effort": "low"},
+        });
+        assert_eq!(force_anthropic_effort(&mut body, "max"), 2);
+        assert_eq!(body["output_config"]["effort"], "max");
+        assert_eq!(body["thinking"]["effort"], "max");
+    }
+
+    #[test]
+    fn force_effort_creates_output_config_when_absent() {
+        // 强制语义的必要条件: 客户端没发 effort 时用户设定也要生效。
+        let mut body = json!({ "model": "kimi-k3" });
+        assert_eq!(force_anthropic_effort(&mut body, "max"), 1);
+        assert_eq!(body["output_config"]["effort"], "max");
+    }
+
+    #[test]
+    fn force_effort_preserves_other_output_config_keys() {
+        let mut body = json!({ "output_config": {"format": {"type": "json_schema"}} });
+        force_anthropic_effort(&mut body, "high");
+        assert_eq!(body["output_config"]["effort"], "high");
+        assert_eq!(body["output_config"]["format"]["type"], "json_schema");
+    }
+
+    /// 回归哨兵: 凭空造 thinking 会把客户端没开的思考打开 (改变行为与计费)。
+    #[test]
+    fn force_effort_does_not_create_thinking_when_absent() {
+        let mut body = json!({ "model": "kimi-k3" });
+        force_anthropic_effort(&mut body, "max");
+        assert!(body.get("thinking").is_none());
+    }
+
+    #[test]
+    fn force_effort_keeps_thinking_type_and_budget_tokens() {
+        let mut body = json!({ "thinking": {"type": "enabled", "budget_tokens": 8192} });
+        force_anthropic_effort(&mut body, "high");
+        assert_eq!(body["thinking"]["effort"], "high");
+        assert_eq!(body["thinking"]["type"], "enabled");
+        assert_eq!(body["thinking"]["budget_tokens"], 8192);
+    }
+
+    /// 客户端显式关思考 → 完全不干预 (Anthropic 官方对 disabled + xhigh/max 是 400)。
+    #[test]
+    fn force_effort_skips_entirely_when_thinking_disabled() {
+        let mut body = json!({ "thinking": {"type": "disabled"} });
+        assert_eq!(force_anthropic_effort(&mut body, "max"), 0);
+        assert!(body.get("output_config").is_none());
+        assert!(body["thinking"].get("effort").is_none());
+    }
+
+    #[test]
+    fn force_effort_never_touches_extra_body() {
+        let mut body = json!({
+            "extra_body": {"reasoning_effort": "low"},
+            "output_config": {},
+        });
+        force_anthropic_effort(&mut body, "max");
+        assert_eq!(body["extra_body"]["reasoning_effort"], "low");
+    }
+
+    #[test]
+    fn force_effort_leaves_messages_untouched() {
+        let mut body = json!({
+            "model": "kimi-k3",
+            "messages": [
+                {"role": "user", "content": [{"type": "text", "text": "hi"}]},
+                {"role": "assistant", "content": [{"type": "text", "text": "yo"}]},
+            ],
+        });
+        let before = body["messages"].clone();
+        force_anthropic_effort(&mut body, "max");
+        assert_eq!(body["messages"], before);
+    }
+
+    #[test]
+    fn force_effort_overwrites_non_object_output_config() {
+        // 防御性: 客户端送了个畸形的 output_config, 不 panic 也不静默丢掉 effort。
+        let mut body = json!({ "output_config": 42 });
+        assert_eq!(force_anthropic_effort(&mut body, "low"), 1);
+        assert_eq!(body["output_config"]["effort"], "low");
     }
 }

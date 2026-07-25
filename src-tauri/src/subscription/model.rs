@@ -152,6 +152,45 @@ impl ModelSlots {
     }
 }
 
+/// 每个模型槽位的 reasoning effort 覆盖, 持久化为 `subscriptions.slot_efforts` 列 (JSON 字符串).
+///
+/// 语义: `None` (JSON 里字段缺失) = auto, 即透传 Claude Code 请求携带的 effort;
+/// `Some(level)` = 强制用该档位, **丢弃客户端传入值** (用于只接受单一 effort 的模型).
+/// 强制语义的注入点见 `proxy::transform::openai::resolve_reasoning_effort` 的 `forced_effort`
+/// 参数 (翻译类 provider) 与 `proxy::sanitize::force_anthropic_effort` (Anthropic 透传).
+///
+/// 存 `Option<String>` 而不是 `ReasoningEffort` 枚举: 与 provider yaml 侧的
+/// `ProviderDescriptor::default_reasoning_effort` 形状一致, 且避免持久化层依赖协议翻译层.
+/// 合法档位在 commands 层用白名单校验 (见 `commands::subscriptions::ALLOWED_SLOT_EFFORTS`).
+///
+/// 每字段 `#[serde(default)]` + `skip_serializing_if`: 对齐 [`OAuthMetadata`] 的向后兼容配方 —
+/// 老订阅的 `'{}'` 反序列化得到全 None (全 auto), 未来加第 5 个槽位也不需要 DB migration.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct SlotEfforts {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub fable: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub opus: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub sonnet: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub haiku: Option<String>,
+}
+
+impl SlotEfforts {
+    /// 取某槽位的强制 effort. 空字符串按 None 处理 — 前端 auto 的 sentinel 是 `""`,
+    /// 万一漏了归一化也不会把空串当合法档位往下传.
+    pub fn get(&self, slot: SubscriptionSlot) -> Option<&str> {
+        let raw = match slot {
+            SubscriptionSlot::Fable => &self.fable,
+            SubscriptionSlot::Opus => &self.opus,
+            SubscriptionSlot::Sonnet => &self.sonnet,
+            SubscriptionSlot::Haiku => &self.haiku,
+        };
+        raw.as_deref().filter(|s| !s.is_empty())
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ModelInfo {
     pub id: String,
@@ -179,6 +218,8 @@ pub struct SubscriptionRow {
     /// OAuth 元数据 (account_id, refresh_token 等), 仅 auth_type=ChatgptOauth 有值.
     pub oauth_metadata: OAuthMetadata,
     pub model_slots: ModelSlots,
+    /// 每槽位 reasoning effort 覆盖. 字段缺失 = auto (透传客户端值).
+    pub slot_efforts: SlotEfforts,
     pub enabled: bool,
     pub is_auth_failed: bool,
     pub last_error_message: Option<String>,
@@ -351,6 +392,10 @@ pub struct SubscriptionDto {
     pub endpoint_id: String,
     pub display_name: String,
     pub model_slots: ModelSlots,
+    /// 每槽位 reasoning effort 覆盖. 字段缺失 = auto (透传客户端值).
+    /// 刻意不加 `skip_serializing_if`: 前端把它声明为必填, DTO 必须总是带这个 key (可以是 `{}`).
+    #[serde(default)]
+    pub slot_efforts: SlotEfforts,
     pub enabled: bool,
     pub state: SubscriptionState,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -436,6 +481,7 @@ impl SubscriptionRow {
                 sonnet: "b".into(),
                 haiku: "c".into(),
             },
+            slot_efforts: SlotEfforts::default(),
             enabled: true,
             is_auth_failed: false,
             last_error_message: None,
@@ -464,6 +510,7 @@ impl SubscriptionDto {
             endpoint_id: rt.row.endpoint_id.clone(),
             display_name: rt.row.display_name.clone(),
             model_slots: rt.row.model_slots.clone(),
+            slot_efforts: rt.row.slot_efforts.clone(),
             enabled: rt.row.enabled,
             state: rt.state,
             cooldown_until: rt.cooldown_until.map(|t| t.timestamp_millis()),
@@ -514,4 +561,59 @@ fn oauth_account_dto(row: &SubscriptionRow) -> Option<OAuthAccountDto> {
         email: row.oauth_metadata.email.clone(),
         authenticated_at: row.oauth_metadata.authenticated_at,
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// 老订阅向后兼容的核心断言: migration 013 的 DEFAULT '{}' 必须反序列化成全 auto。
+    #[test]
+    fn slot_efforts_empty_json_is_all_auto() {
+        let se: SlotEfforts = serde_json::from_str("{}").unwrap();
+        assert!(se.fable.is_none());
+        assert!(se.opus.is_none());
+        assert!(se.sonnet.is_none());
+        assert!(se.haiku.is_none());
+    }
+
+    #[test]
+    fn slot_efforts_get_per_slot() {
+        let se = SlotEfforts {
+            opus: Some("max".into()),
+            ..Default::default()
+        };
+        assert_eq!(se.get(SubscriptionSlot::Opus), Some("max"));
+        assert_eq!(se.get(SubscriptionSlot::Sonnet), None);
+        assert_eq!(se.get(SubscriptionSlot::Fable), None);
+        assert_eq!(se.get(SubscriptionSlot::Haiku), None);
+    }
+
+    /// 前端 auto 的 sentinel 是 "", 后端再兜一层, 不把空串当合法档位往下传。
+    #[test]
+    fn slot_efforts_get_treats_empty_string_as_none() {
+        let se = SlotEfforts {
+            fable: Some(String::new()),
+            ..Default::default()
+        };
+        assert_eq!(se.get(SubscriptionSlot::Fable), None);
+    }
+
+    /// skip_serializing_if 让列里只存用户真的固定过的槽位。
+    #[test]
+    fn slot_efforts_serializes_skipping_none() {
+        let se = SlotEfforts {
+            opus: Some("max".into()),
+            ..Default::default()
+        };
+        assert_eq!(serde_json::to_string(&se).unwrap(), r#"{"opus":"max"}"#);
+    }
+
+    /// 前向兼容: 从含第 5 个槽位的版本降级到旧 binary 时不能炸。
+    #[test]
+    fn slot_efforts_unknown_field_is_ignored() {
+        let se: SlotEfforts =
+            serde_json::from_str(r#"{"opus":"max","future_slot":"low"}"#).unwrap();
+        assert_eq!(se.get(SubscriptionSlot::Opus), Some("max"));
+    }
 }

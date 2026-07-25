@@ -14,8 +14,8 @@ use crate::state::AppState;
 use crate::subscription::{
     balance_discovery,
     model::{
-        BalanceSnapshot, ModelCache, ModelInfo, ModelSlots, OAuthMetadata, SubscriptionDto,
-        SubscriptionRow, SubscriptionRuntime, CUSTOM_GEMINI_INTERACTIONS_SOURCE_MARKER,
+        BalanceSnapshot, ModelCache, ModelInfo, ModelSlots, OAuthMetadata, SlotEfforts,
+        SubscriptionDto, SubscriptionRow, SubscriptionRuntime, CUSTOM_GEMINI_INTERACTIONS_SOURCE_MARKER,
         CUSTOM_GEMINI_SOURCE_MARKER, CUSTOM_OPENAI_CHAT_SOURCE_MARKER, CUSTOM_OPENAI_SOURCE_MARKER,
         CUSTOM_SOURCE_MARKER,
     },
@@ -70,12 +70,49 @@ pub struct CreateSubscriptionInput {
     pub api_key: String,
     pub model_slots: ModelSlots,
     pub source: CreateSource,
+    // 刻意不含 slot_efforts: 新建订阅一律全 auto (DB 列 DEFAULT '{}'), 用户创建后进编辑页再设。
+    // 新建向导是两步非事务流程, 不往里再加表单字段。
+}
+
+/// 订阅槽位级 effort 允许的档位. 刻意不含 `minimal`:
+/// minimal 是 OpenAI 系专有档 (Anthropic 官方 effort 只有 low/medium/high/xhigh/max),
+/// 而槽位 effort 是跨全部 dispatch 路径的统一设置 —— 暴露一个在 Anthropic 透传 /
+/// Gemini interactions 上必须偷偷降级的档位等于假装支持。需要 minimal 的 OpenAI 用户仍可走
+/// provider yaml `default_reasoning_effort` 或客户端 body `extra_body.reasoning_effort`。
+///
+/// 与 `providers/_schema.json` 里 6 值 enum 的不对称是有意的: 那个 enum 约束 provider yaml
+/// 默认值 (provider 作者清楚自家协议), 本白名单约束用户在 UI 选的跨协议统一值。
+const ALLOWED_SLOT_EFFORTS: &[&str] = &["low", "medium", "high", "xhigh", "max"];
+
+/// 校验 patch 里的槽位 effort 都在白名单内 (空/缺失 = auto, 合法)。
+/// 显式列四个槽位而不是遍历: 将来给 ModelSlots 加槽位时这里会因缺字段而被注意到。
+fn validate_slot_efforts(e: &SlotEfforts) -> AppResult<()> {
+    for (slot, v) in [
+        ("fable", &e.fable),
+        ("opus", &e.opus),
+        ("sonnet", &e.sonnet),
+        ("haiku", &e.haiku),
+    ] {
+        let Some(level) = v.as_deref().filter(|s| !s.is_empty()) else {
+            continue;
+        };
+        if !ALLOWED_SLOT_EFFORTS.contains(&level) {
+            return Err(AppError::BadRequest(format!(
+                "槽位 {slot} 的思考档位 \"{level}\" 无效, 可选: auto / {}",
+                ALLOWED_SLOT_EFFORTS.join(" / ")
+            )));
+        }
+    }
+    Ok(())
 }
 
 #[derive(Debug, Deserialize, Default)]
 pub struct SubscriptionPatch {
     pub display_name: Option<String>,
     pub model_slots: Option<ModelSlots>,
+    /// 每槽位 reasoning effort 覆盖. 整块替换 (与 model_slots 一致, 无 per-slot patch)。
+    /// 字段缺失 = auto, 即透传客户端请求携带的 effort。
+    pub slot_efforts: Option<SlotEfforts>,
     /// 内置订阅: 切到同 provider 的另一个 endpoint, 后端 re-snapshot base_url/messages_path。
     /// 自定义订阅传该字段会被拒绝。
     pub endpoint_id: Option<String>,
@@ -191,6 +228,7 @@ pub async fn create_subscription(
                 auth_type: provider.auth.auth_type,
                 oauth_metadata: OAuthMetadata::default(),
                 model_slots: input.model_slots,
+                slot_efforts: SlotEfforts::default(),
                 enabled: true,
                 is_auth_failed: false,
                 last_error_message: None,
@@ -304,6 +342,7 @@ pub async fn create_subscription(
                 auth_type: auth_type_choice,
                 oauth_metadata: OAuthMetadata::default(),
                 model_slots: input.model_slots,
+                slot_efforts: SlotEfforts::default(),
                 enabled: true,
                 is_auth_failed: false,
                 last_error_message: None,
@@ -393,6 +432,9 @@ pub async fn update_subscription(
             validate_messages_path(v)?;
         }
     }
+    if let Some(efforts) = patch.slot_efforts.as_ref() {
+        validate_slot_efforts(efforts)?;
+    }
 
     {
         let mut guard = rt.write().await;
@@ -401,6 +443,9 @@ pub async fn update_subscription(
         }
         if let Some(slots) = patch.model_slots {
             guard.row.model_slots = slots;
+        }
+        if let Some(efforts) = patch.slot_efforts {
+            guard.row.slot_efforts = efforts;
         }
         if let Some((eid, base, path)) = endpoint_resnapshot {
             guard.row.endpoint_id = eid;
@@ -539,7 +584,7 @@ pub async fn test_connection(
         g.row.clone()
     };
 
-    let model = match ping::pick_test_model(&row) {
+    let (model, slot) = match ping::pick_test_model(&row) {
         Some(m) => m,
         None => {
             return Ok(TestConnectionResult {
@@ -552,7 +597,7 @@ pub async fn test_connection(
         }
     };
 
-    let result = ping::probe_subscription(&state, &row, &model).await;
+    let result = ping::probe_subscription(&state, &row, &model, slot).await;
 
     let mut state_reset = false;
     if result.ok {

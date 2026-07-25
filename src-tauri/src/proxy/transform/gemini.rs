@@ -84,14 +84,35 @@ pub fn effort_to_budget(effort: &str) -> Option<i64> {
 }
 
 /// thinking budget 优先级链:
-/// 1. `body.thinking.budget_tokens` (整数, 直接透传)
-/// 2. `body.thinking.effort` (string, 走 [`effort_to_budget`] 映射)
-/// 3. `body.extra_body.reasoning_effort` (string, 同上)
-/// 4. `yaml_default_effort` (provider yaml `default_reasoning_effort`, 同上)
+/// 0. `forced_effort` (订阅槽位级强制值, 命中即丢弃客户端所有 effort 信号)
+/// 1. `body.output_config.effort` (string, Claude Code 2.1+ 原生字段, 走 [`effort_to_budget`] 映射)
+/// 2. `body.thinking.budget_tokens` (整数, 直接透传)
+/// 3. `body.thinking.effort` (string, 同映射)
+/// 4. `body.extra_body.reasoning_effort` (string, 同上)
+/// 5. `yaml_default_effort` (provider yaml `default_reasoning_effort`, 同上)
 ///
 /// 任意一档为空/非法都视为缺失继续找。返回 None 表示不注入 thinkingBudget,
 /// Gemini 后端会按默认 (2.5 系列约 -1 动态) 处理。
-pub fn resolve_thinking_budget(body: &Value, yaml_default_effort: Option<&str>) -> Option<i64> {
+///
+/// 第 2 层优先于第 3/4 层是本 resolver 的原有意图: 本函数输出整数预算, 所以优先取无损的整数
+/// `budget_tokens`, 其次才是需要阈值近似的 effort 字符串。第 1 层是这条意图的**例外** ——
+/// `output_config.effort` 承载的是用户在 Claude Code 里显式选的档位, 而 CC 发的
+/// `thinking.budget_tokens` 只是从配置推出的粗常量; 更权威的来源应当插队。且第 2 层是无条件
+/// `return Some(...)`, 若把 output_config 放到它后面, CC 开思考时新字段会被永久遮蔽 → 功能失效。
+pub fn resolve_thinking_budget(
+    body: &Value,
+    forced_effort: Option<&str>,
+    yaml_default_effort: Option<&str>,
+) -> Option<i64> {
+    if let Some(b) = forced_effort
+        .filter(|s| !s.is_empty())
+        .and_then(effort_to_budget)
+    {
+        return Some(b);
+    }
+    if let Some(b) = super::openai::output_config_effort(body).and_then(effort_to_budget) {
+        return Some(b);
+    }
     if let Some(thinking) = body.get("thinking") {
         if let Some(bt) = thinking.get("budget_tokens").and_then(|x| x.as_i64()) {
             return Some(bt);
@@ -1409,27 +1430,67 @@ mod tests {
     fn resolve_thinking_budget_priority_chain() {
         // 1. budget_tokens 直接透传
         let body = json!({"thinking": {"budget_tokens": 12345}});
-        assert_eq!(resolve_thinking_budget(&body, Some("low")), Some(12345));
+        assert_eq!(resolve_thinking_budget(&body, None, Some("low")), Some(12345));
 
         // 2. thinking.effort 映射
         let body = json!({"thinking": {"effort": "high"}});
-        assert_eq!(resolve_thinking_budget(&body, Some("low")), Some(65536));
+        assert_eq!(resolve_thinking_budget(&body, None, Some("low")), Some(65536));
 
         // 3. extra_body.reasoning_effort 映射
         let body = json!({"extra_body": {"reasoning_effort": "minimal"}});
-        assert_eq!(resolve_thinking_budget(&body, Some("low")), Some(512));
+        assert_eq!(resolve_thinking_budget(&body, None, Some("low")), Some(512));
 
         // 4. yaml default
         let body = json!({});
-        assert_eq!(resolve_thinking_budget(&body, Some("medium")), Some(16384));
+        assert_eq!(resolve_thinking_budget(&body, None, Some("medium")), Some(16384));
 
         // 5. 全空 → None
         let body = json!({});
-        assert_eq!(resolve_thinking_budget(&body, None), None);
+        assert_eq!(resolve_thinking_budget(&body, None, None), None);
 
         // 非法 effort → 继续往下找
         let body = json!({"thinking": {"effort": "garbage"}, "extra_body": {"reasoning_effort": "high"}});
-        assert_eq!(resolve_thinking_budget(&body, None), Some(65536));
+        assert_eq!(resolve_thinking_budget(&body, None, None), Some(65536));
+    }
+
+    #[test]
+    fn resolve_thinking_budget_reads_output_config() {
+        // CC 2.1+ 原生字段, 此前完全没读。
+        let body = json!({"output_config": {"effort": "high"}});
+        assert_eq!(
+            resolve_thinking_budget(&body, None, Some("low")),
+            Some(65536)
+        );
+    }
+
+    /// Gemini 侧最关键的一条: `thinking.budget_tokens` 那层是无条件 `return Some(...)`,
+    /// 若 output_config 排在它后面, CC 开思考时新字段会被永久遮蔽 → 功能对 Gemini 静默失效。
+    #[test]
+    fn resolve_thinking_budget_output_config_beats_budget_tokens() {
+        let body = json!({
+            "output_config": {"effort": "high"},
+            "thinking": {"type": "enabled", "budget_tokens": 1024},
+        });
+        assert_eq!(resolve_thinking_budget(&body, None, None), Some(65536));
+    }
+
+    #[test]
+    fn resolve_thinking_budget_forced_effort_wins() {
+        // 强制 max → -1 (dynamic), 而不是 body 里的 12345。
+        let body = json!({"thinking": {"budget_tokens": 12345}});
+        assert_eq!(
+            resolve_thinking_budget(&body, Some("max"), Some("low")),
+            Some(-1)
+        );
+    }
+
+    #[test]
+    fn resolve_thinking_budget_forced_invalid_falls_through() {
+        let body = json!({"thinking": {"budget_tokens": 12345}});
+        assert_eq!(
+            resolve_thinking_budget(&body, Some("bogus"), None),
+            Some(12345)
+        );
     }
 
     #[test]
@@ -1450,14 +1511,14 @@ mod tests {
         // 修复前: 客户端传 xhigh → silent drop → 落回 yaml medium (16384, 反而降级)
         // 修复后: 客户端传 xhigh → 131072
         let body = json!({"extra_body": {"reasoning_effort": "xhigh"}});
-        assert_eq!(resolve_thinking_budget(&body, Some("medium")), Some(131072));
+        assert_eq!(resolve_thinking_budget(&body, None, Some("medium")), Some(131072));
     }
 
     #[test]
     fn resolve_thinking_budget_max_dynamic_via_chain() {
         // 客户端传 max → -1 (动态), 不再 silent drop
         let body = json!({"thinking": {"effort": "max"}});
-        assert_eq!(resolve_thinking_budget(&body, Some("medium")), Some(-1));
+        assert_eq!(resolve_thinking_budget(&body, None, Some("medium")), Some(-1));
     }
 
     #[test]

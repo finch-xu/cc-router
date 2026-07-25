@@ -1,13 +1,21 @@
 import { useEffect, useRef, useState } from "react";
 import { RefreshCw, AlertCircle } from "lucide-react";
 import { useT } from "@/i18n";
-import type { ModelInfo, ModelSlots } from "@/types";
+import { SLOT_EFFORT_LEVELS } from "@/lib/modelSlots";
+import type { ModelInfo, ModelSlots, SlotEffort, SlotEfforts } from "@/types";
 
 type Mode = "auto" | "manual";
 
 interface Props {
   value: ModelSlots;
   onChange: (next: ModelSlots) => void;
+  /** 每槽位 effort 覆盖。字段缺失 = auto (透传客户端 effort)。 */
+  efforts: SlotEfforts;
+  onEffortsChange: (next: SlotEfforts) => void;
+  /** true 时 effort 下拉灰掉 (Kiro: CodeWhisperer 协议没有 reasoning 字段)。 */
+  effortDisabled?: boolean;
+  /** 灰掉的原因, 显示在下方说明处并挂 title。 */
+  effortDisabledReason?: string;
   models: ModelInfo[] | null;
   loading?: boolean;
   error?: string | null;
@@ -26,6 +34,10 @@ const SLOTS: Array<{ key: keyof ModelSlots; labelKey: string; hintKey: string }>
 export function ModelSlotPicker({
   value,
   onChange,
+  efforts,
+  onEffortsChange,
+  effortDisabled,
+  effortDisabledReason,
   models,
   loading,
   error,
@@ -56,6 +68,17 @@ export function ModelSlotPicker({
 
   function update(key: keyof ModelSlots, v: string) {
     onChange({ ...value, [key]: v });
+  }
+
+  /** "" 是 auto 的 sentinel, 归一化成字段缺失, 保证 patch 里不出现空串。 */
+  function updateEffort(key: keyof ModelSlots, v: string) {
+    const next = { ...efforts };
+    if (v) {
+      next[key] = v as SlotEffort;
+    } else {
+      delete next[key];
+    }
+    onEffortsChange(next);
   }
 
   return (
@@ -133,50 +156,85 @@ export function ModelSlotPicker({
                   {t(hintKey)}
                 </span>
               </label>
-              {effectiveMode === "auto" && models && models.length > 0 ? (
-                <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                  <select
-                    id={`slot-${key}`}
-                    className="select mono"
-                    style={{ flex: 1 }}
-                    value={current || ""}
-                    onChange={(e) => update(key, e.target.value)}
-                    disabled={disabled}
-                  >
-                    <option value="" disabled>
-                      {t("modelSlot.placeholder")}
-                    </option>
-                    {showHistorical && (
-                      <option value={current}>{current}{t("modelSlot.historicalSuffix")}</option>
-                    )}
-                    {models.map((m) => (
-                      <option key={m.id} value={m.id}>
-                        {m.display_name || m.id}
-                      </option>
-                    ))}
-                  </select>
-                  {showHistorical && (
-                    <span
-                      title={t("modelSlot.historicalTitle", { model: current })}
-                      style={{ color: "var(--warn, #d97706)", display: "inline-flex" }}
-                    >
-                      <AlertCircle size={14} />
-                    </span>
+              <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                {/* 左: 模型控件。minWidth:0 防止长模型名把右侧 effort 下拉挤掉 */}
+                <div
+                  style={{
+                    flex: 1,
+                    minWidth: 0,
+                    display: "flex",
+                    alignItems: "center",
+                    gap: 8,
+                  }}
+                >
+                  {effectiveMode === "auto" && models && models.length > 0 ? (
+                    <>
+                      <select
+                        id={`slot-${key}`}
+                        className="select mono"
+                        style={{ flex: 1, minWidth: 0 }}
+                        value={current || ""}
+                        onChange={(e) => update(key, e.target.value)}
+                        disabled={disabled}
+                      >
+                        <option value="" disabled>
+                          {t("modelSlot.placeholder")}
+                        </option>
+                        {showHistorical && (
+                          <option value={current}>{current}{t("modelSlot.historicalSuffix")}</option>
+                        )}
+                        {models.map((m) => (
+                          <option key={m.id} value={m.id}>
+                            {m.display_name || m.id}
+                          </option>
+                        ))}
+                      </select>
+                      {showHistorical && (
+                        <span
+                          title={t("modelSlot.historicalTitle", { model: current })}
+                          style={{ color: "var(--warn, #d97706)", display: "inline-flex" }}
+                        >
+                          <AlertCircle size={14} />
+                        </span>
+                      )}
+                    </>
+                  ) : (
+                    <input
+                      id={`slot-${key}`}
+                      className="input mono"
+                      style={{ flex: 1, minWidth: 0 }}
+                      value={current}
+                      onChange={(e) => update(key, e.target.value)}
+                      placeholder={t("modelSlot.modelIdPh")}
+                      disabled={disabled}
+                    />
                   )}
                 </div>
-              ) : (
-                <input
-                  id={`slot-${key}`}
-                  className="input mono"
-                  value={current}
-                  onChange={(e) => update(key, e.target.value)}
-                  placeholder={t("modelSlot.modelIdPh")}
-                  disabled={disabled}
-                />
-              )}
+                {/* 右: 思考档位。固定宽度让四行右边缘对齐 */}
+                <select
+                  className="select"
+                  style={{ flex: "0 0 104px" }}
+                  aria-label={t("slotEffort.aria", { slot: t(labelKey) })}
+                  title={effortDisabled ? effortDisabledReason : undefined}
+                  value={efforts[key] ?? ""}
+                  onChange={(e) => updateEffort(key, e.target.value)}
+                  disabled={disabled || effortDisabled}
+                >
+                  <option value="">{t("slotEffort.auto")}</option>
+                  {SLOT_EFFORT_LEVELS.map((lv) => (
+                    <option key={lv} value={lv}>
+                      {lv}
+                    </option>
+                  ))}
+                </select>
+              </div>
             </div>
           );
         })}
+      </div>
+
+      <div className="field-hint" style={{ marginTop: 10 }}>
+        {effortDisabled ? effortDisabledReason : t("slotEffort.hint")}
       </div>
     </div>
   );
