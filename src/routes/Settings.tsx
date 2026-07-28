@@ -23,6 +23,7 @@ import {
   useGenerateNewToken,
 } from "@/hooks/useSettings";
 import { useT, type LanguagePref } from "@/i18n";
+import { useTheme, type Theme } from "@/hooks/useTheme";
 import type { ProxyMode, TlsStatus, UpdateSource } from "@/types";
 import { save } from "@tauri-apps/plugin-dialog";
 import { platform } from "@tauri-apps/plugin-os";
@@ -30,6 +31,7 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 
 export function SettingsPage() {
   const { t } = useT();
+  const { theme, setTheme } = useTheme();
   const settings = useSettings();
   const proxy = useProxyStatus();
   const updateMut = useUpdateSettings();
@@ -273,6 +275,19 @@ export function SettingsPage() {
               onChange={(v) => void changeAutostart(v)}
               aria-label={t("settings.proxy.autostart.label")}
             />
+          </div>
+          <div className="setting-row">
+            <div className="label-col">{t("settings.theme.label")}</div>
+            <select
+              className="select"
+              style={{ maxWidth: 200 }}
+              value={theme}
+              onChange={(e) => setTheme(e.target.value as Theme)}
+            >
+              <option value="system">{t("settings.theme.system")}</option>
+              <option value="light">{t("settings.theme.light")}</option>
+              <option value="dark">{t("settings.theme.dark")}</option>
+            </select>
           </div>
           {isMacos && (
             <div className="setting-row">

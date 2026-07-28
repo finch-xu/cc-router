@@ -34,7 +34,7 @@ const SEVERITY_META: Record<BalanceSeverity, SeverityMeta> = {
     badge: "bg-muted text-muted-foreground",
   },
   low: {
-    text: "text-yellow-600",
+    text: "text-yellow-600 dark:text-yellow-400",
     badge: "bg-yellow-500/10 text-yellow-700 dark:text-yellow-500",
     labelKey: "subscriptionBalance.severityLow",
   },
