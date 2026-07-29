@@ -113,25 +113,29 @@ pub fn default_node_version() -> &'static str {
 }
 
 /// 自定义订阅的来源标记常量。
-pub const CUSTOM_SOURCE_MARKER: &str = "__custom__";
+///
+/// 历史: v3.4 前是 `__custom__` 系双下划线包裹格式, 在 UI/DB 里裸露不美观,
+/// migration 014 把存量数据统一改写成现在的 kebab-case 短格式。
+/// 新格式刻意不与任何内置 provider yaml id 冲突 (内置全是 snake_case)。
+pub const CUSTOM_SOURCE_MARKER: &str = "custom";
 
 /// 自定义 Gemini 兼容订阅的来源标记常量。
 /// 与 `CUSTOM_SOURCE_MARKER` 平级, 但走 [`AuthType::GeminiApiKey`] 翻译分支.
-pub const CUSTOM_GEMINI_SOURCE_MARKER: &str = "__custom_gemini__";
+pub const CUSTOM_GEMINI_SOURCE_MARKER: &str = "custom-gemini";
 
 /// 自定义 OpenAI Responses 订阅的来源标记常量。
 /// 与 `CUSTOM_SOURCE_MARKER` 平级, 但走 [`AuthType::OpenaiResponsesApiKey`] 翻译分支.
-pub const CUSTOM_OPENAI_SOURCE_MARKER: &str = "__custom_openai__";
+pub const CUSTOM_OPENAI_SOURCE_MARKER: &str = "custom-openai";
 
 /// 自定义 OpenAI Chat Completions 订阅的来源标记常量。
 /// 与 `CUSTOM_SOURCE_MARKER` 平级, 但走 [`AuthType::OpenaiChatCompletionsApiKey`] 翻译分支.
 /// 覆盖 DeepSeek/Together/Groq/Ollama/各类 one-api 中转等 OpenAI Chat Completions 兼容生态。
-pub const CUSTOM_OPENAI_CHAT_SOURCE_MARKER: &str = "__custom_openai_chat__";
+pub const CUSTOM_OPENAI_CHAT_SOURCE_MARKER: &str = "custom-openai-chat";
 
 /// 自定义 Gemini Interactions 订阅的来源标记常量。
 /// 与 `CUSTOM_SOURCE_MARKER` 平级, 但走 [`AuthType::GeminiInteractionsApiKey`] 翻译分支.
 /// 对应 Google 新的 `/v1beta/interactions` 接口 (区别于 `CUSTOM_GEMINI_SOURCE_MARKER` 的旧 generateContent)。
-pub const CUSTOM_GEMINI_INTERACTIONS_SOURCE_MARKER: &str = "__custom_gemini_interactions__";
+pub const CUSTOM_GEMINI_INTERACTIONS_SOURCE_MARKER: &str = "custom-gemini-interactions";
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ModelSlots {

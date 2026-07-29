@@ -1,6 +1,7 @@
 import { forwardRef, useMemo } from "react";
 import { QRCodeSVG } from "qrcode.react";
 import { BarcodeSVG } from "./BarcodeSVG";
+import { providerIconId } from "@/lib/providerLabels";
 import { useT } from "@/i18n";
 import { fmtNum, fmtCompact } from "@/lib/format";
 import { ProviderIcon } from "@/components/ProviderIcon";
@@ -430,7 +431,7 @@ function SubItemRows({
         {options.showProviderLogo && (
           <span style={{ filter: palette.logoFilter, color: palette.fg }} aria-hidden>
             <ProviderIcon
-              iconId={sub.provider_id}
+              iconId={providerIconId(sub.provider_id)}
               size={12}
               monochrome={options.colorMode === "mono"}
             />
@@ -643,7 +644,7 @@ function SubscriptionBlock({
           {options.showProviderLogo && (
             <span style={{ filter: palette.logoFilter, color: palette.fg }} aria-hidden>
               <ProviderIcon
-                iconId={group.provider_id}
+                iconId={providerIconId(group.provider_id)}
                 size={12}
                 monochrome={options.colorMode === "mono"}
               />
@@ -841,7 +842,7 @@ function TotalsSection({
                   aria-hidden
                 >
                   <ProviderIcon
-                    iconId={r.provider_id}
+                    iconId={providerIconId(r.provider_id)}
                     size={11}
                     monochrome={options.colorMode === "mono"}
                   />

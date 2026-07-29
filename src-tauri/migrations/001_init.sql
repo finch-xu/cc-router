@@ -2,8 +2,8 @@
 
 CREATE TABLE subscriptions (
   id TEXT PRIMARY KEY,
-  provider_id TEXT NOT NULL,            -- 来源标记: 内置 yaml id (如 "zhipu") 或 "__custom__"
-  endpoint_id TEXT NOT NULL,            -- 来源 endpoint id, 自定义订阅写 "__custom__"
+  provider_id TEXT NOT NULL,            -- 来源标记: 内置 yaml id (如 "zhipu") 或自定义 marker (如 "custom", 见 model.rs)
+  endpoint_id TEXT NOT NULL,            -- 来源 endpoint id, 自定义订阅写同 provider_id 的 marker
   display_name TEXT NOT NULL,
   api_key TEXT NOT NULL DEFAULT '',     -- 明文存储, 类比 Claude Code 的 settings.json 做法
   model_slot_opus TEXT NOT NULL,

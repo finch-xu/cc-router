@@ -61,6 +61,10 @@ const MIGRATIONS: &[(u32, &str)] = &[
         13,
         include_str!("../../migrations/013_add_slot_efforts.sql"),
     ),
+    (
+        14,
+        include_str!("../../migrations/014_rename_custom_provider_ids.sql"),
+    ),
 ];
 
 pub async fn init_pool(db_path: &Path) -> AppResult<SqlitePool> {
@@ -338,7 +342,7 @@ mod tests {
         run_migrations(&pool, &dir).await.expect("migrate fresh");
 
         let versions = applied_versions(&pool).await;
-        assert_eq!(versions, vec![1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13]);
+        assert_eq!(versions, vec![1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14]);
         assert!(!has_column(&pool, "subscriptions", "supports_thinking_blocks").await);
         assert!(!has_column(&pool, "subscriptions", "thinking_block_field_name").await);
         assert!(has_column(&pool, "requests", "upstream_response_body").await);
@@ -361,7 +365,7 @@ mod tests {
         run_migrations(&pool, &dir).await.expect("migrate legacy");
 
         let versions = applied_versions(&pool).await;
-        assert_eq!(versions, vec![1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13]); // baseline v=1, 然后跑增量
+        assert_eq!(versions, vec![1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14]); // baseline v=1, 然后跑增量
         assert!(!has_column(&pool, "subscriptions", "supports_thinking_blocks").await);
         assert!(!has_column(&pool, "subscriptions", "thinking_block_field_name").await);
         assert!(has_column(&pool, "requests", "upstream_response_body").await);
@@ -378,7 +382,7 @@ mod tests {
         run_migrations(&pool, &dir).await.expect("third run");
 
         let versions = applied_versions(&pool).await;
-        assert_eq!(versions, vec![1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13]); // 没有重复写
+        assert_eq!(versions, vec![1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14]); // 没有重复写
     }
 
     /// 在 v4 schema 状态下插一条订阅 (含已 v7 移除的 supports_thinking_blocks 列)。
@@ -442,7 +446,10 @@ mod tests {
 
         assert!(has_table(&pool, "subscriptions").await);
         assert!(!has_table(&pool, "subscriptions_new").await);
-        assert_eq!(applied_versions(&pool).await, vec![1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13]);
+        assert_eq!(
+            applied_versions(&pool).await,
+            vec![1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14]
+        );
 
         let count: (i64,) =
             sqlx::query_as("SELECT count(*) FROM subscriptions WHERE provider_id='deepseek'")
@@ -450,6 +457,131 @@ mod tests {
                 .await
                 .unwrap();
         assert_eq!(count.0, 1, "subscriptions_new 里的订阅数据应在自动 RENAME 后保留");
+    }
+
+    /// v13 schema 下插一条订阅 (列清单与 store.rs::insert 对齐)。
+    async fn insert_v13_subscription(pool: &SqlitePool, provider_id: &str, endpoint_id: &str) {
+        sqlx::query(
+            "INSERT INTO subscriptions (id, provider_id, endpoint_id, display_name, api_key,
+                model_slot_fable, model_slot_opus, model_slot_sonnet, model_slot_haiku,
+                enabled, is_auth_failed, last_error_message, created_at, updated_at,
+                base_url, messages_path, auth_header_name, auth_header_format,
+                required_headers, forward_headers, model_discovery, balance_discovery,
+                provider_display_name, provider_icon, is_user_defined,
+                auth_type, oauth_metadata, slot_efforts)
+             VALUES (?, ?, ?, 'name', 'k',
+                     'f','a','b','c', 1, 0, NULL, 0, 0,
+                     '', '', '', 'bearer', '{}', '[]', '{}', NULL,
+                     'pname', 'icon', 1, 'api_key', '{}', '{}')",
+        )
+        .bind(Uuid::new_v4().to_string())
+        .bind(provider_id)
+        .bind(endpoint_id)
+        .execute(pool)
+        .await
+        .unwrap();
+    }
+
+    #[tokio::test]
+    async fn v14_renames_custom_provider_ids_across_tables() {
+        let pool = in_memory_pool().await;
+        sqlx::query(
+            "CREATE TABLE _schema_version (version INTEGER PRIMARY KEY, applied_at INTEGER NOT NULL)",
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+
+        // 应用 v1..=13, 手写版本记录 (照 v5 half-finished 测试的做法)
+        for (v, sql) in &MIGRATIONS[..13] {
+            for stmt in split_sql_statements(sql) {
+                sqlx::query(&stmt).execute(&pool).await.unwrap();
+            }
+            sqlx::query("INSERT INTO _schema_version (version, applied_at) VALUES (?, 0)")
+                .bind(*v as i64)
+                .execute(&pool)
+                .await
+                .unwrap();
+        }
+
+        // 4 张表各插旧 marker 行 + 内置 id 对照行
+        insert_v13_subscription(&pool, "__custom_openai__", "__custom_openai__").await;
+        insert_v13_subscription(&pool, "deepseek", "cn").await;
+        sqlx::query(
+            "INSERT INTO requests (id, timestamp, virtual_model_name, subscription_id,
+                provider_id, endpoint_id, real_model_name, is_streaming, status)
+             VALUES ('r1', 1, 'model-opus', 's1', '__custom_gemini__', '__custom_gemini__', 'm', 0, 'success'),
+                    ('r2', 2, 'model-opus', 's2', 'zhipu', 'cn', 'm', 0, 'success')",
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+        sqlx::query(
+            "INSERT INTO request_stats_daily (date_utc, virtual_model_name, subscription_id, provider_id)
+             VALUES (0, 'model-opus', 's1', '__custom__'), (0, 'model-opus', 's2', 'zhipu')",
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+        sqlx::query(
+            "INSERT INTO model_list_cache (subscription_id, endpoint_id, fetched_at, models_json)
+             VALUES ('s1', '__custom_openai_chat__', 0, '[]'), ('s2', 'cn', 0, '[]')",
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+
+        run_migrations(&pool, &std::path::PathBuf::from("."))
+            .await
+            .expect("apply v14");
+
+        let fetch_one = |sql: &'static str| {
+            let pool = pool.clone();
+            async move {
+                sqlx::query_as::<_, (String,)>(sql)
+                    .fetch_one(&pool)
+                    .await
+                    .unwrap()
+                    .0
+            }
+        };
+        assert_eq!(
+            fetch_one("SELECT provider_id FROM subscriptions WHERE display_name='name' AND provider_id LIKE 'custom%'").await,
+            "custom-openai"
+        );
+        assert_eq!(
+            fetch_one("SELECT endpoint_id FROM subscriptions WHERE provider_id='custom-openai'").await,
+            "custom-openai"
+        );
+        assert_eq!(
+            fetch_one("SELECT provider_id FROM requests WHERE id='r1'").await,
+            "custom-gemini"
+        );
+        assert_eq!(
+            fetch_one("SELECT endpoint_id FROM requests WHERE id='r1'").await,
+            "custom-gemini"
+        );
+        assert_eq!(
+            fetch_one("SELECT provider_id FROM request_stats_daily WHERE subscription_id='s1'").await,
+            "custom"
+        );
+        assert_eq!(
+            fetch_one("SELECT endpoint_id FROM model_list_cache WHERE subscription_id='s1'").await,
+            "custom-openai-chat"
+        );
+        // 内置 id 行不受影响
+        assert_eq!(
+            fetch_one("SELECT provider_id FROM requests WHERE id='r2'").await,
+            "zhipu"
+        );
+        assert_eq!(
+            fetch_one("SELECT provider_id FROM subscriptions WHERE endpoint_id='cn'").await,
+            "deepseek"
+        );
+        assert_eq!(
+            fetch_one("SELECT provider_id FROM request_stats_daily WHERE subscription_id='s2'").await,
+            "zhipu"
+        );
     }
 }
 

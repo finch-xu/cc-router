@@ -228,9 +228,9 @@ export type RefreshBalanceResult =
 
 export interface SubscriptionDto {
   id: string;
-  /** 来源标记: 内置 yaml id 或 "__custom__" */
+  /** 来源标记: 内置 yaml id 或自定义 marker (如 "custom" / "custom-openai") */
   provider_id: string;
-  /** 来源 endpoint id, 自定义订阅写 "__custom__" */
+  /** 来源 endpoint id, 自定义订阅写同 provider_id 的 marker */
   endpoint_id: string;
   display_name: string;
   model_slots: ModelSlots;

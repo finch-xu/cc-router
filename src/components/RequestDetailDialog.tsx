@@ -9,6 +9,7 @@ import {
 import { ClientToolBadge } from "@/components/ClientToolBadge";
 import { useT } from "@/i18n";
 import { fmtTime } from "@/lib/format";
+import { customProviderLabel } from "@/lib/providerLabels";
 import type { RequestLogDto } from "@/types";
 
 interface Props {
@@ -43,7 +44,7 @@ export function RequestDetailDialog({ request, onClose }: Props) {
       `request_id: ${request.id}`,
       `time: ${fmtTime(request.timestamp)}`,
       `virtual_model: ${request.virtual_model_name}`,
-      `provider: ${request.provider_id}`,
+      `provider: ${customProviderLabel(request.provider_id, t) ?? request.provider_id}`,
       `real_model: ${request.real_model_name}`,
       `status: ${request.status}`,
       `http_status: ${request.http_status ?? "—"}`,
@@ -111,7 +112,11 @@ export function RequestDetailDialog({ request, onClose }: Props) {
               />
               <KV
                 k={t("requestLogs.detail.provider")}
-                v={<span className="mono">{request.provider_id}</span>}
+                v={
+                  <span className="mono">
+                    {customProviderLabel(request.provider_id, t) ?? request.provider_id}
+                  </span>
+                }
               />
               <KV
                 k={t("requestLogs.detail.latency")}

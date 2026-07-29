@@ -79,10 +79,12 @@
       "migrations/006_add_request_stats_daily.sql",
       "migrations/007_drop_supports_thinking_blocks.sql",
       "migrations/008_add_subscription_oauth.sql",
+      "migrations/009_add_client_info.sql",
       "migrations/010_add_subscription_balance.sql",
       "migrations/011_add_request_entry_kind_and_http_version.sql",
       "migrations/012_add_model_slot_fable.sql",
       "migrations/013_add_slot_efforts.sql",
+      "migrations/014_rename_custom_provider_ids.sql",
       "../LICENSE"
     ],
     "category": "DeveloperTool",

@@ -790,7 +790,7 @@ pub async fn dispatch(
             if is_fallback {
                 continue;
             }
-            // 自定义路径 (provider_id == __custom_openai__) 未注册到 providers map,
+            // 自定义路径 (provider_id == custom-openai) 未注册到 providers map,
             // 走 provider_reasoning_defaults 兜底 (expose=true + medium effort)。
             let (yaml_expose_reasoning, yaml_default_effort) =
                 provider_reasoning_defaults(state, &provider_id);

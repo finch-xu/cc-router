@@ -56,7 +56,7 @@ export function ReceiptControls({
 
   const subsList: SubscriptionDto[] = subs.data ?? [];
 
-  // 收集所有出现过的 provider — 来自订阅列表的 provider_id (非 __custom__)
+  // 收集所有出现过的 provider — 来自订阅列表的 provider_id (含自定义 marker)
   const providerOptions = useMemo(() => {
     const map = new Map<string, string>();
     for (const s of subsList) {

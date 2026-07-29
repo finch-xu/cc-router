@@ -422,6 +422,12 @@
   "subscriptionNew.step2": "绑定模型",
   "subscriptionNew.field.provider": "厂商",
   "subscriptionNew.providerSelect": "选择厂商",
+  "provider.custom.anthropic": "自定义 (Anthropic)",
+  "provider.custom.gemini": "自定义 (Gemini)",
+  "provider.custom.geminiInteractions": "自定义 (Gemini Interactions)",
+  "provider.custom.openaiResponses": "自定义 (OpenAI Responses)",
+  "provider.custom.openaiChat": "自定义 (OpenAI Chat)",
+
   "subscriptionNew.customProvider": "自定义 (Anthropic 兼容接口)",
   "subscriptionNew.group.firstParty": "大模型厂商",
   "subscriptionNew.group.secondParty": "AI 应用订阅",

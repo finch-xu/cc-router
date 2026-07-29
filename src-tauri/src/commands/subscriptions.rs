@@ -37,7 +37,7 @@ pub enum CustomProtocol {
     /// dispatch 走 [`crate::proxy::openai_chat_completions_dispatch`].
     OpenaiChatCompletions,
     /// Google Gemini Interactions API (`/v1beta/interactions`, 新统一接口), 走 Anthropic ↔ Interactions
-    /// step_list 翻译 + `auth_type=GeminiInteractionsApiKey` + `__custom_gemini_interactions__` provider_id.
+    /// step_list 翻译 + `auth_type=GeminiInteractionsApiKey` + `custom-gemini-interactions` provider_id.
     /// dispatch 走 [`crate::proxy::gemini_interactions_dispatch`].
     GeminiInteractions,
 }
@@ -52,7 +52,7 @@ pub enum CreateSource {
         endpoint_id: String,
     },
     /// 自定义路径: 用户在表单里填完整连接信息。
-    /// `protocol` 缺省 → Anthropic 透传; `Gemini` → `auth_type=GeminiApiKey` + `__custom_gemini__` provider_id.
+    /// `protocol` 缺省 → Anthropic 透传; `Gemini` → `auth_type=GeminiApiKey` + `custom-gemini` provider_id.
     Custom {
         provider_display_name: String,
         base_url: String,

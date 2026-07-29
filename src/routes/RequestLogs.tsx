@@ -12,6 +12,7 @@ import { useSubscriptions } from "@/hooks/useSubscriptions";
 import { useT } from "@/i18n";
 import { fmtNum, fmtTime } from "@/lib/format";
 import { VM_META } from "@/lib/virtualModels";
+import { customProviderLabel, providerIconId } from "@/lib/providerLabels";
 import { CLIENT_TOOLS } from "@/lib/clientTools";
 import {
   CLIENT_TOOL_UNKNOWN_SENTINEL,
@@ -279,9 +280,15 @@ export function RequestLogsPage() {
                     <td className="mono muted">{row.response_model_name ?? "—"}</td>
                     <td>
                       <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                        <ProviderLogo iconId={provider?.icon} size={18} iconSize={12} />
+                        <ProviderLogo
+                          iconId={provider?.icon ?? providerIconId(row.provider_id)}
+                          size={18}
+                          iconSize={12}
+                        />
                         <span style={{ fontSize: 12.5 }}>
-                          {provider?.display_name ?? row.provider_id}
+                          {provider?.display_name ??
+                            customProviderLabel(row.provider_id, t) ??
+                            row.provider_id}
                         </span>
                       </div>
                     </td>

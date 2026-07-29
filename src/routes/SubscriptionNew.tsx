@@ -39,11 +39,12 @@ import { allSlotsFilled, MODEL_SLOT_KEYS, uniformSlots } from "@/lib/modelSlots"
 
 type Step = 1 | 2;
 
-const CUSTOM_VALUE = "__custom__";
-const CUSTOM_GEMINI_VALUE = "__custom_gemini__";
-const CUSTOM_GEMINI_INTERACTIONS_VALUE = "__custom_gemini_interactions__";
-const CUSTOM_OPENAI_VALUE = "__custom_openai__";
-const CUSTOM_OPENAI_CHAT_VALUE = "__custom_openai_chat__";
+// 与 Rust 侧 subscription/model.rs 的 CUSTOM_*_SOURCE_MARKER 同值 (仅 Select sentinel, 不入库)
+const CUSTOM_VALUE = "custom";
+const CUSTOM_GEMINI_VALUE = "custom-gemini";
+const CUSTOM_GEMINI_INTERACTIONS_VALUE = "custom-gemini-interactions";
+const CUSTOM_OPENAI_VALUE = "custom-openai";
+const CUSTOM_OPENAI_CHAT_VALUE = "custom-openai-chat";
 
 /** 自定义 Anthropic 兼容路径的鉴权方式预设: 选一个就同时确定 header_name + header_format */
 type AuthPreset = "bearer" | "x_api_key";

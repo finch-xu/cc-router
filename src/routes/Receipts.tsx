@@ -8,6 +8,7 @@ import { ReceiptControls } from "@/components/receipts/ReceiptControls";
 import { useReceipt } from "@/hooks/useReceipts";
 import { exportPng, exportPdf, exportHtml } from "@/utils/exportReceipt";
 import { ZERO_TOTALS, addTotals } from "@/lib/receipt-aggregations";
+import { customProviderLabel } from "@/lib/providerLabels";
 import type {
   ReceiptDto,
   ReceiptRange,
@@ -47,6 +48,25 @@ function applyFilters(
     ...dto,
     items,
     grand_total: grandTotal,
+  };
+}
+
+/**
+ * 订阅被删除后, 后端 COALESCE 兜底会把 provider_display_name 落成裸 provider_id;
+ * 自定义订阅此时会显示 "custom-openai" 这类内部 id —— 统一替换成 i18n 友好名。
+ * 仅当 display_name 与 id 相同 (即兜底路径) 时替换, 不动用户自起的名字。
+ */
+function localizeCustomProviders(dto: ReceiptDto, t: (key: string) => string): ReceiptDto {
+  return {
+    ...dto,
+    items: dto.items.map((item) => ({
+      ...item,
+      sub_items: item.sub_items.map((s) => {
+        if (s.provider_display_name !== s.provider_id) return s;
+        const label = customProviderLabel(s.provider_id, t);
+        return label ? { ...s, provider_display_name: label } : s;
+      }),
+    })),
   };
 }
 
@@ -97,8 +117,11 @@ export function ReceiptsPage() {
 
   const filteredDto = useMemo(() => {
     if (!receipt.data) return null;
-    return applyFilters(receipt.data, selectedSubs, selectedProviders, excludeDeleted);
-  }, [receipt.data, selectedSubs, selectedProviders, excludeDeleted]);
+    return localizeCustomProviders(
+      applyFilters(receipt.data, selectedSubs, selectedProviders, excludeDeleted),
+      t,
+    );
+  }, [receipt.data, selectedSubs, selectedProviders, excludeDeleted, t]);
 
   const exportDisabled = !filteredDto;
 
