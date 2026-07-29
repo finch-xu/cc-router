@@ -156,6 +156,26 @@ export function ReceiptControls({
             {t("receipts.controls.display.groupMode.desc")}
           </div>
         </div>
+        <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+          <div style={{ fontSize: 12, fontWeight: 500 }}>
+            {t("receipts.controls.display.footerCode.label")}
+          </div>
+          <div className="range-tabs" style={{ flexWrap: "wrap", marginBottom: 0 }}>
+            {(["qr", "barcode"] as const).map((s) => (
+              <button
+                key={s}
+                type="button"
+                className={"range-tab" + (options.footerCodeStyle === s ? " active" : "")}
+                onClick={() => onOptionsChange({ ...options, footerCodeStyle: s })}
+              >
+                {t(`receipts.controls.display.footerCode.${s}`)}
+              </button>
+            ))}
+          </div>
+          <div className="field-hint" style={{ fontSize: 11 }}>
+            {t("receipts.controls.display.footerCode.desc")}
+          </div>
+        </div>
         <CheckboxRow
           checked={options.colorMode === "color"}
           label={t("receipts.controls.display.colorMode")}

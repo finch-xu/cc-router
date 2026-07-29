@@ -53,7 +53,7 @@ function applyFilters(
 export function ReceiptsPage() {
   const { t } = useT();
 
-  const [range, setRange] = useState<ReceiptRange>("last7_days");
+  const [range, setRange] = useState<ReceiptRange>("all_time");
   const [options, setOptions] = useState<ReceiptDisplayOptions>({
     showCacheTokens: true,
     showRequestCounts: true,
@@ -61,6 +61,7 @@ export function ReceiptsPage() {
     showProviderLogo: true,
     compactTokens: true,
     groupMode: "virtual_model",
+    footerCodeStyle: "qr",
   });
   const [selectedSubs, setSelectedSubs] = useState<Set<string>>(new Set());
   const [selectedProviders, setSelectedProviders] = useState<Set<string>>(new Set());

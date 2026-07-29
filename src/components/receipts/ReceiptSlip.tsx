@@ -1,5 +1,6 @@
 import { forwardRef, useMemo } from "react";
 import { QRCodeSVG } from "qrcode.react";
+import { BarcodeSVG } from "./BarcodeSVG";
 import { useT } from "@/i18n";
 import { fmtNum, fmtCompact } from "@/lib/format";
 import { ProviderIcon } from "@/components/ProviderIcon";
@@ -26,6 +27,9 @@ const REPO_LABEL = "github.com/finch-xu/cc-router";
 
 export type ReceiptColorMode = "mono" | "color";
 
+/** 小票底部识别码样式: 二维码 (默认) 或 Code128 条形码 */
+export type ReceiptFooterCodeStyle = "qr" | "barcode";
+
 /**
  * 小票主体的聚合视图模式:
  * - virtual_model: 现状,按 4 个虚拟模型分组 (fable/opus/sonnet/haiku)
@@ -47,6 +51,8 @@ export interface ReceiptDisplayOptions {
   compactTokens: boolean;
   /** 小票主体聚合视图模式; 默认 virtual_model 保持原行为 */
   groupMode: ReceiptGroupMode;
+  /** 底部识别码样式; 默认 qr 保持原行为 */
+  footerCodeStyle: ReceiptFooterCodeStyle;
 }
 
 interface Props {
@@ -263,7 +269,7 @@ export const ReceiptSlip = forwardRef<HTMLDivElement, Props>(function ReceiptSli
         {t("receipts.slip.thanks")}
       </div>
 
-      {/* QR — 扫码进官网 */}
+      {/* 底部识别码 — 扫码进官网, QR / Code128 条形码二选一 */}
       <div style={{ display: "flex", justifyContent: "center", marginTop: 10 }}>
         <div
           style={{
@@ -271,16 +277,26 @@ export const ReceiptSlip = forwardRef<HTMLDivElement, Props>(function ReceiptSli
             padding: 4,
             border: "1px solid " + palette.border,
             borderRadius: 2,
+            maxWidth: "90%",
           }}
         >
-          <QRCodeSVG
-            value={SITE_URL}
-            size={68}
-            bgColor={palette.bg}
-            fgColor={palette.accent}
-            level="M"
-            marginSize={0}
-          />
+          {options.footerCodeStyle === "barcode" ? (
+            <BarcodeSVG
+              value={SITE_URL}
+              height={40}
+              bgColor={palette.bg}
+              fgColor={palette.accent}
+            />
+          ) : (
+            <QRCodeSVG
+              value={SITE_URL}
+              size={68}
+              bgColor={palette.bg}
+              fgColor={palette.accent}
+              level="M"
+              marginSize={0}
+            />
+          )}
         </div>
       </div>
 
