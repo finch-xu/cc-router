@@ -93,6 +93,63 @@
                "Liberation Mono", "Source Han Mono SC", monospace;
 }
 
+/* ============================================================
+ * Dark mode: 高对比冷调深色 (蓝灰底)
+ * 所有变量集中在此, 后续可按需微调
+ * ============================================================ */
+.dark {
+  /* Core grey scale */
+  --bg:        #0b0b0e;
+  --surface:   #16161a;
+  --surface-2: #121216;
+  --surface-3: #1e1e24;
+  --line:      #262630;
+  --line-2:    #32323e;
+  --ink:       #e8e8ec;
+  --ink-2:     #c8c8d0;
+  --ink-3:     #92929e;
+  --ink-4:     #6a6a76;
+  --ink-5:     #4e4e5a;
+
+  /* Accent — 铁锈橙 (暗色下提亮) */
+  --accent:      oklch(0.67 0.15 42);
+  --accent-ink:  oklch(0.78 0.08 42);
+  --accent-bg:   oklch(0.18 0.04 42);
+  --accent-line: oklch(0.28 0.08 42);
+
+  /* Status */
+  --ok:     oklch(0.68 0.15 150);
+  --ok-bg:  oklch(0.17 0.05 150);
+  --warn:   oklch(0.75 0.16 75);
+  --err:    oklch(0.62 0.20 28);
+  --err-bg: oklch(0.18 0.06 28);
+
+  /* Shadows — 暗色下加重 */
+  --shadow-sm: 0 1px 0 rgba(0,0,0,0.30), 0 1px 2px rgba(0,0,0,0.30);
+  --shadow-md: 0 1px 0 rgba(0,0,0,0.40), 0 6px 18px -8px rgba(0,0,0,0.45);
+  --shadow-lg: 0 1px 0 rgba(0,0,0,0.45), 0 24px 60px -28px rgba(0,0,0,0.60);
+
+  /* === Tailwind / shadcn HSL token === */
+  --background: 240 8% 7%;
+  --foreground: 240 4% 92%;
+  --card: 240 6% 10%;
+  --card-foreground: 240 4% 92%;
+  --popover: 240 6% 10%;
+  --popover-foreground: 240 4% 92%;
+  --primary: 240 4% 92%;
+  --primary-foreground: 240 6% 10%;
+  --secondary: 240 5% 16%;
+  --secondary-foreground: 240 4% 92%;
+  --muted: 240 5% 16%;
+  --muted-foreground: 240 4% 62%;
+  --accent-foreground: 240 4% 92%;
+  --destructive: 10 70% 58%;
+  --destructive-foreground: 0 0% 100%;
+  --border: 240 5% 20%;
+  --input: 240 5% 24%;
+  --ring: 240 4% 80%;
+}
+
 * { box-sizing: border-box; }
 html, body { margin: 0; padding: 0; }
 body {
@@ -1336,4 +1393,120 @@ input, select, textarea { font: inherit; color: inherit; }
   body {
     /* 已被上面的全局 body 规则覆盖,但 tailwind 的 bg-background 仍可用 */
   }
+}
+
+/* === Dark mode overrides: 硬编码颜色修复 === */
+.dark .cc-dialog-overlay {
+  background: rgba(0,0,0,0.55);
+}
+
+.dark .toggle::after {
+  background: #e8e8ec;
+}
+
+.dark .toggle.on {
+  background: var(--accent);
+}
+
+.dark .toggle.on::after {
+  box-shadow: 0 1px 2px rgba(0,0,0,0.40);
+}
+
+.dark .danger-card {
+  background: oklch(0.18 0.06 28);
+  border-color: oklch(0.30 0.10 28);
+}
+
+.dark .alert.warn {
+  background: oklch(0.17 0.05 75);
+  border-color: oklch(0.30 0.08 75);
+  color: oklch(0.78 0.10 75);
+}
+
+.dark .diagram {
+  background:
+    linear-gradient(var(--surface), var(--surface)),
+    radial-gradient(circle at 20% 0%, oklch(0.15 0.03 70) 0%, transparent 50%);
+  background-blend-mode: normal, normal;
+  background-color: var(--surface);
+}
+
+.dark .btn.accent:hover {
+  filter: brightness(1.08);
+}
+
+.dark .btn.danger:hover {
+  filter: brightness(1.08);
+}
+
+/* === Dark mode: nav-item active (避免浅色背景过于刺眼) === */
+.dark .nav-item.active {
+  background: var(--surface-3);
+  color: var(--ink);
+}
+
+/* === Dark mode: CodeMirror 编辑器 === */
+.dark .cm-editor {
+  background: var(--surface) !important;
+  color: var(--ink-2) !important;
+}
+.dark .cm-editor .cm-scroller {
+  background: var(--surface);
+}
+.dark .cm-editor .cm-gutters {
+  background: var(--surface-2);
+  color: var(--ink-4);
+  border-right-color: var(--line);
+}
+.dark .cm-editor .cm-activeLineGutter {
+  background: var(--surface-3);
+}
+.dark .cm-editor .cm-activeLine {
+  background: oklch(0.22 0.02 250);
+}
+.dark .cm-editor .cm-cursor {
+  border-left-color: var(--ink);
+}
+.dark .cm-editor .cm-selectionBackground,
+.dark .cm-editor.cm-focused .cm-selectionBackground {
+  background: oklch(0.35 0.06 260) !important;
+}
+
+/* === Dark mode: codeblock 强制深底（不随 --ink 反转） === */
+.dark .codeblock {
+  background: #0f0f13;
+  color: oklch(0.92 0.02 80);
+}
+
+/* === Dark mode: 聚焦环(暗色下黑色阴影不可见) === */
+.dark .input:focus,
+.dark .select:focus {
+  box-shadow: 0 0 0 3px rgba(255,255,255,0.10);
+}
+
+/* === Dark mode: 阴影微调 === */
+.dark .radio-group button.on {
+  box-shadow: 0 1px 2px rgba(0,0,0,0.30);
+}
+.dark .range-tab.active {
+  box-shadow: 0 1px 2px rgba(0,0,0,0.25);
+}
+.dark .stats-tooltip {
+  box-shadow: 0 2px 8px rgba(0,0,0,0.25);
+}
+
+/* === Dark mode: 侧边栏在线指示灯辉光 === */
+.dark .sidebar-footer .live-dot {
+  box-shadow: 0 0 0 3px oklch(0.25 0.05 150);
+}
+
+/* === Dark mode: warn pill (黄色警示在暗色下保持可读) === */
+.dark .pill.warn {
+  background: oklch(0.18 0.05 75);
+  color: oklch(0.78 0.10 75);
+}
+
+/* === Dark mode: OAuth 弹窗遮罩(内联样式无法用 .cc-dialog-overlay 覆盖) === */
+.dark .oauth-overlay {
+  background: rgba(0,0,0,0.65) !important;
 }
