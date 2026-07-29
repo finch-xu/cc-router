@@ -79,6 +79,7 @@ The AI Agent / Coding Agent tools listed below can all connect to cc-router and 
 | `deepseek` | DeepSeek (pay-as-you-go) | ❌ | ✅ | verified |
 | `moonshot` | Moonshot Kimi (pay-as-you-go / China subscription / global subscription) | ✅ | ✅ | untested |
 | `minimax` | MiniMax (pay-as-you-go / China subscription / global subscription) | ✅ | ✅ | verified |
+| `minimax_openai` | MiniMax Chat Completions-compatible endpoints (M3 / M2 series; pay-as-you-go global/China; automatic protocol translation) | ❌ | ✅ | untested |
 | `xiaomi` | Xiaomi MiMo (pay-as-you-go / China subscription / global subscription) | ✅ | ✅ | verified |
 | `alibaba` | Alibaba Cloud Bailian (team Token Plan + 2-region pay-as-you-go + discontinued Coding Plan) | ✅ | ✅ | verified |
 | `volcengine` | ByteDance Volcengine Ark (Coding Plan subscription + Agent Plan subscription + pay-as-you-go) | ✅ | ✅ | untested |

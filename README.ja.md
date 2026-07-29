@@ -79,6 +79,7 @@
 | `deepseek` | DeepSeek（従量課金） | ❌ | ✅ | verified |
 | `moonshot` | Moonshot Kimi（従量課金 / 中国サブスク / グローバルサブスク） | ✅ | ✅ | untested |
 | `minimax` | MiniMax（従量課金 / 中国サブスク / グローバルサブスク） | ✅ | ✅ | verified |
+| `minimax_openai` | MiniMax Chat Completions 互換エンドポイント（M3 / M2 シリーズ、従量課金 国際/中国、プロトコル自動変換） | ❌ | ✅ | untested |
 | `xiaomi` | Xiaomi MiMo（従量課金 / 中国サブスク / グローバルサブスク） | ✅ | ✅ | verified |
 | `alibaba` | Alibaba Cloud Bailian（チーム版 Token Plan + 2 リージョン従量課金 + 販売終了の Coding Plan） | ✅ | ✅ | verified |
 | `volcengine` | バイトダンス 火山方舟 Volcengine Ark（Coding Plan サブスクリプション + Agent Plan サブスクリプション + 従量課金） | ✅ | ✅ | untested |

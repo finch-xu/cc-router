@@ -19,7 +19,7 @@ docs_url: "https://platform.minimax.io/docs"
 api_key_url: "https://platform.minimax.io/user-center/basic-information/interface-key"
 
 compatibility: untested
-compatibility_notes: 
+compatibility_notes: "cc-router 内部做 Anthropic Messages ↔ OpenAI Chat Completions 协议翻译, 按官方文档接入未实测; MiniMax 未提供公开 /models 接口, 模型需手动输入。"
 
 endpoints:
   - id: global_chat_completions
