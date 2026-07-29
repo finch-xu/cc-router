@@ -136,7 +136,7 @@ export function ReceiptsPage() {
       } else if (kind === "pdf") {
         await exportPdf(el, slip, r);
       } else {
-        exportHtml(el, slip, r);
+        await exportHtml(el, slip, r);
       }
       showFlash(t("receipts.savedToDownloads"));
     } catch (err) {

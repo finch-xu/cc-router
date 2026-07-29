@@ -3,8 +3,23 @@ import jsPDF from "jspdf";
 
 const FILE_PREFIX = "cc-router-receipt";
 
-/** 导出 HTML 用的公网 logo。app 内的 logo 是打包资源路径, 独立打开的 HTML 里解析不到会空白。 */
+/** 内联失败时的兜底 logo (公网)。app 内的 logo 是打包资源路径, 独立打开的 HTML 里解析不到会空白。 */
 const PUBLIC_LOGO_URL = "https://ccrouter.app/assets/icon.png";
+
+/** 把 app 内的 logo 资源取回并转成 base64 data URI, 让导出的 HTML 离线也能显示。 */
+async function logoDataUri(src: string): Promise<string | null> {
+  try {
+    const blob = await (await fetch(src)).blob();
+    return await new Promise<string>((resolve, reject) => {
+      const fr = new FileReader();
+      fr.onload = () => resolve(fr.result as string);
+      fr.onerror = () => reject(fr.error);
+      fr.readAsDataURL(blob);
+    });
+  } catch {
+    return null;
+  }
+}
 
 function triggerDownload(blob: Blob, filename: string): void {
   const url = URL.createObjectURL(blob);
@@ -53,12 +68,15 @@ export async function exportPdf(el: HTMLElement, slipNo: string, range: string):
 }
 
 /** 小票本体全 inline-style, 不依赖外部 CSS, outerHTML 直接复制即可在任何浏览器打开。
- *  唯一例外是 logo <img>: 打包资源路径离开 app 无法解析, 导出前克隆 DOM 换成公网 URL。 */
-export function exportHtml(el: HTMLElement, slipNo: string, range: string): void {
+ *  唯一例外是 logo <img>: 打包资源路径离开 app 无法解析, 导出前克隆 DOM 把 src
+ *  内联成 base64 data URI (离线可看); 取不到时兜底公网 URL。 */
+export async function exportHtml(el: HTMLElement, slipNo: string, range: string): Promise<void> {
   const clone = el.cloneNode(true) as HTMLElement;
-  clone
-    .querySelector("img[data-receipt-logo]")
-    ?.setAttribute("src", PUBLIC_LOGO_URL);
+  const logo = clone.querySelector("img[data-receipt-logo]");
+  if (logo) {
+    const inline = await logoDataUri((logo as HTMLImageElement).src);
+    logo.setAttribute("src", inline ?? PUBLIC_LOGO_URL);
+  }
 
   const html = `<!doctype html>
 <html lang="zh">
