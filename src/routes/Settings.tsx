@@ -622,13 +622,13 @@ export function SettingsPage() {
             <select
               className="select"
               style={{ maxWidth: 200 }}
-              value={String(retentionDays)}
+              value={String(retentionDays >= 36500 ? 0 : retentionDays)}
               onChange={(e) => void changeRetentionDays(Number(e.target.value))}
             >
               <option value="7">{t("settings.storage.retention.7d")}</option>
               <option value="30">{t("settings.storage.retention.30d")}</option>
               <option value="90">{t("settings.storage.retention.90d")}</option>
-              <option value="36500">{t("settings.storage.retention.forever")}</option>
+              <option value="0">{t("settings.storage.retention.forever")}</option>
             </select>
           </div>
           <div className="setting-row">

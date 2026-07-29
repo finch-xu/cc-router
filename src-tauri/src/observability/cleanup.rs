@@ -4,8 +4,11 @@
 //! 不受日志清理影响。
 //!
 //! settings.log_retention_days 语义:
-//! - 0 = 永久保留 (跳过删除)
+//! - 0 = 永久保留 (跳过删除), **默认值** (settings/model.rs::default_retention)
 //! - N > 0 = 删除 timestamp < now_ms - N*86400000 的行
+//!
+//! 历史遗留: 旧版前端「永久」选项发的是 36500 (100 年), 功能等价;
+//! 前端显示时把 >= 36500 归一化为「永久」。
 
 use std::sync::Arc;
 
