@@ -108,6 +108,9 @@ export const api = {
     filters?: RequestLogFilters,
   ) =>
     invoke<ListRequestsResult>("list_requests", { page, pageSize, filters }),
+  /** 按当前筛选导出 CSV 到 path (来自 save dialog), 返回导出行数 */
+  exportRequestsCsv: (path: string, filters?: RequestLogFilters) =>
+    invoke<number>("export_requests_csv", { path, filters }),
 
   // statistics (聚合表查询, 跨范围全局)
   getOverallStats: (range: StatsRange) =>

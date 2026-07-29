@@ -112,6 +112,7 @@ pub fn run() {
             commands::virtual_models::list_virtual_models,
             commands::virtual_models::update_virtual_model,
             commands::requests::list_requests,
+            commands::requests::export_requests_csv,
             commands::requests::list_supported_client_tools,
             commands::statistics::get_overall_stats,
             commands::statistics::get_daily_series,

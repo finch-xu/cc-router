@@ -1,6 +1,10 @@
 //! 请求日志查询 command。简单 offset/limit 分页，按 timestamp 倒序。
 //! 支持按 virtual_model_name / provider_id / status 筛选。
+//! 另提供 CSV 导出 (同筛选条件, 流式写文件)。
 
+use std::io::Write;
+
+use futures::TryStreamExt;
 use serde::{Deserialize, Serialize};
 use sqlx::Row;
 use tauri::State;
@@ -62,6 +66,46 @@ pub struct RequestLogFilters {
     pub client_tool: Option<String>,
 }
 
+// client_tool 特殊值 → 拼 `IS NULL` 而非 `= ?`. 与前端
+// `src/types.ts::CLIENT_TOOL_UNKNOWN_SENTINEL` 必须保持同值, 否则筛选「未识别」会静默失效.
+const UNKNOWN_SENTINEL: &str = "__unknown__";
+
+/// 动态构建 WHERE 子句。列名是白名单字面量, 值走 bind, 无注入风险。
+/// 返回 (where 子句, bind 值列表); `IS NULL` 分支不产生 bind 值。
+/// list_requests 与 export_requests_csv 共用, 保证「导出所见即所得」。
+fn build_filter_clause(filters: &RequestLogFilters) -> (String, Vec<String>) {
+    let active: Vec<(&'static str, &str)> = [
+        ("virtual_model_name", filters.virtual_model_name.as_deref()),
+        ("provider_id", filters.provider_id.as_deref()),
+        ("status", filters.status.as_deref()),
+        ("subscription_id", filters.subscription_id.as_deref()),
+        ("client_tool", filters.client_tool.as_deref()),
+    ]
+    .into_iter()
+    .filter_map(|(col, val)| val.map(|v| (col, v)))
+    .collect();
+
+    if active.is_empty() {
+        return (String::new(), Vec::new());
+    }
+    let conds: Vec<String> = active
+        .iter()
+        .map(|(c, v)| {
+            if *c == "client_tool" && *v == UNKNOWN_SENTINEL {
+                format!("{} IS NULL", c)
+            } else {
+                format!("{} = ?", c)
+            }
+        })
+        .collect();
+    let binds = active
+        .iter()
+        .filter(|(c, v)| !(*c == "client_tool" && *v == UNKNOWN_SENTINEL))
+        .map(|(_, v)| v.to_string())
+        .collect();
+    (format!(" WHERE {}", conds.join(" AND ")), binds)
+}
+
 #[tauri::command]
 pub async fn list_requests(
     state: State<'_, AppState>,
@@ -74,46 +118,12 @@ pub async fn list_requests(
     let offset = (page - 1) as i64 * page_size as i64;
     let filters = filters.unwrap_or_default();
 
-    // 动态构建 WHERE 子句。列名是白名单字面量, 值走 bind, 无注入风险。
-    // 一次构造 active filters, conditions / count / select 共用同一份 iterate, 加列只动一处。
-    let active: Vec<(&'static str, &str)> = [
-        ("virtual_model_name", filters.virtual_model_name.as_deref()),
-        ("provider_id", filters.provider_id.as_deref()),
-        ("status", filters.status.as_deref()),
-        ("subscription_id", filters.subscription_id.as_deref()),
-        ("client_tool", filters.client_tool.as_deref()),
-    ]
-    .into_iter()
-    .filter_map(|(col, val)| val.map(|v| (col, v)))
-    .collect();
-
-    // client_tool 特殊值 → 拼 `IS NULL` 而非 `= ?`. 与前端
-    // `src/types.ts::CLIENT_TOOL_UNKNOWN_SENTINEL` 必须保持同值, 否则筛选「未识别」会静默失效.
-    const UNKNOWN_SENTINEL: &str = "__unknown__";
-
-    let where_clause = if active.is_empty() {
-        String::new()
-    } else {
-        let conds: Vec<String> = active
-            .iter()
-            .map(|(c, v)| {
-                if *c == "client_tool" && *v == UNKNOWN_SENTINEL {
-                    format!("{} IS NULL", c)
-                } else {
-                    format!("{} = ?", c)
-                }
-            })
-            .collect();
-        format!(" WHERE {}", conds.join(" AND "))
-    };
+    let (where_clause, binds) = build_filter_clause(&filters);
 
     let count_sql = format!("SELECT COUNT(*) AS c FROM requests{}", where_clause);
     let mut count_q = sqlx::query(&count_sql);
-    for (c, v) in &active {
-        if *c == "client_tool" && *v == UNKNOWN_SENTINEL {
-            continue;
-        }
-        count_q = count_q.bind(*v);
+    for v in &binds {
+        count_q = count_q.bind(v);
     }
     let total: i64 = count_q.fetch_one(&state.db).await?.try_get("c")?;
 
@@ -132,11 +142,8 @@ pub async fn list_requests(
         where_clause
     );
     let mut select_q = sqlx::query(&select_sql);
-    for (c, v) in &active {
-        if *c == "client_tool" && *v == UNKNOWN_SENTINEL {
-            continue;
-        }
-        select_q = select_q.bind(*v);
+    for v in &binds {
+        select_q = select_q.bind(v);
     }
     let rows = select_q
         .bind(page_size as i64)
@@ -177,10 +184,124 @@ pub async fn list_requests(
     Ok(ListRequestsResult { items, total })
 }
 
+/// CSV 字段转义: 含逗号/双引号/换行时整体加双引号并把 `"` 转义为 `""` (RFC 4180)。
+fn csv_field(s: &str) -> String {
+    if s.contains([',', '"', '\n', '\r']) {
+        format!("\"{}\"", s.replace('"', "\"\""))
+    } else {
+        s.to_string()
+    }
+}
+
+/// CSV 列 (与 RequestLogDto 对齐, 刻意不含 upstream_response_body —— 大且多行,
+/// 排障专用不适合表格; 另在 timestamp 旁加人类可读的 timestamp_iso)。
+const CSV_HEADER: &str = "id,timestamp,timestamp_iso,virtual_model_name,subscription_id,\
+provider_id,endpoint_id,real_model_name,response_model_name,is_streaming,status,http_status,\
+total_latency_ms,input_tokens,output_tokens,cache_creation_tokens,cache_read_tokens,\
+error_message,client_tool,client_user_agent,client_version,client_ip,entry_kind,\
+downstream_http_version";
+
+/// 按当前筛选条件把请求日志导出为 CSV 文件 (路径由前端 save dialog 提供)。
+/// 流式逐行写 BufWriter, 不整表载入内存; 返回导出的行数。
+/// 文件头带 UTF-8 BOM, Excel 直接打开中文不乱码。
+#[tauri::command]
+pub async fn export_requests_csv(
+    state: State<'_, AppState>,
+    path: String,
+    filters: Option<RequestLogFilters>,
+) -> AppResult<u64> {
+    let filters = filters.unwrap_or_default();
+    let (where_clause, binds) = build_filter_clause(&filters);
+
+    // 导出按时间正序, 符合表格阅读习惯 (页面展示是倒序)
+    let sql = format!(
+        "SELECT id, timestamp, virtual_model_name, subscription_id, provider_id, endpoint_id,
+                real_model_name, response_model_name, is_streaming, status,
+                http_status, total_latency_ms,
+                upstream_input_tokens, upstream_output_tokens,
+                upstream_cache_creation, upstream_cache_read, error_message,
+                client_tool, client_user_agent, client_version, client_ip,
+                entry_kind, downstream_http_version
+         FROM requests{}
+         ORDER BY timestamp ASC",
+        where_clause
+    );
+    let mut q = sqlx::query(&sql);
+    for v in &binds {
+        q = q.bind(v);
+    }
+
+    let file = std::fs::File::create(&path)
+        .map_err(|e| crate::error::AppError::Internal(format!("创建导出文件失败: {e}")))?;
+    let mut w = std::io::BufWriter::new(file);
+    let io_err = |e: std::io::Error| crate::error::AppError::Internal(format!("写入 CSV 失败: {e}"));
+
+    w.write_all("\u{FEFF}".as_bytes()).map_err(io_err)?;
+    writeln!(w, "{}", CSV_HEADER).map_err(io_err)?;
+
+    let opt_str = |v: Option<String>| v.map(|s| csv_field(&s)).unwrap_or_default();
+    let opt_num = |v: Option<i64>| v.map(|n| n.to_string()).unwrap_or_default();
+
+    let mut count: u64 = 0;
+    let mut stream = q.fetch(&state.db);
+    while let Some(r) = stream.try_next().await? {
+        let ts: i64 = r.try_get("timestamp").unwrap_or(0);
+        let ts_iso = chrono::DateTime::<chrono::Utc>::from_timestamp_millis(ts)
+            .map(|d| d.to_rfc3339_opts(chrono::SecondsFormat::Millis, true))
+            .unwrap_or_default();
+        let line = [
+            csv_field(&r.try_get::<String, _>("id").unwrap_or_default()),
+            ts.to_string(),
+            ts_iso,
+            csv_field(&r.try_get::<String, _>("virtual_model_name").unwrap_or_default()),
+            csv_field(&r.try_get::<String, _>("subscription_id").unwrap_or_default()),
+            csv_field(&r.try_get::<String, _>("provider_id").unwrap_or_default()),
+            csv_field(&r.try_get::<String, _>("endpoint_id").unwrap_or_default()),
+            csv_field(&r.try_get::<String, _>("real_model_name").unwrap_or_default()),
+            opt_str(r.try_get("response_model_name").ok()),
+            (r.try_get::<i64, _>("is_streaming").unwrap_or(0) != 0).to_string(),
+            csv_field(&r.try_get::<String, _>("status").unwrap_or_default()),
+            opt_num(r.try_get("http_status").ok()),
+            opt_num(r.try_get("total_latency_ms").ok()),
+            opt_num(r.try_get("upstream_input_tokens").ok()),
+            opt_num(r.try_get("upstream_output_tokens").ok()),
+            opt_num(r.try_get("upstream_cache_creation").ok()),
+            opt_num(r.try_get("upstream_cache_read").ok()),
+            opt_str(r.try_get("error_message").ok()),
+            opt_str(r.try_get("client_tool").ok()),
+            opt_str(r.try_get("client_user_agent").ok()),
+            opt_str(r.try_get("client_version").ok()),
+            opt_str(r.try_get("client_ip").ok()),
+            opt_str(r.try_get("entry_kind").ok()),
+            opt_str(r.try_get("downstream_http_version").ok()),
+        ]
+        .join(",");
+        writeln!(w, "{}", line).map_err(io_err)?;
+        count += 1;
+    }
+    w.flush().map_err(io_err)?;
+    Ok(count)
+}
+
 /// 返回前端可在筛选器里展示的「已支持识别的 client tool」白名单。
 /// 数据源是 [`crate::proxy::client_fingerprint::SUPPORTED_TOOLS`], 后端单一信息源,
 /// 前端硬编码的 i18n 文案需手工同步 (类比 `ProviderLogo BRAND_MAP`).
 #[tauri::command]
 pub async fn list_supported_client_tools() -> AppResult<Vec<&'static str>> {
     Ok(crate::proxy::client_fingerprint::SUPPORTED_TOOLS.to_vec())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::csv_field;
+
+    #[test]
+    fn csv_field_escapes_specials() {
+        assert_eq!(csv_field("plain"), "plain");
+        assert_eq!(csv_field(""), "");
+        assert_eq!(csv_field("a,b"), "\"a,b\"");
+        assert_eq!(csv_field("he said \"hi\""), "\"he said \"\"hi\"\"\"");
+        assert_eq!(csv_field("line1\nline2"), "\"line1\nline2\"");
+        assert_eq!(csv_field("中文, 带逗号"), "\"中文, 带逗号\"");
+    }
 }

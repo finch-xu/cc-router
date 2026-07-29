@@ -1,6 +1,8 @@
 import { useEffect, useMemo, useState } from "react";
 import { useSearchParams } from "react-router-dom";
-import { RefreshCw, ScrollText, X } from "lucide-react";
+import { Download, RefreshCw, ScrollText, X } from "lucide-react";
+import { save } from "@tauri-apps/plugin-dialog";
+import { api } from "@/api/tauri";
 import { ClientToolBadge } from "@/components/ClientToolBadge";
 import { EmptyState } from "@/components/EmptyState";
 import { Pagination } from "@/components/Pagination";
@@ -42,6 +44,8 @@ export function RequestLogsPage() {
   const [clientFilter, setClientFilter] = useState<string | undefined>();
   const subscriptionFilter = searchParams.get("subscription_id") ?? undefined;
   const [activeRequest, setActiveRequest] = useState<RequestLogDto | null>(null);
+  const [exporting, setExporting] = useState(false);
+  const [exportMsg, setExportMsg] = useState<string | null>(null);
   const subs = useSubscriptions();
   const subFilterLabel = subscriptionFilter
     ? subs.data?.find((s) => s.id === subscriptionFilter)?.display_name ?? subscriptionFilter
@@ -88,6 +92,26 @@ export function RequestLogsPage() {
     setPage(1);
   }
 
+  async function exportCsv() {
+    try {
+      const date = new Date().toISOString().slice(0, 10).replace(/-/g, "");
+      const path = await save({
+        defaultPath: `cc-router-requests-${date}.csv`,
+        filters: [{ name: "CSV", extensions: ["csv"] }],
+      });
+      if (!path) return; // 用户取消
+      setExporting(true);
+      const count = await api.exportRequestsCsv(path, filters);
+      setExportMsg(t("requestLogs.export.success", { count }));
+    } catch (err) {
+      console.warn("export csv failed", err);
+      setExportMsg(t("requestLogs.export.failed"));
+    } finally {
+      setExporting(false);
+      window.setTimeout(() => setExportMsg(null), 4500);
+    }
+  }
+
   return (
     <>
       <div className="page-actions">
@@ -95,15 +119,33 @@ export function RequestLogsPage() {
           <h1>{t("requestLogs.title")}</h1>
           <div className="subtitle">{t("requestLogs.subtitle")}</div>
         </div>
-        <button
-          className="btn"
-          onClick={() => query.refetch()}
-          disabled={query.isFetching}
-          type="button"
-        >
-          <RefreshCw size={12} className={query.isFetching ? "spin" : undefined} />
-          {t("requestLogs.refresh")}
-        </button>
+        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+          {exportMsg && (
+            <span className="field-hint" style={{ fontSize: 11 }}>
+              {exportMsg}
+            </span>
+          )}
+          <button
+            className="btn"
+            onClick={() => void exportCsv()}
+            disabled={exporting}
+            type="button"
+          >
+            <Download size={12} />
+            {exporting
+              ? t("requestLogs.export.exporting")
+              : t("requestLogs.export.button")}
+          </button>
+          <button
+            className="btn"
+            onClick={() => query.refetch()}
+            disabled={query.isFetching}
+            type="button"
+          >
+            <RefreshCw size={12} className={query.isFetching ? "spin" : undefined} />
+            {t("requestLogs.refresh")}
+          </button>
+        </div>
       </div>
 
       <div className="log-filters">
