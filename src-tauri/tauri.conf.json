@@ -85,6 +85,7 @@
       "migrations/012_add_model_slot_fable.sql",
       "migrations/013_add_slot_efforts.sql",
       "migrations/014_rename_custom_provider_ids.sql",
+      "migrations/015_add_receipt_stats_daily.sql",
       "../LICENSE"
     ],
     "category": "DeveloperTool",

@@ -65,6 +65,10 @@ const MIGRATIONS: &[(u32, &str)] = &[
         14,
         include_str!("../../migrations/014_rename_custom_provider_ids.sql"),
     ),
+    (
+        15,
+        include_str!("../../migrations/015_add_receipt_stats_daily.sql"),
+    ),
 ];
 
 pub async fn init_pool(db_path: &Path) -> AppResult<SqlitePool> {
@@ -342,12 +346,13 @@ mod tests {
         run_migrations(&pool, &dir).await.expect("migrate fresh");
 
         let versions = applied_versions(&pool).await;
-        assert_eq!(versions, vec![1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14]);
+        assert_eq!(versions, vec![1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15]);
         assert!(!has_column(&pool, "subscriptions", "supports_thinking_blocks").await);
         assert!(!has_column(&pool, "subscriptions", "thinking_block_field_name").await);
         assert!(has_column(&pool, "requests", "upstream_response_body").await);
         assert!(has_table(&pool, "events").await);
         assert!(has_table(&pool, "request_stats_daily").await);
+        assert!(has_table(&pool, "receipt_stats_daily").await);
         assert!(has_column(&pool, "subscriptions", "auth_type").await);
         assert!(has_column(&pool, "subscriptions", "oauth_metadata").await);
     }
@@ -365,7 +370,7 @@ mod tests {
         run_migrations(&pool, &dir).await.expect("migrate legacy");
 
         let versions = applied_versions(&pool).await;
-        assert_eq!(versions, vec![1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14]); // baseline v=1, 然后跑增量
+        assert_eq!(versions, vec![1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15]); // baseline v=1, 然后跑增量
         assert!(!has_column(&pool, "subscriptions", "supports_thinking_blocks").await);
         assert!(!has_column(&pool, "subscriptions", "thinking_block_field_name").await);
         assert!(has_column(&pool, "requests", "upstream_response_body").await);
@@ -382,7 +387,7 @@ mod tests {
         run_migrations(&pool, &dir).await.expect("third run");
 
         let versions = applied_versions(&pool).await;
-        assert_eq!(versions, vec![1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14]); // 没有重复写
+        assert_eq!(versions, vec![1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15]); // 没有重复写
     }
 
     /// 在 v4 schema 状态下插一条订阅 (含已 v7 移除的 supports_thinking_blocks 列)。
@@ -448,7 +453,7 @@ mod tests {
         assert!(!has_table(&pool, "subscriptions_new").await);
         assert_eq!(
             applied_versions(&pool).await,
-            vec![1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14]
+            vec![1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15]
         );
 
         let count: (i64,) =
@@ -582,6 +587,66 @@ mod tests {
             fetch_one("SELECT provider_id FROM request_stats_daily WHERE subscription_id='s2'").await,
             "zhipu"
         );
+    }
+
+    #[tokio::test]
+    async fn v15_backfills_receipt_stats_from_requests() {
+        let pool = in_memory_pool().await;
+        sqlx::query(
+            "CREATE TABLE _schema_version (version INTEGER PRIMARY KEY, applied_at INTEGER NOT NULL)",
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+
+        for (v, sql) in &MIGRATIONS[..14] {
+            for stmt in split_sql_statements(sql) {
+                sqlx::query(&stmt).execute(&pool).await.unwrap();
+            }
+            sqlx::query("INSERT INTO _schema_version (version, applied_at) VALUES (?, 0)")
+                .bind(*v as i64)
+                .execute(&pool)
+                .await
+                .unwrap();
+        }
+
+        // 同桶两条 (r1+r2) / 隔天一条 (r3) / 同天不同 real_model 一条 (r4)
+        const DAY: i64 = 86_400_000;
+        sqlx::query(
+            "INSERT INTO requests (id, timestamp, virtual_model_name, subscription_id,
+                provider_id, endpoint_id, real_model_name, is_streaming, status,
+                upstream_input_tokens, upstream_output_tokens,
+                upstream_cache_creation, upstream_cache_read)
+             VALUES
+               ('r1', 100, 'model-opus', 's1', 'zhipu', 'cn', 'm1', 0, 'success', 10, 20, 1, 2),
+               ('r2', 200, 'model-opus', 's1', 'zhipu', 'cn', 'm1', 0, 'error', 5, 5, NULL, NULL),
+               ('r3', ?, 'model-opus', 's1', 'zhipu', 'cn', 'm1', 0, 'success', 7, 7, 0, 0),
+               ('r4', 150, 'model-opus', 's1', 'zhipu', 'cn', 'm2', 0, 'success', 1, 1, 0, 0)",
+        )
+        .bind(DAY + 100)
+        .execute(&pool)
+        .await
+        .unwrap();
+
+        run_migrations(&pool, &std::path::PathBuf::from("."))
+            .await
+            .expect("apply v15");
+
+        let rows: (i64,) = sqlx::query_as("SELECT count(*) FROM receipt_stats_daily")
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+        assert_eq!(rows.0, 3, "3 个聚合桶: (day0,m1) / (day1,m1) / (day0,m2)");
+
+        let bucket: (i64, i64, i64, i64, i64) = sqlx::query_as(
+            "SELECT request_count, input_tokens, output_tokens, cache_creation_tokens, cache_read_tokens
+             FROM receipt_stats_daily
+             WHERE date_utc = 0 AND real_model_name = 'm1'",
+        )
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        assert_eq!(bucket, (2, 15, 25, 1, 2), "同桶两条聚合, NULL token 按 0 计, status 不过滤");
     }
 }
 

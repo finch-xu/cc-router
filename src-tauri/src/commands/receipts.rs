@@ -1,9 +1,14 @@
 //! Receipts (用量小票) 数据聚合 command。
 //!
-//! 与 statistics.rs 的差异:
-//! - statistics.rs 查 `request_stats_daily` 聚合表(按天粒度), 服务概览/趋势图/heatmap
-//! - 这里查 `requests` 原始表, 因为小票要下钻到 `real_model_name` 维度(daily 表没这列),
-//!   并支持「过去 24 小时」滚动窗口(daily 粒度做不到)
+//! 数据源是双路的 (v3.4 起):
+//! - 7天/30天/1年/全部 → `receipt_stats_daily` 小票专用聚合表 (含 real_model_name 维度,
+//!   永久保留, 不受 log_retention_days 清理; migration 015 建表并从 requests 回填)
+//! - 「过去 24 小时」→ `requests` 原始表 (滚动窗口, daily 粒度做不到)。
+//!   安全性: Settings 里保留期最短可选 7 天 (0=永久), requests 必然覆盖最近 24h,
+//!   该分支不受日志清理影响。仅手改 settings.json 填 1-6 天才有理论边界。
+//!
+//! 与 statistics.rs 的差异: statistics 查 `request_stats_daily` (无 real_model 维度),
+//! 服务概览/趋势图/heatmap; 这里要按真实模型下钻, 用自己的聚合表。
 //!
 //! Receipts 设计语义只展示 fable/opus/sonnet/haiku 四档主消费项, fallback 透传通道
 //! 不计入小票, SQL 已 WHERE virtual_model_name IN (...) 过滤。
@@ -21,8 +26,8 @@ use crate::virtual_model::model::VirtualModelName;
 
 /// Receipts 专用的时间范围 enum。
 ///
-/// 与 `StatsRange` 故意不共用——StatsRange 给 daily 聚合表用,since_ms 必须按 UTC 0 点对齐;
-/// 这里查 requests 原始表,支持 24h 滚动窗口。
+/// 与 `StatsRange` 故意不共用——StatsRange 全走 daily 聚合表;
+/// 这里 Last24Hours 查 requests 原始表 (滚动窗口), 其余走 receipt_stats_daily。
 #[derive(Debug, Clone, Copy, Deserialize, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum ReceiptRange {
@@ -124,25 +129,50 @@ pub async fn get_receipt_summary(
         .map(|v| format!("'{}'", v.as_str()))
         .collect::<Vec<_>>()
         .join(", ");
-    let sql = format!(
-        "SELECT
-            r.virtual_model_name,
-            r.subscription_id,
-            sub.display_name                                    AS subscription_display_name,
-            r.provider_id,
-            COALESCE(sub.provider_display_name, r.provider_id) AS provider_display_name,
-            r.real_model_name,
-            COUNT(*)                                            AS request_count,
-            COALESCE(SUM(r.upstream_input_tokens), 0)           AS input_tokens,
-            COALESCE(SUM(r.upstream_output_tokens), 0)          AS output_tokens,
-            COALESCE(SUM(r.upstream_cache_creation), 0)         AS cache_creation_tokens,
-            COALESCE(SUM(r.upstream_cache_read), 0)             AS cache_read_tokens
-         FROM requests r
-         LEFT JOIN subscriptions sub ON sub.id = r.subscription_id
-         WHERE r.timestamp >= ?
-           AND r.virtual_model_name IN ({in_clause})
-         GROUP BY r.virtual_model_name, r.subscription_id, r.real_model_name"
-    );
+    // 两条路径列别名完全一致, 行 → DTO 映射共用。
+    let sql = match range {
+        // 滚动 24h 窗口只有原始表能做; 保留期最短 7 天, 该分支不受清理影响
+        ReceiptRange::Last24Hours => format!(
+            "SELECT
+                r.virtual_model_name,
+                r.subscription_id,
+                sub.display_name                                    AS subscription_display_name,
+                r.provider_id,
+                COALESCE(sub.provider_display_name, r.provider_id) AS provider_display_name,
+                r.real_model_name,
+                COUNT(*)                                            AS request_count,
+                COALESCE(SUM(r.upstream_input_tokens), 0)           AS input_tokens,
+                COALESCE(SUM(r.upstream_output_tokens), 0)          AS output_tokens,
+                COALESCE(SUM(r.upstream_cache_creation), 0)         AS cache_creation_tokens,
+                COALESCE(SUM(r.upstream_cache_read), 0)             AS cache_read_tokens
+             FROM requests r
+             LEFT JOIN subscriptions sub ON sub.id = r.subscription_id
+             WHERE r.timestamp >= ?
+               AND r.virtual_model_name IN ({in_clause})
+             GROUP BY r.virtual_model_name, r.subscription_id, r.real_model_name"
+        ),
+        // 7d/30d/1y 的 since 本就 UTC 0 点对齐 (since_ms), all_time=0,
+        // 对日粒度表 `date_utc >= since` 与旧版逐条过滤严格等价
+        _ => format!(
+            "SELECT
+                r.virtual_model_name,
+                r.subscription_id,
+                sub.display_name                                        AS subscription_display_name,
+                MIN(r.provider_id)                                      AS provider_id,
+                COALESCE(sub.provider_display_name, MIN(r.provider_id)) AS provider_display_name,
+                r.real_model_name,
+                COALESCE(SUM(r.request_count), 0)                       AS request_count,
+                COALESCE(SUM(r.input_tokens), 0)                        AS input_tokens,
+                COALESCE(SUM(r.output_tokens), 0)                       AS output_tokens,
+                COALESCE(SUM(r.cache_creation_tokens), 0)               AS cache_creation_tokens,
+                COALESCE(SUM(r.cache_read_tokens), 0)                   AS cache_read_tokens
+             FROM receipt_stats_daily r
+             LEFT JOIN subscriptions sub ON sub.id = r.subscription_id
+             WHERE r.date_utc >= ?
+               AND r.virtual_model_name IN ({in_clause})
+             GROUP BY r.virtual_model_name, r.subscription_id, r.real_model_name"
+        ),
+    };
     let rows = sqlx::query(&sql).bind(since).fetch_all(&state.db).await?;
 
     let mut buckets: std::collections::HashMap<String, Vec<ReceiptSubItemDto>> =

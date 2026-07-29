@@ -34,6 +34,17 @@ struct StatsCounters {
     retry_count_sum: i64,
 }
 
+/// 小票专用聚合计数 (receipt_stats_daily), 只有小票需要的 5 列。
+/// 与 StatsCounters 分开是因为聚合 key 多一维 real_model_name。
+#[derive(Default)]
+struct ReceiptCounters {
+    request_count: i64,
+    input_tokens: i64,
+    output_tokens: i64,
+    cache_creation_tokens: i64,
+    cache_read_tokens: i64,
+}
+
 /// 把 Unix ms 向下取整到 UTC 当天 0 点的 ms。
 /// 用 div_euclid 而非 / 是因为 i64 除法对负数会向 0 截断, 测试可能传非 1970 后的小值。
 pub(crate) fn floor_to_utc_day(ts_ms: i64) -> i64 {
@@ -181,6 +192,9 @@ pub(crate) async fn flush_batch(
 
     // key → (provider_id, counters); provider_id 取首次写入的 entry 值。
     let mut stats_acc: HashMap<(i64, String, String), (String, StatsCounters)> = HashMap::new();
+    // 小票聚合: key 多 real_model_name 一维 (receipt_stats_daily)。
+    let mut receipt_acc: HashMap<(i64, String, String, String), (String, ReceiptCounters)> =
+        HashMap::new();
 
     for entry in batch {
         let key = (
@@ -188,6 +202,16 @@ pub(crate) async fn flush_batch(
             entry.virtual_model_name.as_str().to_string(),
             entry.subscription_id.to_string(),
         );
+
+        let (_, racc) = receipt_acc
+            .entry((key.0, key.1.clone(), key.2.clone(), entry.real_model_name.clone()))
+            .or_insert_with(|| (entry.provider_id.clone(), ReceiptCounters::default()));
+        racc.request_count += 1;
+        racc.input_tokens += entry.upstream_input_tokens.unwrap_or(0) as i64;
+        racc.output_tokens += entry.upstream_output_tokens.unwrap_or(0) as i64;
+        racc.cache_creation_tokens += entry.upstream_cache_creation.unwrap_or(0) as i64;
+        racc.cache_read_tokens += entry.upstream_cache_read.unwrap_or(0) as i64;
+
         let (_, acc) = stats_acc
             .entry(key)
             .or_insert_with(|| (entry.provider_id.clone(), StatsCounters::default()));
@@ -256,7 +280,7 @@ pub(crate) async fn flush_batch(
         }
     }
 
-    // 同事务 UPSERT 聚合结果。requests + stats 同进同退,
+    // 同事务 UPSERT 聚合结果。requests + 两张 stats 表同进同退,
     // 即使 cleanup 把 requests 老数据删了, stats 仍然完整。
     for ((date_utc, vm, sub_id), (provider_id, acc)) in stats_acc {
         let result = sqlx::query(
@@ -303,6 +327,37 @@ pub(crate) async fn flush_batch(
         .await;
         if let Err(e) = result {
             warn!(?e, "UPSERT 统计聚合失败");
+        }
+    }
+
+    for ((date_utc, vm, sub_id, real_model), (provider_id, acc)) in receipt_acc {
+        let result = sqlx::query(
+            "INSERT INTO receipt_stats_daily (
+                date_utc, virtual_model_name, subscription_id, real_model_name, provider_id,
+                request_count, input_tokens, output_tokens,
+                cache_creation_tokens, cache_read_tokens
+             ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+             ON CONFLICT (date_utc, virtual_model_name, subscription_id, real_model_name) DO UPDATE SET
+                request_count = request_count + excluded.request_count,
+                input_tokens = input_tokens + excluded.input_tokens,
+                output_tokens = output_tokens + excluded.output_tokens,
+                cache_creation_tokens = cache_creation_tokens + excluded.cache_creation_tokens,
+                cache_read_tokens = cache_read_tokens + excluded.cache_read_tokens",
+        )
+        .bind(date_utc)
+        .bind(vm)
+        .bind(sub_id)
+        .bind(real_model)
+        .bind(provider_id)
+        .bind(acc.request_count)
+        .bind(acc.input_tokens)
+        .bind(acc.output_tokens)
+        .bind(acc.cache_creation_tokens)
+        .bind(acc.cache_read_tokens)
+        .execute(&mut *tx)
+        .await;
+        if let Err(e) = result {
+            warn!(?e, "UPSERT 小票聚合失败");
         }
     }
 
@@ -536,5 +591,53 @@ mod tests {
         // 3 条有 latency: 50+50+60=160
         assert_eq!(row.try_get::<i64, _>("total_duration_ms_sum").unwrap(), 160);
         assert_eq!(row.try_get::<i64, _>("total_duration_ms_count").unwrap(), 3);
+    }
+
+    #[tokio::test]
+    async fn flush_writes_receipt_stats_with_real_model_dimension() {
+        let pool = fresh_pool().await;
+        let sub = Uuid::new_v4();
+        let day = floor_to_utc_day(1_704_067_200_000);
+
+        // 同 (day, vm, sub) 下两个 real_model: claude-x ×2 + other-model ×1
+        let e1 = make_entry(day, VirtualModelName::Sonnet, sub, "anthropic",
+                            RequestStatus::Success, None, Some(10), Some(20));
+        let e2 = make_entry(day, VirtualModelName::Sonnet, sub, "anthropic",
+                            RequestStatus::Error, None, Some(5), Some(5));
+        let mut e3 = make_entry(day, VirtualModelName::Sonnet, sub, "anthropic",
+                                RequestStatus::Success, None, Some(1), Some(1));
+        e3.real_model_name = "other-model".to_string();
+        flush_batch(&pool, vec![e1, e2, e3]).await.expect("first flush");
+
+        let count: i64 = sqlx::query("SELECT COUNT(*) AS c FROM receipt_stats_daily")
+            .fetch_one(&pool).await.unwrap().try_get("c").unwrap();
+        assert_eq!(count, 2, "real_model_name 是聚合 key 的一维");
+
+        let row = sqlx::query(
+            "SELECT * FROM receipt_stats_daily WHERE real_model_name='claude-x'",
+        )
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        assert_eq!(row.try_get::<i64, _>("request_count").unwrap(), 2);
+        assert_eq!(row.try_get::<i64, _>("input_tokens").unwrap(), 15);
+        assert_eq!(row.try_get::<i64, _>("output_tokens").unwrap(), 25);
+        assert_eq!(row.try_get::<i64, _>("date_utc").unwrap(), day);
+        assert_eq!(row.try_get::<String, _>("provider_id").unwrap(), "anthropic");
+
+        // 二次 flush 相同 key → UPSERT 累加而非新行
+        let e4 = make_entry(day, VirtualModelName::Sonnet, sub, "anthropic",
+                            RequestStatus::Success, None, Some(3), Some(4));
+        flush_batch(&pool, vec![e4]).await.expect("second flush");
+
+        let row = sqlx::query(
+            "SELECT * FROM receipt_stats_daily WHERE real_model_name='claude-x'",
+        )
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        assert_eq!(row.try_get::<i64, _>("request_count").unwrap(), 3);
+        assert_eq!(row.try_get::<i64, _>("input_tokens").unwrap(), 18);
+        assert_eq!(row.try_get::<i64, _>("output_tokens").unwrap(), 29);
     }
 }

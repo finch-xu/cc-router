@@ -1,7 +1,7 @@
 //! 定时清理 requests 表中超过 `log_retention_days` 的旧记录。
 //!
-//! 不动 `request_stats_daily` —— 那张表是按天聚合的, 永久保留, 让历史用量统计
-//! 不受日志清理影响。
+//! 不动 `request_stats_daily` / `receipt_stats_daily` —— 两张按天聚合表永久保留,
+//! 让历史用量统计与小票不受日志清理影响。
 //!
 //! settings.log_retention_days 语义:
 //! - 0 = 永久保留 (跳过删除), **默认值** (settings/model.rs::default_retention)
