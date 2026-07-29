@@ -1186,7 +1186,7 @@ function SlotInput({
   const { t } = useT();
   return (
     <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 8 }}>
-      <span style={{ fontFamily: "var(--mono)", fontSize: 12, color: "var(--ink-3)", width: 130 }}>
+      <span style={{ fontFamily: "var(--font-mono)", fontSize: 12, color: "var(--ink-3)", width: 130 }}>
         {label}
       </span>
       <input

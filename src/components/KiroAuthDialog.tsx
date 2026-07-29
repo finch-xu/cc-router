@@ -303,7 +303,7 @@ export function KiroAuthDialog({ open, onClose, onSuccess }: Props) {
               </div>
               <div
                 style={{
-                  fontFamily: "var(--mono)",
+                  fontFamily: "var(--font-mono)",
                   fontSize: 24,
                   letterSpacing: 4,
                   fontWeight: 600,
@@ -498,7 +498,7 @@ function ImportTabContent({
         onChange={(e) => setPasteJson(e.target.value)}
         className="input"
         rows={6}
-        style={{ width: "100%", fontFamily: "var(--mono)", fontSize: 11 }}
+        style={{ width: "100%", fontFamily: "var(--font-mono)", fontSize: 11 }}
         placeholder='{ "refreshToken": "...", "region": "us-east-1", ... }'
       />
       <button type="button" className="btn primary" style={{ width: "100%", marginTop: 12 }} onClick={onImportFromText} disabled={!pasteJson.trim()}>
@@ -567,7 +567,7 @@ function DisguiseInput({
         value={value}
         onChange={(e) => onChange(e.target.value)}
         className="input"
-        style={{ width: "100%", fontFamily: "var(--mono)", fontSize: 11.5 }}
+        style={{ width: "100%", fontFamily: "var(--font-mono)", fontSize: 11.5 }}
         placeholder={hint}
       />
     </div>

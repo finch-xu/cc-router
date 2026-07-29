@@ -86,11 +86,26 @@
 
   /* status- 颜色保持 tailwind config 里的语义 */
 
-  /* === Font stacks (system-only, no bundled webfonts) === */
-  --font-sans: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC",
-               "Microsoft YaHei", "Helvetica Neue", system-ui, sans-serif;
-  --font-mono: ui-monospace, "SF Mono", Menlo, "Cascadia Mono", Consolas,
-               "Liberation Mono", "Source Han Mono SC", monospace;
+  /* === Font stacks (system-only, no bundled webfonts) ===
+   * 分两段: 前段负责拉丁字母与数字, 后段负责汉字与全角标点。
+   * 靠浏览器的逐字符 fallback 自动分工 —— 汉字在前段字体里没有字形,
+   * 会自动落到后段的中文字体, 因此中西文能各用各的最优字形。
+   * CSP 的 font-src 'self' data: 禁止外链, 这里只用系统自带字体。 */
+  --font-sans:
+    /* 拉丁 / 数字 / UI 主字形 */
+    -apple-system, BlinkMacSystemFont,                /* macOS: SF Pro */
+    "Segoe UI Variable Text", "Segoe UI",             /* Win11 小字号光学优化版 → Win10 回退 */
+    Inter, Roboto, "Helvetica Neue", Arial,           /* Linux 常见 / 通用兜底 */
+    /* 中文回退 */
+    "PingFang SC", "Hiragino Sans GB",                /* macOS */
+    "Microsoft YaHei UI", "Microsoft YaHei",          /* Windows */
+    "Noto Sans CJK SC", "Source Han Sans SC", "WenQuanYi Micro Hei", /* Linux */
+    system-ui, sans-serif;
+  --font-mono:
+    ui-monospace, SFMono-Regular, "SF Mono", Menlo,   /* macOS */
+    "Cascadia Mono", "Cascadia Code", Consolas,       /* Win11 → Win10 */
+    "DejaVu Sans Mono", "Liberation Mono",            /* Linux */
+    "Source Han Mono SC", monospace;
 }
 
 /* ============================================================
@@ -157,7 +172,14 @@ body {
   color: var(--ink);
   font-family: var(--font-sans);
   font-size: var(--fs-body);
+  /* 显式行高: 不同字体的 ascent/descent 不同, 交给 normal 会让行盒高度随平台漂移。
+   * 值与 Tailwind preflight 给 html 设的 1.5 一致 (body 本来就 inherit 它),
+   * 所以这行不改变当前观感 —— 它的作用是在未来移除 Tailwind 时保住行高基线。 */
+  line-height: 1.5;
   -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  /* 让 SF Pro / Segoe UI Variable 这类可变字体按当前字号选光学尺寸 */
+  font-optical-sizing: auto;
   text-rendering: optimizeLegibility;
 }
 
@@ -1443,6 +1465,14 @@ input, select, textarea { font: inherit; color: inherit; }
 .dark .nav-item.active {
   background: var(--surface-3);
   color: var(--ink);
+}
+
+/* === CodeMirror: 纳入设计系统的等宽字体 (与主题无关) ===
+ * CodeMirror 的 baseTheme 自带一套 monospace 栈, 且样式经 StyleModule 动态注入
+ * head, 注入顺序不稳定 —— 沿用本文件对 .cm-editor 既有的 !important 做法锁定。 */
+.cm-editor,
+.cm-editor .cm-scroller {
+  font-family: var(--font-mono) !important;
 }
 
 /* === Dark mode: CodeMirror 编辑器 === */

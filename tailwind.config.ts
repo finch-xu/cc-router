@@ -13,6 +13,12 @@ const config: Config = {
       },
     },
     extend: {
+      // 与 styles.css 的 --font-* 对齐。不配这项的话 preflight 会给 html 挂
+      // Tailwind 自带的默认栈, 而 styles.css 只覆盖了 body —— 两套字体栈并存。
+      fontFamily: {
+        sans: ["var(--font-sans)"],
+        mono: ["var(--font-mono)"],
+      },
       colors: {
         border: "hsl(var(--border))",
         input: "hsl(var(--input))",

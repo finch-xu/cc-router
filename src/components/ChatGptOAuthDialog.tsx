@@ -168,7 +168,7 @@ export function ChatGptOAuthDialog({ open, onClose, onSuccess }: Props) {
               </div>
               <div
                 style={{
-                  fontFamily: "var(--mono)",
+                  fontFamily: "var(--font-mono)",
                   fontSize: 24,
                   letterSpacing: 4,
                   fontWeight: 600,

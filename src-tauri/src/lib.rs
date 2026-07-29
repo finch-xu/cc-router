@@ -18,6 +18,7 @@ pub mod tls;
 pub mod tray;
 pub mod updater_source;
 pub mod virtual_model;
+pub mod window;
 
 use std::sync::Arc;
 
@@ -72,6 +73,11 @@ pub fn run() {
                 .path()
                 .resource_dir()
                 .expect("无法解析 resource_dir");
+
+            // 窗口几何自适应 —— 必须先于 bootstrap: 几何计算是同步且极快的, 而
+            // bootstrap 要跑 DB migration / provider 加载 / TLS。配合
+            // tauri.conf.json 的 visible=false, 用户看到的第一帧就是正确尺寸。
+            window::apply_startup_geometry(app.handle());
 
             // 异步初始化：数据库 + providers + 订阅运行时 + 代理
             let handle = app.handle().clone();
