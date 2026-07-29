@@ -31,14 +31,11 @@ function storeTheme(theme: Theme) {
   }
 }
 
-function resolveTheme(theme: Theme): ResolvedTheme {
-  if (theme !== "system") return theme;
+function getSystemDark(): boolean {
   try {
-    return window.matchMedia("(prefers-color-scheme: dark)").matches
-      ? "dark"
-      : "light";
+    return window.matchMedia("(prefers-color-scheme: dark)").matches;
   } catch {
-    return "light";
+    return false;
   }
 }
 
@@ -56,13 +53,15 @@ const ThemeContext = createContext<ThemeContextValue>({
 
 export function ThemeProvider({ children }: { children: ReactNode }) {
   const [theme, setThemeState] = useState<Theme>(getStoredTheme);
+  const [systemDark, setSystemDark] = useState<boolean>(getSystemDark);
 
   const setTheme = useCallback((t: Theme) => {
     storeTheme(t);
     setThemeState(t);
   }, []);
 
-  const resolved = resolveTheme(theme);
+  const resolved: ResolvedTheme =
+    theme === "system" ? (systemDark ? "dark" : "light") : theme;
 
   // 同步 .dark class 到 <html>
   useEffect(() => {
@@ -74,14 +73,17 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
     }
   }, [resolved]);
 
-  // 监听系统主题变化 (仅在 theme === "system" 时需重算)
+  // 监听系统主题变化 (theme === "system" 时 resolved 随之重算)
   useEffect(() => {
-    if (theme !== "system") return;
-    const mq = window.matchMedia("(prefers-color-scheme: dark)");
-    const handler = () => setThemeState("system"); // 触发重渲染以重算 resolved
-    mq.addEventListener("change", handler);
-    return () => mq.removeEventListener("change", handler);
-  }, [theme]);
+    try {
+      const mq = window.matchMedia("(prefers-color-scheme: dark)");
+      const handler = (e: MediaQueryListEvent) => setSystemDark(e.matches);
+      mq.addEventListener("change", handler);
+      return () => mq.removeEventListener("change", handler);
+    } catch {
+      return;
+    }
+  }, []);
 
   return (
     <ThemeContext.Provider value={{ theme, resolved, setTheme }}>

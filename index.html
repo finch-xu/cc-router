@@ -7,6 +7,19 @@
     <title>cc-router</title>
   </head>
   <body>
+    <script>
+      // 首帧前同步主题, 避免暗色用户启动闪白 (与 src/hooks/useTheme.tsx 的 THEME_KEY 保持一致)
+      (function () {
+        try {
+          var t = localStorage.getItem("cc-router-theme");
+          var dark =
+            t === "dark" ||
+            (t !== "light" &&
+              window.matchMedia("(prefers-color-scheme: dark)").matches);
+          if (dark) document.documentElement.classList.add("dark");
+        } catch (e) {}
+      })();
+    </script>
     <div id="root"></div>
     <script type="module" src="/src/main.tsx"></script>
   </body>

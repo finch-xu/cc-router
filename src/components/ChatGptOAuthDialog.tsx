@@ -91,6 +91,7 @@ export function ChatGptOAuthDialog({ open, onClose, onSuccess }: Props) {
 
   return (
     <div
+      className="oauth-overlay"
       style={{
         position: "fixed",
         inset: 0,
