@@ -68,7 +68,8 @@
       "uuid@11": ">=11.1.1",
       "uuid@13": ">=13.0.1",
       "dompurify": ">=3.4.11",
-      "@babel/core": "^7.29.6"
+      "@babel/core": "^7.29.6",
+      "@codemirror/state": "6.7.1"
     }
   }
 }
