@@ -1,0 +1,59 @@
+# MiniMax Chat Completions 兼容端点 (OpenAI /v1/chat/completions 协议家族).
+# 与 minimax.yaml (Anthropic /v1/messages 透传) 并列, 共享同一 API key,
+# 区别在 auth_type=openai_chat_completions_api_key, 走 cc-router 的
+# Anthropic Messages <-> Chat Completions 协议翻译分支.
+#
+# 官方文档 (核对 2026-07):
+#   - Chat Completions: https://platform.minimax.io/docs/api-reference/chat-completion
+#   - 鉴权: Authorization: Bearer <MINIMAX_API_KEY>
+#   - 国际版 base: https://api.minimax.io/v1  国内版 base: https://api.minimaxi.com/v1
+#   - MiniMax 未提供公开 /models 接口, 只能手动输入模型 (与 anthropic 兼容端点侧一致).
+
+id: minimax_openai
+display_name: "MiniMax (Chat Completions)"
+icon: minimax
+category: first_party
+description: "MiniMax Chat Completions 兼容端点（MiniMax-M3 / M2 系列）"
+homepage: "https://platform.minimax.io"
+docs_url: "https://platform.minimax.io/docs"
+api_key_url: "https://platform.minimax.io/user-center/basic-information/interface-key"
+
+compatibility: untested
+compatibility_notes: 
+
+endpoints:
+  - id: global_chat_completions
+    label: "国际版 · Chat Completions 按量付费 API"
+    description: "api.minimax.io，按 token 计费"
+    base_url: "https://api.minimax.io/v1"
+    messages_path: "/chat/completions"
+    region: global
+    billing: pay_as_you_go
+
+  - id: china_chat_completions
+    label: "国内版 · Chat Completions 按量付费 API"
+    description: "api.minimaxi.com，国内加速访问"
+    base_url: "https://api.minimaxi.com/v1"
+    messages_path: "/chat/completions"
+    region: china
+    billing: pay_as_you_go
+
+default_endpoint: global_chat_completions
+
+auth:
+  type: openai_chat_completions_api_key
+  header_name: "Authorization"
+  header_format: bearer
+
+required_headers: {}
+forward_headers: []
+
+model_discovery:
+  # MiniMax 未提供公开 /models 接口, 只能手动输入 (与 anthropic 兼容端点侧一致)
+  enabled: false
+  path: "/v1/models"
+  cache_ttl_hours: 24
+  # 来源: https://platform.minimax.io/docs/guides/models-intro (2026-07 核对)
+  example_models:
+    - "MiniMax-M3"
+    - "MiniMax-M2.7"

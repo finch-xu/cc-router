@@ -2,7 +2,7 @@ id: minimax
 display_name: "MiniMax"
 icon: minimax
 category: first_party
-description: "MiniMax M2 系列模型"
+description: "MiniMax M3 / M2 系列模型"
 homepage: "https://platform.minimax.io"
 docs_url: "https://platform.minimax.io/docs"
 api_key_url: "https://platform.minimax.io/user-center/basic-information/interface-key"
@@ -60,8 +60,9 @@ model_discovery:
   enabled: false
   path: "/v1/models"
   cache_ttl_hours: 24
-  # 来源: https://platform.minimax.io/docs/guides/models-intro (2026-04 核对)
+  # 来源: https://platform.minimax.io/docs/guides/models-intro (2026-07 核对)
   example_models:
+    - "MiniMax-M3"
     - "MiniMax-M2.7"
     - "MiniMax-M2.7-highspeed"
     - "MiniMax-M2.5"
