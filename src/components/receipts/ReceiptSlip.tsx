@@ -166,6 +166,7 @@ export const ReceiptSlip = forwardRef<HTMLDivElement, Props>(function ReceiptSli
         <div style={{ display: "flex", justifyContent: "center", marginBottom: 6 }}>
           <img
             src={logoUrl}
+            data-receipt-logo=""
             alt="cc-router"
             width={40}
             height={40}

@@ -3,6 +3,9 @@ import jsPDF from "jspdf";
 
 const FILE_PREFIX = "cc-router-receipt";
 
+/** 导出 HTML 用的公网 logo。app 内的 logo 是打包资源路径, 独立打开的 HTML 里解析不到会空白。 */
+const PUBLIC_LOGO_URL = "https://ccrouter.app/assets/icon.png";
+
 function triggerDownload(blob: Blob, filename: string): void {
   const url = URL.createObjectURL(blob);
   const a = document.createElement("a");
@@ -49,8 +52,14 @@ export async function exportPdf(el: HTMLElement, slipNo: string, range: string):
   pdf.save(`${FILE_PREFIX}-${range}-${slipNo}.pdf`);
 }
 
-/** 小票本体全 inline-style, 不依赖外部 CSS, outerHTML 直接复制即可在任何浏览器打开。 */
+/** 小票本体全 inline-style, 不依赖外部 CSS, outerHTML 直接复制即可在任何浏览器打开。
+ *  唯一例外是 logo <img>: 打包资源路径离开 app 无法解析, 导出前克隆 DOM 换成公网 URL。 */
 export function exportHtml(el: HTMLElement, slipNo: string, range: string): void {
+  const clone = el.cloneNode(true) as HTMLElement;
+  clone
+    .querySelector("img[data-receipt-logo]")
+    ?.setAttribute("src", PUBLIC_LOGO_URL);
+
   const html = `<!doctype html>
 <html lang="zh">
 <head>
@@ -59,7 +68,7 @@ export function exportHtml(el: HTMLElement, slipNo: string, range: string): void
 <style>body { margin: 0; padding: 32px; background: #f0ece2; display: flex; justify-content: center; }</style>
 </head>
 <body>
-${el.outerHTML}
+${clone.outerHTML}
 </body>
 </html>`;
 
