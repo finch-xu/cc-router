@@ -28,7 +28,7 @@ export type ReceiptColorMode = "mono" | "color";
 
 /**
  * 小票主体的聚合视图模式:
- * - virtual_model: 现状,按 4 个虚拟模型分组 (opus/sonnet/haiku/fallback)
+ * - virtual_model: 现状,按 4 个虚拟模型分组 (fable/opus/sonnet/haiku)
  * - subscription:  按订阅分组,订阅下展开各真实模型用量
  * - totals_only:   上下两段并列,「按订阅总量」+「按真实模型总量」, 无嵌套
  */

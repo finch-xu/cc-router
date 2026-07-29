@@ -631,7 +631,7 @@ export interface ReceiptSubItemDto {
 }
 
 export interface ReceiptVirtualModelItemDto {
-  /** "model-opus" | "model-sonnet" | "model-haiku" — fallback 不出现 */
+  /** "model-fable" | "model-opus" | "model-sonnet" | "model-haiku" — fallback 不出现 */
   virtual_model_name: string;
   subtotal: ReceiptTotalsDto;
   sub_items: ReceiptSubItemDto[];
@@ -644,7 +644,7 @@ export interface ReceiptDto {
   generated_at_ms: number;
   /** 8 位大写 hex 单号 */
   slip_no: string;
-  /** 始终 3 项: opus / sonnet / haiku, 顺序固定 */
+  /** 始终 4 项: fable / opus / sonnet / haiku, 顺序固定 */
   items: ReceiptVirtualModelItemDto[];
   grand_total: ReceiptTotalsDto;
 }

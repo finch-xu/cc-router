@@ -5,7 +5,7 @@
 //! - 这里查 `requests` 原始表, 因为小票要下钻到 `real_model_name` 维度(daily 表没这列),
 //!   并支持「过去 24 小时」滚动窗口(daily 粒度做不到)
 //!
-//! Receipts 设计语义只展示 opus/sonnet/haiku 三档主消费项, fallback 透传通道
+//! Receipts 设计语义只展示 fable/opus/sonnet/haiku 四档主消费项, fallback 透传通道
 //! 不计入小票, SQL 已 WHERE virtual_model_name IN (...) 过滤。
 
 use std::hash::{Hash, Hasher};
@@ -81,7 +81,7 @@ pub struct ReceiptSubItemDto {
 
 #[derive(Debug, Serialize)]
 pub struct ReceiptVirtualModelItemDto {
-    /// "model-opus" / "model-sonnet" / "model-haiku" — fallback 不出现在小票
+    /// "model-fable" / "model-opus" / "model-sonnet" / "model-haiku" — fallback 不出现在小票
     pub virtual_model_name: String,
     pub subtotal: ReceiptTotalsDto,
     pub sub_items: Vec<ReceiptSubItemDto>,
@@ -97,13 +97,15 @@ pub struct ReceiptDto {
     pub generated_at_ms: i64,
     /// 8 位大写 hex, 用于小票上的「单号」展示
     pub slip_no: String,
-    /// 始终 3 项: model-opus / model-sonnet / model-haiku, 顺序固定, 空也返回
+    /// 始终 4 项: model-fable / model-opus / model-sonnet / model-haiku, 顺序固定, 空也返回
     pub items: Vec<ReceiptVirtualModelItemDto>,
     pub grand_total: ReceiptTotalsDto,
 }
 
-/// 固定排序: opus → sonnet → haiku, fallback 不出现
-const RECEIPT_VM_ORDER: [VirtualModelName; 3] = [
+/// 固定排序: fable → opus → sonnet → haiku (与前端 virtualModels.ts::VM_ORDER 一致),
+/// fallback 不出现
+const RECEIPT_VM_ORDER: [VirtualModelName; 4] = [
+    VirtualModelName::Fable,
     VirtualModelName::Opus,
     VirtualModelName::Sonnet,
     VirtualModelName::Haiku,
