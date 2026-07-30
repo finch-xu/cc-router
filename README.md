@@ -79,7 +79,6 @@
 | `deepseek` | DeepSeek（按量付费） | ❌ | ✅ | verified |
 | `moonshot` | Moonshot Kimi（按量付费/中国订阅/国际订阅） | ✅ | ✅ | untested |
 | `minimax` | MiniMax（按量付费/中国订阅/国际订阅） | ✅ | ✅ | verified |
-| `minimax_openai` | MiniMax Chat Completions 兼容端点（M3 / M2 系列，按量付费国际/国内，自动协议翻译） | ❌ | ✅ | untested |
 | `xiaomi` | 小米 MiMo（按量付费/中国订阅/国际订阅） | ✅ | ✅ | verified |
 | `alibaba` | 阿里云百炼（Token Plan 团队版 + 按量付费 2 地域 + 停售的 Coding Plan） | ✅ | ✅ | verified |
 | `volcengine` | 字节跳动 火山方舟（Coding Plan 订阅 + Agent Plan 订阅 + 按量付费） | ✅ | ✅ | untested |
