@@ -26,7 +26,6 @@ import { useT, type LanguagePref } from "@/i18n";
 import { useTheme, type Theme } from "@/hooks/useTheme";
 import type { ProxyMode, TlsStatus, UpdateSource } from "@/types";
 import { save } from "@tauri-apps/plugin-dialog";
-import { platform } from "@tauri-apps/plugin-os";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 
 export function SettingsPage() {
@@ -48,9 +47,6 @@ export function SettingsPage() {
   const [corsAllowOrigin, setCorsAllowOrigin] = useState("*");
   const [preferredLanguage, setPreferredLanguage] = useState<LanguagePref>("system");
   const [debugMode, setDebugMode] = useState(false);
-  const [hideDockIcon, setHideDockIcon] = useState(false);
-  // Tauri 官方 OS 插件取代 deprecated navigator.platform. 同步 API, 取一次即可.
-  const [isMacos] = useState(() => platform() === "macos");
   const [clearDumpsDialog, setClearDumpsDialog] = useState(false);
   const [clearingDumps, setClearingDumps] = useState(false);
   const [resetDialog, setResetDialog] = useState(false);
@@ -102,7 +98,6 @@ export function SettingsPage() {
     setCorsAllowOrigin(settings.data.cors_allow_origin);
     setPreferredLanguage(settings.data.preferred_language ?? "system");
     setDebugMode(settings.data.debug_mode ?? false);
-    setHideDockIcon(settings.data.hide_dock_icon ?? false);
     initializedRef.current = true;
   }, [settings.data]);
 
@@ -143,13 +138,6 @@ export function SettingsPage() {
   async function changeDebugMode(next: boolean) {
     setDebugMode(next);
     await patch({ debug_mode: next });
-  }
-
-  // macOS dock 显隐即时生效: 后端 update_settings 在保存后调用
-  // apply_dock_visibility 切换 NSApplication activationPolicy.
-  async function changeHideDockIcon(next: boolean) {
-    setHideDockIcon(next);
-    await patch({ hide_dock_icon: next });
   }
 
   async function changeListenAll(next: boolean) {
@@ -289,19 +277,6 @@ export function SettingsPage() {
               <option value="dark">{t("settings.theme.dark")}</option>
             </select>
           </div>
-          {isMacos && (
-            <div className="setting-row">
-              <div className="label-col">
-                {t("settings.appearance.hideDock.label")}
-                <div className="desc">{t("settings.appearance.hideDock.desc")}</div>
-              </div>
-              <Toggle
-                checked={hideDockIcon}
-                onChange={(v) => void changeHideDockIcon(v)}
-                aria-label={t("settings.appearance.hideDock.label")}
-              />
-            </div>
-          )}
           <div className="setting-row">
             <div className="label-col">
               {t("settings.update.source.label")}

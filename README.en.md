@@ -116,6 +116,8 @@ Community PRs welcome.
 2. Add your LLM subscriptions, bind them to virtual models, pick a dispatch mode.
 3. Point Claude Code at cc-router via the env snippet below.
 
+> **On macOS cc-router runs as a menu bar app** — there is no Dock icon. Closing the window only hides it; the proxy keeps running. Click the menu bar icon (or simply launch cc-router again from Spotlight) to bring the window back, and use the menu bar icon → "Quit cc-router" to exit for real.
+
 ## Using with Claude Code
 
 The **Settings** page renders the full env snippet dynamically — if the default port is taken, cc-router probes upward up to 100 times.

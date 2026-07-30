@@ -22,7 +22,9 @@ tauri-plugin-dialog = "2"
 tauri-plugin-shell = "2"
 tauri-plugin-updater = "2"
 tauri-plugin-autostart = "2"
-# 仅前端用: @tauri-apps/plugin-os::platform() 取代 deprecated navigator.platform 判断 macOS.
+# Rust 侧用 tauri_plugin_os::locale() 做托盘菜单的系统语言探测 (tray::TrayLocale::from_pref);
+# 该函数是 sys_locale 的纯封装, 不依赖 plugin 注册, 但 plugin 保留着以便前端随时取 OS 信息.
+# 注: 本 crate 的 rust-version = 1.77.2 就是被这个 plugin 的 MSRV 顶上来的.
 tauri-plugin-os = "2"
 
 serde = { version = "1", features = ["derive"] }

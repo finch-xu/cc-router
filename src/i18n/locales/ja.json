@@ -103,8 +103,6 @@
   "settings.theme.system": "システムに従う",
   "settings.theme.light": "ライト",
   "settings.theme.dark": "ダーク",
-  "settings.appearance.hideDock.label": "Dock からアイコンを隠す",
-  "settings.appearance.hideDock.desc": "オンにすると cc-router はメニューバーにのみ表示され、Dock から非表示になります。即時に反映されます。",
   "settings.section.debug": "デバッグ",
   "settings.debug.mode.label": "デバッグモード",
   "settings.debug.mode.desc": "有効にすると、毎回のアウトバウンドリクエストでクライアントリクエストボディ、cc-router 書き換え後のリクエストボディ、上流レスポンスボディの 3 セットを debug-dumps ディレクトリにそれぞれ .txt として書き出し、プロトコル適合の問題を切り分けるのに使えます。ファイルには会話の全内容が含まれるため、デバッグ後は無効化してクリーンアップしてください。",

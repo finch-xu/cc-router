@@ -87,12 +87,6 @@ pub struct Settings {
     /// 用于排查协议适配类问题. 默认关闭(file IO 与磁盘占用代价).
     #[serde(default)]
     pub debug_mode: bool,
-    /// macOS 专属: 是否把 app 从 Dock 隐藏 (NSApplication activationPolicy=Accessory).
-    /// 默认 false 保留 Dock 图标, 与 macOS 同类成熟 app 惯例一致.
-    /// 切换立即生效 (commands::settings::update_settings 内调 apply_dock_visibility),
-    /// 启动时按本字段自动应用 (lib.rs setup). 非 macOS 平台后端 helper 为 no-op.
-    #[serde(default)]
-    pub hide_dock_icon: bool,
 }
 
 fn default_port() -> u16 {
@@ -144,7 +138,6 @@ impl Default for Settings {
             preferred_language: default_preferred_language(),
             update_source: None,
             debug_mode: false,
-            hide_dock_icon: false,
         }
     }
 }
@@ -166,7 +159,6 @@ pub struct SettingsPatch {
     pub preferred_language: Option<String>,
     pub update_source: Option<String>,
     pub debug_mode: Option<bool>,
-    pub hide_dock_icon: Option<bool>,
 }
 
 impl Settings {
@@ -216,9 +208,6 @@ impl Settings {
         if let Some(p) = patch.debug_mode {
             self.debug_mode = p;
         }
-        if let Some(p) = patch.hide_dock_icon {
-            self.hide_dock_icon = p;
-        }
     }
 }
 
@@ -235,6 +224,31 @@ mod tests {
     fn default_retention_is_forever() {
         // 0 = 永久保留 (cleanup.rs 的短路分支), 是刻意的默认值
         assert_eq!(Settings::default().log_retention_days, 0);
+    }
+
+    #[test]
+    fn legacy_settings_json_with_removed_hide_dock_icon_still_loads() {
+        // v3.4 及更早的 settings.json 里带 hide_dock_icon; 该字段已删除
+        // (macOS 现在恒为 Accessory, 见 lib.rs::run)。Settings 没有 deny_unknown_fields,
+        // 反序列化必须照常成功 —— 老用户升级不能因为一个残留键就整份配置重置。
+        // 下次 save 时该键会被 to_string_pretty 全量覆写掉。
+        // 给这个类型加 deny_unknown_fields 会直接打破这条约定。
+        let raw = r#"{
+            "proxy_port": 23456,
+            "listen_all": false,
+            "autostart": false,
+            "log_retention_days": 30,
+            "db_size_limit_mb": 500,
+            "auth_enabled": true,
+            "auth_token": "abc",
+            "cors_enabled": true,
+            "cors_allow_origin": "*",
+            "preferred_language": "ja",
+            "hide_dock_icon": true
+        }"#;
+        let s: Settings = serde_json::from_str(raw).unwrap();
+        assert_eq!(s.preferred_language, "ja");
+        assert_eq!(s.proxy_port, 23456);
     }
 
     #[test]

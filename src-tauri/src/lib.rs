@@ -28,28 +28,31 @@ use tracing::{error, info};
 
 use crate::state::AppState;
 
-/// macOS: 切换 NSApplication activationPolicy 实现 Dock 图标显示/隐藏.
-/// Accessory = 仅菜单栏 (Dock 无图标), Regular = 常规前台 app.
-/// 启动时由 setup 闭包调用; 运行时由 commands::settings::update_settings 在
-/// patch 含 hide_dock_icon 时调用. 非 macOS 平台是 no-op.
+/// macOS: 用户从 Dock / Spotlight / Launchpad / Finder 再次打开 cc-router 时,
+/// LaunchServices 不会起新进程, 只给已有实例发 applicationShouldHandleReopen
+/// (→ `RunEvent::Reopen`). 主窗口此时通常是 hide 状态 (关闭窗口 = 隐藏到托盘),
+/// 必须主动呼出, 否则用户会觉得"点了没反应". cc-router 在 Dock 里没有图标,
+/// 这是除菜单栏托盘外唯一的找回入口.
+///
+/// 不判 `has_visible_windows`: 窗口被 hide 之后 AppKit 认不认它是 "visible window"
+/// 不可靠, 而 `reveal_window` 对已可见窗口是幂等的, 无脑呼出更稳.
 #[cfg(target_os = "macos")]
-pub fn apply_dock_visibility<R: tauri::Runtime>(app: &tauri::AppHandle<R>, hide: bool) {
-    let policy = if hide {
-        tauri::ActivationPolicy::Accessory
-    } else {
-        tauri::ActivationPolicy::Regular
-    };
-    if let Err(e) = app.set_activation_policy(policy) {
-        tracing::warn!(error = %e, "failed to set macOS activation policy");
+fn on_run_event(app: &tauri::AppHandle, event: &tauri::RunEvent) {
+    if matches!(event, tauri::RunEvent::Reopen { .. }) {
+        if let Some(win) = app.get_webview_window("main") {
+            tray::reveal_window(&win);
+        }
     }
 }
 
 #[cfg(not(target_os = "macos"))]
-pub fn apply_dock_visibility<R: tauri::Runtime>(_app: &tauri::AppHandle<R>, _hide: bool) {}
+fn on_run_event(_app: &tauri::AppHandle, _event: &tauri::RunEvent) {}
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
-    tauri::Builder::default()
+    // 非 macOS 下不需要 mut (set_activation_policy 那段被 cfg 掉了)
+    #[allow(unused_mut)]
+    let mut app = tauri::Builder::default()
         .plugin(tauri_plugin_shell::init())
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_clipboard_manager::init())
@@ -79,14 +82,16 @@ pub fn run() {
             // tauri.conf.json 的 visible=false, 用户看到的第一帧就是正确尺寸。
             window::apply_startup_geometry(app.handle());
 
-            // 异步初始化：数据库 + providers + 订阅运行时 + 代理
+            // 异步初始化：数据库 + providers + 订阅运行时 + 代理。
+            // 顺便把语言偏好带出来给托盘菜单用 —— settings 只在这里加载过一次,
+            // 让 block_on 直接返回省得为托盘再开一次 block_on。
             let handle = app.handle().clone();
-            tauri::async_runtime::block_on(async move {
+            let lang_pref = tauri::async_runtime::block_on(async move {
                 match bootstrap(handle.clone(), app_data_dir, resource_dir).await {
                     Ok(state) => {
-                        let hide_dock = state.settings.read().await.hide_dock_icon;
-                        apply_dock_visibility(&handle, hide_dock);
+                        let pref = state.settings.read().await.preferred_language.clone();
                         handle.manage(state);
+                        pref
                     }
                     Err(e) => {
                         error!(?e, "bootstrap failed");
@@ -96,7 +101,7 @@ pub fn run() {
             });
 
             // 系统托盘
-            if let Err(e) = tray::setup(app) {
+            if let Err(e) = tray::setup(app, tray::TrayLocale::from_pref(&lang_pref)) {
                 error!(?e, "tray setup failed");
             }
 
@@ -166,8 +171,26 @@ pub fn run() {
             commands::integrations::write_codex_config,
             commands::integrations::write_codex_auth,
         ])
-        .run(tauri::generate_context!())
-        .expect("运行 cc-router 时发生错误");
+        .build(tauri::generate_context!())
+        .expect("构建 cc-router 时发生错误");
+
+    // macOS: 把 app 固定为 Accessory —— 仅菜单栏, Dock 无图标, 不进 Cmd+Tab.
+    // cc-router 是常驻代理, 交互形态就是菜单栏工具, 所以刻意不做成可配置。
+    //
+    // 位置必须在 build() 之后、run() 之前, 这是唯一能做到零闪烁的窗口:
+    // 此时 `App.runtime` 还是 `Some` (take 发生在 `App::run` 内部), 于是
+    // `App::set_activation_policy` 会走 `Runtime::set_activation_policy` 直接写
+    // tao 的 aux state, 让 `applicationDidFinishLaunching` 一次就把 policy 设成
+    // Accessory (tao app_state.rs::launched -> apply_activation_policy)。
+    //
+    // 换成在 setup 闭包里调 `AppHandle::set_activation_policy` 就晚了: setup 是在
+    // `RuntimeRunEvent::Ready` 回调里跑的, 而 `launched()` 已经先按 aux state 的默认值
+    // Regular 应用过一遍 —— Dock 图标会先出现再消失。
+    // 注: Info.plist 的 LSUIElement 同样救不了, tao 会无条件用 aux state 覆盖它。
+    #[cfg(target_os = "macos")]
+    app.set_activation_policy(tauri::ActivationPolicy::Accessory);
+
+    app.run(|handle, event| on_run_event(handle, &event));
 }
 
 async fn bootstrap(
