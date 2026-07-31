@@ -7,7 +7,7 @@
 <p align="center">
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-blue.svg?style=flat-square" alt="License: MIT"></a>
   <img src="https://img.shields.io/badge/Tauri-2-FFC131?style=flat-square&logo=tauri&logoColor=white" alt="Tauri 2">
-  <img src="https://img.shields.io/badge/Rust-1.77+-DEA584?style=flat-square&logo=rust&logoColor=white" alt="Rust 1.77+">
+  <img src="https://img.shields.io/badge/Rust-1.88+-DEA584?style=flat-square&logo=rust&logoColor=white" alt="Rust 1.88+">
   <img src="https://img.shields.io/badge/React-19-61DAFB?style=flat-square&logo=react&logoColor=white" alt="React 19">
   <img src="https://img.shields.io/badge/TypeScript-5-3178C6?style=flat-square&logo=typescript&logoColor=white" alt="TypeScript 5">
   <img src="https://img.shields.io/badge/Tailwind-4-06B6D4?style=flat-square&logo=tailwindcss&logoColor=white" alt="Tailwind CSS">
@@ -210,7 +210,7 @@ CC からのリクエストはこのマッピングに従って転送される�
 
 ## 開発
 
-前提条件: Node.js ≥ 20（pnpm 推奨）、Rust ≥ 1.77、Xcode Command Line Tools（macOS）。
+前提条件: Node.js ≥ 20（pnpm 推奨）、Rust ≥ 1.88（rustup の最新 stable 推奨）、Xcode Command Line Tools（macOS）。
 
 ```bash
 pnpm install
@@ -234,6 +234,46 @@ pnpm tauri build
 ```
 
 成果物は `src-tauri/target/release/bundle/` 配下のプラットフォーム別サブフォルダに出力されます。
+
+## Windows 開発環境の注意点
+
+<details>
+<summary>Windows での開発・ビルドで問題が起きたら展開（数時間の節約になります）</summary>
+
+**1. MSVC toolchain が必須（GNU は不可）**
+
+Tauri の Windows バンドルは MSVC に依存しており、CI も `x86_64-pc-windows-msvc` でビルドしています。確認方法:
+
+```powershell
+rustup show          # active toolchain の末尾が -msvc であること
+rustc --version      # 1.88 以上であること
+```
+
+**2. Visual Studio Build Tools が必要**
+
+MSVC toolchain は C++ コンパイラと Windows SDK を必要とし、無い場合は `link.exe not found` になります。[Build Tools for Visual Studio](https://visualstudio.microsoft.com/downloads/) をインストールする際に「**C++ によるデスクトップ開発**」ワークロードを選択し、完了後にターミナルを開き直してください。
+
+**3. `rustc --version` と `rustup show` が食い違う場合は PATH を確認**
+
+msi / scoop / Visual Studio コンポーネント経由でスタンドアロンの Rust を導入したことがある場合、それが rustup の shim より前に PATH へ並び、`rustup default stable` が無効化されることがあります:
+
+```powershell
+Get-Command rustc, cargo -All | Select-Object Source
+```
+
+`Source` が `%USERPROFILE%\.cargo\bin` を指しているはずです。そうでなければ該当ディレクトリを PATH の先頭へ移動する（`rundll32 sysdm.cpl,EditEnvironmentVariables`）か、スタンドアロン版をアンインストールしてください。
+
+**4. dev server のプロセス残留**
+
+Windows では Ctrl+C で `tauri dev` のプロセスツリーを終了しきれないことが多く、次回起動時に `Port 1420 is already in use` となります（`devUrl` が 1420 固定のため、`strictPort: true` は意図的に別ポートへフォールバックしません）:
+
+```powershell
+Get-NetTCPConnection -LocalPort 1420 -State Listen |
+  Select-Object -ExpandProperty OwningProcess -Unique |
+  ForEach-Object { Stop-Process -Id $_ -Force }
+```
+
+</details>
 
 ## アイコン
 

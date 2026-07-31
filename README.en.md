@@ -7,7 +7,7 @@
 <p align="center">
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-blue.svg?style=flat-square" alt="License: MIT"></a>
   <img src="https://img.shields.io/badge/Tauri-2-FFC131?style=flat-square&logo=tauri&logoColor=white" alt="Tauri 2">
-  <img src="https://img.shields.io/badge/Rust-1.77+-DEA584?style=flat-square&logo=rust&logoColor=white" alt="Rust 1.77+">
+  <img src="https://img.shields.io/badge/Rust-1.88+-DEA584?style=flat-square&logo=rust&logoColor=white" alt="Rust 1.88+">
   <img src="https://img.shields.io/badge/React-19-61DAFB?style=flat-square&logo=react&logoColor=white" alt="React 19">
   <img src="https://img.shields.io/badge/TypeScript-5-3178C6?style=flat-square&logo=typescript&logoColor=white" alt="TypeScript 5">
   <img src="https://img.shields.io/badge/Tailwind-4-06B6D4?style=flat-square&logo=tailwindcss&logoColor=white" alt="Tailwind CSS">
@@ -210,7 +210,7 @@ Example: subscription A = GLM-5 / MiniMax-2.7 / DeepSeek-Flash; subscription B =
 
 ## Development
 
-Prerequisites: Node.js ≥ 20 (pnpm recommended), Rust ≥ 1.77, Xcode Command Line Tools (macOS).
+Prerequisites: Node.js ≥ 20 (pnpm recommended), Rust ≥ 1.88 (the latest stable via rustup is recommended), Xcode Command Line Tools (macOS).
 
 ```bash
 pnpm install
@@ -234,6 +234,46 @@ pnpm tauri build
 ```
 
 Artifacts land in `src-tauri/target/release/bundle/` under per-platform subfolders.
+
+## Windows Development Notes
+
+<details>
+<summary>Expand when you hit trouble developing or building on Windows (can save you hours)</summary>
+
+**1. The MSVC toolchain is required — GNU will not work**
+
+Tauri's Windows bundling depends on MSVC, and CI builds with `x86_64-pc-windows-msvc` too. Verify:
+
+```powershell
+rustup show          # the active toolchain should end with -msvc
+rustc --version      # should be >= 1.88
+```
+
+**2. Visual Studio Build Tools are required**
+
+The MSVC toolchain needs the C++ compiler and the Windows SDK; without them you get `link.exe not found`. Install [Build Tools for Visual Studio](https://visualstudio.microsoft.com/downloads/) with the **"Desktop development with C++"** workload, then reopen your terminal.
+
+**3. `rustc --version` disagrees with `rustup show`? Check PATH**
+
+If you ever installed a standalone Rust via msi / scoop / a Visual Studio component, it may sit ahead of the rustup shim on PATH, silently making `rustup default stable` a no-op:
+
+```powershell
+Get-Command rustc, cargo -All | Select-Object Source
+```
+
+`Source` should point at `%USERPROFILE%\.cargo\bin`. If it does not, move that directory to the front of PATH (`rundll32 sysdm.cpl,EditEnvironmentVariables`) or uninstall the standalone copy.
+
+**4. Leftover dev server on port 1420**
+
+Ctrl+C often fails to kill the whole `tauri dev` process tree on Windows, so the next run reports `Port 1420 is already in use` (`strictPort: true` deliberately refuses to fall back to another port, because `devUrl` is pinned to 1420):
+
+```powershell
+Get-NetTCPConnection -LocalPort 1420 -State Listen |
+  Select-Object -ExpandProperty OwningProcess -Unique |
+  ForEach-Object { Stop-Process -Id $_ -Force }
+```
+
+</details>
 
 ## Icons
 

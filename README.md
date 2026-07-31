@@ -7,7 +7,7 @@
 <p align="center">
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-blue.svg?style=flat-square" alt="License: MIT"></a>
   <img src="https://img.shields.io/badge/Tauri-2-FFC131?style=flat-square&logo=tauri&logoColor=white" alt="Tauri 2">
-  <img src="https://img.shields.io/badge/Rust-1.77+-DEA584?style=flat-square&logo=rust&logoColor=white" alt="Rust 1.77+">
+  <img src="https://img.shields.io/badge/Rust-1.88+-DEA584?style=flat-square&logo=rust&logoColor=white" alt="Rust 1.88+">
   <img src="https://img.shields.io/badge/React-19-61DAFB?style=flat-square&logo=react&logoColor=white" alt="React 19">
   <img src="https://img.shields.io/badge/TypeScript-5-3178C6?style=flat-square&logo=typescript&logoColor=white" alt="TypeScript 5">
   <img src="https://img.shields.io/badge/Tailwind-4-06B6D4?style=flat-square&logo=tailwindcss&logoColor=white" alt="Tailwind CSS">
@@ -210,7 +210,7 @@ CC 请求来了就按映射转发，不用再频繁改 `~/.claude/settings.json`
 
 ## 开发
 
-依赖：Node.js ≥ 20（推荐 pnpm），Rust ≥ 1.77，Xcode CLT（macOS）。
+依赖：Node.js ≥ 20（推荐 pnpm），Rust ≥ 1.88（建议直接用 rustup 最新 stable），Xcode CLT（macOS）。
 
 ```bash
 pnpm install
@@ -234,6 +234,46 @@ pnpm tauri build
 ```
 
 产出：`src-tauri/target/release/bundle/` 下对应平台的安装包。
+
+## Windows 开发环境注意事项
+
+<details>
+<summary>在 Windows 上开发或打包遇到问题时展开（能省几小时）</summary>
+
+**1. 必须用 MSVC toolchain，不能用 GNU**
+
+Tauri 在 Windows 上打包依赖 MSVC，CI 用的也是 `x86_64-pc-windows-msvc`。确认：
+
+```powershell
+rustup show          # active toolchain 应带 -msvc 后缀
+rustc --version      # 应 ≥ 1.88
+```
+
+**2. 需要 Visual Studio Build Tools**
+
+MSVC toolchain 依赖 C++ 编译器和 Windows SDK，缺了会报 `link.exe not found`。装 [Build Tools for Visual Studio](https://visualstudio.microsoft.com/downloads/) 时勾选「使用 C++ 的桌面开发」工作负载，装完重开终端。
+
+**3. `rustc --version` 和 `rustup show` 对不上？查 PATH**
+
+若曾用 msi / scoop / Visual Studio 组件装过独立 Rust，它可能排在 rustup shim 之前，导致 `rustup default stable` 说什么都不生效：
+
+```powershell
+Get-Command rustc, cargo -All | Select-Object Source
+```
+
+`Source` 应指向 `%USERPROFILE%\.cargo\bin`。否则把该目录提到 PATH 最前（`rundll32 sysdm.cpl,EditEnvironmentVariables`），或卸掉那份独立安装。
+
+**4. dev server 端口残留**
+
+Ctrl+C 常杀不干净 `tauri dev` 的进程树，再次启动会报 `Port 1420 is already in use`（`strictPort: true` 刻意不自动换端口，因为 `devUrl` 写死了 1420）：
+
+```powershell
+Get-NetTCPConnection -LocalPort 1420 -State Listen |
+  Select-Object -ExpandProperty OwningProcess -Unique |
+  ForEach-Object { Stop-Process -Id $_ -Force }
+```
+
+</details>
 
 ## 图标
 
