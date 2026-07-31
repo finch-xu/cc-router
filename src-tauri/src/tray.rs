@@ -3,8 +3,9 @@
 //! `tauri.conf.json` 的 `app.trayIcon` 字段已经声明了托盘，Tauri 启动时自动注册。
 //! 这里只需要挂上菜单与事件回调。
 //!
-//! macOS 上 cc-router 是纯菜单栏 app（activationPolicy=Accessory，见 `lib.rs::run`），
-//! Dock 里没有图标，托盘就是唯一常驻入口，所以菜单文案必须跟随用户选的界面语言。
+//! macOS 上 Dock 图标随窗口显隐动态切换（Regular ↔ Accessory，见 `reveal_window`
+//! 与 `on_window_event`）：窗口收进托盘后 Dock 无图标，托盘是唯一常驻入口，
+//! 所以菜单文案必须跟随用户选的界面语言。
 
 use tauri::menu::{Menu, MenuItem};
 use tauri::tray::{MouseButton, MouseButtonState, TrayIconEvent};
@@ -151,13 +152,24 @@ pub fn rebuild_menu<R: tauri::Runtime>(app: &tauri::AppHandle<R>, locale: TrayLo
 
 /// 把主窗口呼出到前台并抢键盘焦点。
 ///
-/// 顺序很关键: Tauri `WebviewWindow::set_focus` 在 macOS 下透传到 tao
-/// `Window::set_focus` (tao 0.35.x src/platform_impl/macos/window.rs),
-/// 该实现仅在 `!is_minimized && is_visible` 时才会调用
-/// `NSApp.activateIgnoringOtherApps(YES)`. 所以必须先 unminimize、再 show、
-/// 最后 set_focus, 否则在 Accessory (Dock 隐藏) 模式下从托盘呼出窗口
-/// 可能不抢前台焦点, 用户需要二次点击.
+/// 顺序很关键, 且 macOS 下 policy 必须排最先:
+/// 1. 先把 activation policy 升回 Regular (Dock 图标出现)。tao 的 `set_focus`
+///    走 `NSApp.activateIgnoringOtherApps`, Accessory 进程调用它常被
+///    WindowServer 忽略 (Accessory 语义即「不参与前台激活」), 先升 Regular
+///    才能保证抢到前台。
+/// 2. 再 unminimize → show → set_focus: Tauri `WebviewWindow::set_focus` 在
+///    macOS 下透传到 tao `Window::set_focus` (tao 0.35.x
+///    src/platform_impl/macos/window.rs), 该实现仅在
+///    `!is_minimized && is_visible` 时才会调用
+///    `NSApp.activateIgnoringOtherApps(YES)`, 乱序会导致用户需要二次点击。
 pub(crate) fn reveal_window<R: tauri::Runtime>(win: &tauri::WebviewWindow<R>) {
+    #[cfg(target_os = "macos")]
+    if let Err(e) = win
+        .app_handle()
+        .set_activation_policy(tauri::ActivationPolicy::Regular)
+    {
+        warn!(error = %e, "set_activation_policy(Regular) failed");
+    }
     let _ = win.unminimize();
     let _ = win.show();
     let _ = win.set_focus();
@@ -175,6 +187,15 @@ pub fn on_window_event(window: &tauri::Window, event: &WindowEvent) {
     if let WindowEvent::CloseRequested { api, .. } = event {
         api.prevent_close();
         let _ = window.hide();
+        // macOS: 窗口收进托盘后降为 Accessory —— Dock 图标消失, 退出 Cmd+Tab。
+        // 下次 reveal_window 会升回 Regular。
+        #[cfg(target_os = "macos")]
+        if let Err(e) = window
+            .app_handle()
+            .set_activation_policy(tauri::ActivationPolicy::Accessory)
+        {
+            warn!(error = %e, "set_activation_policy(Accessory) failed");
+        }
     }
 }
 
