@@ -116,7 +116,7 @@
 2. 配置多厂商的大模型，配置虚拟模型对应的真实模型和调度模式。
 3. 配置到Claude Code中使用。
 
-> **macOS 上 cc-router 是菜单栏 app**：Dock 里不显示图标，入口在屏幕右上角的菜单栏。关闭窗口只是隐藏，代理会继续运行；要再打开窗口，点菜单栏图标、或在 Spotlight 里再搜一次 cc-router 即可。彻底退出请用菜单栏图标 →「退出 cc-router」。
+> **macOS 上 cc-router 的 Dock 图标随窗口显隐**：窗口打开时 Dock 有图标、可 Cmd+Tab 切换；关闭窗口后图标消失，入口只剩屏幕右上角的菜单栏。关闭窗口只是隐藏，代理会继续运行；要再打开窗口，点菜单栏图标、或在 Spotlight 里再搜一次 cc-router 即可。彻底退出请用菜单栏图标 →「退出 cc-router」。
 
 ## 在 Claude Code 中使用
 
