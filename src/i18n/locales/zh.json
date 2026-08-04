@@ -12,18 +12,15 @@
   "common.copied": "已复制",
   "common.copy": "复制",
   "common.close": "关闭",
-
   "sidebar.brand.tag": "多订阅聚合代理",
   "sidebar.nav.guide": "接入指南",
   "sidebar.nav.virtualModels": "虚拟模型",
   "sidebar.nav.subscriptions": "订阅管理",
   "sidebar.nav.requestLogs": "请求日志",
-  "sidebar.nav.logs": "日志",
-  "sidebar.nav.statistics": "统计",
+  "sidebar.nav.statistics": "数据统计",
   "sidebar.nav.settings": "设置",
   "sidebar.nav.about": "关于",
   "sidebar.updateAvailable": "有可用更新",
-
   "settings.title": "设置",
   "settings.subtitle": "代理服务、客户端配置、鉴权与数据保留期。",
   "settings.section.update": "应用更新",
@@ -51,7 +48,6 @@
   "settings.proxy.mode.both": "HTTP + HTTPS",
   "settings.proxy.httpsPort.label": "HTTPS 端口",
   "settings.proxy.httpsPort.desc": "默认 23457, 被占用时自动 +1 递增。与 HTTP 端口冲突时也会自动避开。",
-
   "settings.section.https": "HTTPS 证书",
   "settings.https.h2.label": "HTTP/2 协议",
   "settings.https.h2.desc": "勾选后 HTTPS 端口在 TLS 握手时通过 ALPN 协商 HTTP/2, 失败自动回退 HTTP/1.1; 关闭则强制 HTTP/1.1。修改后需重启 cc-router 才生效。",
@@ -127,7 +123,6 @@
   "settings.danger.dialog.item.settings": "app 设置(端口、保留期等)",
   "settings.danger.dialog.outro": "操作完成后 app 会自动重启。",
   "settings.danger.dialog.confirm": "确认清空并重启",
-
   "about.title": "关于",
   "about.subtitle": "项目信息与版权",
   "about.description": "本地 HTTP 代理,将多家大模型订阅聚合为单一 Anthropic Messages API 端点,供 Claude Code 透明切换。",
@@ -157,7 +152,6 @@
   "onboarding.disclaimer.title": "免责声明",
   "onboarding.disclaimer.subtitle": "在开始使用 cc-router 前,请阅读并知悉以下内容。",
   "onboarding.disclaimer.accept": "我已阅读并同意",
-
   "guide.title": "接入指南",
   "guide.subtitle": "把 cc-router 作为 Anthropic Messages 兼容端点接入各类客户端。",
   "guide.proxy.title": "代理监听地址",
@@ -175,7 +169,6 @@
   "guide.method2.note1": "把上面这几行加到 ",
   "guide.method2.note2": "、",
   "guide.method2.note3": " 或 PowerShell profile,然后重启 terminal 后启动 Claude Code。",
-
   "guide.editor.title": "settings.json 编辑器",
   "guide.editor.subtitle": "直接查看与修改 ~/.claude/settings.json。点「插入推荐」按需填入 cc-router 字段(已存在的用户配置会被尊重),改完点「保存」即可一键写回。",
   "guide.editor.status.inSync": "已同步",
@@ -193,7 +186,6 @@
   "guide.editor.toast.invalidJson": "当前编辑器内容不是合法 JSON,请先修正后再插入推荐配置。",
   "guide.editor.toast.endpointLoading": "代理状态还没拉到,请稍后再点。",
   "guide.editor.confirm.discardDirty": "有未保存的修改,确定要丢弃并重新加载吗?",
-
   "guide.codex.path.title": "Codex CLI / Desktop 配置文件",
   "guide.codex.path.intro": "Codex CLI 与 Codex Desktop 共用同一份 ~/.codex/ 配置, 改一处即生效。下面两个编辑器分别管 config.toml (告诉 Codex 走 cc-router) 和 auth.json (cc-router token)。",
   "guide.codex.editor.title": "Codex 配置编辑器",
@@ -220,10 +212,8 @@
   "guide.codex.usage.title": "使用方式",
   "guide.codex.usage.desc": "保存配置后, 用 -p cc-router 参数切换 profile 即可走 cc-router 代理:",
   "guide.codex.usage.note": "走 cc-router 后, Codex 看到的 model-sonnet/opus/haiku 由 cc-router 调度到具体订阅。原 ChatGPT OAuth 凭据已备份, 想切回官方后端可手动恢复 auth.json.cc-router.bak。",
-
   "guide.tab.others": "其他 AI Agent",
   "guide.others.title": "更多工具接入中",
-
   "guide.ccswitch.entry.title": "在 cc-switch 添加新供应商",
   "guide.ccswitch.entry.body": "打开 cc-switch → 点「添加新供应商」→ 切换到「Claude 供应商」标签 → 选择「自定义配置」(不要选预设里的某一家)。",
   "guide.ccswitch.method1.title": "方式 1 · 在表单里手动填",
@@ -242,14 +232,12 @@
   "guide.ccswitch.method2.title": "方式 2 · 直接粘贴 JSON",
   "guide.ccswitch.method2.sub": "一次性粘贴跳过填表",
   "guide.ccswitch.method2.desc": "在 cc-switch 的「配置 JSON」编辑框里粘贴下面内容, 可一次配好。已填入当前真实 port 和 token。",
-
   "guide.openclaw.path.title": "配置文件路径",
   "guide.openclaw.path.note": "支持 .js / .json / .yaml 三种格式,任选其一。",
   "guide.openclaw.config.title": "完整配置示例",
   "guide.openclaw.config.desc": "把下面内容写入文件,不存在则新建。已填入 cc-router 当前真实 port 和 token,可直接使用。",
   "guide.openclaw.note.modelRef": "model ref 必须用 anthropic/<model-name> 带前缀格式。cc-router 提供 model-opus / model-sonnet / model-haiku 三个虚拟模型,任意其他模型名会走 fallback 透传。",
   "guide.openclaw.note.tokenHint": "token 可在「设置」页重新生成。",
-
   "guide.hermes.path.title": "配置文件路径",
   "guide.hermes.path.note": "也可用 hermes model 命令以交互式向导生成,无需手动写文件。",
   "guide.hermes.config.title": "配置示例",
@@ -257,7 +245,6 @@
   "guide.hermes.auth.title": "API Key 配置",
   "guide.hermes.auth.desc": "用环境变量 ANTHROPIC_API_KEY,或执行 hermes auth add anthropic --type api-key --api-key <token>。token 可在「设置」页查看与重新生成。",
   "guide.hermes.note.apiMode": "api_mode 必须是 anthropic_messages(Hermes 三选一中匹配 cc-router 协议的那个),否则走错协议会全部 4xx。",
-
   "guide.opencode.path.title": "配置文件路径",
   "guide.opencode.path.project": "项目级",
   "guide.opencode.path.global": "全局",
@@ -266,7 +253,6 @@
   "guide.opencode.config.desc": "通过 @ai-sdk/anthropic npm 包声明这是 Anthropic 协议端点。已填入 cc-router 当前真实 port 和 token,可直接使用。",
   "guide.opencode.note.baseUrlTrap": "⚠️ baseURL 末尾不要带 /v1。@ai-sdk/anthropic 内部会自动追加 /v1/messages,重复会变成 /v1/v1/messages 导致 404(OpenCode issue #5163 的成因)。",
   "guide.opencode.note.usage": "调用时用 /models 选 cc-router/model-opus(或 sonnet / haiku)即可。",
-
   "stats.title": "统计",
   "stats.subtitle": "用量、耗时、成功率的全局聚合视图。数据按天聚合、永久保留,不受日志清理影响。",
   "stats.refresh": "刷新",
@@ -312,7 +298,6 @@
   "stats.bySub.col.avgDuration": "平均耗时",
   "stats.bySub.col.tokensOut": "输出 Token",
   "stats.bySub.empty": "选定范围内暂无订阅数据。",
-
   "requestLogs.title": "请求日志",
   "requestLogs.subtitle": "最近经过代理的请求记录,按时间倒序。",
   "requestLogs.refresh": "刷新",
@@ -376,7 +361,6 @@
   "clientTool.opencode": "OpenCode",
   "clientTool.anthropicSdkPython": "Anthropic Python SDK",
   "clientTool.anthropicSdkJs": "Anthropic JS SDK",
-
   "logs.tab.requests": "请求日志",
   "logs.tab.subscriptionEvents": "订阅事件",
   "logs.tab.systemErrors": "系统异常",
@@ -387,7 +371,6 @@
   "logs.systemErrors.detailTitle": "系统异常详情",
   "logs.systemErrors.summary": "摘要",
   "logs.systemErrors.payload": "上下文",
-
   "subscriptions.title": "订阅管理",
   "subscriptions.subtitle": "每个订阅对应一个厂商的 API Key。状态实时反映健康检查结果。",
   "subscriptions.add": "添加订阅",
@@ -401,10 +384,9 @@
   "subscriptions.notUsed": "未使用",
   "subscriptions.custom": "自定义",
   "subscriptions.view": "查看",
-
   "virtualModels.title": "虚拟模型",
-  "virtualModels.subtitle1": "三个固定虚拟模型对应 Claude Code 的模型槽位;",
-  "virtualModels.subtitle2": "是兜底,任何其他 model 请求都走这里。",
+  "virtualModels.subtitle1": "四个固定虚拟模型对应 Claude Code 的模型槽位;",
+  "virtualModels.subtitle2": " 是兜底,任何其他 model 请求都走这里。",
   "virtualModels.endpointsSuffix": " 端点",
   "virtualModels.mode.label": "调度模式",
   "virtualModels.mode.sequentialHint": "按优先级,失败下降",
@@ -413,7 +395,6 @@
   "virtualModels.dialog.title": "选择要添加的订阅",
   "virtualModels.dialog.empty": "没有可用的订阅。先到「订阅管理」添加一个。",
   "virtualModels.dialog.add": "添加所选",
-
   "subscriptionNew.back": "返回",
   "subscriptionNew.backToList": "返回列表",
   "subscriptionNew.welcomeTitle": "欢迎使用 cc-router",
@@ -429,7 +410,6 @@
   "provider.custom.geminiInteractions": "自定义 (Gemini Interactions)",
   "provider.custom.openaiResponses": "自定义 (OpenAI Responses)",
   "provider.custom.openaiChat": "自定义 (OpenAI Chat)",
-
   "subscriptionNew.customProvider": "自定义 (Anthropic 兼容接口)",
   "subscriptionNew.group.firstParty": "大模型厂商",
   "subscriptionNew.group.secondParty": "AI 应用订阅",
@@ -528,7 +508,6 @@
   "oauth.kiro.sourceFromDeviceFlow": "来自 AWS Builder ID 登录",
   "common.orPasteBelow": "或者粘贴 JSON",
   "common.retry": "重试",
-
   "subscriptionEdit.notFound": "未找到订阅",
   "subscriptionEdit.referencedPrefix": "引用: ",
   "subscriptionEdit.enabled": "启用",
@@ -557,12 +536,10 @@
   "subscriptionEdit.deleteDialog.refByOutro": "删除后这些虚拟模型的订阅列表会少一个。",
   "subscriptionEdit.deleteDialog.noRef": "删除订阅会同时清除存储的 API Key。",
   "subscriptionEdit.deleteDialog.confirm": "确认删除",
-
   "common.relativeTime.justNow": "刚刚",
   "common.relativeTime.minutesAgo": " 分钟前",
   "common.relativeTime.hoursAgo": " 小时前",
   "common.relativeTime.daysAgo": " 天前",
-
   "subscriptionBalance.title": "余额",
   "subscriptionBalance.refresh": "刷新余额",
   "subscriptionBalance.refreshing": "查询中…",
@@ -572,7 +549,6 @@
   "subscriptionBalance.accountUnavailable": "账户当前不可用 (欠费或被限制)",
   "subscriptionBalance.severityLow": "余额偏低",
   "subscriptionBalance.severityCritical": "余额不足",
-
   "modelSlot.label": "模型槽位",
   "modelSlot.modeAuto": "自动",
   "modelSlot.modeManual": "手动",
@@ -596,33 +572,27 @@
   "slotEffort.aria": "{slot} 思考档位",
   "slotEffort.hint": "右侧下拉是该槽位的思考档位。「自动」表示原样透传 Claude Code 请求里携带的档位；选定具体档位后会忽略客户端传入值，强制使用该档位（适用于只接受单一档位的模型）。",
   "slotEffort.unsupportedKiro": "Kiro / CodeWhisperer 上游协议没有 reasoning 字段，无法设置思考档位。需要思考能力请改用 OpenAI / Codex / Gemini 类 provider。",
-
   "providerBadge.verified": "已验证",
   "providerBadge.partial": "部分兼容",
   "providerBadge.untested": "未测试",
-
   "routeFlow.title": "请求路由",
   "routeFlow.live": "实时",
   "routeFlow.offline": "未运行",
   "routeFlow.notBound": "未绑定",
   "routeFlow.providersTitle": "厂商订阅",
   "routeFlow.providersEmpty": "未绑定任何订阅",
-
   "sortableSub.empty": "暂无订阅,点击下方按钮添加",
   "sortableSub.passthrough": "原样透传请求的 model",
   "sortableSub.dragHandle": "拖拽排序",
   "sortableSub.remove": "移除",
-
   "subscriptionState.healthy": "正常",
   "subscriptionState.rate_limited": "限流",
   "subscriptionState.quota_exhausted": "配额耗尽",
   "subscriptionState.transient_error": "临时错误",
   "subscriptionState.auth_failed": "凭证失效",
   "subscriptionState.disabled": "已禁用",
-
   "copyable.copied": "已复制",
   "copyable.copy": "复制",
-
   "vm.fable.purpose": "最强",
   "vm.fable.purposeEn": "Hardest tasks",
   "vm.fable.label": "最强 · 超长 / 高难任务",
@@ -640,12 +610,9 @@
   "vm.fallback.label": "兜底 · 未知模型透传",
   "vm.mode.sequential": "顺序",
   "vm.mode.round_robin": "轮询",
-
   "validation.baseUrl": "base URL 必须以 http:// 或 https:// 开头",
   "validation.messagesPath": "messages path 必须以 / 开头",
-
   "sidebar.nav.receipts": "用量小票",
-
   "receipts.title": "用量小票",
   "receipts.subtitle": "把订阅的 token 用量渲染成可分享的小票快照,默认不显示价格,只展示用量。",
   "receipts.empty": "本时段没有请求数据。",
@@ -653,13 +620,11 @@
   "receipts.exportFailed": "导出失败,请重试。",
   "receipts.savedToDownloads": "已保存到下载文件夹",
   "receipts.openDownloads": "打开",
-
   "receipts.range.last24h": "近 1 天",
   "receipts.range.last7": "近 7 天",
   "receipts.range.last30": "近 30 天",
   "receipts.range.lastYear": "近 1 年",
   "receipts.range.all": "全部",
-
   "receipts.controls.range.title": "时间范围",
   "receipts.controls.display.title": "显示选项",
   "receipts.controls.display.colorMode": "彩色模式",
@@ -693,7 +658,6 @@
   "receipts.controls.export.pdf": "PDF",
   "receipts.controls.export.html": "HTML",
   "receipts.controls.export.exporting": "导出中…",
-
   "receipts.slip.header": "USAGE SLIP",
   "receipts.slip.tagline": "多订阅 · Anthropic Messages 端点",
   "receipts.slip.period": "期间",
@@ -710,5 +674,45 @@
   "receipts.slip.deletedSub": "(已删除订阅)",
   "receipts.slip.thanks": "感谢你与 cc-router 同行",
   "receipts.slip.section.bySubscription": "按订阅",
-  "receipts.slip.section.byRealModel": "按真实模型"
+  "receipts.slip.section.byRealModel": "按真实模型",
+  "sidebar.nav.liveRouting": "实时路由",
+  "sidebar.nav.updates": "检查更新",
+  "sidebar.proxyRunning": "代理运行中",
+  "virtualModels.addButtonShort": "添加订阅",
+  "liveRouting.clients": "CLIENTS · AI Agent 工具",
+  "liveRouting.upstreams": "UPSTREAMS · 厂商订阅",
+  "liveRouting.summary": "{slots} 槽位 + 1 兜底 · {vendors} 家在用",
+  "liveRouting.access.title": "接入信息",
+  "liveRouting.access.httpUrl": "接入地址 · HTTP",
+  "liveRouting.access.httpsUrl": "接入地址 · HTTPS",
+  "liveRouting.access.httpsHint": "需先在设置页导出并信任 cc-router 自签 CA",
+  "liveRouting.access.token": "鉴权 Token",
+  "liveRouting.access.tokenHint": "ANTHROPIC_AUTH_TOKEN 用这一串;重新生成请到设置页",
+  "liveRouting.access.authOff": "已关闭鉴权",
+  "liveRouting.access.bind": "监听地址",
+  "liveRouting.access.bindLocal": "127.0.0.1 · 仅本机",
+  "liveRouting.access.bindAll": "0.0.0.0 · 局域网",
+  "liveRouting.access.cors": "CORS Allow-Origin",
+  "liveRouting.api.title": "API 入口",
+  "liveRouting.api.dualProtocol": "双协议并行",
+  "liveRouting.api.messages": "Anthropic Messages",
+  "liveRouting.api.responses": "OpenAI Responses",
+  "liveRouting.api.models": "虚拟模型列表",
+  "liveRouting.api.health": "健康检查",
+  "liveRouting.readonly.notice": "本页配置只读展示。端口、协议模式、Token、监听地址与 CORS 都在「设置」页修改,改完按提示重启代理生效。",
+  "liveRouting.readonly.goSettings": "去设置",
+  "liveRouting.map.title": "虚拟模型映射",
+  "liveRouting.map.colClient": "AI Agent 里可以配置的模型名",
+  "liveRouting.map.colVirtual": "cc-router 内部虚拟模型",
+  "liveRouting.map.colReal": "真实模型",
+  "liveRouting.map.goConfigure": "去虚拟模型页配置",
+  "liveRouting.map.fallbackLeft": "以上都没命中的 model",
+  "liveRouting.map.note.wildcard": "* 是模糊匹配:claude-opus-4-7 / claude-opus-100 都算",
+  "liveRouting.map.note.prefix": "每个别名都可带 anthropic/ 或 openai/ 前缀",
+  "liveRouting.map.note.source": "右列读自「虚拟模型」页的配置",
+  "updates.title": "检查更新",
+  "updates.source": "更新源",
+  "updates.sourceHint": "更新源与「设置」页是同一项配置,在这里切换等于改设置,两边始终一致。",
+  "updates.current": "当前 v{version}",
+  "updates.available": "可更新"
 }
