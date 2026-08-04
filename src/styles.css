@@ -335,7 +335,13 @@ input, select, textarea { font: inherit; color: inherit; }
 .main {
   padding: 22px 28px 36px;
   min-width: 0;
+  /* clip 而非 hidden: overflow-x:hidden 会把 overflow-y 隐式提成 auto, 让 .main
+   * 变成一个永不滚动的滚动容器 —— 内部所有 position:sticky 会认它做参照物而彻底失效
+   * (真正滚动的是 body)。clip 同样裁剪横向溢出, 但不创建滚动容器、不牵连 y 轴。
+   * 两行是渐进增强: 不认识 clip 的旧 WebKit (Safari <16) 用 hidden 兜底,
+   * 代价只是那些环境下小票控制台不跟随滚动。 */
   overflow-x: hidden;
+  overflow-x: clip;
 }
 .page-header { margin-bottom: 18px; }
 .page-header h1 {
@@ -2052,6 +2058,147 @@ input, select, textarea { font: inherit; color: inherit; }
   white-space: pre-wrap;
   max-height: 150px;
   overflow: auto;
+}
+
+/* ============================================================
+ * 用量小票 — 右侧控制台
+ * 小票本体固定 360px, 控制台吃满剩余宽度。密度比 .stats-section 的
+ * 默认值更紧: 这里是一屏操作面板, 不是需要呼吸感的数据展示区。
+ * ============================================================ */
+.receipt-layout {
+  display: flex;
+  gap: 20px;
+  align-items: flex-start;
+}
+.receipt-slip-col {
+  flex-shrink: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+}
+.receipt-panel {
+  flex: 1;
+  min-width: 300px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  /* 小票比控制台高得多 (1150 vs 580), 不跟随滚动的话下半屏全是空白。
+   * 控制台放得进一屏, 所以直接 sticky; max-height 兜住小窗口。 */
+  position: sticky;
+  top: 22px;
+  align-self: flex-start;
+  max-height: calc(100vh - 44px);
+  overflow-y: auto;
+}
+/* .stats-section 自带 margin-bottom:16, 与外层 gap 叠加会变成 40px 的空档 */
+.receipt-panel .stats-section {
+  margin-bottom: 0;
+  padding: 13px 16px 15px;
+}
+.receipt-panel .stats-section-header { margin-bottom: 10px; }
+.receipt-panel .range-tabs { margin-bottom: 0; }
+
+/* 区块内的字段块 (标签 + 控件 + 说明) */
+.receipt-field-label {
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--ink-2);
+  margin-bottom: 6px;
+}
+.receipt-field-desc {
+  font-size: 11px;
+  color: var(--ink-4);
+  line-height: 1.5;
+  margin-top: 5px;
+}
+/* 两个分段控件并排 —— 各自都很窄, 单列排会白白拉长面板 */
+.receipt-field-row {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(230px, 1fr));
+  gap: 12px 18px;
+}
+
+/* 勾选项双列: 5 条单列排要 5 行, 双列 3 行, 省掉近一半高度 */
+.receipt-check-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+  gap: 9px 18px;
+}
+.receipt-check {
+  display: flex;
+  gap: 8px;
+  align-items: flex-start;
+  cursor: pointer;
+}
+.receipt-check input {
+  margin: 2px 0 0;
+  flex-shrink: 0;
+  accent-color: var(--ink);
+}
+.receipt-check-text { min-width: 0; }
+.receipt-check-label { display: block; font-size: 12.5px; line-height: 1.35; color: var(--ink); }
+.receipt-check-desc {
+  display: block;
+  font-size: 11px;
+  color: var(--ink-4);
+  line-height: 1.45;
+  margin-top: 2px;
+}
+
+/* 过滤下拉 (details/summary 版) —— 原先用了 shadcn 的 HSL 分量 token
+ * var(--border), 在 border 简写里是无效值, 边框根本没画出来 */
+.receipt-dropdown {
+  border: 1px solid var(--line-2);
+  border-radius: var(--r-sm);
+  background: var(--surface);
+  overflow: hidden;
+}
+.receipt-dropdown > summary {
+  padding: 7px 10px;
+  cursor: pointer;
+  list-style: none;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  font-size: 12px;
+}
+.receipt-dropdown > summary::-webkit-details-marker { display: none; }
+.receipt-dropdown > summary:hover { background: var(--surface-2); }
+.receipt-dropdown-value {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--ink-3);
+}
+.receipt-dropdown[open] > summary { border-bottom: 1px solid var(--line); }
+.receipt-dropdown-body {
+  padding: 7px 10px 9px;
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  max-height: 208px;
+  overflow-y: auto;
+}
+.receipt-dropdown-body label {
+  display: flex;
+  gap: 7px;
+  align-items: center;
+  cursor: pointer;
+  font-size: 12px;
+}
+.receipt-dropdown-body input { accent-color: var(--ink); margin: 0; flex-shrink: 0; }
+
+.receipt-empty {
+  width: 360px;
+  padding: 40px 20px;
+  text-align: center;
+  color: var(--ink-4);
+  font-size: 12.5px;
+  border: 1px dashed var(--line-2);
+  border-radius: var(--r-md);
+  background: var(--surface-2);
 }
 
 /* === 侧边栏状态点 (红=有更新 / 绿=代理在跑) === */

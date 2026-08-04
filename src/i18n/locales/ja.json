@@ -625,7 +625,6 @@
   "receipts.range.last30": "過去 30 日間",
   "receipts.range.lastYear": "過去 1 年間",
   "receipts.range.all": "すべて",
-  "receipts.controls.range.title": "期間",
   "receipts.controls.display.title": "表示オプション",
   "receipts.controls.display.colorMode": "カラーモード",
   "receipts.controls.display.colorModeDesc": "既定はモノクロ(印刷レシート風)。オンにするとクリーム色の用紙にダークブラウン文字に切り替わります。",

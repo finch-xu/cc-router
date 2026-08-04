@@ -625,7 +625,6 @@
   "receipts.range.last30": "Last 30 days",
   "receipts.range.lastYear": "Last year",
   "receipts.range.all": "All time",
-  "receipts.controls.range.title": "Time range",
   "receipts.controls.display.title": "Display options",
   "receipts.controls.display.colorMode": "Color mode",
   "receipts.controls.display.colorModeDesc": "Default is monochrome (printed-receipt look). Toggle on for cream paper with dark-brown ink.",

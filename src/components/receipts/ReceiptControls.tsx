@@ -5,7 +5,8 @@ import { useSubscriptions } from "@/hooks/useSubscriptions";
 import type { ReceiptRange, SubscriptionDto } from "@/types";
 import type { ReceiptDisplayOptions } from "./ReceiptSlip";
 
-const RANGES: { key: ReceiptRange; labelKey: string }[] = [
+/** 时间范围选择器渲染在页面标题行 (Receipts.tsx), 这里只导出选项表 */
+export const RECEIPT_RANGES: { key: ReceiptRange; labelKey: string }[] = [
   { key: "last_24_hours", labelKey: "receipts.range.last24h" },
   { key: "last7_days", labelKey: "receipts.range.last7" },
   { key: "last30_days", labelKey: "receipts.range.last30" },
@@ -14,8 +15,6 @@ const RANGES: { key: ReceiptRange; labelKey: string }[] = [
 ];
 
 interface Props {
-  range: ReceiptRange;
-  onRangeChange: (r: ReceiptRange) => void;
   options: ReceiptDisplayOptions;
   onOptionsChange: (o: ReceiptDisplayOptions) => void;
   /** 选中的订阅 ID 集合; 空集合 = 全选(语义上「不过滤」) */
@@ -35,8 +34,6 @@ interface Props {
 }
 
 export function ReceiptControls({
-  range,
-  onRangeChange,
   options,
   onOptionsChange,
   selectedSubscriptionIds,
@@ -68,10 +65,10 @@ export function ReceiptControls({
   }, [subsList]);
 
   return (
-    <div style={{ display: "flex", flexDirection: "column", gap: 24 }}>
-      {/* Section 1 — 导出 (置顶, 让用户一眼看到主操作) */}
+    <div className="receipt-panel">
+      {/* Section 1 — 导出 (置顶, 让用户一眼看到主操作); 刷新并进同一行 */}
       <Section title={t("receipts.controls.export.title")}>
-        <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+        <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
           <button
             className="btn"
             type="button"
@@ -99,137 +96,129 @@ export function ReceiptControls({
             <FileCode size={12} />
             {t("receipts.controls.export.html")}
           </button>
-          {exporting && (
-            <span className="field-hint" style={{ alignSelf: "center", fontSize: 11 }}>
-              {t("receipts.controls.export.exporting")}
-            </span>
-          )}
-        </div>
-        <div style={{ marginTop: 6 }}>
           <button
             className="btn"
             type="button"
             onClick={onRefresh}
             disabled={isFetching}
+            style={{ marginLeft: "auto" }}
           >
             <RefreshCw size={12} className={isFetching ? "spin" : undefined} />
             {t("common.refresh")}
           </button>
+          {exporting && (
+            <span className="receipt-field-desc" style={{ marginTop: 0, width: "100%" }}>
+              {t("receipts.controls.export.exporting")}
+            </span>
+          )}
         </div>
       </Section>
 
-      {/* Section 2 — 时间范围 */}
-      <Section title={t("receipts.controls.range.title")}>
-        <div className="range-tabs" style={{ flexWrap: "wrap" }}>
-          {RANGES.map((r) => (
-            <button
-              key={r.key}
-              type="button"
-              className={"range-tab" + (range === r.key ? " active" : "")}
-              onClick={() => onRangeChange(r.key)}
-            >
-              {t(r.labelKey)}
-            </button>
-          ))}
-        </div>
-      </Section>
-
-      {/* Section 3 — 显示选项 */}
+      {/* Section 2 — 显示选项: 两个分段控件并排, 5 个勾选项双列 */}
       <Section title={t("receipts.controls.display.title")}>
-        <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
-          <div style={{ fontSize: 12, fontWeight: 500 }}>
-            {t("receipts.controls.display.groupMode.label")}
+        <div className="receipt-field-row">
+          <div>
+            <div className="receipt-field-label">
+              {t("receipts.controls.display.groupMode.label")}
+            </div>
+            <div className="range-tabs" style={{ flexWrap: "wrap" }}>
+              {(["virtual_model", "subscription", "totals_only"] as const).map((m) => (
+                <button
+                  key={m}
+                  type="button"
+                  className={"range-tab" + (options.groupMode === m ? " active" : "")}
+                  onClick={() => onOptionsChange({ ...options, groupMode: m })}
+                >
+                  {t(`receipts.controls.display.groupMode.${m}`)}
+                </button>
+              ))}
+            </div>
+            <div className="receipt-field-desc">
+              {t("receipts.controls.display.groupMode.desc")}
+            </div>
           </div>
-          <div className="range-tabs" style={{ flexWrap: "wrap", marginBottom: 0 }}>
-            {(["virtual_model", "subscription", "totals_only"] as const).map((m) => (
-              <button
-                key={m}
-                type="button"
-                className={"range-tab" + (options.groupMode === m ? " active" : "")}
-                onClick={() => onOptionsChange({ ...options, groupMode: m })}
-              >
-                {t(`receipts.controls.display.groupMode.${m}`)}
-              </button>
-            ))}
-          </div>
-          <div className="field-hint" style={{ fontSize: 11 }}>
-            {t("receipts.controls.display.groupMode.desc")}
+          <div>
+            <div className="receipt-field-label">
+              {t("receipts.controls.display.footerCode.label")}
+            </div>
+            <div className="range-tabs" style={{ flexWrap: "wrap" }}>
+              {(["qr", "barcode"] as const).map((s) => (
+                <button
+                  key={s}
+                  type="button"
+                  className={"range-tab" + (options.footerCodeStyle === s ? " active" : "")}
+                  onClick={() => onOptionsChange({ ...options, footerCodeStyle: s })}
+                >
+                  {t(`receipts.controls.display.footerCode.${s}`)}
+                </button>
+              ))}
+            </div>
+            <div className="receipt-field-desc">
+              {t("receipts.controls.display.footerCode.desc")}
+            </div>
           </div>
         </div>
-        <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
-          <div style={{ fontSize: 12, fontWeight: 500 }}>
-            {t("receipts.controls.display.footerCode.label")}
-          </div>
-          <div className="range-tabs" style={{ flexWrap: "wrap", marginBottom: 0 }}>
-            {(["qr", "barcode"] as const).map((s) => (
-              <button
-                key={s}
-                type="button"
-                className={"range-tab" + (options.footerCodeStyle === s ? " active" : "")}
-                onClick={() => onOptionsChange({ ...options, footerCodeStyle: s })}
-              >
-                {t(`receipts.controls.display.footerCode.${s}`)}
-              </button>
-            ))}
-          </div>
-          <div className="field-hint" style={{ fontSize: 11 }}>
-            {t("receipts.controls.display.footerCode.desc")}
-          </div>
+
+        <div className="receipt-check-grid" style={{ marginTop: 12 }}>
+          <CheckboxRow
+            checked={options.colorMode === "color"}
+            label={t("receipts.controls.display.colorMode")}
+            desc={t("receipts.controls.display.colorModeDesc")}
+            onChange={(v) => onOptionsChange({ ...options, colorMode: v ? "color" : "mono" })}
+          />
+          <CheckboxRow
+            checked={options.showProviderLogo}
+            label={t("receipts.controls.display.showProviderLogo")}
+            desc={t("receipts.controls.display.showProviderLogoDesc")}
+            onChange={(v) => onOptionsChange({ ...options, showProviderLogo: v })}
+          />
+          <CheckboxRow
+            checked={options.showCacheTokens}
+            label={t("receipts.controls.display.showCache")}
+            desc={t("receipts.controls.display.showCacheDesc")}
+            onChange={(v) => onOptionsChange({ ...options, showCacheTokens: v })}
+          />
+          <CheckboxRow
+            checked={options.showRequestCounts}
+            label={t("receipts.controls.display.showCounts")}
+            desc={t("receipts.controls.display.showCountsDesc")}
+            onChange={(v) => onOptionsChange({ ...options, showRequestCounts: v })}
+          />
+          <CheckboxRow
+            checked={options.compactTokens}
+            label={t("receipts.controls.display.compactTokens")}
+            desc={t("receipts.controls.display.compactTokensDesc")}
+            onChange={(v) => onOptionsChange({ ...options, compactTokens: v })}
+          />
         </div>
-        <CheckboxRow
-          checked={options.colorMode === "color"}
-          label={t("receipts.controls.display.colorMode")}
-          desc={t("receipts.controls.display.colorModeDesc")}
-          onChange={(v) => onOptionsChange({ ...options, colorMode: v ? "color" : "mono" })}
-        />
-        <CheckboxRow
-          checked={options.showProviderLogo}
-          label={t("receipts.controls.display.showProviderLogo")}
-          desc={t("receipts.controls.display.showProviderLogoDesc")}
-          onChange={(v) => onOptionsChange({ ...options, showProviderLogo: v })}
-        />
-        <CheckboxRow
-          checked={options.showCacheTokens}
-          label={t("receipts.controls.display.showCache")}
-          desc={t("receipts.controls.display.showCacheDesc")}
-          onChange={(v) => onOptionsChange({ ...options, showCacheTokens: v })}
-        />
-        <CheckboxRow
-          checked={options.showRequestCounts}
-          label={t("receipts.controls.display.showCounts")}
-          desc={t("receipts.controls.display.showCountsDesc")}
-          onChange={(v) => onOptionsChange({ ...options, showRequestCounts: v })}
-        />
-        <CheckboxRow
-          checked={options.compactTokens}
-          label={t("receipts.controls.display.compactTokens")}
-          desc={t("receipts.controls.display.compactTokensDesc")}
-          onChange={(v) => onOptionsChange({ ...options, compactTokens: v })}
-        />
       </Section>
 
-      {/* Section 4 — 过滤 */}
+      {/* Section 3 — 过滤: 两个下拉并排 */}
       <Section title={t("receipts.controls.filter.title")}>
-        <FilterDropdown
-          label={t("receipts.controls.filter.bySubscription")}
-          allLabel={t("receipts.controls.filter.allSubscriptions")}
-          options={subsList.map((s) => ({ id: s.id, label: s.display_name }))}
-          selected={selectedSubscriptionIds}
-          onChange={onSelectedSubscriptionsChange}
-        />
-        <FilterDropdown
-          label={t("receipts.controls.filter.byProvider")}
-          allLabel={t("receipts.controls.filter.allProviders")}
-          options={providerOptions}
-          selected={selectedProviderIds}
-          onChange={onSelectedProvidersChange}
-        />
-        <CheckboxRow
-          checked={excludeDeleted}
-          label={t("receipts.controls.filter.excludeDeleted")}
-          desc={t("receipts.controls.filter.excludeDeletedDesc")}
-          onChange={onExcludeDeletedChange}
-        />
+        <div className="receipt-field-row">
+          <FilterDropdown
+            label={t("receipts.controls.filter.bySubscription")}
+            allLabel={t("receipts.controls.filter.allSubscriptions")}
+            options={subsList.map((s) => ({ id: s.id, label: s.display_name }))}
+            selected={selectedSubscriptionIds}
+            onChange={onSelectedSubscriptionsChange}
+          />
+          <FilterDropdown
+            label={t("receipts.controls.filter.byProvider")}
+            allLabel={t("receipts.controls.filter.allProviders")}
+            options={providerOptions}
+            selected={selectedProviderIds}
+            onChange={onSelectedProvidersChange}
+          />
+        </div>
+        <div style={{ marginTop: 10 }}>
+          <CheckboxRow
+            checked={excludeDeleted}
+            label={t("receipts.controls.filter.excludeDeleted")}
+            desc={t("receipts.controls.filter.excludeDeletedDesc")}
+            onChange={onExcludeDeletedChange}
+          />
+        </div>
       </Section>
     </div>
   );
@@ -247,9 +236,7 @@ function Section({
       <div className="stats-section-header">
         <div className="stats-section-title">{title}</div>
       </div>
-      <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-        {children}
-      </div>
+      {children}
     </div>
   );
 }
@@ -266,23 +253,15 @@ function CheckboxRow({
   onChange: (v: boolean) => void;
 }) {
   return (
-    <label
-      style={{
-        display: "flex",
-        gap: 8,
-        cursor: "pointer",
-        alignItems: "flex-start",
-      }}
-    >
+    <label className="receipt-check">
       <input
         type="checkbox"
         checked={checked}
         onChange={(e) => onChange(e.target.checked)}
-        style={{ marginTop: 3 }}
       />
-      <span>
-        <div>{label}</div>
-        {desc && <div className="field-hint" style={{ fontSize: 11 }}>{desc}</div>}
+      <span className="receipt-check-text">
+        <span className="receipt-check-label">{label}</span>
+        {desc && <span className="receipt-check-desc">{desc}</span>}
       </span>
     </label>
   );
@@ -313,55 +292,30 @@ function FilterDropdown({
     onChange(next);
   };
   return (
-    <details style={{ border: "1px solid var(--border)", borderRadius: 4 }}>
-      <summary
-        style={{
-          padding: "6px 10px",
-          cursor: "pointer",
-          listStyle: "none",
-          display: "flex",
-          alignItems: "center",
-          justifyContent: "space-between",
-          fontSize: 12,
-        }}
-      >
+    <details className="receipt-dropdown">
+      <summary>
         <span>{label}</span>
-        <span style={{ display: "flex", alignItems: "center", gap: 6, opacity: 0.7 }}>
+        <span className="receipt-dropdown-value">
           <span>{summary}</span>
           <ChevronDown size={12} />
         </span>
       </summary>
-      <div
-        style={{
-          padding: "6px 10px 8px",
-          borderTop: "1px solid var(--border)",
-          display: "flex",
-          flexDirection: "column",
-          gap: 4,
-          maxHeight: 220,
-          overflowY: "auto",
-        }}
-      >
-        {options.length === 0 && (
-          <div className="field-hint" style={{ fontSize: 11 }}>—</div>
-        )}
+      <div className="receipt-dropdown-body">
+        {options.length === 0 && <div className="receipt-field-desc" style={{ marginTop: 0 }}>—</div>}
         {options.map((opt) => (
-          <label
-            key={opt.id}
-            style={{ display: "flex", gap: 6, alignItems: "center", cursor: "pointer" }}
-          >
+          <label key={opt.id}>
             <input
               type="checkbox"
               checked={selected.has(opt.id)}
               onChange={() => toggle(opt.id)}
             />
-            <span style={{ fontSize: 12 }}>{opt.label}</span>
+            <span>{opt.label}</span>
           </label>
         ))}
         {selected.size > 0 && (
           <button
             type="button"
-            className="btn"
+            className="btn sm"
             onClick={() => onChange(new Set())}
             style={{ marginTop: 4, alignSelf: "flex-start" }}
           >

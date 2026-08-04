@@ -625,7 +625,6 @@
   "receipts.range.last30": "近 30 天",
   "receipts.range.lastYear": "近 1 年",
   "receipts.range.all": "全部",
-  "receipts.controls.range.title": "时间范围",
   "receipts.controls.display.title": "显示选项",
   "receipts.controls.display.colorMode": "彩色模式",
   "receipts.controls.display.colorModeDesc": "默认黑白(打印小票感),开启后切换成米色纸张配深棕字体。",

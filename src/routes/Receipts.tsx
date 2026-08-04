@@ -4,7 +4,7 @@ import { open as openShell } from "@tauri-apps/plugin-shell";
 import { downloadDir } from "@tauri-apps/api/path";
 import { useT } from "@/i18n";
 import { ReceiptSlip, type ReceiptDisplayOptions } from "@/components/receipts/ReceiptSlip";
-import { ReceiptControls } from "@/components/receipts/ReceiptControls";
+import { ReceiptControls, RECEIPT_RANGES } from "@/components/receipts/ReceiptControls";
 import { useReceipt } from "@/hooks/useReceipts";
 import { exportPng, exportPdf, exportHtml } from "@/utils/exportReceipt";
 import { ZERO_TOTALS, addTotals } from "@/lib/receipt-aggregations";
@@ -154,68 +154,55 @@ export function ReceiptsPage() {
           <h1>{t("receipts.title")}</h1>
           <div className="subtitle">{t("receipts.subtitle")}</div>
         </div>
+        {/* 时间范围决定整页数据, 属于页面级控制 —— 放标题行, 不跟小票的渲染选项混在一起 */}
+        <div className="range-tabs" style={{ marginBottom: 0, flexShrink: 0 }}>
+          {RECEIPT_RANGES.map((r) => (
+            <button
+              key={r.key}
+              type="button"
+              className={"range-tab" + (range === r.key ? " active" : "")}
+              onClick={() => setRange(r.key)}
+            >
+              {t(r.labelKey)}
+            </button>
+          ))}
+        </div>
       </div>
 
-      <div
-        style={{
-          display: "flex",
-          gap: 24,
-          alignItems: "flex-start",
-          flexWrap: "wrap",
-        }}
-      >
-        {/* 左 — 小票 */}
-        <div
-          style={{
-            display: "flex",
-            flexDirection: "column",
-            alignItems: "center",
-            gap: 8,
-          }}
-        >
+      <div className="receipt-layout">
+        {/* 左 — 小票 (固定 360px, 就是小票的物理宽度) */}
+        <div className="receipt-slip-col">
           {filteredDto ? (
             <ReceiptSlip ref={slipRef} dto={filteredDto} options={options} />
           ) : (
-            <div
-              style={{
-                width: 360,
-                padding: 40,
-                textAlign: "center",
-                color: "var(--muted)",
-                border: "1px dashed var(--border)",
-                borderRadius: 4,
-              }}
-            >
+            <div className="receipt-empty">
               {receipt.isLoading ? t("common.loading") : t("receipts.empty")}
             </div>
           )}
           {receipt.isError && (
-            <div className="alert alert-error" style={{ maxWidth: 360 }}>
+            <div className="alert err" style={{ maxWidth: 360 }}>
               {t("receipts.loadError")}
             </div>
           )}
         </div>
 
-        {/* 右 — 控制台 */}
-        <div style={{ flex: "1 1 320px", maxWidth: 460, minWidth: 280 }}>
-          <ReceiptControls
-            range={range}
-            onRangeChange={setRange}
-            options={options}
-            onOptionsChange={setOptions}
-            selectedSubscriptionIds={selectedSubs}
-            onSelectedSubscriptionsChange={setSelectedSubs}
-            selectedProviderIds={selectedProviders}
-            onSelectedProvidersChange={setSelectedProviders}
-            excludeDeleted={excludeDeleted}
-            onExcludeDeletedChange={setExcludeDeleted}
-            isFetching={receipt.isFetching}
-            onRefresh={() => receipt.refetch()}
-            onExport={runExport}
-            exportDisabled={exportDisabled}
-            exporting={exporting}
-          />
-        </div>
+        {/* 右 — 控制台。根节点自带 .receipt-panel (flex:1), 直接吃满剩余宽度;
+            原先外面套一层 maxWidth:460 的 div, 右边会白留 200px 空档 */}
+        <ReceiptControls
+          options={options}
+          onOptionsChange={setOptions}
+          selectedSubscriptionIds={selectedSubs}
+          onSelectedSubscriptionsChange={setSelectedSubs}
+          selectedProviderIds={selectedProviders}
+          onSelectedProvidersChange={setSelectedProviders}
+          excludeDeleted={excludeDeleted}
+          onExcludeDeletedChange={setExcludeDeleted}
+          isFetching={receipt.isFetching}
+          onRefresh={() => receipt.refetch()}
+          onExport={runExport}
+          exportDisabled={exportDisabled}
+          exporting={exporting}
+        />
       </div>
 
       {flash && (
