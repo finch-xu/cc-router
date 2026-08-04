@@ -40,6 +40,16 @@ export function fmtLatencyMs(ms?: number | null): string {
   return `${(ms / 1000).toFixed(2)}s`;
 }
 
+/** 冷却剩余时长的极简形式: "45s" / "4m" / "2h"。无值或已过期返回 null。 */
+export function fmtCooldownLeft(untilMs?: number): string | null {
+  if (!untilMs) return null;
+  const left = untilMs - Date.now();
+  if (left <= 0) return null;
+  if (left < 60_000) return `${Math.ceil(left / 1000)}s`;
+  if (left < 3_600_000) return `${Math.ceil(left / 60_000)}m`;
+  return `${Math.ceil(left / 3_600_000)}h`;
+}
+
 export function fmtBytes(n: number): string {
   if (n < 1024) return `${n} B`;
   if (n < 1024 * 1024) return `${(n / 1024).toFixed(1)} KB`;

@@ -39,6 +39,22 @@
   --r-md: 10px;
   --r-lg: 14px;
 
+  /* === 路由图 / 虚拟模型映射派生色 ===
+   * 同一 OKLCH 亮度轴上的三组语义色: 绿=客户端侧, 橙=cc-router(复用 accent), 蓝=上游 provider。
+   * 收成变量而非字面值, 是因为 SVG 的 stroke 走 presentation attribute —— 写死就无法随
+   * .dark 切换; 引用 var() 才能一份图形吃两套主题。 */
+  --rf-client-line: oklch(0.85 0.07 150);
+  --rf-client-flow: oklch(0.60 0.14 150);
+  --rf-client-ink:  oklch(0.40 0.12 150);
+  --rf-client-bg:   oklch(0.97 0.02 150);
+  --rf-router-bg:   oklch(0.97 0.02 42);
+  --rf-up-line:     oklch(0.85 0.07 250);
+  --rf-up-flow:     oklch(0.60 0.14 250);
+  --rf-up-ink:      oklch(0.42 0.14 255);
+  --rf-up-bg:       oklch(0.97 0.02 250);
+  --rf-err-line:    oklch(0.82 0.10 28);
+  --rf-err-ink:     oklch(0.42 0.16 28);
+
   --shadow-sm: 0 1px 0 rgba(20,18,12,0.04), 0 1px 2px rgba(20,18,12,0.04);
   --shadow-md: 0 1px 0 rgba(20,18,12,0.04), 0 6px 18px -8px rgba(20,18,12,0.10);
   --shadow-lg: 0 1px 0 rgba(20,18,12,0.04), 0 24px 60px -28px rgba(20,18,12,0.22);
@@ -139,6 +155,19 @@
   --err:    oklch(0.62 0.20 28);
   --err-bg: oklch(0.18 0.06 28);
 
+  /* 路由图派生色 — 暗色版: 线色压暗(当描边用)、文字/流动色提亮、底色压到近黑 */
+  --rf-client-line: oklch(0.42 0.09 150);
+  --rf-client-flow: oklch(0.72 0.16 150);
+  --rf-client-ink:  oklch(0.78 0.12 150);
+  --rf-client-bg:   oklch(0.19 0.04 150);
+  --rf-router-bg:   oklch(0.19 0.04 42);
+  --rf-up-line:     oklch(0.44 0.09 250);
+  --rf-up-flow:     oklch(0.72 0.14 250);
+  --rf-up-ink:      oklch(0.78 0.10 255);
+  --rf-up-bg:       oklch(0.19 0.04 250);
+  --rf-err-line:    oklch(0.46 0.12 28);
+  --rf-err-ink:     oklch(0.78 0.13 28);
+
   /* Shadows — 暗色下加重 */
   --shadow-sm: 0 1px 0 rgba(0,0,0,0.30), 0 1px 2px rgba(0,0,0,0.30);
   --shadow-md: 0 1px 0 rgba(0,0,0,0.40), 0 6px 18px -8px rgba(0,0,0,0.45);
@@ -194,7 +223,10 @@ input, select, textarea { font: inherit; color: inherit; }
 /* === Layout === */
 .app {
   display: grid;
-  grid-template-columns: 220px 1fr;
+  /* 宽度取 en 最长导航项 "Virtual models" 的实测需求 (28 边距 + 22 内距 + 16 图标
+   * + 11 间隔 + 92 文字 + 11 间隔 + 18 badge ≈ 198), 留一点渲染余量。
+   * ja 译文更长, 按 .nav-label 的规则折行, 不截断。 */
+  grid-template-columns: 204px 1fr;
   min-height: 100vh;
   width: 100%;
   max-width: 100%;
@@ -243,7 +275,9 @@ input, select, textarea { font: inherit; color: inherit; }
 }
 .brand-text { line-height: 1.1; }
 .brand-name { font-weight: 700; font-size: 15px; letter-spacing: -0.01em; }
-.brand-tag { font-size: 11px; color: var(--ink-3); margin-top: 3px; }
+/* 定位标语在 zh 下是一行, 日/英译文更长会折成两行 —— 给它一个像样的行高,
+ * 比为了单行把文案砍到不通顺更好 */
+.brand-tag { font-size: 11px; color: var(--ink-3); margin-top: 3px; line-height: 1.4; }
 
 .nav-item {
   display: flex;
@@ -262,6 +296,13 @@ input, select, textarea { font: inherit; color: inherit; }
   position: relative;
   transition: background 0.12s, color 0.12s;
   text-decoration: none;
+}
+/* 侧边栏宽度按 en 最长项 "Virtual models" 定 (见 .app 的 204px)。
+ * ja 的译文更长, 允许折成两行 —— 导航标签绝不截断成省略号, 宁可换行。
+ * flex 下 min-width:0 让标签能收缩到容器内换行, 而不是撑破 nav-item。 */
+.nav-label {
+  min-width: 0;
+  line-height: 1.35;
 }
 .nav-item:hover { background: var(--surface-3); color: var(--ink); }
 .nav-item.active {
@@ -290,28 +331,6 @@ input, select, textarea { font: inherit; color: inherit; }
   padding: 1px 6px;
   border-radius: 4px;
 }
-.sidebar-footer {
-  margin-top: auto;
-  padding: 12px;
-  border-top: 1px solid var(--line);
-  font-size: 11px;
-  color: var(--ink-4);
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  gap: 6px;
-}
-.sidebar-footer .live-dot {
-  display: inline-block;
-  width: 6px; height: 6px;
-  border-radius: 50%;
-  background: var(--ok);
-  box-shadow: 0 0 0 3px oklch(0.95 0.05 150);
-  margin-right: 6px;
-  vertical-align: middle;
-}
-.sidebar-footer .live-dot.off { background: var(--ink-4); box-shadow: 0 0 0 3px var(--surface-3); }
-
 /* === Main === */
 .main {
   padding: 22px 28px 36px;
@@ -1410,6 +1429,646 @@ input, select, textarea { font: inherit; color: inherit; }
   font-weight: 500;
 }
 
+/* ============================================================
+ * 通栏布局 (flush layout)
+ * 与 .card 体系并存: 只有显式挂 .flush 的页面走这套。
+ * 特征 —— 页面自身不留白, 白留给区块; 区块之间只有 1px 分隔线,
+ * 没有间隙、圆角、阴影。用于「一屏看完」优先的页面。
+ * ============================================================ */
+.main.flush {
+  /* 高度必须收死, 否则 .page-flow 的 overflow-y 无处可滚 (父级没有确定高度时
+   * flex:1 只能撑开而不会溢出)。sidebar 已是 100vh, 这里对齐。 */
+  height: 100vh;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+/* 页面顶部状态条 (替代 .page-header) */
+.page-bar {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  height: 52px;
+  flex-shrink: 0;
+  padding: 0 24px;
+  background: var(--surface);
+  border-bottom: 1px solid var(--line);
+}
+.page-bar h1 {
+  font-size: 16px;
+  font-weight: 700;
+  letter-spacing: -0.015em;
+  margin: 0;
+  white-space: nowrap;
+}
+.page-bar .sep { width: 1px; height: 18px; background: var(--line); flex-shrink: 0; }
+.page-bar-status {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  min-width: 0;
+  font-family: var(--font-mono);
+  font-size: 11.5px;
+  color: var(--ink-3);
+  white-space: nowrap;
+  overflow: hidden;
+}
+.page-bar-status strong { color: var(--ink); font-weight: 600; }
+.page-bar-status .live-dot {
+  width: 6px; height: 6px; border-radius: 50%;
+  background: var(--ok);
+  animation: pulse 1.6s infinite;
+  flex-shrink: 0;
+}
+.page-bar-status .live-dot.off { background: var(--ink-4); animation: none; }
+.page-bar-right {
+  margin-left: auto;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-shrink: 0;
+}
+
+/* 厂商 logo 重叠堆 */
+.logo-stack { display: flex; align-items: center; }
+.logo-stack > .logo {
+  margin-left: -5px;
+  box-shadow: 0 0 0 1.5px var(--surface);
+}
+.logo-stack > .logo:first-child { margin-left: 0; }
+
+/* 通栏内容区: 自身不留白 */
+.page-flow { flex: 1; min-height: 0; overflow-y: auto; padding: 0; }
+
+/* 通栏区块 */
+.flush-section {
+  background: var(--surface);
+  border-bottom: 1px solid var(--line);
+  padding: 16px 24px 18px;
+}
+.flush-section:last-child { border-bottom: none; }
+.flush-title {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--ink);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+/* 两栏通栏: 用竖线代替 gap */
+.flush-split {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0;
+  align-items: stretch;
+  background: var(--surface);
+  border-bottom: 1px solid var(--line);
+}
+.flush-split > * { padding: 14px 24px 16px; min-width: 0; }
+.flush-split > * + * { border-left: 1px solid var(--line); }
+
+/* === 紧凑槽位卡 ===
+ * 卡片外形(圆角/阴影/间距) 保持与其他页面一致, 只压缩卡内密度:
+ * 调度模式并进卡头、端点行单行 30px、添加按钮 26px。 */
+/* fallback: 通栏一行, 左侧 accent 竖条点明「第 5 个虚拟模型」而非第 5 个槽位 */
+.slot-card.wide {
+  grid-column: 1 / -1;
+  border-left: 3px solid var(--accent-line);
+}
+.slot-head.compact {
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 10px;
+}
+.slot-head.compact .slot-name { font-size: 14px; }
+.slot-head.compact .slot-purpose { font-size: 11.5px; margin-left: 8px; }
+.radio-group.sm { padding: 2px; flex-shrink: 0; }
+.radio-group.sm button { padding: 3px 9px; font-size: 11px; }
+
+.endpoint-list { display: flex; flex-direction: column; gap: 5px; }
+.endpoint.compact {
+  height: 30px;
+  padding: 0 8px;
+  gap: 7px;
+  margin-bottom: 0;
+}
+.endpoint.compact .priority {
+  width: 16px; height: 16px;
+  font-size: 9.5px;
+}
+.endpoint.compact .endpoint-info {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.endpoint.compact .endpoint-name {
+  font-size: 12.5px;
+  margin-bottom: 0;
+  gap: 6px;
+  flex-shrink: 0;
+}
+.endpoint.compact .endpoint-model {
+  font-size: 11px;
+  min-width: 0;
+}
+/* 单行布局下 '↳' 是纵向承接符号, 横排里读不通 */
+.endpoint.compact .endpoint-model::before { content: none; }
+.endpoint.compact .remove {
+  padding: 2px 4px;
+  display: inline-flex;
+  align-items: center;
+  color: var(--ink-5);
+}
+.add-endpoint.compact {
+  height: 26px;
+  padding: 0;
+  font-size: 11.5px;
+  margin-top: 5px;
+}
+.endpoint-empty.compact {
+  padding: 8px 12px;
+  font-size: 11.5px;
+  margin-bottom: 0;
+}
+/* 通栏的 fallback 卡有整行宽度, 端点列表与添加按钮并排比堆叠更省高度 */
+.slot-card.wide .slot-body {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+  align-items: start;
+}
+.slot-card.wide .add-endpoint.compact { margin-top: 0; }
+
+/* ============================================================
+ * 实时路由图
+ * 固定 1000×340 画布 + 绝对定位 —— 弧线的贝塞尔控制点与节点坐标
+ * 是一体的, 用流式布局无法保证端点对齐。
+ * ============================================================ */
+.rf-wrap {
+  /* 画布 1000px 是死的, 而最小窗口(1120) 减掉侧边栏(204) 只剩 916 —— 直接溢出。
+   * 拓扑图的价值在于一眼看全形状, 横向滚动等于毁掉它, 所以窄窗口下整体等比缩小。
+   * 标签行与画布必须一起缩放, 否则「UPSTREAMS」会跟云朵错位。
+   * 阈值 = 画布 1000 + 侧边栏 204 —— 改侧边栏宽度必须同步改这里。 */
+  --rf-scale: 1;
+  background: var(--surface);
+  padding: 12px 0 14px;
+  border-bottom: 1px solid var(--line);
+  overflow: hidden;
+}
+@media (max-width: 1203px) {
+  .rf-wrap { --rf-scale: 0.9; }
+}
+/* transform 缩放后元素仍占原始高度(364 = 标签 20 + 间隔 4 + 画布 340),
+ * 用负 margin 把多出来的空白收回; margin-left 承担居中(margin:auto 在
+ * 子元素比容器宽时会失效, 只能自己算)。 */
+.rf-stage {
+  width: 1000px;
+  transform: scale(var(--rf-scale));
+  transform-origin: top left;
+  /* 24px = 标签行 20 + 与画布的间隔 4 */
+  margin-bottom: calc((24px + var(--rf-h, 340px)) * (var(--rf-scale) - 1));
+  margin-left: calc((100% - 1000px * var(--rf-scale)) / 2);
+}
+.rf-labels {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 0 30px;
+  margin-bottom: 4px;
+}
+.rf-label {
+  font-size: 9.5px;
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  font-weight: 600;
+  color: var(--ink-4);
+}
+.rf-count { font-family: var(--font-mono); font-size: 10.5px; color: var(--ink-4); }
+/* 高度由 RouteFlowDiagram 按上游家数算出后经 --rf-h 传进来 (10 家以内恒为 340) */
+.rf-canvas { position: relative; width: 1000px; height: var(--rf-h, 340px); }
+.rf-arcs { position: absolute; inset: 0; overflow: visible; }
+@keyframes flow { to { stroke-dashoffset: -34; } }
+.rf-flow { animation: flow 2.4s linear infinite; }
+
+/* logo 自带白底圆角, 再套一层深色方块等于两重边框, 所以 hub 只做定位容器。
+ * 纵向跟着画布中心走 (96/2 = 48), 画布变高时不会留在原地。 */
+.rf-hub {
+  position: absolute;
+  left: 452px;
+  top: calc(var(--rf-h, 340px) / 2 - 48px);
+  width: 96px; height: 96px;
+  display: grid;
+  place-items: center;
+}
+.rf-hub img {
+  width: 76px; height: 76px;
+  border-radius: 18px;
+  image-rendering: pixelated;
+  display: block;
+  box-shadow: 0 8px 24px -10px rgba(20,18,12,0.40);
+}
+.rf-hub.off img { box-shadow: none; opacity: 0.7; }
+.rf-hub-label {
+  position: absolute;
+  left: 400px;
+  top: calc(var(--rf-h, 340px) / 2 + 56px);
+  width: 200px;
+  text-align: center;
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--ink);
+}
+
+/* 客户端 = 圆角终端窗口 */
+.rf-client {
+  position: absolute;
+  left: 14px;
+  width: 150px; height: 60px;
+  border: 1.5px solid var(--line-2);
+  border-radius: 10px;
+  background: var(--surface);
+  box-shadow: var(--shadow-sm);
+  overflow: hidden;
+}
+.rf-client-bar {
+  height: 15px;
+  background: var(--surface-3);
+  border-bottom: 1px solid var(--line);
+  display: flex;
+  align-items: center;
+  gap: 3px;
+  padding: 0 7px;
+}
+.rf-client-bar i {
+  width: 4px; height: 4px;
+  border-radius: 50%;
+  background: var(--ink-5);
+  display: block;
+}
+.rf-client-body {
+  height: calc(100% - 15px);
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  padding: 0 11px;
+}
+.rf-client-caret {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--accent);
+}
+.rf-client-name {
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--ink-2);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* 上游 provider = 云朵。left/top 由 layoutUpstreams 算出后内联 —— 超过 6 家时
+ * 会分成左右交错两列, left 不再是常量。 */
+.rf-up { position: absolute; width: 132px; height: 53px; }
+.rf-up > svg { position: absolute; inset: 0; width: 100%; height: 100%; }
+.rf-up-text {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  /* 云朵重心在下, 文字纯居中会偏高 */
+  padding-top: 9%;
+  line-height: 1.25;
+  pointer-events: none;
+}
+.rf-up-name {
+  font-size: 11.5px;
+  font-weight: 600;
+  color: var(--rf-up-ink);
+  max-width: 108px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.rf-up.err .rf-up-name { color: var(--rf-err-ink); }
+.rf-up-state { font-size: 9.5px; color: var(--rf-err-ink); }
+
+/* === 接入信息 (只读值框 + 复制) === */
+.access-fields { display: flex; flex-direction: column; gap: 11px; }
+.access-label {
+  font-size: 11.5px;
+  font-weight: 500;
+  color: var(--ink-3);
+  margin-bottom: 5px;
+}
+.access-row { display: flex; align-items: center; gap: 8px; }
+.access-value {
+  flex: 1;
+  min-width: 0;
+  height: 30px;
+  padding: 0 10px;
+  border: 1px solid var(--line-2);
+  border-radius: var(--r-sm);
+  background: var(--surface-2);
+  font-family: var(--font-mono);
+  font-size: 11.5px;
+  color: var(--ink-2);
+  display: flex;
+  align-items: center;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.access-copy {
+  height: 30px;
+  padding: 0 10px;
+  border: 1px solid var(--line-2);
+  border-radius: 5px;
+  background: var(--surface);
+  color: var(--ink);
+  font-size: 11.5px;
+  font-weight: 500;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  flex-shrink: 0;
+  transition: background 0.12s, border-color 0.12s;
+}
+.access-copy:hover { background: var(--surface-2); border-color: var(--ink-4); }
+.access-hint { font-size: 11px; color: var(--ink-4); margin-top: 5px; line-height: 1.5; }
+.access-pair { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+
+/* === API 入口表 === */
+.api-row {
+  display: grid;
+  grid-template-columns: 56px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 10px;
+  padding: 9px 0;
+  border-bottom: 1px solid var(--line);
+}
+.api-row:last-child { border-bottom: none; }
+.api-method {
+  justify-self: start;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  color: var(--ink-3);
+  border: 1px solid var(--line-2);
+  border-radius: 4px;
+  padding: 1px 6px;
+}
+.api-path {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--ink);
+}
+.api-desc { font-size: 11.5px; color: var(--ink-3); text-align: right; }
+
+.readonly-note {
+  margin-top: 12px;
+  padding: 11px 14px;
+  border: 1px solid var(--line-2);
+  border-radius: var(--r-sm);
+  background: var(--surface-2);
+  font-size: 12px;
+  line-height: 1.6;
+  color: var(--ink-2);
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.readonly-note > svg { flex-shrink: 0; color: var(--ink-4); }
+.btn-dark {
+  background: var(--ink);
+  color: var(--surface);
+  border: none;
+  border-radius: 5px;
+  padding: 5px 10px;
+  font-size: 11.5px;
+  font-weight: 500;
+  white-space: nowrap;
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+}
+.btn-dark:hover { background: var(--ink-2); }
+
+/* ============================================================
+ * 虚拟模型映射 (三列)
+ * 三个区域块的配色由 --c-* 局部变量承担, 子元素只引用变量 ——
+ * 换一列的颜色只需改块上的 modifier, 不必逐个子选择器重写。
+ * ============================================================ */
+.vm-map {
+  display: grid;
+  /* 中列定宽按最长的那条标题算: ja「cc-router 内部の仮想モデル」实测 149px,
+   * 加 .vm-map-head 的 22 内距 + 2 边框 + 余量 = 180。左右列是 1fr, 让得起。
+   * 三语标题都必须单行完整显示 —— 这列一换行就会顶破 34px 而错开所有数据行。 */
+  grid-template-columns: minmax(0, 1fr) 20px 180px 20px minmax(0, 1fr);
+  gap: 8px;
+}
+.vm-map-col {
+  --c-line: var(--line-2);
+  --c-bg: var(--surface-2);
+  --c-ink: var(--ink-3);
+  border: 1px dashed var(--c-line);
+  border-radius: 10px;
+  background: var(--c-bg);
+  overflow: hidden;
+  min-width: 0;
+}
+.vm-map-col.client {
+  --c-line: var(--rf-client-line);
+  --c-bg: var(--rf-client-bg);
+  --c-ink: var(--rf-client-ink);
+}
+.vm-map-col.router {
+  --c-line: var(--accent-line);
+  --c-bg: var(--rf-router-bg);
+  --c-ink: var(--accent-ink);
+}
+.vm-map-col.real {
+  --c-line: var(--rf-up-line);
+  --c-bg: var(--rf-up-bg);
+  --c-ink: var(--rf-up-ink);
+}
+/* 高度锁死 34px 是为了三列逐行对齐 —— 长译文必须退化成省略号,
+ * 一旦换行就会溢出到分隔线上并错开下面所有数据行 */
+.vm-map-head {
+  height: 34px;
+  padding: 0 11px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  overflow: hidden;
+  border-bottom: 1px solid var(--c-line);
+  font-size: 11.5px;
+  font-weight: 600;
+  color: var(--c-ink);
+}
+/* 不截断成省略号 —— 三语译文都按 150px 中列宽度控制在单行内;
+ * overflow:hidden 只是最后一道防线, 防止未来的超长文案顶破 34px 而错开三列 */
+.vm-map-head > span {
+  white-space: nowrap;
+  min-width: 0;
+}
+.vm-map-row {
+  height: 36px;
+  padding: 0 10px;
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  overflow: hidden;
+}
+.vm-map-row + .vm-map-row { border-top: 1px solid var(--c-line); }
+.vm-map-row.fallback { border-top: 1px dashed var(--line-2); }
+.vm-map-note { font-size: 11.5px; color: var(--c-ink); }
+/* 箭头列: padding-top 让第一格避开标题行, transparent 上边框补齐数据行的 1px 分隔 */
+.vm-map-arrows { display: flex; flex-direction: column; padding-top: 35px; }
+.vm-map-arrows > span {
+  height: 36px;
+  display: grid;
+  place-items: center;
+  font-family: var(--font-mono);
+  font-size: 13px;
+  color: var(--ink-5);
+}
+.vm-map-arrows > span + span { border-top: 1px solid transparent; }
+
+.vm-chip {
+  background: var(--surface);
+  border: 1px solid var(--line-2);
+  border-radius: 4px;
+  padding: 2px 7px;
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  color: var(--ink-3);
+  white-space: nowrap;
+}
+.vm-chip.primary { color: var(--ink); font-weight: 600; }
+.vm-pill {
+  background: var(--surface);
+  border: 1px solid var(--line-2);
+  border-radius: 5px;
+  padding: 3px 9px;
+  font-family: var(--font-mono);
+  font-size: 11.5px;
+  font-weight: 600;
+  color: var(--ink);
+  white-space: nowrap;
+}
+.vm-real {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  background: var(--surface);
+  border: 1px solid var(--line-2);
+  border-radius: 4px;
+  padding: 2px 7px 2px 4px;
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  color: var(--ink-2);
+  white-space: nowrap;
+  max-width: 100%;
+  overflow: hidden;
+}
+.vm-real.err { border-color: var(--rf-err-line); }
+.vm-mode {
+  font-size: 9.5px;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--ink-4);
+  flex-shrink: 0;
+}
+.vm-map-goto {
+  padding: 2px 9px;
+  border-radius: 999px;
+  background: var(--surface);
+  border: 1px solid var(--rf-up-line);
+  color: var(--rf-up-ink);
+  font-size: 10.5px;
+  font-weight: 600;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  white-space: nowrap;
+}
+.vm-map-foot {
+  margin-top: 10px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 18px;
+  font-size: 11px;
+  line-height: 1.6;
+  color: var(--ink-4);
+}
+
+/* === 检查更新页 === */
+.updates-head { display: flex; align-items: center; gap: 16px; }
+.updates-mark {
+  width: 44px; height: 44px;
+  border-radius: 11px;
+  box-shadow: var(--shadow-sm);
+  overflow: hidden;
+  flex-shrink: 0;
+}
+.updates-mark img {
+  width: 100%; height: 100%;
+  object-fit: cover;
+  display: block;
+  image-rendering: pixelated;
+}
+.update-progress {
+  height: 6px;
+  border-radius: 3px;
+  background: var(--surface-3);
+  overflow: hidden;
+}
+.update-progress > i {
+  display: block;
+  height: 100%;
+  background: var(--accent);
+  transition: width 200ms ease;
+}
+.update-notes {
+  padding: 11px 13px;
+  background: var(--surface-3);
+  border-radius: var(--r-sm);
+  font-family: var(--font-mono);
+  font-size: 11.5px;
+  line-height: 1.75;
+  color: var(--ink-2);
+  white-space: pre-wrap;
+  max-height: 150px;
+  overflow: auto;
+}
+
+/* === 侧边栏状态点 (红=有更新 / 绿=代理在跑) === */
+.nav-dot {
+  margin-left: auto;
+  width: 8px; height: 8px;
+  border-radius: 9999px;
+  background: var(--err);
+  box-shadow: 0 0 0 2px var(--err-bg);
+  flex-shrink: 0;
+}
+.nav-dot.ok {
+  width: 6px; height: 6px;
+  background: var(--ok);
+  box-shadow: 0 0 0 2px var(--ok-bg);
+}
+
 /* === Tailwind base override 兼容: 让原 ui/* shadcn 组件颜色仍可读 === */
 @layer base {
   body {
@@ -1525,11 +2184,6 @@ input, select, textarea { font: inherit; color: inherit; }
   box-shadow: 0 2px 8px rgba(0,0,0,0.25);
 }
 
-/* === Dark mode: 侧边栏在线指示灯辉光 === */
-.dark .sidebar-footer .live-dot {
-  box-shadow: 0 0 0 3px oklch(0.25 0.05 150);
-}
-
 /* === Dark mode: warn pill (黄色警示在暗色下保持可读) === */
 .dark .pill.warn {
   background: oklch(0.18 0.05 75);
@@ -1540,3 +2194,9 @@ input, select, textarea { font: inherit; color: inherit; }
 .dark .oauth-overlay {
   background: rgba(0,0,0,0.65) !important;
 }
+
+/* === Dark mode: 路由图中心 hub 的投影(浅色阴影在暗底上不可见) === */
+.dark .rf-hub img {
+  box-shadow: 0 8px 24px -10px rgba(0,0,0,0.70);
+}
+/* .btn-dark: 暗色下 --ink 是浅色, 深底白字自动变成浅底深字, 语义仍成立 */

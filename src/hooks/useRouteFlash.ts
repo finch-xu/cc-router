@@ -1,4 +1,4 @@
-import { useEffect, useSyncExternalStore } from "react";
+import { useCallback, useEffect, useSyncExternalStore } from "react";
 import { listen } from "@tauri-apps/api/event";
 import type {
   RouteAttemptFinishedEvent,
@@ -82,4 +82,28 @@ export function useRouteFlashState(
     () => FLASHES.get(key),
     () => undefined,
   );
+}
+
+/**
+ * 跨虚拟模型聚合: 给定一组订阅, 返回其中最新的 flash。
+ * 用于按 provider 维度高亮 —— 一个 provider 下可能有多条订阅, 每条又被多个
+ * 虚拟模型引用, 逐对调 useRouteFlashState 会让 hook 数量随数据变化。
+ *
+ * getSnapshot 返回的是 FLASHES 里的 entry 引用本身(同一次 flash 内不变),
+ * 无匹配时返回 undefined —— 两者都引用稳定, 不会触发重渲染循环。
+ */
+export function useAnyRouteFlashState(subIds: string[]): FlashEntry | undefined {
+  const joined = subIds.join("|");
+  const getSnapshot = useCallback(() => {
+    if (!joined) return undefined;
+    const wanted = new Set(joined.split("|"));
+    let latest: FlashEntry | undefined;
+    for (const [key, entry] of FLASHES) {
+      const sep = key.indexOf("::");
+      if (sep < 0 || !wanted.has(key.slice(sep + 2))) continue;
+      if (!latest || entry.token > latest.token) latest = entry;
+    }
+    return latest;
+  }, [joined]);
+  return useSyncExternalStore(subscribe, getSnapshot, () => undefined);
 }

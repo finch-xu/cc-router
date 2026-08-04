@@ -13,7 +13,7 @@ import {
   arrayMove,
 } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
-import { GripVertical } from "lucide-react";
+import { GripVertical, X } from "lucide-react";
 import { ProviderLogo } from "@/components/ProviderLogo";
 import { stateTone } from "@/components/StatusBadge";
 import { useRouteFlashState } from "@/hooks/useRouteFlash";
@@ -54,29 +54,31 @@ export function SortableSubscriptionList({
   }
 
   if (subscriptionIds.length === 0) {
-    return <div className="endpoint-empty">{t("sortableSub.empty")}</div>;
+    return <div className="endpoint-empty compact">{t("sortableSub.empty")}</div>;
   }
 
   return (
     <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={handleDragEnd}>
       <SortableContext items={subscriptionIds} strategy={verticalListSortingStrategy}>
-        {subscriptionIds.map((id, idx) => {
-          const sub = subscriptions.get(id);
-          const realModel =
-            slot === null ? t("sortableSub.passthrough") : sub ? sub.model_slots[slot] : "?";
-          return (
-            <SortableRow
-              key={id}
-              id={id}
-              vmName={vmName}
-              priority={idx + 1}
-              sub={sub}
-              iconId={sub?.provider_icon}
-              realModel={realModel}
-              onRemove={() => onRemove(id)}
-            />
-          );
-        })}
+        <div className="endpoint-list">
+          {subscriptionIds.map((id, idx) => {
+            const sub = subscriptions.get(id);
+            const realModel =
+              slot === null ? t("sortableSub.passthrough") : sub ? sub.model_slots[slot] : "?";
+            return (
+              <SortableRow
+                key={id}
+                id={id}
+                vmName={vmName}
+                priority={idx + 1}
+                sub={sub}
+                iconId={sub?.provider_icon}
+                realModel={realModel}
+                onRemove={() => onRemove(id)}
+              />
+            );
+          })}
+        </div>
       </SortableContext>
     </DndContext>
   );
@@ -114,21 +116,21 @@ function SortableRow({
   const flashClass = flash ? ` route-flash-${flash.kind}` : "";
 
   return (
-    <div ref={setNodeRef} style={style} className={`endpoint${flashClass}`}>
+    <div ref={setNodeRef} style={style} className={`endpoint compact${flashClass}`}>
       <button className="grip" {...attributes} {...listeners} type="button" aria-label={t("sortableSub.dragHandle")}>
-        <GripVertical size={14} strokeWidth={1.6} />
+        <GripVertical size={12} strokeWidth={1.6} />
       </button>
       <span className="priority mono">{priority}</span>
-      <ProviderLogo iconId={iconId} size={22} />
+      <ProviderLogo iconId={iconId} size={18} iconSize={11} />
       <div className="endpoint-info">
         <div className="endpoint-name">
-          {sub?.display_name ?? t("common.notFound")}
           <span className={`endpoint-status${dotClass}`} aria-hidden />
+          {sub?.display_name ?? t("common.notFound")}
         </div>
         <div className="endpoint-model mono">{realModel}</div>
       </div>
-      <button className="remove" onClick={onRemove} type="button">
-        {t("sortableSub.remove")}
+      <button className="remove" onClick={onRemove} type="button" aria-label={t("sortableSub.remove")}>
+        <X size={12} strokeWidth={2} />
       </button>
     </div>
   );

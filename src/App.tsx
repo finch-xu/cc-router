@@ -1,6 +1,8 @@
 import { Navigate, Route, Routes } from "react-router-dom";
 import { AppShell } from "@/components/layout/AppShell";
 import { VirtualModelsPage } from "@/routes/VirtualModels";
+import { LiveRoutingPage } from "@/routes/LiveRouting";
+import { UpdatesPage } from "@/routes/Updates";
 import { SubscriptionsPage } from "@/routes/Subscriptions";
 import { SubscriptionNewPage } from "@/routes/SubscriptionNew";
 import { SubscriptionEditPage } from "@/routes/SubscriptionEdit";
@@ -47,6 +49,7 @@ function AppInner() {
         }
       >
         <Route index element={<Navigate to="/virtual-models" replace />} />
+        <Route path="/live-routing" element={<LiveRoutingPage />} />
         <Route path="/virtual-models" element={<VirtualModelsPage />} />
         <Route path="/subscriptions" element={<SubscriptionsPage />} />
         <Route path="/subscriptions/new" element={<SubscriptionNewPage />} />
@@ -55,6 +58,7 @@ function AppInner() {
         <Route path="/statistics" element={<StatisticsPage />} />
         <Route path="/receipts" element={<ReceiptsPage />} />
         <Route path="/guide" element={<GuidePage />} />
+        <Route path="/updates" element={<UpdatesPage />} />
         <Route path="/settings" element={<SettingsPage />} />
         <Route path="/about" element={<AboutPage />} />
       </Route>

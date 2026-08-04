@@ -9,10 +9,9 @@ import {
 } from "@/components/ui/dialog";
 import { StatusDot, stateLabel } from "@/components/StatusBadge";
 import { SortableSubscriptionList } from "@/components/SortableSubscriptionList";
-import { RouteFlowDiagram } from "@/components/RouteFlowDiagram";
 import { useSubscriptions } from "@/hooks/useSubscriptions";
 import { useVirtualModels, useUpdateVirtualModel } from "@/hooks/useVirtualModels";
-import { VM_META, vmNameToSlot } from "@/lib/virtualModels";
+import { VM_META, VM_ORDER, vmNameToSlot } from "@/lib/virtualModels";
 import { useT } from "@/i18n";
 import type { RoutingMode, SubscriptionDto, VirtualModelDto } from "@/types";
 
@@ -27,6 +26,14 @@ export function VirtualModelsPage() {
     return m;
   }, [subs.data]);
 
+  const orderedVms = useMemo<VirtualModelDto[]>(
+    () =>
+      VM_ORDER.map((name) => vms.data?.find((v) => v.name === name)).filter(
+        (v): v is VirtualModelDto => v !== undefined,
+      ),
+    [vms.data],
+  );
+
   return (
     <>
       <div className="page-header">
@@ -38,10 +45,8 @@ export function VirtualModelsPage() {
         </div>
       </div>
 
-      <RouteFlowDiagram />
-
       <div className="slot-grid">
-        {vms.data?.map((vm) => (
+        {orderedVms.map((vm) => (
           <VirtualModelCard
             key={vm.name}
             vm={vm}
@@ -88,25 +93,19 @@ function VirtualModelCard({
     vm.mode === "round_robin"
       ? t("virtualModels.mode.roundRobinHint")
       : t("virtualModels.mode.sequentialHint");
+  // fallback 是第 5 个虚拟模型, 语义上与 4 个槽位并列而非同级, 通栏独占一行
+  const isFallback = vm.name === "model-fallback";
 
   return (
-    <div className="slot-card">
-      <div className="slot-head">
-        <div>
+    <div className={isFallback ? "slot-card wide" : "slot-card"}>
+      <div className="slot-head compact">
+        <div style={{ minWidth: 0 }}>
           <span className="slot-name">{vm.name}</span>
           <span className="slot-purpose">
             <strong>{t(meta.purposeKey)}</strong> · {t(meta.purposeEnKey)}
           </span>
         </div>
-        <span className="pill accent">
-          <span className="dot" />
-          {vm.subscription_ids.length}{t("virtualModels.endpointsSuffix")}
-        </span>
-      </div>
-
-      <div className="slot-mode-row">
-        <span style={{ fontWeight: 500, color: "var(--ink-2)" }}>{t("virtualModels.mode.label")}</span>
-        <div className="radio-group">
+        <div className="radio-group sm" title={modeHint}>
           <button
             className={vm.mode === "sequential" ? "on" : ""}
             onClick={() => update("sequential", vm.subscription_ids)}
@@ -122,26 +121,26 @@ function VirtualModelCard({
             {t("vm.mode.round_robin")}
           </button>
         </div>
-        <span
-          className="mono"
-          style={{ marginLeft: "auto", fontSize: 11.5, color: "var(--ink-4)" }}
-        >
-          {modeHint}
-        </span>
       </div>
 
-      <SortableSubscriptionList
-        subscriptionIds={vm.subscription_ids}
-        subscriptions={subsMap}
-        slot={slot}
-        vmName={vm.name}
-        onChange={onReorder}
-        onRemove={onRemove}
-      />
+      <div className="slot-body">
+        <SortableSubscriptionList
+          subscriptionIds={vm.subscription_ids}
+          subscriptions={subsMap}
+          slot={slot}
+          vmName={vm.name}
+          onChange={onReorder}
+          onRemove={onRemove}
+        />
 
-      <button className="add-endpoint" onClick={() => setPickerOpen(true)} type="button">
-        <Plus size={12} /> {t("virtualModels.addButton")}
-      </button>
+        <button
+          className="add-endpoint compact"
+          onClick={() => setPickerOpen(true)}
+          type="button"
+        >
+          <Plus size={12} /> {t("virtualModels.addButtonShort")}
+        </button>
+      </div>
 
       <AddSubscriptionDialog
         open={pickerOpen}
