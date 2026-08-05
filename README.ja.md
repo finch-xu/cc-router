@@ -47,11 +47,13 @@
 
 <table align="center">
   <tr>
-    <td width="60%"><img src="assets/screenshot-models.png" alt="cc-router 仮想モデル設定画面" /></td>
-    <td width="40%" rowspan="2"><img src="assets/screenshot-receipts.png" alt="cc-router 利用レシート 縦長スクリーンショット" /></td>
+    <td width="40%"><img src="assets/screenshot-routing.png" alt="cc-router リアルタイムルーティング画面" /></td>
+    <td width="40%"><img src="assets/screenshot-models.png" alt="cc-router 仮想モデル設定画面" /></td>
+    <td width="20%" rowspan="2"><img src="assets/screenshot-receipts.png" alt="cc-router 利用レシート 縦長スクリーンショット" /></td>
   </tr>
   <tr>
-    <td width="60%"><img src="assets/screenshot-logs.png" alt="cc-router リクエストログ画面" /></td>
+    <td width="40%"><img src="assets/screenshot-receipts-page.png" alt="cc-router 利用レシート画面" /></td>
+    <td width="40%"><img src="assets/screenshot-logs.png" alt="cc-router リクエストログ画面" /></td>
   </tr>
 </table>
 

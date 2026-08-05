@@ -47,11 +47,13 @@ Highlights:
 
 <table align="center">
   <tr>
-    <td width="60%"><img src="assets/screenshot-models.png" alt="cc-router virtual model configuration page" /></td>
-    <td width="40%" rowspan="2"><img src="assets/screenshot-receipts.png" alt="cc-router usage receipts long screenshot" /></td>
+    <td width="40%"><img src="assets/screenshot-routing.png" alt="cc-router live routing page" /></td>
+    <td width="40%"><img src="assets/screenshot-models.png" alt="cc-router virtual model configuration page" /></td>
+    <td width="20%" rowspan="2"><img src="assets/screenshot-receipts.png" alt="cc-router usage receipts long screenshot" /></td>
   </tr>
   <tr>
-    <td width="60%"><img src="assets/screenshot-logs.png" alt="cc-router request logs page" /></td>
+    <td width="40%"><img src="assets/screenshot-receipts-page.png" alt="cc-router usage receipts page" /></td>
+    <td width="40%"><img src="assets/screenshot-logs.png" alt="cc-router request logs page" /></td>
   </tr>
 </table>
 

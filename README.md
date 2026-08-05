@@ -47,11 +47,13 @@
 
 <table align="center">
   <tr>
-    <td width="60%"><img src="assets/screenshot-models.png" alt="cc-router 虚拟模型配置页截图" /></td>
-    <td width="40%" rowspan="2"><img src="assets/screenshot-receipts.png" alt="cc-router 用量小票长图" /></td>
+    <td width="40%"><img src="assets/screenshot-routing.png" alt="cc-router 实时路由页截图" /></td>
+    <td width="40%"><img src="assets/screenshot-models.png" alt="cc-router 虚拟模型配置页截图" /></td>
+    <td width="20%" rowspan="2"><img src="assets/screenshot-receipts.png" alt="cc-router 用量小票长图" /></td>
   </tr>
   <tr>
-    <td width="60%"><img src="assets/screenshot-logs.png" alt="cc-router 请求日志页截图" /></td>
+    <td width="40%"><img src="assets/screenshot-receipts-page.png" alt="cc-router 用量小票页截图" /></td>
+    <td width="40%"><img src="assets/screenshot-logs.png" alt="cc-router 请求日志页截图" /></td>
   </tr>
 </table>
 
