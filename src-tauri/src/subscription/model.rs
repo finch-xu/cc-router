@@ -143,6 +143,10 @@ pub struct ModelSlots {
     pub opus: String,
     pub sonnet: String,
     pub haiku: String,
+    /// 兜底槽 (可选): fallback 虚拟模型命中该订阅时, 非空则把请求 model 改写为此值,
+    /// 空串 = 未配置 = 透传原始 model. `#[serde(default)]` 兼容不带该字段的旧输入.
+    #[serde(default)]
+    pub fallback: String,
 }
 
 impl ModelSlots {
@@ -153,6 +157,13 @@ impl ModelSlots {
             SubscriptionSlot::Sonnet => &self.sonnet,
             SubscriptionSlot::Haiku => &self.haiku,
         }
+    }
+
+    /// 兜底槽取值: 空白 = 未配置(透传)。fallback 刻意不进 [`SubscriptionSlot`] enum,
+    /// 不参与 slot_efforts / ping 探测, 所以单独开 getter 而不是塞进 `get`。
+    pub fn fallback_model(&self) -> Option<&str> {
+        let t = self.fallback.trim();
+        (!t.is_empty()).then_some(t)
     }
 }
 
@@ -484,6 +495,7 @@ impl SubscriptionRow {
                 opus: "a".into(),
                 sonnet: "b".into(),
                 haiku: "c".into(),
+                fallback: String::new(),
             },
             slot_efforts: SlotEfforts::default(),
             enabled: true,
@@ -619,5 +631,31 @@ mod tests {
         let se: SlotEfforts =
             serde_json::from_str(r#"{"opus":"max","future_slot":"low"}"#).unwrap();
         assert_eq!(se.get(SubscriptionSlot::Opus), Some("max"));
+    }
+
+    /// 兜底槽: 空串 / 纯空白 = 未配置, trim 后返回配置值。
+    #[test]
+    fn fallback_model_treats_blank_as_none() {
+        let mut slots = ModelSlots {
+            fable: "d".into(),
+            opus: "a".into(),
+            sonnet: "b".into(),
+            haiku: "c".into(),
+            fallback: String::new(),
+        };
+        assert_eq!(slots.fallback_model(), None);
+        slots.fallback = "   ".into();
+        assert_eq!(slots.fallback_model(), None);
+        slots.fallback = " glm-4.7 ".into();
+        assert_eq!(slots.fallback_model(), Some("glm-4.7"));
+    }
+
+    /// 旧前端 payload 不带 fallback 字段时反序列化得到空串 (= 未配置)。
+    #[test]
+    fn model_slots_deserializes_without_fallback_field() {
+        let slots: ModelSlots =
+            serde_json::from_str(r#"{"fable":"d","opus":"a","sonnet":"b","haiku":"c"}"#).unwrap();
+        assert_eq!(slots.fallback, "");
+        assert_eq!(slots.fallback_model(), None);
     }
 }

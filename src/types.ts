@@ -155,6 +155,12 @@ export interface ModelSlots {
   opus: string;
   sonnet: string;
   haiku: string;
+  /**
+   * 兜底槽 (可选): fallback 虚拟模型命中该订阅时, 非空则把请求 model 改写为此值;
+   * 缺失 / 空串 = 未配置 = 透传原始 model。刻意 optional: 不参与 allSlotsFilled 必填校验,
+   * Rust 侧 #[serde(default)] 兼容不带该字段的 payload。
+   */
+  fallback?: string;
 }
 
 /**

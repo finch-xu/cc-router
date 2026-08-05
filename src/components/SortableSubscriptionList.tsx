@@ -18,6 +18,7 @@ import { ProviderLogo } from "@/components/ProviderLogo";
 import { stateTone } from "@/components/StatusBadge";
 import { useRouteFlashState } from "@/hooks/useRouteFlash";
 import { useT } from "@/i18n";
+import { isAnthropicPassthrough } from "@/lib/authTypes";
 import type { SubscriptionDto, SubscriptionSlot, VirtualModelName } from "@/types";
 
 interface Props {
@@ -63,8 +64,17 @@ export function SortableSubscriptionList({
         <div className="endpoint-list">
           {subscriptionIds.map((id, idx) => {
             const sub = subscriptions.get(id);
+            // fallback 卡片三态: 配置了兜底槽 → 槽值; 未配置且透传类 → 「原样透传」;
+            // 未配置且翻译类 → 警示 (dispatch 层会跳过该候选)。
+            const fallbackModel = sub?.model_slots.fallback?.trim() ?? "";
             const realModel =
-              slot === null ? t("sortableSub.passthrough") : sub ? sub.model_slots[slot] : "?";
+              slot === null
+                ? fallbackModel || t("sortableSub.passthrough")
+                : sub
+                  ? sub.model_slots[slot]
+                  : "?";
+            const fallbackSkipped =
+              slot === null && !fallbackModel && !!sub && !isAnthropicPassthrough(sub.auth_type);
             return (
               <SortableRow
                 key={id}
@@ -74,6 +84,7 @@ export function SortableSubscriptionList({
                 sub={sub}
                 iconId={sub?.provider_icon}
                 realModel={realModel}
+                fallbackSkipped={fallbackSkipped}
                 onRemove={() => onRemove(id)}
               />
             );
@@ -91,6 +102,7 @@ function SortableRow({
   sub,
   iconId,
   realModel,
+  fallbackSkipped,
   onRemove,
 }: {
   id: string;
@@ -99,6 +111,8 @@ function SortableRow({
   sub: SubscriptionDto | undefined;
   iconId: string | undefined;
   realModel: string;
+  /** fallback 卡片专用: 翻译类订阅未配置兜底槽, dispatch 会跳过 → 显示警示替代模型名 */
+  fallbackSkipped?: boolean;
   onRemove: () => void;
 }) {
   const { t } = useT();
@@ -127,7 +141,13 @@ function SortableRow({
           <span className={`endpoint-status${dotClass}`} aria-hidden />
           {sub?.display_name ?? t("common.notFound")}
         </div>
-        <div className="endpoint-model mono">{realModel}</div>
+        {fallbackSkipped ? (
+          <div className="endpoint-model">
+            <span className="pill err">{t("sortableSub.fallbackSkipped")}</span>
+          </div>
+        ) : (
+          <div className="endpoint-model mono">{realModel}</div>
+        )}
       </div>
       <button className="remove" onClick={onRemove} type="button" aria-label={t("sortableSub.remove")}>
         <X size={12} strokeWidth={2} />

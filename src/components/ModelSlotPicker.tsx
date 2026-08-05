@@ -24,12 +24,24 @@ interface Props {
   disabled?: boolean;
 }
 
-const SLOTS: Array<{ key: keyof ModelSlots; labelKey: string; hintKey: string }> = [
+type SlotRow = { key: keyof ModelSlots; labelKey: string; hintKey: string };
+
+const SLOTS: SlotRow[] = [
   { key: "fable",  labelKey: "modelSlot.fable.label",  hintKey: "modelSlot.fable.hint" },
   { key: "opus",   labelKey: "modelSlot.opus.label",   hintKey: "modelSlot.opus.hint" },
   { key: "sonnet", labelKey: "modelSlot.sonnet.label", hintKey: "modelSlot.sonnet.hint" },
   { key: "haiku",  labelKey: "modelSlot.haiku.label",  hintKey: "modelSlot.haiku.hint" },
 ];
+
+/**
+ * 兜底槽 (可选, fallback 虚拟模型专用): 留空 = 透传未知 model。
+ * 与四个核心槽同循环渲染保持控件一致, 但不参与必填校验、无 effort 下拉。
+ */
+const FALLBACK_ROW: SlotRow = {
+  key: "fallback",
+  labelKey: "modelSlot.fallback.label",
+  hintKey: "modelSlot.fallback.hint",
+};
 
 export function ModelSlotPicker({
   value,
@@ -71,7 +83,7 @@ export function ModelSlotPicker({
   }
 
   /** "" 是 auto 的 sentinel, 归一化成字段缺失, 保证 patch 里不出现空串。 */
-  function updateEffort(key: keyof ModelSlots, v: string) {
+  function updateEffort(key: keyof SlotEfforts, v: string) {
     const next = { ...efforts };
     if (v) {
       next[key] = v as SlotEffort;
@@ -143,8 +155,9 @@ export function ModelSlotPicker({
       )}
 
       <div style={{ display: "grid", gap: 14 }}>
-        {SLOTS.map(({ key, labelKey, hintKey }) => {
-          const current = value[key];
+        {[...SLOTS, FALLBACK_ROW].map(({ key, labelKey, hintKey }) => {
+          const isFallbackSlot = key === "fallback";
+          const current = value[key] ?? "";
           const inList = !!models && models.some((m) => m.id === current);
           const showHistorical =
             effectiveMode === "auto" && !!models && models.length > 0 && !!current && !inList;
@@ -177,8 +190,11 @@ export function ModelSlotPicker({
                         onChange={(e) => update(key, e.target.value)}
                         disabled={disabled}
                       >
-                        <option value="" disabled>
-                          {t("modelSlot.placeholder")}
+                        {/* 兜底槽空值是合法选择 (= 透传), 核心槽空值只是未选提示 */}
+                        <option value="" disabled={!isFallbackSlot}>
+                          {isFallbackSlot
+                            ? t("modelSlot.fallback.none")
+                            : t("modelSlot.placeholder")}
                         </option>
                         {showHistorical && (
                           <option value={current}>{current}{t("modelSlot.historicalSuffix")}</option>
@@ -205,28 +221,34 @@ export function ModelSlotPicker({
                       style={{ flex: 1, minWidth: 0 }}
                       value={current}
                       onChange={(e) => update(key, e.target.value)}
-                      placeholder={t("modelSlot.modelIdPh")}
+                      placeholder={
+                        isFallbackSlot ? t("modelSlot.fallback.none") : t("modelSlot.modelIdPh")
+                      }
                       disabled={disabled}
                     />
                   )}
                 </div>
-                {/* 右: 思考档位。固定宽度让四行右边缘对齐 */}
-                <select
-                  className="select"
-                  style={{ flex: "0 0 104px" }}
-                  aria-label={t("slotEffort.aria", { slot: t(labelKey) })}
-                  title={effortDisabled ? effortDisabledReason : undefined}
-                  value={efforts[key] ?? ""}
-                  onChange={(e) => updateEffort(key, e.target.value)}
-                  disabled={disabled || effortDisabled}
-                >
-                  <option value="">{t("slotEffort.auto")}</option>
-                  {SLOT_EFFORT_LEVELS.map((lv) => (
-                    <option key={lv} value={lv}>
-                      {lv}
-                    </option>
-                  ))}
-                </select>
+                {/* 右: 思考档位。固定宽度让各行右边缘对齐; 兜底槽无 effort, 放占位块保持对齐 */}
+                {isFallbackSlot ? (
+                  <div style={{ flex: "0 0 104px" }} />
+                ) : (
+                  <select
+                    className="select"
+                    style={{ flex: "0 0 104px" }}
+                    aria-label={t("slotEffort.aria", { slot: t(labelKey) })}
+                    title={effortDisabled ? effortDisabledReason : undefined}
+                    value={efforts[key as keyof SlotEfforts] ?? ""}
+                    onChange={(e) => updateEffort(key as keyof SlotEfforts, e.target.value)}
+                    disabled={disabled || effortDisabled}
+                  >
+                    <option value="">{t("slotEffort.auto")}</option>
+                    {SLOT_EFFORT_LEVELS.map((lv) => (
+                      <option key={lv} value={lv}>
+                        {lv}
+                      </option>
+                    ))}
+                  </select>
+                )}
               </div>
             </div>
           );

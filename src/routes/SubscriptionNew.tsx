@@ -1019,6 +1019,13 @@ export function SubscriptionNewPage() {
                         onChange={(v) => setSlots({ ...slots, [key]: v })}
                       />
                     ))}
+                    {/* 兜底槽 (可选): 留空 = fallback 透传未知 model */}
+                    <SlotInput
+                      label="model-fallback →"
+                      value={slots.fallback ?? ""}
+                      onChange={(v) => setSlots({ ...slots, fallback: v })}
+                      placeholder={t("modelSlot.fallback.none")}
+                    />
                   </div>
                 )}
 
@@ -1178,10 +1185,12 @@ function SlotInput({
   label,
   value,
   onChange,
+  placeholder,
 }: {
   label: string;
   value: string;
   onChange: (v: string) => void;
+  placeholder?: string;
 }) {
   const { t } = useT();
   return (
@@ -1194,7 +1203,7 @@ function SlotInput({
         style={{ flex: 1 }}
         value={value}
         onChange={(e) => onChange(e.target.value)}
-        placeholder={t("subscriptionNew.slotPh")}
+        placeholder={placeholder ?? t("subscriptionNew.slotPh")}
       />
     </div>
   );

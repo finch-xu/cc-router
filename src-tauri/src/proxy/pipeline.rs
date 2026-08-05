@@ -182,6 +182,10 @@ pub async fn dispatch(
         None
     };
 
+    // B: fallback 下因未配置兜底槽被跳过的翻译类订阅, 攒起来给 503 summary 用,
+    // 否则「订阅明明 Available 却 503」无从排查。
+    let mut skipped_no_fallback_slot: Vec<String> = Vec::new();
+
     for sub_id in order.candidate_ids {
         let attempt_id = Uuid::new_v4();
         let rt = {
@@ -206,11 +210,20 @@ pub async fn dispatch(
             auth_type,
             oauth_metadata,
             forced_effort,
+            fallback_override,
         ) = {
             let guard = rt.read().await;
-            // fallback 透传原始 model; 其他三个按 slot 映射
+            // fallback: 订阅配置了兜底槽则改写为槽值, 否则透传原始 model;
+            // 其他四个虚拟模型按 slot 映射。
+            let fallback_override: Option<String> = if is_fallback {
+                guard.row.model_slots.fallback_model().map(str::to_string)
+            } else {
+                None
+            };
             let real_model = if is_fallback {
-                model.to_string()
+                fallback_override
+                    .clone()
+                    .unwrap_or_else(|| model.to_string())
             } else {
                 let slot = vm_name.slot();
                 guard.row.model_slots.get(slot).to_string()
@@ -233,19 +246,34 @@ pub async fn dispatch(
                 guard.row.auth_type,
                 guard.row.oauth_metadata.clone(),
                 forced_effort,
+                fallback_override,
             )
         };
         let oauth_refresh_token = oauth_metadata.refresh_token.clone();
         let oauth_account_id = oauth_metadata.account_id.clone();
 
+        // 翻译类 6 分支 (非 ApiKey) 与 fallback 透传互斥: 翻译层必须有确定的 model 改写目标。
+        // 订阅配置了兜底槽 (fallback_override) 时改写目标存在, 正常参与 fallback;
+        // 未配置则跳过此候选 (不发请求、不计 retry), 并记入 503 summary 供排查。
+        if is_fallback
+            && fallback_override.is_none()
+            && !matches!(auth_type, AuthType::ApiKey)
+        {
+            warn!(
+                %sub_id,
+                %display_name,
+                ?auth_type,
+                "translation-type subscription skipped under fallback (no fallback slot configured)"
+            );
+            skipped_no_fallback_slot.push(display_name.clone());
+            continue;
+        }
+
         // ChatGPT OAuth 分支: 走独立的 dispatch + 翻译层 (proxy::oauth_dispatch).
-        // fallback 透传与 OAuth 互斥: 此 provider 不允许做 fallback (model 必须改写到 codex 模型).
         if matches!(auth_type, AuthType::ChatgptOauth) {
-            // 改写 model 字段后给翻译层 (类似默认路径里 fallback==false 的处理)
+            // 改写 model 字段后给翻译层 (fallback 走到这里必然带兜底槽, real_model 已是槽值)
             let mut oauth_body = request_body.clone();
-            if !is_fallback {
-                oauth_body["model"] = Value::String(real_model.clone());
-            }
+            oauth_body["model"] = Value::String(real_model.clone());
 
             let (yaml_expose_reasoning, yaml_default_effort) =
                 provider_reasoning_defaults(state, &provider_id);
@@ -376,17 +404,11 @@ pub async fn dispatch(
 
         // Kiro OAuth 分支: 凭据走 AWS Builder ID OIDC 或 Kiro IDE JSON 文件,
         // 上游为 AWS CodeWhisperer (二进制 Event Stream), 协议完全独立, 与 codex 互不污染.
-        // fallback 与 OAuth 互斥, 同 codex 规则.
         //
         // 本分支刻意不读 forced_effort: CodeWhisperer 协议没有 reasoning 字段 (见 kiro.yaml
         // 的 expose_reasoning: false 与 kiro_codewhisperer.rs 丢弃客户端 thinking 块的注释)。
         // 即便订阅的 slot_efforts 里存了值也不读, 前端已把 Kiro 订阅的 effort 下拉灰掉。
         if matches!(auth_type, AuthType::KiroOauth) {
-            if is_fallback {
-                // fallback 透传原始 model, Kiro 后端只认 codewhisperer 模型, 必然 400.
-                // 直接跳过此候选, 不计入 retry.
-                continue;
-            }
             let mut kiro_body = request_body.clone();
             kiro_body["model"] = Value::String(real_model.clone());
             emit_attempt_started(state, sub_id, vm_name);
@@ -506,14 +528,8 @@ pub async fn dispatch(
         // Gemini 分支: Google AI Studio API key + Gemini generateContent 协议翻译.
         // 与 OAuth 分支不同, auth 仍是 api_key (而非 OAuth token), 但响应/请求体走独立翻译路径
         // (Anthropic Messages ↔ Gemini contents/parts). model 嵌在 URL 路径里, 由 dispatch 层
-        // 做 `{model}` 占位符替换. fallback 与翻译互斥, 因为 fallback 不改写 model.
+        // 做 `{model}` 占位符替换 (fallback 走到这里必然带兜底槽, real_model 已是槽值).
         if matches!(auth_type, AuthType::GeminiApiKey) {
-            if is_fallback {
-                // fallback 透传原始 model, Gemini URL 拼接需要真实 model 名才能命中端点.
-                // 直接跳过此候选, 不计 retry.
-                continue;
-            }
-
             let (yaml_expose_reasoning, yaml_default_effort) =
                 provider_reasoning_defaults(state, &provider_id);
             let gemini_extras = GeminiExtras {
@@ -641,13 +657,8 @@ pub async fn dispatch(
         }
 
         // Gemini Interactions 分支: Google 新 /v1beta/interactions 接口 + 协议翻译 (与旧 generateContent
-        // 完全不同的请求/响应形态). model 在 body 里 (不嵌 URL), URL 固定. fallback 与翻译互斥
-        // (fallback 不改写 model, 但 Interactions 必须翻译协议).
+        // 完全不同的请求/响应形态). model 在 body 里 (不嵌 URL), URL 固定.
         if matches!(auth_type, AuthType::GeminiInteractionsApiKey) {
-            if is_fallback {
-                continue;
-            }
-
             let (yaml_expose_reasoning, yaml_default_effort) =
                 provider_reasoning_defaults(state, &provider_id);
             let interactions_extras = InteractionsExtras {
@@ -785,11 +796,8 @@ pub async fn dispatch(
         }
 
         // OpenAI Responses (API key) 分支: 走独立的 dispatch + 翻译层 (proxy::openai_responses_dispatch).
-        // 客户端 stream 决定上游 stream; reasoning 双向支持; 与 fallback 互斥 (model 必须改写).
+        // 客户端 stream 决定上游 stream; reasoning 双向支持.
         if matches!(auth_type, AuthType::OpenaiResponsesApiKey) {
-            if is_fallback {
-                continue;
-            }
             // 自定义路径 (provider_id == custom-openai) 未注册到 providers map,
             // 走 provider_reasoning_defaults 兜底 (expose=true + medium effort)。
             let (yaml_expose_reasoning, yaml_default_effort) =
@@ -927,11 +935,7 @@ pub async fn dispatch(
         // (proxy::openai_chat_completions_dispatch). 与 OpenaiResponsesApiKey 并列, 都是 OpenAI
         // 协议家族但 SSE 状态机不同 (chat completions 是 delta.{content,tool_calls[i]} 增量,
         // responses 是 output_item.added 事件). 覆盖 DeepSeek/Together/Groq/Ollama 等兼容生态.
-        // 与 fallback 互斥 (model 必须改写到订阅 slot 真实模型, 透传 "model-fallback" 上游 400).
         if matches!(auth_type, AuthType::OpenaiChatCompletionsApiKey) {
-            if is_fallback {
-                continue;
-            }
             let (yaml_expose_reasoning, yaml_default_effort) =
                 provider_reasoning_defaults(state, &provider_id);
 
@@ -1067,8 +1071,8 @@ pub async fn dispatch(
             }
         }
 
-        // fallback 透传原始 body, 不必 clone JSON, 直接序列化引用; 其他三个虚拟模型按
-        // 订阅 slot 改写 model 字段, 必须在 clone 上改。
+        // fallback 未配置兜底槽时透传原始 model; 配置了兜底槽或非 fallback 时改写 model
+        // (real_model 已在 snapshot 处算好: 兜底槽值或 slot 映射值)。
         //
         // 透传分支 (Anthropic 协议: anthropic/zhipu/deepseek/xiaomi/moonshot/minimax/alibaba 等)
         // 都走这一段, 上游不认 cc-router 自家翻译层 (openai_responses/gemini) 包装的 thinking
@@ -1076,7 +1080,7 @@ pub async fn dispatch(
         // must be passed back to the API"。详见 [`strip_foreign_thinking_blocks`].
         let serialized_body = {
             let mut upstream_body = request_body.clone();
-            if !is_fallback {
+            if !is_fallback || fallback_override.is_some() {
                 upstream_body["model"] = Value::String(real_model.clone());
             }
             // 订阅槽位级 forced effort 双写 (output_config.effort + thinking.effort).
@@ -1247,9 +1251,13 @@ pub async fn dispatch(
                     )
                 };
 
-                // 改写响应 model 字段：真实名 → 虚拟名（§5.4）；fallback 透传不改写
+                // 改写响应 model 字段（§5.4）：真实名 → 虚拟名; fallback 且配置了兜底槽时
+                // 回显客户端原始请求名 (保持「响应 model = 请求 model」不变量);
+                // fallback 纯透传不改写。
                 let final_body = if is_success && !is_fallback {
                     rewrite_response_model(resp_body, vm_name.as_str())
+                } else if is_success && fallback_override.is_some() {
+                    rewrite_response_model(resp_body, model)
                 } else {
                     resp_body
                 };
@@ -1532,6 +1540,15 @@ pub async fn dispatch(
                         } else {
                             None
                         };
+                        // message.model 改写目标: 非 fallback → 虚拟名; fallback 且配置了
+                        // 兜底槽 → 客户端原始 model; fallback 纯透传 → None 不改写。
+                        let virtual_name_override = if !is_fallback {
+                            Some(vm_name.as_str().to_string())
+                        } else if fallback_override.is_some() {
+                            Some(model.to_string())
+                        } else {
+                            None
+                        };
                         let response = sse::stream_response(
                             resp_headers,
                             stream,
@@ -1552,6 +1569,7 @@ pub async fn dispatch(
                             dump_tx,
                             Some(first_byte_at),
                             ctx.clone(),
+                            virtual_name_override,
                         );
                         return Ok(response);
                     }
@@ -1626,7 +1644,16 @@ pub async fn dispatch(
     for sub_id in &vm_config.subscription_ids {
         if let Some(rt) = subs_map.get(sub_id) {
             let g = rt.read().await;
-            summary.push(format!("- {}: {:?}", g.row.display_name, g.state));
+            // fallback 下因未配置兜底槽被跳过的翻译类订阅: 状态显示 Available 却没被使用,
+            // 不注明的话用户无从排查「明明可用为什么 503」。
+            if skipped_no_fallback_slot.contains(&g.row.display_name) {
+                summary.push(format!(
+                    "- {}: 未配置兜底模型, fallback 下已跳过",
+                    g.row.display_name
+                ));
+            } else {
+                summary.push(format!("- {}: {:?}", g.row.display_name, g.state));
+            }
         }
     }
     drop(subs_map);

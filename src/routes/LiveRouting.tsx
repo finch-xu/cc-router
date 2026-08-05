@@ -7,6 +7,7 @@ import { ProviderLogo } from "@/components/ProviderLogo";
 import { useProxyStatus, useSettings } from "@/hooks/useSettings";
 import { useSubscriptions } from "@/hooks/useSubscriptions";
 import { useVirtualModels } from "@/hooks/useVirtualModels";
+import { isAnthropicPassthrough } from "@/lib/authTypes";
 import { MODE_LABEL_KEY, VM_ORDER, vmNameToSlot } from "@/lib/virtualModels";
 import { useT } from "@/i18n";
 import type { SubscriptionDto, VirtualModelDto, VirtualModelName } from "@/types";
@@ -294,8 +295,15 @@ function MappingSection() {
                     {vm.subscription_ids.map((sid) => {
                       const sub = subsMap.get(sid);
                       if (!sub) return null;
+                      // fallback 行三态: 兜底槽值 / 透传 / 翻译类未配槽会被跳过
+                      const fallbackModel = sub.model_slots.fallback?.trim() ?? "";
                       const real =
-                        slot === null ? t("sortableSub.passthrough") : sub.model_slots[slot];
+                        slot === null
+                          ? fallbackModel ||
+                            (isAnthropicPassthrough(sub.auth_type)
+                              ? t("sortableSub.passthrough")
+                              : t("sortableSub.fallbackSkipped"))
+                          : sub.model_slots[slot];
                       return (
                         <span
                           className={sub.state === "healthy" ? "vm-real" : "vm-real err"}

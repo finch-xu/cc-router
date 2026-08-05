@@ -11,6 +11,7 @@ import { StatusDot, stateLabel } from "@/components/StatusBadge";
 import { SortableSubscriptionList } from "@/components/SortableSubscriptionList";
 import { useSubscriptions } from "@/hooks/useSubscriptions";
 import { useVirtualModels, useUpdateVirtualModel } from "@/hooks/useVirtualModels";
+import { isAnthropicPassthrough } from "@/lib/authTypes";
 import { VM_META, VM_ORDER, vmNameToSlot } from "@/lib/virtualModels";
 import { useT } from "@/i18n";
 import type { RoutingMode, SubscriptionDto, VirtualModelDto } from "@/types";
@@ -147,6 +148,7 @@ function VirtualModelCard({
         onOpenChange={setPickerOpen}
         existingIds={vm.subscription_ids}
         allSubs={allSubs}
+        isFallback={isFallback}
         onConfirm={(ids) => {
           addSubs(ids);
           setPickerOpen(false);
@@ -161,12 +163,15 @@ function AddSubscriptionDialog({
   onOpenChange,
   existingIds,
   allSubs,
+  isFallback,
   onConfirm,
 }: {
   open: boolean;
   onOpenChange: (v: boolean) => void;
   existingIds: string[];
   allSubs: SubscriptionDto[];
+  /** fallback 卡片打开时 true: 对「翻译类且未配兜底槽」的候选显示提示 (不禁选) */
+  isFallback: boolean;
   onConfirm: (ids: string[]) => void;
 }) {
   const { t } = useT();
@@ -224,6 +229,11 @@ function AddSubscriptionDialog({
                 />
                 <StatusDot state={sub.state} />
                 <span style={{ fontSize: 13, flex: 1 }}>{sub.display_name}</span>
+                {isFallback &&
+                  !sub.model_slots.fallback?.trim() &&
+                  !isAnthropicPassthrough(sub.auth_type) && (
+                    <span className="pill warn">{t("virtualModels.dialog.needFallbackSlot")}</span>
+                  )}
                 {sub.state === "auth_failed" && (
                   <span className="pill err">{stateLabel("auth_failed", t)}</span>
                 )}

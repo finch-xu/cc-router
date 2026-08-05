@@ -27,6 +27,7 @@ pub async fn load_runtime(
     let rows = sqlx::query(
         "SELECT id, provider_id, endpoint_id, display_name, api_key,
                 model_slot_fable, model_slot_opus, model_slot_sonnet, model_slot_haiku,
+                model_slot_fallback,
                 enabled, is_auth_failed, last_error_message,
                 created_at, updated_at,
                 base_url, messages_path, auth_header_name, auth_header_format,
@@ -127,6 +128,7 @@ fn row_to_row(row: &sqlx::sqlite::SqliteRow) -> AppResult<SubscriptionRow> {
             opus: row.try_get("model_slot_opus")?,
             sonnet: row.try_get("model_slot_sonnet")?,
             haiku: row.try_get("model_slot_haiku")?,
+            fallback: row.try_get("model_slot_fallback")?,
         },
         slot_efforts,
         enabled: {
@@ -176,12 +178,13 @@ pub async fn insert(pool: &SqlitePool, sub: &SubscriptionRow) -> AppResult<()> {
     sqlx::query(
         "INSERT INTO subscriptions (id, provider_id, endpoint_id, display_name, api_key,
             model_slot_fable, model_slot_opus, model_slot_sonnet, model_slot_haiku,
+            model_slot_fallback,
             enabled, is_auth_failed, last_error_message, created_at, updated_at,
             base_url, messages_path, auth_header_name, auth_header_format,
             required_headers, forward_headers, model_discovery, balance_discovery,
             provider_display_name, provider_icon, is_user_defined,
             auth_type, oauth_metadata, slot_efforts)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
                  ?, ?, ?, ?,
                  ?, ?, ?, ?,
                  ?, ?, ?,
@@ -196,6 +199,7 @@ pub async fn insert(pool: &SqlitePool, sub: &SubscriptionRow) -> AppResult<()> {
     .bind(&sub.model_slots.opus)
     .bind(&sub.model_slots.sonnet)
     .bind(&sub.model_slots.haiku)
+    .bind(&sub.model_slots.fallback)
     .bind(sub.enabled as i64)
     .bind(sub.is_auth_failed as i64)
     .bind(&sub.last_error_message)
@@ -261,6 +265,7 @@ pub async fn update_row(pool: &SqlitePool, sub: &SubscriptionRow) -> AppResult<(
         "UPDATE subscriptions SET
             endpoint_id = ?, display_name = ?,
             model_slot_fable = ?, model_slot_opus = ?, model_slot_sonnet = ?, model_slot_haiku = ?,
+            model_slot_fallback = ?,
             slot_efforts = ?,
             enabled = ?, is_auth_failed = ?, last_error_message = ?, updated_at = ?,
             base_url = ?, messages_path = ?, auth_header_name = ?, auth_header_format = ?,
@@ -274,6 +279,7 @@ pub async fn update_row(pool: &SqlitePool, sub: &SubscriptionRow) -> AppResult<(
     .bind(&sub.model_slots.opus)
     .bind(&sub.model_slots.sonnet)
     .bind(&sub.model_slots.haiku)
+    .bind(&sub.model_slots.fallback)
     .bind(slot_efforts_json)
     .bind(sub.enabled as i64)
     .bind(sub.is_auth_failed as i64)

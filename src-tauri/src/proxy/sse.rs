@@ -62,15 +62,12 @@ pub fn stream_response(
     // 单独传是为了避免 peek + state_machine apply 的耗时被错算到 TTFT 里.
     peek_first_byte_at: Option<Instant>,
     ctx: ClientContext,
+    // message_start 的 message.model 改写目标, 由调用方决定:
+    // 非 fallback → 虚拟名; fallback 且订阅配置了兜底槽 → 客户端原始 model
+    // (保持「响应 model = 请求 model」不变量); fallback 纯透传 → None 不改写。
+    virtual_name_override: Option<String>,
 ) -> Response {
     let (client_tx, client_rx) = mpsc::channel::<Result<Bytes, std::io::Error>>(64);
-
-    // fallback 模式下不改写 message.model；传 None 表示透传
-    let virtual_name_override: Option<String> = if vm_name.is_fallback() {
-        None
-    } else {
-        Some(vm_name.as_str().to_string())
-    };
 
     tokio::spawn(async move {
         let mut upstream = upstream_stream;
