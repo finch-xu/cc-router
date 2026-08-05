@@ -15,6 +15,13 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import { api } from "@/api/tauri";
 import {
   useProxyStatus,
@@ -244,17 +251,20 @@ export function SettingsPage() {
               {t("settings.language.label")}
               <div className="desc">{t("settings.language.desc")}</div>
             </div>
-            <select
-              className="select"
-              style={{ maxWidth: 200 }}
+            <Select
               value={preferredLanguage}
-              onChange={(e) => changeLanguage(e.target.value as LanguagePref)}
+              onValueChange={(v) => changeLanguage(v as LanguagePref)}
             >
-              <option value="system">{t("settings.language.system")}</option>
-              <option value="zh">中文</option>
-              <option value="en">English</option>
-              <option value="ja">日本語</option>
-            </select>
+              <SelectTrigger style={{ maxWidth: 200 }}>
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="system">{t("settings.language.system")}</SelectItem>
+                <SelectItem value="zh">中文</SelectItem>
+                <SelectItem value="en">English</SelectItem>
+                <SelectItem value="ja">日本語</SelectItem>
+              </SelectContent>
+            </Select>
           </div>
           <div className="setting-row">
             <div className="label-col">{t("settings.proxy.autostart.label")}</div>
@@ -266,32 +276,35 @@ export function SettingsPage() {
           </div>
           <div className="setting-row">
             <div className="label-col">{t("settings.theme.label")}</div>
-            <select
-              className="select"
-              style={{ maxWidth: 200 }}
-              value={theme}
-              onChange={(e) => setTheme(e.target.value as Theme)}
-            >
-              <option value="system">{t("settings.theme.system")}</option>
-              <option value="light">{t("settings.theme.light")}</option>
-              <option value="dark">{t("settings.theme.dark")}</option>
-            </select>
+            <Select value={theme} onValueChange={(v) => setTheme(v as Theme)}>
+              <SelectTrigger style={{ maxWidth: 200 }}>
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="system">{t("settings.theme.system")}</SelectItem>
+                <SelectItem value="light">{t("settings.theme.light")}</SelectItem>
+                <SelectItem value="dark">{t("settings.theme.dark")}</SelectItem>
+              </SelectContent>
+            </Select>
           </div>
           <div className="setting-row">
             <div className="label-col">
               {t("settings.update.source.label")}
             </div>
-            <select
-              className="select"
-              style={{ maxWidth: 240 }}
+            <Select
               value={settings.data?.update_source ?? "china"}
-              onChange={(e) => void changeUpdateSource(e.target.value as UpdateSource)}
+              onValueChange={(v) => void changeUpdateSource(v as UpdateSource)}
             >
-              <option value="international">
-                {t("settings.update.source.international")}
-              </option>
-              <option value="china">{t("settings.update.source.china")}</option>
-            </select>
+              <SelectTrigger style={{ maxWidth: 240 }}>
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="international">
+                  {t("settings.update.source.international")}
+                </SelectItem>
+                <SelectItem value="china">{t("settings.update.source.china")}</SelectItem>
+              </SelectContent>
+            </Select>
           </div>
         </div>
       </div>
@@ -594,31 +607,37 @@ export function SettingsPage() {
         <div className="card-body">
           <div className="setting-row">
             <div className="label-col">{t("settings.storage.retention.label")}</div>
-            <select
-              className="select"
-              style={{ maxWidth: 200 }}
+            <Select
               value={String(retentionDays >= 36500 ? 0 : retentionDays)}
-              onChange={(e) => void changeRetentionDays(Number(e.target.value))}
+              onValueChange={(v) => void changeRetentionDays(Number(v))}
             >
-              <option value="7">{t("settings.storage.retention.7d")}</option>
-              <option value="30">{t("settings.storage.retention.30d")}</option>
-              <option value="90">{t("settings.storage.retention.90d")}</option>
-              <option value="0">{t("settings.storage.retention.forever")}</option>
-            </select>
+              <SelectTrigger style={{ maxWidth: 200 }}>
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="7">{t("settings.storage.retention.7d")}</SelectItem>
+                <SelectItem value="30">{t("settings.storage.retention.30d")}</SelectItem>
+                <SelectItem value="90">{t("settings.storage.retention.90d")}</SelectItem>
+                <SelectItem value="0">{t("settings.storage.retention.forever")}</SelectItem>
+              </SelectContent>
+            </Select>
           </div>
           <div className="setting-row">
             <div className="label-col">{t("settings.storage.dbLimit.label")}</div>
-            <select
-              className="select"
-              style={{ maxWidth: 200 }}
+            <Select
               value={String(dbLimitMb)}
-              onChange={(e) => void changeDbLimit(Number(e.target.value))}
+              onValueChange={(v) => void changeDbLimit(Number(v))}
             >
-              <option value="100">100 MB</option>
-              <option value="500">500 MB</option>
-              <option value="1024">1 GB</option>
-              <option value="10240">{t("settings.storage.dbLimit.unlimited")}</option>
-            </select>
+              <SelectTrigger style={{ maxWidth: 200 }}>
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="100">100 MB</SelectItem>
+                <SelectItem value="500">500 MB</SelectItem>
+                <SelectItem value="1024">1 GB</SelectItem>
+                <SelectItem value="10240">{t("settings.storage.dbLimit.unlimited")}</SelectItem>
+              </SelectContent>
+            </Select>
           </div>
         </div>
       </div>

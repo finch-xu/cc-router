@@ -641,7 +641,7 @@ export function SubscriptionNewPage() {
                 <div style={{ marginBottom: 20 }}>
                   <label className="field-label">{t("subscriptionNew.field.provider")}</label>
                   <Select value={providerId} onValueChange={handleProviderChange}>
-                    <SelectTrigger className="select h-auto">
+                    <SelectTrigger>
                       {renderProviderTriggerLabel()}
                     </SelectTrigger>
                     <SelectContent>
@@ -765,7 +765,7 @@ export function SubscriptionNewPage() {
                   <div style={{ marginBottom: 20 }}>
                     <label className="field-label">{t("subscriptionNew.field.endpoint")}</label>
                     <Select value={endpointId} onValueChange={setEndpointId}>
-                      <SelectTrigger className="select h-auto">
+                      <SelectTrigger>
                         <SelectValue placeholder={t("subscriptionNew.endpointSelect")} />
                       </SelectTrigger>
                       <SelectContent>
@@ -865,7 +865,7 @@ export function SubscriptionNewPage() {
                           value={customAuthPreset}
                           onValueChange={(v) => setCustomAuthPreset(v as AuthPreset)}
                         >
-                          <SelectTrigger className="select h-auto">
+                          <SelectTrigger>
                             <SelectValue />
                           </SelectTrigger>
                           <SelectContent>

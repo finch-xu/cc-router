@@ -1,8 +1,19 @@
 import { useEffect, useRef, useState } from "react";
-import { RefreshCw, AlertCircle } from "lucide-react";
-import { useT } from "@/i18n";
+import { RefreshCw, AlertCircle, HelpCircle } from "lucide-react";
+import { useT, type TFunction } from "@/i18n";
 import { SLOT_EFFORT_LEVELS } from "@/lib/modelSlots";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import type { ModelInfo, ModelSlots, SlotEffort, SlotEfforts } from "@/types";
+
+/** Radix SelectItem 不允许 value=""; 空值语义各自映射成 sentinel, 写回 state 前还原。 */
+const EFFORT_AUTO = "__auto__";
+const MODEL_NONE = "__none__";
 
 type Mode = "auto" | "manual";
 
@@ -61,6 +72,7 @@ export function ModelSlotPicker({
   // null 表示还没初始化;一旦用户主动点击切换,userChose 置 true,不再被外部 data 反向覆盖。
   const [mode, setMode] = useState<Mode | null>(null);
   const userChoseRef = useRef(false);
+  const [showEffortHelp, setShowEffortHelp] = useState(false);
 
   useEffect(() => {
     if (userChoseRef.current) return;
@@ -154,6 +166,47 @@ export function ModelSlotPicker({
         </div>
       )}
 
+      {/* 列头: 与下方控件行同 flex 结构 (左 flex:1 / 右 104px) 保证对齐 */}
+      <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 8 }}>
+        <div style={{ flex: 1, minWidth: 0, fontSize: 12, fontWeight: 500, color: "var(--ink-3)" }}>
+          {t("modelSlot.colModel")}
+        </div>
+        <div
+          style={{
+            flex: "0 0 104px",
+            display: "flex",
+            alignItems: "center",
+            gap: 4,
+            fontSize: 12,
+            fontWeight: 500,
+            color: "var(--ink-3)",
+          }}
+        >
+          {t("slotEffort.colLabel")}
+          <button
+            type="button"
+            className="help-toggle"
+            aria-label={t("slotEffort.helpAria")}
+            aria-expanded={showEffortHelp}
+            onClick={() => setShowEffortHelp((v) => !v)}
+          >
+            <HelpCircle size={13} />
+          </button>
+        </div>
+      </div>
+
+      {showEffortHelp && (
+        <div className="field-hint help-panel">
+          {t("slotEffort.hint")}
+          {effortDisabled && effortDisabledReason && (
+            <>
+              <br />
+              {effortDisabledReason}
+            </>
+          )}
+        </div>
+      )}
+
       <div style={{ display: "grid", gap: 14 }}>
         {[...SLOTS, FALLBACK_ROW].map(({ key, labelKey, hintKey }) => {
           const isFallbackSlot = key === "fallback";
@@ -182,29 +235,16 @@ export function ModelSlotPicker({
                 >
                   {effectiveMode === "auto" && models && models.length > 0 ? (
                     <>
-                      <select
+                      <ModelSelect
                         id={`slot-${key}`}
-                        className="select mono"
-                        style={{ flex: 1, minWidth: 0 }}
-                        value={current || ""}
-                        onChange={(e) => update(key, e.target.value)}
+                        isFallbackSlot={isFallbackSlot}
+                        current={current}
+                        models={models}
+                        showHistorical={showHistorical}
                         disabled={disabled}
-                      >
-                        {/* 兜底槽空值是合法选择 (= 透传), 核心槽空值只是未选提示 */}
-                        <option value="" disabled={!isFallbackSlot}>
-                          {isFallbackSlot
-                            ? t("modelSlot.fallback.none")
-                            : t("modelSlot.placeholder")}
-                        </option>
-                        {showHistorical && (
-                          <option value={current}>{current}{t("modelSlot.historicalSuffix")}</option>
-                        )}
-                        {models.map((m) => (
-                          <option key={m.id} value={m.id}>
-                            {m.display_name || m.id}
-                          </option>
-                        ))}
-                      </select>
+                        onSelect={(v) => update(key, v)}
+                        t={t}
+                      />
                       {showHistorical && (
                         <span
                           title={t("modelSlot.historicalTitle", { model: current })}
@@ -232,22 +272,29 @@ export function ModelSlotPicker({
                 {isFallbackSlot ? (
                   <div style={{ flex: "0 0 104px" }} />
                 ) : (
-                  <select
-                    className="select"
-                    style={{ flex: "0 0 104px" }}
-                    aria-label={t("slotEffort.aria", { slot: t(labelKey) })}
-                    title={effortDisabled ? effortDisabledReason : undefined}
-                    value={efforts[key as keyof SlotEfforts] ?? ""}
-                    onChange={(e) => updateEffort(key as keyof SlotEfforts, e.target.value)}
+                  <Select
+                    value={efforts[key as keyof SlotEfforts] ?? EFFORT_AUTO}
+                    onValueChange={(v) =>
+                      updateEffort(key as keyof SlotEfforts, v === EFFORT_AUTO ? "" : v)
+                    }
                     disabled={disabled || effortDisabled}
                   >
-                    <option value="">{t("slotEffort.auto")}</option>
-                    {SLOT_EFFORT_LEVELS.map((lv) => (
-                      <option key={lv} value={lv}>
-                        {lv}
-                      </option>
-                    ))}
-                  </select>
+                    <SelectTrigger
+                      style={{ flex: "0 0 104px" }}
+                      aria-label={t("slotEffort.aria", { slot: t(labelKey) })}
+                      title={effortDisabled ? effortDisabledReason : undefined}
+                    >
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value={EFFORT_AUTO}>{t("slotEffort.auto")}</SelectItem>
+                      {SLOT_EFFORT_LEVELS.map((lv) => (
+                        <SelectItem key={lv} value={lv}>
+                          {lv}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
                 )}
               </div>
             </div>
@@ -255,9 +302,115 @@ export function ModelSlotPicker({
         })}
       </div>
 
-      <div className="field-hint" style={{ marginTop: 10 }}>
-        {effortDisabled ? effortDisabledReason : t("slotEffort.hint")}
-      </div>
+      {/* 长说明已收进列头的 (?) 面板; 底部只保留 Kiro 灰掉原因这种必须常显的信息 */}
+      {effortDisabled && effortDisabledReason && (
+        <div className="field-hint" style={{ marginTop: 10 }}>
+          {effortDisabledReason}
+        </div>
+      )}
     </div>
+  );
+}
+
+/** 模型下拉: Radix Select + 面板顶部搜索框 (列表可能上百项)。 */
+function ModelSelect({
+  id,
+  isFallbackSlot,
+  current,
+  models,
+  showHistorical,
+  disabled,
+  onSelect,
+  t,
+}: {
+  id: string;
+  isFallbackSlot: boolean;
+  current: string;
+  models: ModelInfo[];
+  showHistorical: boolean;
+  disabled?: boolean;
+  onSelect: (v: string) => void;
+  t: TFunction;
+}) {
+  const [query, setQuery] = useState("");
+  const [open, setOpen] = useState(false);
+  const inputRef = useRef<HTMLInputElement>(null);
+  // 过滤会卸载列表项 (含选中项), Radix FocusScope 随之把焦点抢回 listbox,
+  // 导致只能输入一个字符 — 每次 query 变化后把焦点还给搜索框。
+  useEffect(() => {
+    if (!open || !query) return;
+    const timer = setTimeout(() => inputRef.current?.focus(), 0);
+    return () => clearTimeout(timer);
+  }, [open, query]);
+  const q = query.trim().toLowerCase();
+  // 当前选中项永远保留: 它一旦被过滤卸载, Radix 会把焦点从搜索框抢回 listbox (丢按键)
+  const filtered = q
+    ? models.filter(
+        (m) =>
+          m.id === current ||
+          m.id.toLowerCase().includes(q) ||
+          (m.display_name ?? "").toLowerCase().includes(q),
+      )
+    : models;
+  return (
+    <Select
+      // 核心槽空值只是未选提示 → Radix placeholder; 兜底槽空值是合法选择 (= 透传) → sentinel 项
+      value={current || (isFallbackSlot ? MODEL_NONE : undefined)}
+      onValueChange={(v) => onSelect(v === MODEL_NONE ? "" : v)}
+      disabled={disabled}
+      onOpenChange={(next) => {
+        setOpen(next);
+        if (next) {
+          setQuery("");
+          // Radix 打开后会把焦点交给选中项, 稍后再抢回给搜索框
+          setTimeout(() => inputRef.current?.focus(), 0);
+        }
+      }}
+    >
+      <SelectTrigger id={id} className="font-mono" style={{ flex: 1, minWidth: 0 }}>
+        <SelectValue
+          placeholder={
+            isFallbackSlot ? t("modelSlot.fallback.none") : t("modelSlot.placeholder")
+          }
+        />
+      </SelectTrigger>
+      <SelectContent
+        header={
+          <input
+            ref={inputRef}
+            className="input"
+            style={{ fontSize: 12, padding: "6px 10px" }}
+            placeholder={t("modelSlot.searchPlaceholder")}
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+            // 阻断 Radix Select 的 typeahead / 方向键抢焦点; Esc 放行用于关闭面板
+            onKeyDown={(e) => {
+              if (e.key !== "Escape") e.stopPropagation();
+            }}
+          />
+        }
+      >
+        {/* sentinel / 历史项可能正是当前选中项, 不随搜索卸载 (卸载选中项会触发 Radix 抢焦点) */}
+        {isFallbackSlot && (
+          <SelectItem value={MODEL_NONE}>{t("modelSlot.fallback.none")}</SelectItem>
+        )}
+        {showHistorical && (
+          <SelectItem value={current} className="font-mono">
+            {current}
+            {t("modelSlot.historicalSuffix")}
+          </SelectItem>
+        )}
+        {filtered.map((m) => (
+          <SelectItem key={m.id} value={m.id} className="font-mono">
+            {m.display_name || m.id}
+          </SelectItem>
+        ))}
+        {filtered.length === 0 && (
+          <div style={{ padding: "8px 10px", fontSize: 12, color: "var(--ink-4)" }}>
+            {t("modelSlot.searchNoResult")}
+          </div>
+        )}
+      </SelectContent>
+    </Select>
   );
 }

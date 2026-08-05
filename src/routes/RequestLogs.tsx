@@ -8,6 +8,13 @@ import { EmptyState } from "@/components/EmptyState";
 import { Pagination } from "@/components/Pagination";
 import { ProviderLogo } from "@/components/ProviderLogo";
 import { RequestDetailDialog } from "@/components/RequestDetailDialog";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import { useRequests } from "@/hooks/useRequests";
 import { useProviders } from "@/hooks/useProviders";
 import { useSubscriptions } from "@/hooks/useSubscriptions";
@@ -149,76 +156,88 @@ export function RequestLogsPage() {
       </div>
 
       <div className="log-filters">
-        <select
-          className="select"
+        <Select
           value={vmFilter ?? ALL}
-          onChange={(e) => {
-            const v = e.target.value;
+          onValueChange={(v) => {
             setVmFilter(v === ALL ? undefined : (v as VirtualModelName));
             setPage(1);
           }}
         >
-          <option value={ALL}>{t("requestLogs.filter.allVm")}</option>
-          {(Object.keys(VM_META) as VirtualModelName[]).map((name) => (
-            <option key={name} value={name}>
-              {name}
-            </option>
-          ))}
-        </select>
+          <SelectTrigger className="w-auto min-w-[140px]">
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value={ALL}>{t("requestLogs.filter.allVm")}</SelectItem>
+            {(Object.keys(VM_META) as VirtualModelName[]).map((name) => (
+              <SelectItem key={name} value={name}>
+                {name}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
 
-        <select
-          className="select"
+        <Select
           value={providerFilter ?? ALL}
-          onChange={(e) => {
-            const v = e.target.value;
+          onValueChange={(v) => {
             setProviderFilter(v === ALL ? undefined : v);
             setPage(1);
           }}
         >
-          <option value={ALL}>{t("requestLogs.filter.allProvider")}</option>
-          {providers.data?.map((p) => (
-            <option key={p.id} value={p.id}>
-              {p.display_name}
-            </option>
-          ))}
-        </select>
+          <SelectTrigger className="w-auto min-w-[140px]">
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value={ALL}>{t("requestLogs.filter.allProvider")}</SelectItem>
+            {providers.data?.map((p) => (
+              <SelectItem key={p.id} value={p.id}>
+                {p.display_name}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
 
-        <select
-          className="select"
+        <Select
           value={statusFilter ?? ALL}
-          onChange={(e) => {
-            const v = e.target.value;
+          onValueChange={(v) => {
             setStatusFilter(v === ALL ? undefined : (v as RequestStatus));
             setPage(1);
           }}
         >
-          <option value={ALL}>{t("requestLogs.filter.allStatus")}</option>
-          {(Object.keys(STATUS_TONE) as RequestStatus[]).map((s) => (
-            <option key={s} value={s}>
-              {t(STATUS_TONE[s].labelKey)}
-            </option>
-          ))}
-        </select>
+          <SelectTrigger className="w-auto min-w-[140px]">
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value={ALL}>{t("requestLogs.filter.allStatus")}</SelectItem>
+            {(Object.keys(STATUS_TONE) as RequestStatus[]).map((s) => (
+              <SelectItem key={s} value={s}>
+                {t(STATUS_TONE[s].labelKey)}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
 
-        <select
-          className="select"
+        <Select
           value={clientFilter ?? ALL}
-          onChange={(e) => {
-            const v = e.target.value;
+          onValueChange={(v) => {
             setClientFilter(v === ALL ? undefined : v);
             setPage(1);
           }}
         >
-          <option value={ALL}>{t("requestLogs.filter.allClient")}</option>
-          {CLIENT_TOOLS.map((c) => (
-            <option key={c.id} value={c.id}>
-              {t(c.i18nKey)}
-            </option>
-          ))}
-          <option value={CLIENT_TOOL_UNKNOWN_SENTINEL}>
-            {t("requestLogs.filter.clientUnknown")}
-          </option>
-        </select>
+          <SelectTrigger className="w-auto min-w-[140px]">
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value={ALL}>{t("requestLogs.filter.allClient")}</SelectItem>
+            {CLIENT_TOOLS.map((c) => (
+              <SelectItem key={c.id} value={c.id}>
+                {t(c.i18nKey)}
+              </SelectItem>
+            ))}
+            <SelectItem value={CLIENT_TOOL_UNKNOWN_SENTINEL}>
+              {t("requestLogs.filter.clientUnknown")}
+            </SelectItem>
+          </SelectContent>
+        </Select>
 
         {subscriptionFilter && (
           <span className="pill accent" style={{ display: "inline-flex", alignItems: "center", gap: 4 }}>
