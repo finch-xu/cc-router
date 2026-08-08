@@ -52,6 +52,15 @@ pub struct ResponsesTransformConfig {
     /// codex: true (chatgpt 反代会 400 拒绝 max_output_tokens). openai: false (映射为 max_output_tokens).
     pub drop_max_tokens: bool,
 
+    /// 是否 drop `temperature` 而不透传.
+    /// codex: true (chatgpt 反代 400 拒绝 temperature, issue #32). openai: false (官方接受).
+    pub drop_temperature: bool,
+
+    /// 是否把 input 内 `role: system` 的 message 提取合并到顶层 `instructions`.
+    /// Claude Code 在 MCP 场景会往 messages 里夹带 system role 消息 (issue #33).
+    /// codex: true (chatgpt 反代 400 拒绝 input 内 system role). openai: false (官方接受).
+    pub lift_input_system_to_instructions: bool,
+
     /// 上游 SSE 里出现 reasoning item 时, 是否翻译成 Anthropic thinking content_block.
     /// codex 默认 false (向后兼容, yaml opt-in 后开). openai 默认 true.
     pub emit_reasoning: bool,
@@ -75,6 +84,8 @@ impl ResponsesTransformConfig {
             inject_default_include: vec!["reasoning.encrypted_content".into()],
             force_instructions_present: true,
             drop_max_tokens: true,
+            drop_temperature: true,
+            lift_input_system_to_instructions: true,
             emit_reasoning: expose_reasoning,
             roundtrip_reasoning: expose_reasoning,
         }
@@ -95,6 +106,8 @@ impl ResponsesTransformConfig {
             },
             force_instructions_present: false,
             drop_max_tokens: false,
+            drop_temperature: false,
+            lift_input_system_to_instructions: false,
             emit_reasoning: expose_reasoning,
             roundtrip_reasoning: expose_reasoning,
         }
@@ -133,22 +146,28 @@ pub fn build_responses_body(body: &Value, config: &ResponsesTransformConfig) -> 
     }
 
     // system → instructions (语义差异见 force_instructions_present 字段文档)
-    let system = body.get("system");
-    let has_system = system.is_some();
-    if config.force_instructions_present {
-        let text = system.map(anthropic_system_to_text).unwrap_or_default();
-        out["instructions"] = json!(text);
-    } else if has_system {
-        let text = anthropic_system_to_text(system.unwrap());
-        if !text.is_empty() {
-            out["instructions"] = json!(text);
-        }
-    }
+    let mut instructions = body
+        .get("system")
+        .map(anthropic_system_to_text)
+        .unwrap_or_default();
 
     // messages[] → input[]
     if let Some(msgs) = body.get("messages").and_then(|m| m.as_array()) {
-        let input = anthropic_messages_to_input(msgs, config)?;
+        let mut input = anthropic_messages_to_input(msgs, config)?;
+        if config.lift_input_system_to_instructions {
+            let lifted = lift_system_messages(&mut input);
+            if !lifted.is_empty() {
+                if !instructions.is_empty() {
+                    instructions.push_str("\n\n");
+                }
+                instructions.push_str(&lifted);
+            }
+        }
         out["input"] = json!(input);
+    }
+
+    if config.force_instructions_present || !instructions.is_empty() {
+        out["instructions"] = json!(instructions);
     }
 
     // tools[] → tools[]
@@ -166,11 +185,14 @@ pub fn build_responses_body(body: &Value, config: &ResponsesTransformConfig) -> 
         }
     }
 
-    // 透传字段
-    for key in ["temperature", "top_p"] {
-        if let Some(v) = body.get(key) {
-            out[key] = v.clone();
+    // 透传采样字段 — temperature 受 drop_temperature 控制 (chatgpt 反代 400 拒绝)
+    if !config.drop_temperature {
+        if let Some(v) = body.get("temperature") {
+            out["temperature"] = v.clone();
         }
+    }
+    if let Some(v) = body.get("top_p") {
+        out["top_p"] = v.clone();
     }
 
     // max_tokens — codex 路径 drop, openai 路径映射为 max_output_tokens
@@ -199,6 +221,32 @@ pub fn anthropic_system_to_text(system: &Value) -> String {
             .join("\n\n");
     }
     String::new()
+}
+
+/// 把 input 中 `role: system` 的 message item 抽出, 返回拼接后的文本 (issue #33).
+/// chatgpt 反代只认顶层 `instructions` 作为 system 通道, input 内的 system role 会 400
+/// (`System messages are not allowed`); 其他 role 原样保留.
+fn lift_system_messages(input: &mut Vec<Value>) -> String {
+    let mut parts: Vec<String> = Vec::new();
+    input.retain(|item| {
+        let is_system = item.get("type").and_then(|v| v.as_str()) == Some("message")
+            && item.get("role").and_then(|v| v.as_str()) == Some("system");
+        if !is_system {
+            return true;
+        }
+        if let Some(blocks) = item.get("content").and_then(|v| v.as_array()) {
+            let text = blocks
+                .iter()
+                .filter_map(|b| b.get("text").and_then(|t| t.as_str()))
+                .collect::<Vec<_>>()
+                .join("\n");
+            if !text.is_empty() {
+                parts.push(text);
+            }
+        }
+        false
+    });
+    parts.join("\n\n")
 }
 
 /// Anthropic messages 的 content 既可能是 str, 也可能是 [{type:..., ...}, ...].
@@ -1300,6 +1348,8 @@ mod tests {
         assert_eq!(cfg.inject_default_include, vec!["reasoning.encrypted_content"]);
         assert!(cfg.force_instructions_present);
         assert!(cfg.drop_max_tokens);
+        assert!(cfg.drop_temperature);
+        assert!(cfg.lift_input_system_to_instructions);
         assert!(!cfg.emit_reasoning);
         assert!(!cfg.roundtrip_reasoning);
     }
@@ -1312,6 +1362,8 @@ mod tests {
         assert!(cfg.inject_default_include.is_empty());
         assert!(!cfg.force_instructions_present);
         assert!(!cfg.drop_max_tokens);
+        assert!(!cfg.drop_temperature);
+        assert!(!cfg.lift_input_system_to_instructions);
     }
 
     #[test]
@@ -1356,6 +1408,85 @@ mod tests {
         });
         let out = build_responses_body(&body, &ResponsesTransformConfig::openai_official(false)).unwrap();
         assert_eq!(out["instructions"], json!("你是助手"));
+    }
+
+    #[test]
+    fn codex_path_drops_temperature_keeps_top_p() {
+        let body = json!({
+            "model": "gpt-5.6-luna",
+            "temperature": 0.2,
+            "top_p": 0.8,
+            "messages": [{"role": "user", "content": "hi"}],
+        });
+        let out = build_responses_body(&body, &ResponsesTransformConfig::codex_chatgpt(false)).unwrap();
+        assert!(out.get("temperature").is_none(), "chatgpt 反代 400 拒绝 temperature");
+        assert_eq!(out["top_p"], json!(0.8));
+    }
+
+    #[test]
+    fn openai_path_passes_through_temperature_and_top_p() {
+        let body = json!({
+            "model": "gpt-5",
+            "temperature": 0.2,
+            "top_p": 0.8,
+            "messages": [{"role": "user", "content": "hi"}],
+        });
+        let out = build_responses_body(&body, &ResponsesTransformConfig::openai_official(false)).unwrap();
+        assert_eq!(out["temperature"], json!(0.2));
+        assert_eq!(out["top_p"], json!(0.8));
+    }
+
+    #[test]
+    fn codex_path_lifts_embedded_system_messages_to_instructions() {
+        let body = json!({
+            "model": "gpt-5.6-terra",
+            "system": "顶层 system",
+            "messages": [
+                {"role": "system", "content": "夹带的 system 指令"},
+                {"role": "user", "content": "hello"},
+            ],
+        });
+        let out = build_responses_body(&body, &ResponsesTransformConfig::codex_chatgpt(false)).unwrap();
+        assert_eq!(
+            out["instructions"],
+            json!("顶层 system\n\n夹带的 system 指令"),
+            "input 内 system 消息应合并进 instructions"
+        );
+        let input = out["input"].as_array().unwrap();
+        assert!(
+            input.iter().all(|item| item.get("role").and_then(|r| r.as_str()) != Some("system")),
+            "chatgpt 反代 400 拒绝 input 内的 system role"
+        );
+        assert_eq!(input[0]["role"], json!("user"));
+    }
+
+    #[test]
+    fn codex_path_lifts_system_message_without_top_level_system() {
+        let body = json!({
+            "model": "gpt-5.6-terra",
+            "messages": [
+                {"role": "system", "content": [{"type": "text", "text": "只有夹带 system"}]},
+                {"role": "user", "content": "hello"},
+            ],
+        });
+        let out = build_responses_body(&body, &ResponsesTransformConfig::codex_chatgpt(false)).unwrap();
+        assert_eq!(out["instructions"], json!("只有夹带 system"));
+        assert_eq!(out["input"].as_array().unwrap().len(), 1);
+    }
+
+    #[test]
+    fn openai_path_keeps_embedded_system_messages() {
+        let body = json!({
+            "model": "gpt-5",
+            "messages": [
+                {"role": "system", "content": "标准 Responses system 消息"},
+                {"role": "user", "content": "hello"},
+            ],
+        });
+        let out = build_responses_body(&body, &ResponsesTransformConfig::openai_official(false)).unwrap();
+        assert!(out.get("instructions").is_none());
+        assert_eq!(out["input"][0]["role"], json!("system"));
+        assert_eq!(out["input"][1]["role"], json!("user"));
     }
 
     #[test]

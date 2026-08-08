@@ -42,7 +42,10 @@ hyper = { version = "1", features = ["full"] }
 bytes = "1"
 futures = "0.3"
 
-reqwest = { version = "0.12", default-features = false, features = ["stream", "json", "rustls-tls"] }
+# TLS 信任取并集: rustls-tls(=webpki 内置根证书) + rustls-tls-native-roots(操作系统证书库).
+# 后者让企业内网私有 CA (系统已信任) 可用 (issue #34); 前者保证系统证书库缺失/为空时仍有兜底.
+# reqwest 0.12 两个 feature 并存时把两套根证书都加进 root store (tls_built_in_certs_webpki/native 默认均开).
+reqwest = { version = "0.12", default-features = false, features = ["stream", "json", "rustls-tls", "rustls-tls-native-roots"] }
 
 # 本地 TLS 监听 (HTTPS 模式). rustls 与 reqwest/tokio-rustls 间接引入版本对齐, cargo tree 实测 rustls 0.23.39 + tokio-rustls 0.26.4.
 axum-server = { version = "0.7", features = ["tls-rustls"] }
