@@ -40,7 +40,9 @@ export function UpdatesPage() {
   const checking = status === "checking";
 
   return (
-    <div className="page-flow">
+    // updates-flow: 让「有更新」时的日志区吃满剩余视口高度 (见 styles.css)。
+    // 其余状态下所有 section 都是 flex-shrink:0, 排版与改造前一致。
+    <div className="page-flow updates-flow">
       <div className="flush-section">
         <div className="updates-head">
           <div className="updates-mark">
@@ -108,8 +110,11 @@ function UpdaterStatusSection() {
   if (status === "available" && detected) {
     const isManual = detected.kind === "manual";
     return (
-      <div className="flush-section">
+      // updates-notes-section 是唯一允许纵向 grow 的 section: 它内部再开一层
+      // flex column, 把剩余高度整块让给 .update-notes。
+      <div className="flush-section updates-notes-section">
         <div
+          className="updates-notes-head"
           style={{
             display: "flex",
             alignItems: "center",

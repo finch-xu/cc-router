@@ -2073,8 +2073,32 @@ input, select, textarea { font: inherit; color: inherit; }
   line-height: 1.75;
   color: var(--ink-2);
   white-space: pre-wrap;
-  max-height: 150px;
   overflow: auto;
+}
+
+/* 更新页专属: 日志区吃满剩余视口高度。
+ * 通栏页的设计意图是「一屏看完」, 所以这里不给日志一个写死的 max-height,
+ * 而是让头部 section 保持自然高度 (flex-shrink:0)、日志 section 独占剩余空间。
+ * 结果: 窗口越大能看的日志越多, 头部与「立即安装」按钮始终钉在原位不被滚走。
+ *
+ * .page-flow 自带 overflow-y:auto, 这里刻意不改成 hidden ——
+ * 窗口矮到连 UPDATE_NOTES_MIN_H 都放不下时, 整页退化为可滚动, 不会把内容裁没。 */
+.updates-flow {
+  --update-notes-min-h: 200px;
+  display: flex;
+  flex-direction: column;
+}
+.updates-flow > .flush-section { flex-shrink: 0; }
+.updates-flow > .flush-section.updates-notes-section {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+.updates-notes-section > .updates-notes-head { flex-shrink: 0; }
+.updates-notes-section > .update-notes {
+  flex: 1;
+  min-height: var(--update-notes-min-h);
 }
 
 /* ============================================================
