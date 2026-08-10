@@ -16,3 +16,23 @@ export function validateConnection(input: {
   }
   return null;
 }
+
+export type RequiredHeadersErrorKey =
+  | "validation.requiredHeaderIncomplete"
+  | "validation.requiredHeaderDuplicate";
+
+/** 只拦「半填行」与「大小写不敏感重名」两类会静默丢数据的错误
+ *  (Object.fromEntries 后者覆盖前者, 重名不在前端拦、到后端前就已合并),
+ *  其余校验交后端中文报错。 */
+export function validateRequiredHeaders(
+  rows: Array<{ key: string; value: string }>,
+): RequiredHeadersErrorKey | null {
+  const seen = new Set<string>();
+  for (const r of rows) {
+    if (r.key === "" || r.value === "") return "validation.requiredHeaderIncomplete";
+    const lower = r.key.toLowerCase();
+    if (seen.has(lower)) return "validation.requiredHeaderDuplicate";
+    seen.add(lower);
+  }
+  return null;
+}

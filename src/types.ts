@@ -320,6 +320,8 @@ export interface ConnectionPatch {
   auth_header_name?: string;
   auth_header_format?: AuthHeaderFormat;
   provider_display_name?: string;
+  /** 额外出站 header, 整块替换; 缺省 = 不改 */
+  required_headers?: Record<string, string>;
 }
 
 export interface SubscriptionPatch {

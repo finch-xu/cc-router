@@ -29,7 +29,8 @@ import { ProviderIcon } from "@/components/ProviderIcon";
 import { ModelSlotPicker } from "@/components/ModelSlotPicker";
 import { SubscriptionBalanceCard } from "@/components/SubscriptionBalanceCard";
 import { api } from "@/api/tauri";
-import { validateConnection } from "@/lib/connectionValidation";
+import { KeyValueEditor, type KeyValueRow } from "@/components/KeyValueEditor";
+import { validateConnection, validateRequiredHeaders } from "@/lib/connectionValidation";
 import { useProviders } from "@/hooks/useProviders";
 import {
   useDeleteSubscription,
@@ -86,6 +87,7 @@ export function SubscriptionEditPage() {
   const [authHeaderName, setAuthHeaderName] = useState<string>("");
   const [authHeaderFormat, setAuthHeaderFormat] = useState<AuthHeaderFormat>("bearer");
   const [providerDisplayName, setProviderDisplayName] = useState<string>("");
+  const [requiredHeaders, setRequiredHeaders] = useState<KeyValueRow[]>([]);
 
   const [models, setModels] = useState<ModelInfo[] | null>(null);
   const [fetchingModels, setFetchingModels] = useState(false);
@@ -107,6 +109,12 @@ export function SubscriptionEditPage() {
       setAuthHeaderName(subQuery.data.auth_header_name);
       setAuthHeaderFormat(subQuery.data.auth_header_format);
       setProviderDisplayName(subQuery.data.provider_display_name);
+      setRequiredHeaders(
+        Object.entries(subQuery.data.required_headers ?? {}).map(([key, value]) => ({
+          key,
+          value,
+        })),
+      );
       if (subQuery.data.model_cache) {
         setModels(subQuery.data.model_cache.models);
       }
@@ -145,12 +153,18 @@ export function SubscriptionEditPage() {
     if (sub.is_user_defined) {
       const connErrKey = validateConnection({ base_url: baseUrl, messages_path: messagesPath });
       if (connErrKey) return setSaveError(t(connErrKey));
+      const headerRows = requiredHeaders
+        .map((r) => ({ key: r.key.trim(), value: r.value.trim() }))
+        .filter((r) => r.key !== "" || r.value !== ""); // 全空行静默丢弃
+      const hdrErr = validateRequiredHeaders(headerRows);
+      if (hdrErr) return setSaveError(t(hdrErr));
       patch.connection = {
         base_url: baseUrl.trim(),
         messages_path: messagesPath.trim(),
         auth_header_name: authHeaderName.trim(),
         auth_header_format: authHeaderFormat,
         provider_display_name: providerDisplayName.trim(),
+        required_headers: Object.fromEntries(headerRows.map((r) => [r.key, r.value])),
       };
     } else {
       // 内置订阅: 切 endpoint 走 endpoint_id patch (后端 re-snapshot)
@@ -335,6 +349,22 @@ export function SubscriptionEditPage() {
                     <SelectItem value="raw">{t("subscriptionEdit.authRawOption")}</SelectItem>
                   </SelectContent>
                 </Select>
+              </div>
+              <div className="grid grid-cols-[120px_1fr] gap-3 items-start">
+                <Label className="mt-2">{t("subscriptionEdit.requiredHeaders")}</Label>
+                <div className="space-y-1">
+                  <KeyValueEditor
+                    value={requiredHeaders}
+                    onChange={setRequiredHeaders}
+                    keyPlaceholder={t("subscriptionEdit.requiredHeaderKeyPh")}
+                    valuePlaceholder={t("subscriptionEdit.requiredHeaderValuePh")}
+                    addLabel={t("subscriptionEdit.requiredHeadersAdd")}
+                    removeAriaLabel={t("subscriptionEdit.requiredHeadersRemove")}
+                  />
+                  <p className="text-xs text-muted-foreground">
+                    {t("subscriptionEdit.requiredHeadersHint")}
+                  </p>
+                </div>
               </div>
             </>
           )}
