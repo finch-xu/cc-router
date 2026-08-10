@@ -127,6 +127,9 @@ pub struct ConnectionPatch {
     pub auth_header_name: Option<String>,
     pub auth_header_format: Option<AuthHeaderFormat>,
     pub provider_display_name: Option<String>,
+    /// 额外出站 header。整块替换 (与 model_slots / slot_efforts 一致):
+    /// Some(map) = 覆盖为 map (空 map = 清空), None = 不改。
+    pub required_headers: Option<BTreeMap<String, String>>,
 }
 
 #[derive(Debug, Serialize)]
@@ -431,6 +434,14 @@ pub async fn update_subscription(
         if let Some(v) = conn.messages_path.as_deref() {
             validate_messages_path(v)?;
         }
+        if let Some(hs) = conn.required_headers.as_ref() {
+            // 针对 patch 后生效的鉴权头名校验: conn 新值优先, 否则现有 row 值。
+            let effective_auth_name = match conn.auth_header_name.clone() {
+                Some(v) => v,
+                None => rt.read().await.row.auth_header_name.clone(),
+            };
+            validate_required_headers(hs, &effective_auth_name)?;
+        }
     }
     if let Some(efforts) = patch.slot_efforts.as_ref() {
         validate_slot_efforts(efforts)?;
@@ -467,6 +478,9 @@ pub async fn update_subscription(
             }
             if let Some(v) = conn.provider_display_name {
                 guard.row.provider_display_name = v;
+            }
+            if let Some(v) = conn.required_headers {
+                guard.row.required_headers = v;
             }
         }
 
