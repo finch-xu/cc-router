@@ -495,12 +495,20 @@ mod tests {
             sonnet: Some("xhigh".into()),
             ..Default::default()
         };
+        // test_fixture 的 required_headers 是空 map, 顺带覆盖非空 map 经 update_row 的往返
+        updated
+            .required_headers
+            .insert("X-DST".to_string(), "eastus2".to_string());
         update_row(&pool, &updated).await.expect("update");
 
         let loaded = load_runtime(&pool).await.expect("reload");
         let g = loaded.get(&row.id).unwrap().read().await;
         assert_eq!(g.row.slot_efforts.get(SubscriptionSlot::Sonnet), Some("xhigh"));
         assert_eq!(g.row.slot_efforts.get(SubscriptionSlot::Opus), None);
+        assert_eq!(
+            g.row.required_headers.get("X-DST").map(String::as_str),
+            Some("eastus2")
+        );
         assert_eq!(g.row.display_name, "往返测试");
     }
 

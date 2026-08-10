@@ -601,3 +601,58 @@ fn finalize_non_streaming(
 }
 
 
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+    use wiremock::matchers::{header, method, path};
+    use wiremock::{Mock, MockServer, ResponseTemplate};
+
+    /// issue #35: required_headers 注入 —— 自定义 header 必须到达上游。
+    /// Mock 用 .and(header("X-DST", ...)) 匹配: header 未送达时 wiremock 回 404,
+    /// dispatch 转成 Upstream 错误, expect 即失败。
+    #[tokio::test]
+    async fn dispatch_sends_required_headers_to_upstream() {
+        let server = MockServer::start().await;
+        Mock::given(method("POST"))
+            .and(path("/v1/responses"))
+            .and(header("Authorization", "Bearer sk-test"))
+            .and(header("X-DST", "eastus2"))
+            .respond_with(
+                ResponseTemplate::new(200)
+                    .set_body_json(json!({"id": "resp_1", "output": []}))
+                    .insert_header("content-type", "application/json"),
+            )
+            .mount(&server)
+            .await;
+
+        let mut required = std::collections::BTreeMap::new();
+        required.insert("X-DST".to_string(), "eastus2".to_string());
+
+        let result = dispatch_openai_responses_attempt(
+            &reqwest::Client::new(),
+            "sk-test".into(),
+            "Authorization".into(),
+            AuthHeaderFormat::Bearer,
+            format!("{}/v1/responses", server.uri()),
+            &json!({
+                "model": "gpt-5",
+                "messages": [{"role": "user", "content": "hi"}],
+                "max_tokens": 32,
+            }),
+            false,
+            Vec::new(),
+            HeaderMap::new(),
+            required,
+            OpenAiResponsesExtras {
+                reasoning_effort: None,
+                expose_reasoning: true,
+            },
+        )
+        .await;
+
+        let ok = result.expect("上游 mock 仅在收到 X-DST: eastus2 时匹配, 失败即 header 未送达");
+        assert!(matches!(ok.payload, OpenaiResponsesPayload::NonStreaming(_)));
+    }
+}
