@@ -746,3 +746,183 @@ fn validate_messages_path(s: &str) -> AppResult<()> {
     }
     Ok(())
 }
+
+/// 禁止用户自定义的保留头: 由 HTTP 栈/dispatch 层自动管理, 允许设置只会产生
+/// 被覆盖的假象或破坏连接语义。以小写形式比较。
+const RESERVED_HEADER_NAMES: &[&str] = &[
+    "content-type",
+    "content-length",
+    "host",
+    "transfer-encoding",
+    "connection",
+];
+/// 额外 header 条数上限, 纯防御性 (真实网关场景 1~3 条)。
+const MAX_REQUIRED_HEADERS: usize = 20;
+
+/// 校验自定义订阅的额外出站 header。`auth_header_name` 须传「patch 后生效的」鉴权头名。
+/// 用 reqwest::header::{HeaderName, HeaderValue} 解析 —— 与 dispatch 层七处注入点同类型,
+/// 保证校验通过的 header 不会在出站时被静默跳过 (dispatch 对非法项是 if let Ok 静默 skip)。
+fn validate_required_headers(
+    headers: &BTreeMap<String, String>,
+    auth_header_name: &str,
+) -> AppResult<()> {
+    use reqwest::header::{HeaderName, HeaderValue};
+
+    if headers.len() > MAX_REQUIRED_HEADERS {
+        return Err(AppError::BadRequest(format!(
+            "额外 header 最多 {MAX_REQUIRED_HEADERS} 条 (当前 {} 条)",
+            headers.len()
+        )));
+    }
+    // dispatch 层空 auth 名回退 Authorization, 比较口径保持一致
+    let auth_lower = if auth_header_name.is_empty() {
+        "authorization".to_string()
+    } else {
+        auth_header_name.to_ascii_lowercase()
+    };
+    let mut seen = std::collections::HashSet::new();
+    for (k, v) in headers {
+        if k.trim().is_empty() {
+            return Err(AppError::BadRequest("header 名不能为空".into()));
+        }
+        if HeaderName::try_from(k.as_str()).is_err() {
+            return Err(AppError::BadRequest(format!(
+                "header 名 \"{k}\" 含非法字符 (只允许字母、数字、连字符等 HTTP token 字符)"
+            )));
+        }
+        let lower = k.to_ascii_lowercase();
+        if RESERVED_HEADER_NAMES.contains(&lower.as_str()) {
+            return Err(AppError::BadRequest(format!(
+                "header \"{k}\" 是保留头, 由系统自动设置, 不能自定义"
+            )));
+        }
+        if lower == auth_lower {
+            return Err(AppError::BadRequest(format!(
+                "header \"{k}\" 与鉴权 header 同名, 会覆盖鉴权信息, 请改用其他名称"
+            )));
+        }
+        if !seen.insert(lower) {
+            return Err(AppError::BadRequest(format!(
+                "header \"{k}\" 与另一条仅大小写不同, 发送时会互相覆盖, 请合并为一条"
+            )));
+        }
+        if v.trim().is_empty() {
+            return Err(AppError::BadRequest(format!("header \"{k}\" 的值不能为空")));
+        }
+        if !v.is_ascii() {
+            return Err(AppError::BadRequest(format!(
+                "header \"{k}\" 的值含非 ASCII 字符 (如中文), HTTP header 值只能用可见 ASCII"
+            )));
+        }
+        if HeaderValue::from_str(v).is_err() {
+            return Err(AppError::BadRequest(format!(
+                "header \"{k}\" 的值含非法字符 (不允许换行等控制字符)"
+            )));
+        }
+    }
+    Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn hdrs(pairs: &[(&str, &str)]) -> BTreeMap<String, String> {
+        pairs
+            .iter()
+            .map(|(k, v)| (k.to_string(), v.to_string()))
+            .collect()
+    }
+
+    #[test]
+    fn empty_map_is_ok() {
+        // 清空场景合法 (整块替换语义下空 map = 清空)
+        assert!(validate_required_headers(&BTreeMap::new(), "Authorization").is_ok());
+    }
+
+    #[test]
+    fn issue_35_case_x_dst_is_ok() {
+        assert!(validate_required_headers(&hdrs(&[("X-DST", "eastus2")]), "Authorization").is_ok());
+    }
+
+    #[test]
+    fn more_than_20_entries_rejected() {
+        let m: BTreeMap<String, String> = (0..21)
+            .map(|i| (format!("X-H-{i}"), "v".to_string()))
+            .collect();
+        let err = validate_required_headers(&m, "Authorization").unwrap_err();
+        assert!(err.to_string().contains("20"));
+    }
+
+    #[test]
+    fn empty_key_rejected() {
+        assert!(validate_required_headers(&hdrs(&[("", "v")]), "Authorization").is_err());
+        assert!(validate_required_headers(&hdrs(&[("  ", "v")]), "Authorization").is_err());
+    }
+
+    #[test]
+    fn key_with_space_rejected() {
+        assert!(validate_required_headers(&hdrs(&[("X DST", "v")]), "Authorization").is_err());
+    }
+
+    #[test]
+    fn key_with_non_ascii_rejected() {
+        assert!(validate_required_headers(&hdrs(&[("头名", "v")]), "Authorization").is_err());
+    }
+
+    #[test]
+    fn reserved_header_rejected_case_insensitive() {
+        assert!(
+            validate_required_headers(&hdrs(&[("Content-Type", "v")]), "Authorization").is_err()
+        );
+        assert!(validate_required_headers(&hdrs(&[("HOST", "v")]), "Authorization").is_err());
+    }
+
+    #[test]
+    fn same_name_as_auth_header_rejected() {
+        let err = validate_required_headers(&hdrs(&[("authorization", "v")]), "Authorization")
+            .unwrap_err();
+        assert!(err.to_string().contains("鉴权"));
+    }
+
+    #[test]
+    fn empty_auth_name_falls_back_to_authorization() {
+        // dispatch 层空 auth 名回退 Authorization (openai_responses_dispatch.rs:128-132), 校验口径一致
+        assert!(validate_required_headers(&hdrs(&[("Authorization", "v")]), "").is_err());
+    }
+
+    #[test]
+    fn case_insensitive_duplicate_keys_rejected() {
+        // BTreeMap 允许并存, 但 HeaderMap insert 大小写不敏感会互相覆盖
+        assert!(
+            validate_required_headers(&hdrs(&[("X-DST", "a"), ("x-dst", "b")]), "Authorization")
+                .is_err()
+        );
+    }
+
+    #[test]
+    fn empty_value_rejected() {
+        assert!(validate_required_headers(&hdrs(&[("X-DST", "")]), "Authorization").is_err());
+        assert!(validate_required_headers(&hdrs(&[("X-DST", "  ")]), "Authorization").is_err());
+    }
+
+    #[test]
+    fn non_ascii_value_rejected() {
+        // 注意: HeaderValue::from_str 对 0x80+ 字节其实放行 (按 opaque bytes 发送),
+        // 所以必须显式 is_ascii() 检查, 不能只靠解析
+        assert!(validate_required_headers(&hdrs(&[("X-DST", "东区")]), "Authorization").is_err());
+    }
+
+    #[test]
+    fn control_char_value_rejected() {
+        assert!(validate_required_headers(&hdrs(&[("X-DST", "a\nb")]), "Authorization").is_err());
+    }
+
+    #[test]
+    fn value_with_surrounding_spaces_ok() {
+        // trim 仅用于判空, 非空值带空格放行、存原样
+        assert!(
+            validate_required_headers(&hdrs(&[("X-DST", " eastus2 ")]), "Authorization").is_ok()
+        );
+    }
+}
