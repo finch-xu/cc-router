@@ -34,6 +34,28 @@
 >
 > 本软件按 As-Is 提供，不对任何因使用造成的直接或间接损失负责，包括但不限于额度异常消耗、数据丢失、业务中断。
 
+架构与请求走向一览：
+
+```text
+ Claude Code     OpenCode      OpenClaw     pi ...            Codex ...
+      |              |             |           |                  |
+      ------------------------------------------                  |
+                          |                                       |
+               Anthropic Messages API                   OpenAI Responses API
+                   (/v1/messages)                          (/v1/responses)
+                          |                                       |
+                          -----------------------------------------
+                                              |
+                                          cc-router
+                                   (本地 127.0.0.1:23456)
+                                              |
+      -----------------------------------------------------------------------------------
+      |             |             |             |             |             |           |
+  DeepSeek         GLM          Kimi        Anthropic      OpenAI        Gemini      ......
+     API         Coding        Coding       Messages     Responses &       API
+                  Plan          Plan           API       Completions
+```
+
 功能亮点：
 
 - **19 家 provider 一站调度** —— 内置 DeepSeek、Qwen、Kimi、MiMo、MiniMax、GLM、Claude、Gemini 等 Token Plan / Coding Plan / API 额度,opus / sonnet / haiku 三槽位任意搭配,顺序或轮询自动切换

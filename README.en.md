@@ -34,6 +34,28 @@ Bundle your scattered `Token Plan`, `Coding Plan`, and LLM API quotas into a sin
 >
 > This software is provided As-Is, without warranty of any kind. The author is not liable for any direct or indirect damages arising from its use, including but not limited to abnormal quota consumption, data loss, or business interruption.
 
+Architecture and request flow at a glance:
+
+```text
+ Claude Code     OpenCode      OpenClaw     pi ...            Codex ...
+      |              |             |           |                  |
+      ------------------------------------------                  |
+                          |                                       |
+               Anthropic Messages API                   OpenAI Responses API
+                   (/v1/messages)                          (/v1/responses)
+                          |                                       |
+                          -----------------------------------------
+                                              |
+                                          cc-router
+                                   (local 127.0.0.1:23456)
+                                              |
+      -----------------------------------------------------------------------------------
+      |             |             |             |             |             |           |
+  DeepSeek         GLM          Kimi        Anthropic      OpenAI        Gemini      ......
+     API         Coding        Coding       Messages     Responses &       API
+                  Plan          Plan           API       Completions
+```
+
 Highlights:
 
 - **19 providers, one router** — built-in routing for DeepSeek, Qwen, Kimi, MiMo, MiniMax, GLM, Claude, Gemini, etc., across Token Plans / Coding Plans / pay-as-you-go APIs; mix and match opus / sonnet / haiku slots with sequential or round-robin dispatch

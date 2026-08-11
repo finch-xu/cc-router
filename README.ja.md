@@ -34,6 +34,28 @@
 >
 > 本ソフトウェアは As-Is（現状有姿）で提供され、明示・黙示を問わずいかなる保証もしません。クォータの異常消費、データ損失、業務中断を含む直接・間接の損害について作者は責任を負いません。
 
+アーキテクチャとリクエストの流れ：
+
+```text
+ Claude Code     OpenCode      OpenClaw     pi ...            Codex ...
+      |              |             |           |                  |
+      ------------------------------------------                  |
+                          |                                       |
+               Anthropic Messages API                   OpenAI Responses API
+                   (/v1/messages)                          (/v1/responses)
+                          |                                       |
+                          -----------------------------------------
+                                              |
+                                          cc-router
+                                 (ローカル 127.0.0.1:23456)
+                                              |
+      -----------------------------------------------------------------------------------
+      |             |             |             |             |             |           |
+  DeepSeek         GLM          Kimi        Anthropic      OpenAI        Gemini      ......
+     API         Coding        Coding       Messages     Responses &       API
+                  Plan          Plan           API       Completions
+```
+
 機能ハイライト：
 
 - **19 プロバイダーを 1 つのルーターで** —— DeepSeek・Qwen・Kimi・MiMo・MiniMax・GLM・Claude・Gemini などの Token Plan / Coding Plan / 従量課金 API を内蔵対応。opus / sonnet / haiku の 3 スロットに自由に割り当て、順次（sequential）またはラウンドロビン（round_robin）で自動切替
