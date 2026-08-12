@@ -53,6 +53,7 @@
       "providers/deepseek.yaml",
       "providers/moonshot.yaml",
       "providers/minimax.yaml",
+      "providers/minimax-openai.yaml",
       "providers/xiaomi.yaml",
       "providers/alibaba.yaml",
       "providers/volcengine.yaml",

@@ -1,0 +1,65 @@
+id: minimax_openai
+display_name: "MiniMax (Chat Completions)"
+icon: minimax
+category: first_party
+description: "MiniMax M3 and M2 series Chat Completions-compatible endpoints"
+homepage: "https://platform.minimax.io"
+docs_url: "https://platform.minimax.io/docs"
+api_key_url: "https://platform.minimax.io/user-center/basic-information/interface-key"
+
+compatibility: untested
+compatibility_notes: "Uses the built-in protocol conversion path; model selection is manual because no public model-list endpoint is available."
+
+endpoints:
+  - id: global_chat_completions
+    label: "Global Chat Completions API"
+    description: "Global pay-as-you-go endpoint"
+    base_url: "https://api.minimax.io/v1"
+    messages_path: "/chat/completions"
+    region: global
+    billing: pay_as_you_go
+
+  - id: china_chat_completions
+    label: "China Chat Completions API"
+    description: "China pay-as-you-go endpoint"
+    base_url: "https://api.minimaxi.com/v1"
+    messages_path: "/chat/completions"
+    region: china
+    billing: pay_as_you_go
+
+default_endpoint: global_chat_completions
+
+auth:
+  type: openai_chat_completions_api_key
+  header_name: "Authorization"
+  header_format: bearer
+
+required_headers: {}
+forward_headers: []
+
+model_discovery:
+  enabled: false
+  path: "/v1/models"
+  cache_ttl_hours: 24
+  example_models:
+    - "MiniMax-M3"
+    - "MiniMax-M2.7"
+  model_metadata:
+    - model_id: "MiniMax-M3"
+      context_window: 1000000
+      pricing_usd_per_million_tokens:
+        input: 0.6
+        output: 2.4
+        cache_read: 0.12
+        cache_write: null
+      input_modalities: [text, image, video]
+      thinking: [adaptive, disabled]
+    - model_id: "MiniMax-M2.7"
+      context_window: 204800
+      pricing_usd_per_million_tokens:
+        input: 0.3
+        output: 1.2
+        cache_read: 0.06
+        cache_write: 0.375
+      input_modalities: [text]
+      thinking: [always_on]

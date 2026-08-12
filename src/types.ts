@@ -147,6 +147,18 @@ export interface ProviderInfo {
     path: string;
     cache_ttl_hours: number;
     example_models: string[];
+    model_metadata: Array<{
+      model_id: string;
+      context_window: number;
+      pricing_usd_per_million_tokens: {
+        input: number;
+        output: number;
+        cache_read: number | null;
+        cache_write: number | null;
+      };
+      input_modalities: string[];
+      thinking: string[];
+    }>;
   };
 }
 

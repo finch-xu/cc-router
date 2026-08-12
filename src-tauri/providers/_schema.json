@@ -60,6 +60,41 @@
         "example_models": {
           "type": "array",
           "items": { "type": "string" }
+        },
+        "model_metadata": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["model_id", "context_window", "pricing_usd_per_million_tokens", "input_modalities", "thinking"],
+            "additionalProperties": false,
+            "properties": {
+              "model_id": { "type": "string" },
+              "context_window": { "type": "integer", "minimum": 1 },
+              "pricing_usd_per_million_tokens": {
+                "type": "object",
+                "required": ["input", "output", "cache_read", "cache_write"],
+                "additionalProperties": false,
+                "properties": {
+                  "input": { "type": "number", "minimum": 0 },
+                  "output": { "type": "number", "minimum": 0 },
+                  "cache_read": { "type": ["number", "null"], "minimum": 0 },
+                  "cache_write": { "type": ["number", "null"], "minimum": 0 }
+                }
+              },
+              "input_modalities": {
+                "type": "array",
+                "minItems": 1,
+                "uniqueItems": true,
+                "items": { "enum": ["text", "image", "video"] }
+              },
+              "thinking": {
+                "type": "array",
+                "minItems": 1,
+                "uniqueItems": true,
+                "items": { "enum": ["adaptive", "disabled", "always_on"] }
+              }
+            }
+          }
         }
       }
     },

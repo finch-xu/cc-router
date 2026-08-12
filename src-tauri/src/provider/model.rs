@@ -183,6 +183,29 @@ pub struct ModelDiscovery {
     pub cache_ttl_hours: u32,
     #[serde(default)]
     pub example_models: Vec<String>,
+    #[serde(default)]
+    pub model_metadata: Vec<ModelMetadata>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ModelPricing {
+    pub input: f64,
+    pub output: f64,
+    #[serde(default)]
+    pub cache_read: Option<f64>,
+    #[serde(default)]
+    pub cache_write: Option<f64>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ModelMetadata {
+    pub model_id: String,
+    pub context_window: u64,
+    pub pricing_usd_per_million_tokens: ModelPricing,
+    #[serde(default)]
+    pub input_modalities: Vec<String>,
+    #[serde(default)]
+    pub thinking: Vec<String>,
 }
 
 fn default_true() -> bool {
@@ -318,5 +341,54 @@ pub struct Provider {
 impl Provider {
     pub fn endpoint(&self, id: &str) -> Option<&ProviderEndpoint> {
         self.endpoints.iter().find(|e| e.id == id)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::Provider;
+
+    fn parse_and_validate_provider(yaml: &str) -> Provider {
+        let yaml_value: serde_yaml::Value = serde_yaml::from_str(yaml).unwrap();
+        let json_value = serde_json::to_value(&yaml_value).unwrap();
+        let schema_value: serde_json::Value =
+            serde_json::from_str(include_str!("../../providers/_schema.json")).unwrap();
+        let schema = jsonschema::JSONSchema::compile(&schema_value).unwrap();
+        assert!(schema.is_valid(&json_value));
+        serde_yaml::from_value(yaml_value).unwrap()
+    }
+
+    #[test]
+    fn parses_minimax_model_metadata() {
+        let provider = parse_and_validate_provider(include_str!("../../providers/minimax.yaml"));
+        let models = &provider.model_discovery.model_metadata;
+
+        assert_eq!(models.len(), 2);
+        assert_eq!(models[0].model_id, "MiniMax-M3");
+        assert_eq!(models[0].context_window, 1_000_000);
+        assert_eq!(models[0].pricing_usd_per_million_tokens.input, 0.6);
+        assert_eq!(models[0].input_modalities, ["text", "image", "video"]);
+        assert_eq!(models[0].thinking, ["adaptive", "disabled"]);
+
+        assert_eq!(models[1].model_id, "MiniMax-M2.7");
+        assert_eq!(models[1].context_window, 204_800);
+        assert_eq!(models[1].pricing_usd_per_million_tokens.output, 1.2);
+        assert_eq!(models[1].thinking, ["always_on"]);
+    }
+
+    #[test]
+    fn parses_minimax_compatible_endpoints() {
+        let provider =
+            parse_and_validate_provider(include_str!("../../providers/minimax-openai.yaml"));
+
+        assert_eq!(provider.endpoints.len(), 2);
+        assert_eq!(
+            provider.endpoints[0].messages_url(),
+            "https://api.minimax.io/v1/chat/completions"
+        );
+        assert_eq!(
+            provider.endpoints[1].messages_url(),
+            "https://api.minimaxi.com/v1/chat/completions"
+        );
     }
 }

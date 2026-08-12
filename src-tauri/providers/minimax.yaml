@@ -8,7 +8,7 @@ docs_url: "https://platform.minimax.io/docs"
 api_key_url: "https://platform.minimax.io/user-center/basic-information/interface-key"
 
 compatibility: untested
-compatibility_notes: 
+compatibility_notes: "Native endpoint configuration; model selection is manual because no public model-list endpoint is available."
 
 endpoints:
   - id: china_coding_plan
@@ -70,3 +70,22 @@ model_discovery:
     - "MiniMax-M2.1"
     - "MiniMax-M2.1-highspeed"
     - "MiniMax-M2"
+  model_metadata:
+    - model_id: "MiniMax-M3"
+      context_window: 1000000
+      pricing_usd_per_million_tokens:
+        input: 0.6
+        output: 2.4
+        cache_read: 0.12
+        cache_write: null
+      input_modalities: [text, image, video]
+      thinking: [adaptive, disabled]
+    - model_id: "MiniMax-M2.7"
+      context_window: 204800
+      pricing_usd_per_million_tokens:
+        input: 0.3
+        output: 1.2
+        cache_read: 0.06
+        cache_write: 0.375
+      input_modalities: [text]
+      thinking: [always_on]
