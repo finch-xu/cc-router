@@ -16,7 +16,7 @@
 //! 各 provider 的 dispatch 层 (`oauth_dispatch.rs`, `openai_responses_dispatch.rs`) 负责
 //! 调度、鉴权、headers 注入, 翻译层只关心协议字节。
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 use serde::Serialize;
 use serde_json::{json, Value};
@@ -316,6 +316,16 @@ pub fn anthropic_messages_to_input(
                                 "output": output,
                             }));
                         }
+                        // issue #37: image 块转 Responses input_image (仅限非 assistant;
+                        // assistant 侧 Responses 没有对应的输出图片 part)
+                        "image" if role != "assistant" => {
+                            if let Some(image_url) = anthropic_image_url(blk) {
+                                text_parts.push(json!({
+                                    "type": "input_image",
+                                    "image_url": image_url,
+                                }));
+                            }
+                        }
                         "thinking" if config.roundtrip_reasoning => {
                             // 注意: 多轮长对话里每轮都会重解码全部历史 thinking 块 (N 轮 × M 块).
                             // 当前规模 (~50 块以内) 量级 µs 级可忽略; 超出后考虑改 signature 编码避免 JSON parse.
@@ -347,7 +357,7 @@ pub fn anthropic_messages_to_input(
                                 }
                             }
                         }
-                        // 其余 (image / document / 配置关闭时的 thinking) 暂不支持: 直接忽略
+                        // 其余 (document / 配置关闭时的 thinking) 暂不支持: 直接忽略
                         _ => {}
                     }
                 }
@@ -439,6 +449,30 @@ pub fn looks_like_cc_router_signature(signature: &str) -> Option<&'static str> {
         return Some("gemini");
     }
     None
+}
+
+/// Anthropic image block → Responses `input_image` 的 image_url 值。
+/// source.type=url 直接用; base64 拼 data URL (media_type 缺省 image/png)。
+fn anthropic_image_url(block: &Value) -> Option<String> {
+    let source = block.get("source")?;
+    if let Some(url) = source.get("url").and_then(|v| v.as_str()) {
+        if !url.is_empty() {
+            return Some(url.to_string());
+        }
+    }
+    let data = source.get("data").and_then(|v| v.as_str())?;
+    if data.is_empty() {
+        return None;
+    }
+    if data.starts_with("data:") {
+        return Some(data.to_string());
+    }
+    let media_type = source
+        .get("media_type")
+        .and_then(|v| v.as_str())
+        .filter(|v| !v.is_empty())
+        .unwrap_or("image/png");
+    Some(format!("data:{media_type};base64,{data}"))
 }
 
 fn flush_text_parts(out: &mut Vec<Value>, role: &str, text_parts: &mut Vec<Value>) {
@@ -642,6 +676,9 @@ pub struct ResponsesSseConverter {
     pub(crate) response_model: String,
     next_anthropic_index: u32,
     blocks: HashMap<u32, ContentBlock>,
+    /// 发过 delta 的 output_index — output_item.done 回填时避免重放内容 (issue #37)
+    text_delta_seen: HashSet<u32>,
+    tool_args_delta_seen: HashSet<u32>,
     pub(crate) final_usage: Option<Value>,
     stopped: bool,
 }
@@ -667,6 +704,8 @@ impl ResponsesSseConverter {
             response_model: String::new(),
             next_anthropic_index: 0,
             blocks: HashMap::new(),
+            text_delta_seen: HashSet::new(),
+            tool_args_delta_seen: HashSet::new(),
             final_usage: None,
             stopped: false,
         }
@@ -850,6 +889,10 @@ impl ResponsesSseConverter {
         if !matches!(block.kind, BlockKind::Text) {
             return Vec::new();
         }
+        if delta.is_empty() {
+            return Vec::new();
+        }
+        self.text_delta_seen.insert(output_index);
         vec![AnthropicEvent::ContentBlockDelta {
             index: block.anthropic_index,
             delta: json!({"type": "text_delta", "text": delta}),
@@ -867,6 +910,10 @@ impl ResponsesSseConverter {
         if !matches!(block.kind, BlockKind::ToolUse) {
             return Vec::new();
         }
+        if delta.is_empty() {
+            return Vec::new();
+        }
+        self.tool_args_delta_seen.insert(output_index);
         vec![AnthropicEvent::ContentBlockDelta {
             index: block.anthropic_index,
             delta: json!({"type": "input_json_delta", "partial_json": delta}),
@@ -927,9 +974,46 @@ impl ResponsesSseConverter {
             });
             return events;
         }
-        vec![AnthropicEvent::ContentBlockStop {
+        // issue #37: 部分 Responses 兼容上游不发增量 delta, 只在 done 给最终内容 —
+        // 没收到过 delta 时从 done item 回填, 收到过则只发 stop 避免重放
+        let mut events = Vec::new();
+        if matches!(block.kind, BlockKind::Text) && !self.text_delta_seen.contains(&output_index) {
+            let text: String = item
+                .get("content")
+                .and_then(|v| v.as_array())
+                .map(|content| {
+                    content
+                        .iter()
+                        .filter(|part| {
+                            part.get("type").and_then(|v| v.as_str()) == Some("output_text")
+                        })
+                        .filter_map(|part| part.get("text").and_then(|v| v.as_str()))
+                        .collect()
+                })
+                .unwrap_or_default();
+            if !text.is_empty() {
+                events.push(AnthropicEvent::ContentBlockDelta {
+                    index: block.anthropic_index,
+                    delta: json!({"type": "text_delta", "text": text}),
+                });
+            }
+        }
+        if matches!(block.kind, BlockKind::ToolUse)
+            && !self.tool_args_delta_seen.contains(&output_index)
+        {
+            if let Some(arguments) = item.get("arguments").and_then(|v| v.as_str()) {
+                if !arguments.is_empty() {
+                    events.push(AnthropicEvent::ContentBlockDelta {
+                        index: block.anthropic_index,
+                        delta: json!({"type": "input_json_delta", "partial_json": arguments}),
+                    });
+                }
+            }
+        }
+        events.push(AnthropicEvent::ContentBlockStop {
             index: block.anthropic_index,
-        }]
+        });
+        events
     }
 
     fn handle_completed(&mut self, resp: &Value) -> Vec<AnthropicEvent> {
@@ -1564,5 +1648,138 @@ mod tests {
             looks_like_cc_router_signature("03ea0953-5ece-4386-afea-31404f331c5f"),
             None
         );
+    }
+
+    #[test]
+    fn request_converts_anthropic_base64_image_to_input_image() {
+        // issue #37: user 消息里的 image block 不能被静默丢弃
+        let body = json!({
+            "model": "gpt-5.5",
+            "messages": [{
+                "role": "user",
+                "content": [
+                    {"type": "text", "text": "describe this"},
+                    {"type": "image", "source": {
+                        "type": "base64", "media_type": "image/jpeg", "data": "aGVsbG8="
+                    }}
+                ]
+            }]
+        });
+        let out =
+            build_responses_body(&body, &ResponsesTransformConfig::codex_chatgpt(false)).unwrap();
+        assert_eq!(out["input"][0]["content"][0]["type"], json!("input_text"));
+        assert_eq!(
+            out["input"][0]["content"][1],
+            json!({
+                "type": "input_image",
+                "image_url": "data:image/jpeg;base64,aGVsbG8=",
+            })
+        );
+    }
+
+    #[test]
+    fn request_converts_anthropic_url_image_to_input_image() {
+        let body = json!({
+            "model": "gpt-5.5",
+            "messages": [{
+                "role": "user",
+                "content": [
+                    {"type": "image", "source": {"type": "url", "url": "https://example.com/a.png"}}
+                ]
+            }]
+        });
+        let out =
+            build_responses_body(&body, &ResponsesTransformConfig::codex_chatgpt(false)).unwrap();
+        assert_eq!(
+            out["input"][0]["content"][0],
+            json!({"type": "input_image", "image_url": "https://example.com/a.png"})
+        );
+    }
+
+    #[test]
+    fn sse_done_backfills_text_when_upstream_omits_text_deltas() {
+        // issue #37: 部分中转只在 output_item.done 给最终文本, 不发 output_text.delta
+        let mut conv = ResponsesSseConverter::new();
+        conv.feed(
+            "response.created",
+            &json!({"response":{"id":"r","model":"gpt-5.5"}}),
+        );
+        conv.feed(
+            "response.output_item.added",
+            &json!({"output_index":0,"item":{"type":"message"}}),
+        );
+        let events = conv.feed(
+            "response.output_item.done",
+            &json!({
+                "output_index":0,
+                "item":{"type":"message","content":[{"type":"output_text","text":"fallback text"}]}
+            }),
+        );
+        assert_eq!(events.len(), 2, "回填 text_delta + content_block_stop");
+        if let AnthropicEvent::ContentBlockDelta { delta, .. } = &events[0] {
+            assert_eq!(delta["type"], "text_delta");
+            assert_eq!(delta["text"], "fallback text");
+        } else {
+            panic!("expected backfilled text_delta, got {:?}", events[0]);
+        }
+        assert_eq!(events[1].event_name(), "content_block_stop");
+    }
+
+    #[test]
+    fn sse_done_does_not_replay_text_after_text_delta() {
+        // 正常发过 delta 的上游, done 不能重复输出内容
+        let mut conv = ResponsesSseConverter::new();
+        conv.feed(
+            "response.created",
+            &json!({"response":{"id":"r","model":"gpt-5.5"}}),
+        );
+        conv.feed(
+            "response.output_item.added",
+            &json!({"output_index":0,"item":{"type":"message"}}),
+        );
+        conv.feed(
+            "response.output_text.delta",
+            &json!({"output_index":0,"delta":"live text"}),
+        );
+        let events = conv.feed(
+            "response.output_item.done",
+            &json!({
+                "output_index":0,
+                "item":{"type":"message","content":[{"type":"output_text","text":"live text"}]}
+            }),
+        );
+        assert_eq!(events.len(), 1, "只发 stop, 不重放内容");
+        assert_eq!(events[0].event_name(), "content_block_stop");
+    }
+
+    #[test]
+    fn sse_done_backfills_tool_arguments_when_upstream_omits_argument_deltas() {
+        let mut conv = ResponsesSseConverter::new();
+        conv.feed(
+            "response.created",
+            &json!({"response":{"id":"r","model":"gpt-5.5"}}),
+        );
+        conv.feed(
+            "response.output_item.added",
+            &json!({
+                "output_index":0,
+                "item":{"type":"function_call","call_id":"call_1","name":"lookup"}
+            }),
+        );
+        let events = conv.feed(
+            "response.output_item.done",
+            &json!({
+                "output_index":0,
+                "item":{"type":"function_call","arguments":"{\"q\":\"codex\"}"}
+            }),
+        );
+        assert_eq!(events.len(), 2);
+        if let AnthropicEvent::ContentBlockDelta { delta, .. } = &events[0] {
+            assert_eq!(delta["type"], "input_json_delta");
+            assert_eq!(delta["partial_json"], "{\"q\":\"codex\"}");
+        } else {
+            panic!("expected backfilled input_json_delta, got {:?}", events[0]);
+        }
+        assert_eq!(events[1].event_name(), "content_block_stop");
     }
 }
