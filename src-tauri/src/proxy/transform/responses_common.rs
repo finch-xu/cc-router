@@ -178,10 +178,14 @@ pub fn build_responses_body(body: &Value, config: &ResponsesTransformConfig) -> 
         }
     }
 
-    // tool_choice
+    // tool_choice — disable_parallel_tool_use 是 Anthropic 放在 tool_choice 里的独立开关,
+    // OpenAI 侧对应顶层 parallel_tool_calls
     if let Some(tc) = body.get("tool_choice") {
         if let Some(mapped) = map_tool_choice(tc) {
             out["tool_choice"] = mapped;
+        }
+        if tc.get("disable_parallel_tool_use").and_then(|v| v.as_bool()) == Some(true) {
+            out["parallel_tool_calls"] = json!(false);
         }
     }
 
@@ -519,19 +523,28 @@ pub fn convert_tool(t: &Value) -> Option<Value> {
     }))
 }
 
+/// Anthropic tool_choice → OpenAI Responses tool_choice。
+/// Anthropic 是对象形态 (`{"type":"auto"|"any"|"none"}` / `{"type":"tool","name"}`);
+/// OpenAI 侧 `any` 对应 `"required"` (`"any"` 不是合法值)。字符串形态防御性保留。
 pub fn map_tool_choice(tc: &Value) -> Option<Value> {
     if let Some(s) = tc.as_str() {
-        match s {
-            "auto" | "any" | "none" => return Some(json!(s)),
-            _ => return None,
-        }
+        return match s {
+            "auto" | "none" => Some(json!(s)),
+            "any" => Some(json!("required")),
+            _ => None,
+        };
     }
     if let Some(obj) = tc.as_object() {
-        if obj.get("type").and_then(|v| v.as_str()) == Some("tool") {
-            if let Some(name) = obj.get("name").and_then(|v| v.as_str()) {
-                return Some(json!({"type": "function", "name": name}));
-            }
-        }
+        return match obj.get("type").and_then(|v| v.as_str()) {
+            Some("auto") => Some(json!("auto")),
+            Some("any") => Some(json!("required")),
+            Some("none") => Some(json!("none")),
+            Some("tool") => obj
+                .get("name")
+                .and_then(|v| v.as_str())
+                .map(|name| json!({"type": "function", "name": name})),
+            _ => None,
+        };
     }
     None
 }
@@ -576,7 +589,8 @@ pub fn parse_upstream_event(event_name: &str, data: &Value) -> UpstreamEvent {
             let item = data.get("item").cloned().unwrap_or(Value::Null);
             UpstreamEvent::OutputItemDone { output_index, item }
         }
-        "response.output_text.delta" => {
+        // refusal 文本复用 text delta 通道: 拒答消息以 text_delta 透出, 客户端不再收到空响应
+        "response.output_text.delta" | "response.refusal.delta" => {
             let output_index = data.get("output_index").and_then(|v| v.as_u64()).unwrap_or(0) as u32;
             let delta = data
                 .get("delta")
@@ -610,7 +624,9 @@ pub fn parse_upstream_event(event_name: &str, data: &Value) -> UpstreamEvent {
         | "response.function_call_arguments.done"
         | "response.reasoning_summary_part.added"
         | "response.reasoning_summary_part.done"
-        | "response.reasoning_summary_text.done" => UpstreamEvent::Ignored,
+        | "response.reasoning_summary_text.done"
+        | "response.refusal.done"
+        | "response.output_text.annotation.added" => UpstreamEvent::Ignored,
         _ => UpstreamEvent::Unknown,
     }
 }
@@ -1763,6 +1779,77 @@ mod tests {
             looks_like_cc_router_signature("03ea0953-5ece-4386-afea-31404f331c5f"),
             None
         );
+    }
+
+    #[test]
+    fn tool_choice_maps_anthropic_object_forms() {
+        // Anthropic 的 tool_choice 是对象形态; any 对应 OpenAI 的 required ("any" 不是合法值)
+        assert_eq!(map_tool_choice(&json!({"type": "auto"})), Some(json!("auto")));
+        assert_eq!(
+            map_tool_choice(&json!({"type": "any"})),
+            Some(json!("required"))
+        );
+        assert_eq!(map_tool_choice(&json!({"type": "none"})), Some(json!("none")));
+        assert_eq!(
+            map_tool_choice(&json!({"type": "tool", "name": "get_weather"})),
+            Some(json!({"type": "function", "name": "get_weather"}))
+        );
+        // 字符串形态 (防御性保留) 同样修正 any
+        assert_eq!(map_tool_choice(&json!("any")), Some(json!("required")));
+        assert_eq!(map_tool_choice(&json!("auto")), Some(json!("auto")));
+    }
+
+    #[test]
+    fn tool_choice_disable_parallel_maps_to_parallel_tool_calls() {
+        let body = json!({
+            "model": "gpt-5.5",
+            "messages": [{"role": "user", "content": "hi"}],
+            "tool_choice": {"type": "auto", "disable_parallel_tool_use": true},
+        });
+        let out =
+            build_responses_body(&body, &ResponsesTransformConfig::openai_official(false)).unwrap();
+        assert_eq!(out["tool_choice"], json!("auto"));
+        assert_eq!(out["parallel_tool_calls"], json!(false));
+
+        // 不带 disable 时不注入
+        let body2 = json!({
+            "model": "gpt-5.5",
+            "messages": [{"role": "user", "content": "hi"}],
+            "tool_choice": {"type": "auto"},
+        });
+        let out2 =
+            build_responses_body(&body2, &ResponsesTransformConfig::openai_official(false))
+                .unwrap();
+        assert!(out2.get("parallel_tool_calls").is_none());
+    }
+
+    #[test]
+    fn sse_refusal_delta_surfaces_as_text() {
+        // 官方 refusal 事件此前落 Unknown → 拒答时客户端收到空响应
+        let mut conv = ResponsesSseConverter::new();
+        conv.feed(
+            "response.created",
+            &json!({"response":{"id":"r","model":"gpt-5.5"}}),
+        );
+        conv.feed(
+            "response.output_item.added",
+            &json!({"output_index":0,"item":{"type":"message"}}),
+        );
+        let events = conv.feed(
+            "response.refusal.delta",
+            &json!({"output_index":0,"delta":"I cannot help with that."}),
+        );
+        assert_eq!(events.len(), 1);
+        if let AnthropicEvent::ContentBlockDelta { delta, .. } = &events[0] {
+            assert_eq!(delta["type"], "text_delta");
+            assert_eq!(delta["text"], "I cannot help with that.");
+        } else {
+            panic!("expected text_delta for refusal, got {:?}", events[0]);
+        }
+        // refusal.done 不产出内容
+        assert!(conv
+            .feed("response.refusal.done", &json!({"output_index":0}))
+            .is_empty());
     }
 
     #[test]
