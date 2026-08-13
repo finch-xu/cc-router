@@ -43,7 +43,7 @@ use crate::observability::request_log::{RequestLogEntry, RequestStatus};
 use crate::provider::model::AuthHeaderFormat;
 use crate::proxy::client_fingerprint::ClientContext;
 use crate::proxy::handler::error_response;
-use crate::proxy::oauth_dispatch::OAuthDispatchError;
+use crate::proxy::oauth_dispatch::{peek_responses_first_frame, OAuthDispatchError};
 use crate::proxy::sse_framing::find_sse_frame_boundary;
 use crate::proxy::transform::openai::{
     anthropic_to_openai_responses, responses_json_to_anthropic, OpenAiResponsesExtras,
@@ -216,6 +216,10 @@ pub async fn dispatch_openai_responses_attempt(
                     message: truncate_error_body(buf),
                 });
             }
+            // 流首 peek: HTTP 200 但首帧就是 response.failed → Err 让 pipeline failover (issue #38)
+            let stream = peek_responses_first_frame(stream)
+                .await
+                .map_err(|message| OAuthDispatchError::Upstream { status: None, message })?;
             Ok(OpenaiResponsesDispatchOk {
                 transform_config,
                 payload: OpenaiResponsesPayload::Streaming(stream),
@@ -331,9 +335,10 @@ fn finalize_streaming(
         let mut output_tokens: Option<u32> = None;
         let mut cache_read: Option<u32> = None;
         let mut response_model_observed: Option<String> = None;
+        let mut upstream_error: Option<String> = None;
 
         let mut stream = upstream_stream;
-        while let Some(chunk) = stream.next().await {
+        'recv: while let Some(chunk) = stream.next().await {
             let chunk = match chunk {
                 Ok(c) => c,
                 Err(e) => {
@@ -359,15 +364,21 @@ fn finalize_streaming(
                     continue;
                 };
                 let anth_events = converter.feed(&event_name, &data);
-                if anth_events.is_empty() {
-                    continue;
+                if !anth_events.is_empty() {
+                    let mut buf = Vec::with_capacity(256);
+                    for evt in anth_events {
+                        buf.extend_from_slice(evt.to_sse_frame().as_bytes());
+                    }
+                    if client_tx.send(Ok(Bytes::from(buf))).await.is_err() {
+                        return;
+                    }
                 }
-                let mut buf = Vec::with_capacity(256);
-                for evt in anth_events {
-                    buf.extend_from_slice(evt.to_sse_frame().as_bytes());
-                }
-                if client_tx.send(Ok(Bytes::from(buf))).await.is_err() {
-                    return;
+
+                // 流中 response.failed / error: Anthropic error 帧已随上面转发,
+                // 终止消费并把失败带到日志/状态机 (issue #38)
+                if let Some(message) = converter.failure_message() {
+                    upstream_error = Some(message.to_string());
+                    break 'recv;
                 }
             }
         }
@@ -403,15 +414,15 @@ fn finalize_streaming(
             response_model_observed = Some(response_model.to_string());
         }
 
-        // 状态机 + 日志
-        let _ = state_machine::apply(
-            &pool,
-            &app,
-            &event_log_tx,
-            sub_rt.clone(),
-            state_machine::Event::RequestSucceeded,
-        )
-        .await;
+        // 状态机 + 日志 — HTTP 200 但 SSE 内报错时按「上游 SSE 错误」处理 (对齐智谱前例)
+        let state_event = if upstream_error.is_some() {
+            state_machine::Event::UpstreamSseError {
+                is_quota_exhausted: false,
+            }
+        } else {
+            state_machine::Event::RequestSucceeded
+        };
+        let _ = state_machine::apply(&pool, &app, &event_log_tx, sub_rt.clone(), state_event).await;
 
         let entry = RequestLogEntry {
             id: attempt_id,
@@ -423,7 +434,12 @@ fn finalize_streaming(
             real_model_name: real_model.clone(),
             response_model_name: response_model_observed,
             is_streaming: true,
-            status: RequestStatus::Success,
+            status: if upstream_error.is_some() {
+                RequestStatus::Error
+            } else {
+                RequestStatus::Success
+            },
+            // HTTP 层仍是 200, 语义层失败靠 status + error_message 区分
             http_status: Some(200),
             ttft_ms: None,
             total_latency_ms: Some(start.elapsed().as_millis() as u64),
@@ -432,7 +448,7 @@ fn finalize_streaming(
             upstream_cache_creation: None,
             upstream_cache_read: cache_read,
             retry_count,
-            error_message: None,
+            error_message: upstream_error.clone(),
             upstream_response_body: None,
             client_tool: ctx.info.tool,
             client_user_agent: ctx.info.user_agent.clone(),
@@ -442,18 +458,28 @@ fn finalize_streaming(
             downstream_http_version: ctx.http_version.clone(),
         };
         let _ = log_tx.try_send(entry);
-        events::record_request(
-            &event_log_tx,
-            attempt_id,
-            sub_id,
-            Severity::Info,
-            format!(
-                "{} · {} · OpenAI · {}",
-                vm_name.as_str(),
-                display_name,
-                real_model
+        let (severity, summary) = match &upstream_error {
+            Some(msg) => (
+                Severity::Error,
+                format!(
+                    "{} · {} · OpenAI · {} SSE failed: {}",
+                    vm_name.as_str(),
+                    display_name,
+                    real_model,
+                    msg
+                ),
             ),
-        );
+            None => (
+                Severity::Info,
+                format!(
+                    "{} · {} · OpenAI · {}",
+                    vm_name.as_str(),
+                    display_name,
+                    real_model
+                ),
+            ),
+        };
+        events::record_request(&event_log_tx, attempt_id, sub_id, severity, summary);
     });
 
     let stream = futures::stream::unfold(client_rx, |mut rx| async move {
@@ -654,5 +680,110 @@ mod tests {
 
         let ok = result.expect("上游 mock 仅在收到 X-DST: eastus2 时匹配, 失败即 header 未送达");
         assert!(matches!(ok.payload, OpenaiResponsesPayload::NonStreaming(_)));
+    }
+
+    /// issue #38: 上游 HTTP 200 但流首帧就是 response.failed → attempt 返回 Err,
+    /// pipeline 据此 failover 到下一个候选订阅 (对齐智谱 SSE error peek 前例)。
+    #[tokio::test]
+    async fn dispatch_streaming_failed_first_frame_returns_err_for_failover() {
+        let server = MockServer::start().await;
+        let sse_body = "event: response.failed\ndata: {\"response\":{\"status\":\"failed\",\"error\":{\"code\":\"server_error\",\"message\":\"The model failed to generate a response.\"}}}\n\n";
+        Mock::given(method("POST"))
+            .and(path("/v1/responses"))
+            .respond_with(
+                ResponseTemplate::new(200)
+                    .set_body_raw(sse_body, "text/event-stream"),
+            )
+            .mount(&server)
+            .await;
+
+        let result = dispatch_openai_responses_attempt(
+            &reqwest::Client::new(),
+            "sk-test".into(),
+            "Authorization".into(),
+            AuthHeaderFormat::Bearer,
+            format!("{}/v1/responses", server.uri()),
+            &json!({
+                "model": "gpt-5",
+                "stream": true,
+                "messages": [{"role": "user", "content": "hi"}],
+            }),
+            true,
+            Vec::new(),
+            HeaderMap::new(),
+            std::collections::BTreeMap::new(),
+            OpenAiResponsesExtras {
+                reasoning_effort: None,
+                expose_reasoning: true,
+            },
+        )
+        .await;
+
+        match result {
+            Err(OAuthDispatchError::Upstream { status, message }) => {
+                assert_eq!(status, None, "流内失败无 HTTP 状态, pipeline 按 502 分类重试");
+                assert!(
+                    message.contains("The model failed to generate a response."),
+                    "错误消息应透出上游 error.message, got: {message}"
+                );
+            }
+            Err(OAuthDispatchError::Auth(m)) => panic!("unexpected auth error: {m}"),
+            Ok(_) => panic!("expected Upstream error, got Ok"),
+        }
+    }
+
+    /// 正常流式响应不受 peek 影响, 上游字节完整到达翻译层。
+    #[tokio::test]
+    async fn dispatch_streaming_normal_first_frame_passes_through() {
+        let server = MockServer::start().await;
+        let sse_body = concat!(
+            "event: response.created\ndata: {\"response\":{\"id\":\"r\",\"model\":\"gpt-5\"}}\n\n",
+            "event: response.output_item.added\ndata: {\"output_index\":0,\"item\":{\"type\":\"message\"}}\n\n",
+            "event: response.output_text.delta\ndata: {\"output_index\":0,\"delta\":\"hello\"}\n\n",
+            "event: response.completed\ndata: {\"response\":{\"status\":\"completed\",\"usage\":{\"input_tokens\":1,\"output_tokens\":2}}}\n\n",
+        );
+        Mock::given(method("POST"))
+            .and(path("/v1/responses"))
+            .respond_with(
+                ResponseTemplate::new(200)
+                    .set_body_raw(sse_body, "text/event-stream"),
+            )
+            .mount(&server)
+            .await;
+
+        let result = dispatch_openai_responses_attempt(
+            &reqwest::Client::new(),
+            "sk-test".into(),
+            "Authorization".into(),
+            AuthHeaderFormat::Bearer,
+            format!("{}/v1/responses", server.uri()),
+            &json!({
+                "model": "gpt-5",
+                "stream": true,
+                "messages": [{"role": "user", "content": "hi"}],
+            }),
+            true,
+            Vec::new(),
+            HeaderMap::new(),
+            std::collections::BTreeMap::new(),
+            OpenAiResponsesExtras {
+                reasoning_effort: None,
+                expose_reasoning: true,
+            },
+        )
+        .await;
+
+        let ok = result.expect("正常 SSE 应返回 Ok");
+        let OpenaiResponsesPayload::Streaming(s) = ok.payload else {
+            panic!("expected streaming payload");
+        };
+        let collected: Vec<u8> = s
+            .filter_map(|r| async move { r.ok() })
+            .fold(Vec::new(), |mut acc, b| async move {
+                acc.extend_from_slice(&b);
+                acc
+            })
+            .await;
+        assert_eq!(collected, sse_body.as_bytes(), "peek 不能丢/改任何字节");
     }
 }

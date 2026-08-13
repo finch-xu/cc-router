@@ -540,6 +540,8 @@ pub fn map_tool_choice(tc: &Value) -> Option<Value> {
 pub enum UpstreamEvent {
     Created(Value),
     Completed(Value),
+    /// `response.failed` 或流中顶层 `error` 事件 — 上游应用层失败 (issue #38)
+    Failed(Value),
     OutputItemAdded { output_index: u32, item: Value },
     OutputItemDone { output_index: u32, item: Value },
     OutputTextDelta { output_index: u32, delta: String },
@@ -556,6 +558,7 @@ pub fn parse_upstream_event(event_name: &str, data: &Value) -> UpstreamEvent {
     match event_name {
         "response.created" => UpstreamEvent::Created(data.clone()),
         "response.completed" => UpstreamEvent::Completed(data.clone()),
+        "response.failed" | "error" => UpstreamEvent::Failed(data.clone()),
         "response.output_item.added" => {
             let output_index = data.get("output_index").and_then(|v| v.as_u64()).unwrap_or(0) as u32;
             let item = data.get("item").cloned().unwrap_or(Value::Null);
@@ -624,6 +627,8 @@ pub enum AnthropicEvent {
     MessageDelta { delta: Value, usage: Value },
     #[serde(rename = "message_stop")]
     MessageStop,
+    #[serde(rename = "error")]
+    Error { error: Value },
 }
 
 impl AnthropicEvent {
@@ -635,6 +640,7 @@ impl AnthropicEvent {
             Self::ContentBlockStop { .. } => "content_block_stop",
             Self::MessageDelta { .. } => "message_delta",
             Self::MessageStop => "message_stop",
+            Self::Error { .. } => "error",
         }
     }
 
@@ -680,6 +686,8 @@ pub struct ResponsesSseConverter {
     text_delta_seen: HashSet<u32>,
     tool_args_delta_seen: HashSet<u32>,
     pub(crate) final_usage: Option<Value>,
+    /// 上游发过 response.failed / error 时的错误消息 — dispatch 层据此写失败日志与状态机 (issue #38)
+    failure_message: Option<String>,
     stopped: bool,
 }
 
@@ -707,6 +715,7 @@ impl ResponsesSseConverter {
             text_delta_seen: HashSet::new(),
             tool_args_delta_seen: HashSet::new(),
             final_usage: None,
+            failure_message: None,
             stopped: false,
         }
     }
@@ -731,6 +740,7 @@ impl ResponsesSseConverter {
                 self.handle_reasoning_summary_text_delta(output_index, &delta)
             }
             UpstreamEvent::Completed(resp) => self.handle_completed(&resp),
+            UpstreamEvent::Failed(resp) => self.handle_failed(&resp),
             UpstreamEvent::Ignored | UpstreamEvent::Unknown => Vec::new(),
         }
     }
@@ -746,6 +756,11 @@ impl ResponsesSseConverter {
 
     pub fn response_model(&self) -> &str {
         &self.response_model
+    }
+
+    /// Some = 上游在流内报了应用层失败 (response.failed / error 事件)。
+    pub fn failure_message(&self) -> Option<&str> {
+        self.failure_message.as_deref()
     }
 
     // ---------- handlers ----------
@@ -1043,6 +1058,32 @@ impl ResponsesSseConverter {
             AnthropicEvent::MessageStop,
         ]
     }
+
+    fn handle_failed(&mut self, resp: &Value) -> Vec<AnthropicEvent> {
+        if self.stopped {
+            return Vec::new();
+        }
+        self.stopped = true;
+        let message = failure_message_from_event(resp);
+        self.failure_message = Some(message.clone());
+        vec![AnthropicEvent::Error {
+            error: json!({"type": "api_error", "message": message}),
+        }]
+    }
+}
+
+/// 从 `response.failed` / 顶层 `error` 事件的 data 里提取人类可读错误消息 (issue #38)。
+/// 两种 shape: response.failed 是 `{response:{error:{message}}}`, 顶层 error 事件是
+/// `{message}` 或 `{error:{message}}`。dispatch 层流首 peek 与 converter 共用。
+pub fn failure_message_from_event(data: &Value) -> String {
+    data.get("response")
+        .and_then(|r| r.get("error"))
+        .and_then(|e| e.get("message"))
+        .or_else(|| data.get("message"))
+        .or_else(|| data.get("error").and_then(|e| e.get("message")))
+        .and_then(|v| v.as_str())
+        .unwrap_or("Responses upstream request failed")
+        .to_string()
 }
 
 pub fn map_status_to_anthropic_stop_reason(status: &str) -> &'static str {
@@ -1093,6 +1134,11 @@ impl NonStreamingCollector {
             block_meta: HashMap::new(),
             order: Vec::new(),
         }
+    }
+
+    /// Some = 上游在流内报了应用层失败, 见 [`ResponsesSseConverter::failure_message`]。
+    pub fn failure_message(&self) -> Option<&str> {
+        self.converter.failure_message()
     }
 
     pub fn feed(&mut self, event_name: &str, data: &Value) {
@@ -1750,6 +1796,65 @@ mod tests {
         );
         assert_eq!(events.len(), 1, "只发 stop, 不重放内容");
         assert_eq!(events[0].event_name(), "content_block_stop");
+    }
+
+    #[test]
+    fn sse_response_failed_emits_anthropic_error_and_records_failure() {
+        // issue #38: response.failed 必须转成 Anthropic error 事件, 不能静默丢弃
+        let mut conv = ResponsesSseConverter::new();
+        conv.feed(
+            "response.created",
+            &json!({"response":{"id":"r","model":"gpt-5.5"}}),
+        );
+        let events = conv.feed(
+            "response.failed",
+            &json!({"response":{"status":"failed","error":{"code":"server_error","message":"The model failed to generate a response."}}}),
+        );
+        assert_eq!(events.len(), 1);
+        if let AnthropicEvent::Error { error } = &events[0] {
+            // serde tag="type" 序列化后是 {"type":"error","error":{...}} — 标准 Anthropic error 帧
+            assert_eq!(error["type"], "api_error");
+            assert_eq!(error["message"], "The model failed to generate a response.");
+        } else {
+            panic!("expected Error event, got {:?}", events[0]);
+        }
+        assert_eq!(
+            conv.failure_message(),
+            Some("The model failed to generate a response.")
+        );
+        // failed 已终止, 兜底 finalize 不再补 message_stop
+        assert!(conv.finalize_if_needed().is_empty());
+    }
+
+    #[test]
+    fn sse_toplevel_error_event_emits_anthropic_error() {
+        // 官方事件清单里流中还可能出现顶层 error 事件 (shape 与 response.failed 不同)
+        let mut conv = ResponsesSseConverter::new();
+        conv.feed(
+            "response.created",
+            &json!({"response":{"id":"r","model":"gpt-5.5"}}),
+        );
+        let events = conv.feed(
+            "error",
+            &json!({"type":"error","code":"rate_limit_exceeded","message":"Rate limit reached"}),
+        );
+        assert_eq!(events.len(), 1);
+        assert_eq!(events[0].event_name(), "error");
+        assert_eq!(conv.failure_message(), Some("Rate limit reached"));
+    }
+
+    #[test]
+    fn nonstreaming_collector_exposes_failure_message() {
+        let mut col = NonStreamingCollector::new();
+        col.feed(
+            "response.created",
+            &json!({"response":{"id":"r","model":"gpt-5.5"}}),
+        );
+        col.feed(
+            "response.failed",
+            &json!({"response":{"status":"failed","error":{"message":"quota exceeded"}}}),
+        );
+        assert_eq!(col.failure_message(), Some("quota exceeded"));
     }
 
     #[test]

@@ -207,6 +207,11 @@ pub async fn dispatch_oauth_attempt(
         });
     }
 
+    // 流首 peek: HTTP 200 但首帧就是 response.failed → 返回 Err 让 pipeline failover (issue #38)
+    let stream = peek_responses_first_frame(stream)
+        .await
+        .map_err(|message| OAuthDispatchError::Upstream { status: None, message })?;
+
     Ok(OAuthDispatchOk {
         upstream_status: status,
         upstream_headers: resp_headers,
@@ -349,18 +354,20 @@ fn finalize_streaming(
         let mut buffer = BytesMut::with_capacity(8 * 1024);
         let mut input_tokens: Option<u32> = None;
         let mut output_tokens: Option<u32> = None;
+        let mut upstream_error: Option<String> = None;
 
         let mut stream = upstream_stream;
-        while let Some(chunk) = stream.next().await {
+        'recv: while let Some(chunk) = stream.next().await {
             let chunk = match chunk {
                 Ok(c) => c,
                 Err(e) => {
                     warn!(?e, "OAuth upstream stream error");
+                    // serde 序列化保证 JSON 转义正确 (手拼字符串遇到引号会破帧)
+                    let payload =
+                        serde_json::to_string(&serde_json::json!({"error": e.to_string()}))
+                            .unwrap_or_else(|_| r#"{"error":"unknown"}"#.into());
                     let _ = client_tx
-                        .send(Ok(Bytes::from(format!(
-                            "event: error\ndata: {{\"error\":\"{}\"}}\n\n",
-                            e
-                        ))))
+                        .send(Ok(Bytes::from(format!("event: error\ndata: {}\n\n", payload))))
                         .await;
                     break;
                 }
@@ -399,6 +406,13 @@ fn finalize_streaming(
                         return;
                     }
                 }
+
+                // 流中 response.failed / error: Anthropic error 帧已随上面 anth_events
+                // 转发给客户端, 这里终止消费并把失败带到日志/状态机 (issue #38)
+                if let Some(message) = converter.failure_message() {
+                    upstream_error = Some(message.to_string());
+                    break 'recv;
+                }
             }
         }
 
@@ -407,13 +421,20 @@ fn finalize_streaming(
             let _ = client_tx.send(Ok(Bytes::from(evt.to_sse_frame()))).await;
         }
 
-        // 状态机 + 日志
+        // 状态机 + 日志 — HTTP 200 但 SSE 内报错时按「上游 SSE 错误」处理 (对齐智谱前例)
+        let state_event = if upstream_error.is_some() {
+            state_machine::Event::UpstreamSseError {
+                is_quota_exhausted: false,
+            }
+        } else {
+            state_machine::Event::RequestSucceeded
+        };
         let _ = state_machine::apply(
             &pool,
             &app,
             &event_log_tx,
             sub_rt.clone(),
-            state_machine::Event::RequestSucceeded,
+            state_event,
         )
         .await;
 
@@ -430,7 +451,12 @@ fn finalize_streaming(
                 if m.is_empty() { None } else { Some(m.to_string()) }
             },
             is_streaming: true,
-            status: RequestStatus::Success,
+            status: if upstream_error.is_some() {
+                RequestStatus::Error
+            } else {
+                RequestStatus::Success
+            },
+            // HTTP 层仍是 200, 语义层失败靠 status + error_message 区分 (对齐智谱前例)
             http_status: Some(200),
             ttft_ms: None,
             total_latency_ms: Some(start.elapsed().as_millis() as u64),
@@ -439,7 +465,7 @@ fn finalize_streaming(
             upstream_cache_creation: None,
             upstream_cache_read: None,
             retry_count,
-            error_message: None,
+            error_message: upstream_error.clone(),
             upstream_response_body: None,
             client_tool: ctx.info.tool,
             client_user_agent: ctx.info.user_agent.clone(),
@@ -449,13 +475,23 @@ fn finalize_streaming(
             downstream_http_version: ctx.http_version.clone(),
         };
         let _ = log_tx.try_send(entry);
-        events::record_request(
-            &event_log_tx,
-            attempt_id,
-            sub_id,
-            Severity::Info,
-            format!("{} · {} · {}", vm_name.as_str(), display_name, real_model),
-        );
+        let (severity, summary) = match &upstream_error {
+            Some(msg) => (
+                Severity::Error,
+                format!(
+                    "{} · {} · {} SSE failed: {}",
+                    vm_name.as_str(),
+                    display_name,
+                    real_model,
+                    msg
+                ),
+            ),
+            None => (
+                Severity::Info,
+                format!("{} · {} · {}", vm_name.as_str(), display_name, real_model),
+            ),
+        };
+        events::record_request(&event_log_tx, attempt_id, sub_id, severity, summary);
     });
 
     let stream = futures::stream::unfold(client_rx, |mut rx| async move {
@@ -529,6 +565,68 @@ async fn collect_to_json_response(
                 collector.feed(&event_name, &data);
             }
         }
+    }
+
+    // 流中 response.failed / error: 非流式还没给客户端发过 header, 可以返回真实错误码 (issue #38)
+    if let Some(message) = collector.failure_message().map(str::to_string) {
+        let _ = state_machine::apply(
+            &pool,
+            &app,
+            &event_log_tx,
+            sub_rt.clone(),
+            state_machine::Event::UpstreamSseError {
+                is_quota_exhausted: false,
+            },
+        )
+        .await;
+        let entry = RequestLogEntry {
+            id: attempt_id,
+            timestamp_ms: Utc::now().timestamp_millis(),
+            virtual_model_name: vm_name,
+            subscription_id: sub_id,
+            provider_id,
+            endpoint_id,
+            real_model_name: real_model.clone(),
+            response_model_name: None,
+            is_streaming: false,
+            status: RequestStatus::Error,
+            // HTTP 层仍是 200, 语义层失败靠 status + error_message 区分 (对齐智谱前例)
+            http_status: Some(200),
+            ttft_ms: None,
+            total_latency_ms: Some(start.elapsed().as_millis() as u64),
+            upstream_input_tokens: input_tokens,
+            upstream_output_tokens: output_tokens,
+            upstream_cache_creation: None,
+            upstream_cache_read: None,
+            retry_count,
+            error_message: Some(message.clone()),
+            upstream_response_body: None,
+            client_tool: ctx.info.tool,
+            client_user_agent: ctx.info.user_agent.clone(),
+            client_version: ctx.info.version.clone(),
+            client_ip: ctx.ip.clone(),
+            entry_kind: Some(ctx.entry_kind.as_str()),
+            downstream_http_version: ctx.http_version.clone(),
+        };
+        let _ = log_tx.try_send(entry);
+        events::record_request(
+            &event_log_tx,
+            attempt_id,
+            sub_id,
+            Severity::Error,
+            format!(
+                "{} · {} · {} SSE failed: {}",
+                vm_name.as_str(),
+                display_name,
+                real_model,
+                message
+            ),
+        );
+        return (
+            StatusCode::BAD_GATEWAY,
+            Json(error_body("oauth_upstream_error", &message)),
+        )
+            .into_response();
     }
 
     let final_msg = collector.finalize();
@@ -1056,6 +1154,55 @@ async fn collect_kiro_to_json_response(
     response
 }
 
+/// 流首 peek 的字节上限 — 超过还没凑齐一个完整 SSE 帧就放弃判断直接放行,
+/// 防止畸形上游让 peek 无限缓冲。
+const PEEK_FIRST_FRAME_CAP: usize = 64 * 1024;
+
+/// Responses SSE 流首窥探 (issue #38, 对齐智谱 `sse::peek_first_event` 前例):
+/// 上游 HTTP 200 但首帧就是 `response.failed` / `error` 时返回 `Err(message)`,
+/// 让 pipeline 在还没给客户端发过任何字节时 failover 到下一个候选订阅。
+///
+/// 正常流返回 `Ok(等价流)` — 已消费的 chunk (含网络错误项) 原样 prepend 回去, 零字节丢失。
+/// 首帧解析不出 (心跳注释 / 非 JSON) 或超过 [`PEEK_FIRST_FRAME_CAP`] 一律放行, 不误杀。
+pub(crate) async fn peek_responses_first_frame(
+    mut stream: BoxStream<'static, Result<Bytes, reqwest::Error>>,
+) -> Result<BoxStream<'static, Result<Bytes, reqwest::Error>>, String> {
+    use crate::proxy::transform::responses_common::{
+        failure_message_from_event, parse_upstream_event, UpstreamEvent,
+    };
+
+    let mut consumed: Vec<Result<Bytes, reqwest::Error>> = Vec::new();
+    let mut acc = BytesMut::new();
+
+    while acc.len() < PEEK_FIRST_FRAME_CAP {
+        match stream.next().await {
+            Some(Ok(chunk)) => {
+                acc.extend_from_slice(&chunk);
+                consumed.push(Ok(chunk));
+                if let Some((idx, _sep_len)) = find_sse_frame_boundary(&acc) {
+                    let frame_str = std::str::from_utf8(&acc[..idx]).unwrap_or("");
+                    if let Some((event_name, data)) = parse_sse_frame(frame_str) {
+                        if let UpstreamEvent::Failed(payload) =
+                            parse_upstream_event(&event_name, &data)
+                        {
+                            return Err(failure_message_from_event(&payload));
+                        }
+                    }
+                    break;
+                }
+            }
+            // 网络错误不在 peek 层裁决: 原样入队, 由 finalize 的消费循环按既有逻辑处理
+            Some(Err(e)) => {
+                consumed.push(Err(e));
+                break;
+            }
+            None => break,
+        }
+    }
+
+    Ok(futures::stream::iter(consumed).chain(stream).boxed())
+}
+
 /// 把 OAuth 错误转成给客户端的 axum Response.
 pub fn build_error_response(err: &OAuthDispatchError) -> Response {
     match err {
@@ -1070,5 +1217,79 @@ pub fn build_error_response(err: &OAuthDispatchError) -> Response {
                 .unwrap_or(StatusCode::BAD_GATEWAY);
             (code, Json(error_body("oauth_upstream_error", message))).into_response()
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use futures::stream;
+
+    fn byte_stream(
+        items: Vec<Result<Bytes, reqwest::Error>>,
+    ) -> BoxStream<'static, Result<Bytes, reqwest::Error>> {
+        stream::iter(items).boxed()
+    }
+
+    /// issue #38: 流首帧是 response.failed → 返回 Err 让 pipeline failover 下一候选
+    #[tokio::test]
+    async fn peek_returns_err_when_first_frame_is_response_failed() {
+        let frame = "event: response.failed\ndata: {\"response\":{\"status\":\"failed\",\"error\":{\"message\":\"quota exceeded\"}}}\n\n";
+        let s = byte_stream(vec![Ok(Bytes::from(frame))]);
+        match peek_responses_first_frame(s).await {
+            Err(msg) => assert_eq!(msg, "quota exceeded"),
+            Ok(_) => panic!("failed 首帧应返回 Err"),
+        }
+    }
+
+    /// 顶层 error 事件同样触发 failover
+    #[tokio::test]
+    async fn peek_returns_err_when_first_frame_is_error_event() {
+        let frame = "event: error\ndata: {\"type\":\"error\",\"message\":\"Rate limit reached\"}\n\n";
+        let s = byte_stream(vec![Ok(Bytes::from(frame))]);
+        match peek_responses_first_frame(s).await {
+            Err(msg) => assert_eq!(msg, "Rate limit reached"),
+            Ok(_) => panic!("error 首帧应返回 Err"),
+        }
+    }
+
+    /// 正常首帧: 已消费字节必须完整 prepend 回流, 一个字节都不能丢
+    #[tokio::test]
+    async fn peek_passes_through_normal_stream_preserving_all_bytes() {
+        let all = concat!(
+            "event: response.created\ndata: {\"response\":{\"id\":\"r\",\"model\":\"gpt-5.5\"}}\n\n",
+            "event: response.output_text.delta\ndata: {\"output_index\":0,\"delta\":\"hi\"}\n\n",
+        );
+        // 故意按怪异位置切 chunk, 覆盖帧边界跨 chunk 的情况
+        let s = byte_stream(vec![
+            Ok(Bytes::from(&all.as_bytes()[..10])),
+            Ok(Bytes::from(&all.as_bytes()[10..90])),
+            Ok(Bytes::from(&all.as_bytes()[90..])),
+        ]);
+        let out = peek_responses_first_frame(s).await.expect("正常流应 passthrough");
+        let collected: Vec<u8> = out
+            .filter_map(|r| async move { r.ok() })
+            .fold(Vec::new(), |mut acc, b| async move {
+                acc.extend_from_slice(&b);
+                acc
+            })
+            .await;
+        assert_eq!(collected, all.as_bytes());
+    }
+
+    /// 首帧解析不出 (如 : ping 心跳) → 放行, 不误杀
+    #[tokio::test]
+    async fn peek_passes_through_unparseable_first_frame() {
+        let all = ": ping\n\nevent: response.created\ndata: {\"response\":{}}\n\n";
+        let s = byte_stream(vec![Ok(Bytes::from(all))]);
+        let out = peek_responses_first_frame(s).await.expect("心跳首帧应放行");
+        let collected: Vec<u8> = out
+            .filter_map(|r| async move { r.ok() })
+            .fold(Vec::new(), |mut acc, b| async move {
+                acc.extend_from_slice(&b);
+                acc
+            })
+            .await;
+        assert_eq!(collected, all.as_bytes());
     }
 }
