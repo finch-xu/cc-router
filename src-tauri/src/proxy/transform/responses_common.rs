@@ -301,7 +301,7 @@ pub fn anthropic_messages_to_input(
                             let call_id =
                                 blk.get("tool_use_id").and_then(|v| v.as_str()).unwrap_or("");
                             // tool_result.content 可能是 str 或 Anthropic content blocks
-                            let output = match blk.get("content") {
+                            let mut output = match blk.get("content") {
                                 Some(Value::String(s)) => s.clone(),
                                 Some(Value::Array(arr)) => arr
                                     .iter()
@@ -310,6 +310,11 @@ pub fn anthropic_messages_to_input(
                                     .join("\n"),
                                 _ => String::new(),
                             };
+                            // issue #39: Responses 的 function_call_output 没有错误标记字段,
+                            // 用前缀保留 is_error 语义, 上游才知道工具执行失败了
+                            if blk.get("is_error").and_then(|v| v.as_bool()) == Some(true) {
+                                output = format!("Error: {output}");
+                            }
                             out.push(json!({
                                 "type": "function_call_output",
                                 "call_id": call_id,
@@ -557,7 +562,9 @@ pub enum UpstreamEvent {
 pub fn parse_upstream_event(event_name: &str, data: &Value) -> UpstreamEvent {
     match event_name {
         "response.created" => UpstreamEvent::Created(data.clone()),
-        "response.completed" => UpstreamEvent::Completed(data.clone()),
+        // response.incomplete 是官方独立终止事件 (截断时代替 completed 发),
+        // data 同样带 response.status / incomplete_details / usage, 直接复用 Completed 处理
+        "response.completed" | "response.incomplete" => UpstreamEvent::Completed(data.clone()),
         "response.failed" | "error" => UpstreamEvent::Failed(data.clone()),
         "response.output_item.added" => {
             let output_index = data.get("output_index").and_then(|v| v.as_u64()).unwrap_or(0) as u32;
@@ -686,6 +693,9 @@ pub struct ResponsesSseConverter {
     text_delta_seen: HashSet<u32>,
     tool_args_delta_seen: HashSet<u32>,
     pub(crate) final_usage: Option<Value>,
+    /// completed/incomplete 时算出的 stop_reason — NonStreamingCollector 靠它拼最终 JSON
+    /// (MessageDelta 事件在 collector 的 absorb 里被丢弃, 不存字段就永远 end_turn)
+    final_stop_reason: Option<&'static str>,
     /// 上游发过 response.failed / error 时的错误消息 — dispatch 层据此写失败日志与状态机 (issue #38)
     failure_message: Option<String>,
     stopped: bool,
@@ -715,6 +725,7 @@ impl ResponsesSseConverter {
             text_delta_seen: HashSet::new(),
             tool_args_delta_seen: HashSet::new(),
             final_usage: None,
+            final_stop_reason: None,
             failure_message: None,
             stopped: false,
         }
@@ -1039,14 +1050,13 @@ impl ResponsesSseConverter {
 
         let response = resp.get("response");
         let stop_reason = response
-            .and_then(|r| r.get("status"))
-            .and_then(|v| v.as_str())
-            .map(map_status_to_anthropic_stop_reason)
+            .map(map_response_to_anthropic_stop_reason)
             .unwrap_or("end_turn");
+        self.final_stop_reason = Some(stop_reason);
 
         let usage = response
             .and_then(|r| r.get("usage"))
-            .cloned()
+            .map(responses_usage_to_anthropic)
             .unwrap_or_else(|| json!({"input_tokens": 0, "output_tokens": 0}));
         self.final_usage = Some(usage.clone());
 
@@ -1093,6 +1103,63 @@ pub fn map_status_to_anthropic_stop_reason(status: &str) -> &'static str {
         "cancelled" => "stop_sequence",
         _ => "end_turn",
     }
+}
+
+/// 基于完整 response 对象的 stop_reason 映射 (issue #39) — 比只看 status 的
+/// [`map_status_to_anthropic_stop_reason`] 多吃 `incomplete_details.reason`:
+/// 内容过滤等非 token 上限的截断不该误报 max_tokens (会诱导客户端加大 max_tokens 重试)。
+pub fn map_response_to_anthropic_stop_reason(response: &Value) -> &'static str {
+    let status = response.get("status").and_then(|v| v.as_str()).unwrap_or("");
+    let incomplete_reason = response
+        .get("incomplete_details")
+        .and_then(|v| v.get("reason"))
+        .and_then(|v| v.as_str());
+    match status {
+        "incomplete" | "truncated" => match incomplete_reason {
+            // reason 缺失时保守按 max_tokens, 与旧行为一致
+            Some("max_output_tokens") | Some("max_tokens") | None => "max_tokens",
+            _ => "end_turn",
+        },
+        "cancelled" => "end_turn",
+        _ => map_status_to_anthropic_stop_reason(status),
+    }
+}
+
+/// Responses usage → Anthropic usage 命名归一化 (issue #39)。
+///
+/// - `input_tokens_details.cached_tokens` (官方) / `prompt_tokens_details.cached_tokens`
+///   (部分中转) → `cache_read_input_tokens`
+/// - `input_tokens_details.cache_write_tokens` (new-api 系扩展, aiberm 实测) →
+///   `cache_creation_input_tokens`
+///
+/// 注意语义差异: OpenAI 的 `input_tokens` **含** cached 部分, Anthropic 的 `input_tokens`
+/// **不含** cache_read。这里只补字段不做减法 — 统计页把两者分开展示, 不相加。
+pub fn responses_usage_to_anthropic(usage: &Value) -> Value {
+    let mut out = usage.clone();
+    let cache_read = usage
+        .get("cache_read_input_tokens")
+        .or_else(|| {
+            usage
+                .get("input_tokens_details")
+                .and_then(|d| d.get("cached_tokens"))
+        })
+        .or_else(|| {
+            usage
+                .get("prompt_tokens_details")
+                .and_then(|d| d.get("cached_tokens"))
+        });
+    if let Some(v) = cache_read {
+        out["cache_read_input_tokens"] = v.clone();
+    }
+    let cache_creation = usage.get("cache_creation_input_tokens").or_else(|| {
+        usage
+            .get("input_tokens_details")
+            .and_then(|d| d.get("cache_write_tokens"))
+    });
+    if let Some(v) = cache_creation {
+        out["cache_creation_input_tokens"] = v.clone();
+    }
+    out
 }
 
 // ============================================================
@@ -1194,7 +1261,9 @@ impl NonStreamingCollector {
             .final_usage
             .clone()
             .unwrap_or_else(|| json!({"input_tokens": 0, "output_tokens": 0}));
-        let stop_reason = "end_turn";
+        // issue #39: converter 在 completed/incomplete 时算好的 stop_reason 存了字段,
+        // 不再硬编码 end_turn (max_tokens 截断此前会被非流式路径吞掉)
+        let stop_reason = self.converter.final_stop_reason.unwrap_or("end_turn");
 
         json!({
             "id": if self.converter.message_id.is_empty() { Uuid::new_v4().to_string() } else { self.converter.message_id.clone() },
@@ -1796,6 +1865,157 @@ mod tests {
         );
         assert_eq!(events.len(), 1, "只发 stop, 不重放内容");
         assert_eq!(events[0].event_name(), "content_block_stop");
+    }
+
+    #[test]
+    fn request_marks_error_tool_result_output() {
+        // issue #39: tool_result.is_error 丢失会让上游把工具失败当成功继续推理
+        let body = json!({
+            "model": "gpt-5.5",
+            "messages": [{
+                "role": "user",
+                "content": [{
+                    "type": "tool_result",
+                    "tool_use_id": "call_1",
+                    "is_error": true,
+                    "content": "command not found",
+                }]
+            }]
+        });
+        let out =
+            build_responses_body(&body, &ResponsesTransformConfig::codex_chatgpt(false)).unwrap();
+        assert_eq!(out["input"][0]["type"], "function_call_output");
+        assert_eq!(out["input"][0]["output"], "Error: command not found");
+    }
+
+    #[test]
+    fn stop_reason_maps_incomplete_details_reason() {
+        // issue #39: incomplete 不能一律报 max_tokens, 要看 incomplete_details.reason
+        assert_eq!(
+            map_response_to_anthropic_stop_reason(&json!({
+                "status": "incomplete",
+                "incomplete_details": {"reason": "max_output_tokens"}
+            })),
+            "max_tokens"
+        );
+        assert_eq!(
+            map_response_to_anthropic_stop_reason(&json!({
+                "status": "incomplete",
+                "incomplete_details": {"reason": "content_filter"}
+            })),
+            "end_turn"
+        );
+        // reason 缺失时保守按 max_tokens (与旧行为一致)
+        assert_eq!(
+            map_response_to_anthropic_stop_reason(&json!({"status": "incomplete"})),
+            "max_tokens"
+        );
+        assert_eq!(
+            map_response_to_anthropic_stop_reason(&json!({"status": "completed"})),
+            "end_turn"
+        );
+        assert_eq!(
+            map_response_to_anthropic_stop_reason(&json!({"status": "cancelled"})),
+            "end_turn"
+        );
+    }
+
+    #[test]
+    fn usage_normalizes_cached_and_cache_write_tokens() {
+        // issue #39: Responses usage 的缓存字段要归一化成 Anthropic 命名
+        let usage = responses_usage_to_anthropic(&json!({
+            "input_tokens": 100,
+            "output_tokens": 10,
+            "input_tokens_details": {"cached_tokens": 60, "cache_write_tokens": 30}
+        }));
+        assert_eq!(usage["input_tokens"], 100);
+        assert_eq!(usage["output_tokens"], 10);
+        assert_eq!(usage["cache_read_input_tokens"], 60);
+        // cache_write_tokens 是 new-api 系扩展 (实测 aiberm), ≈ Anthropic cache_creation
+        assert_eq!(usage["cache_creation_input_tokens"], 30);
+    }
+
+    #[test]
+    fn sse_completed_carries_normalized_usage_and_stop_reason() {
+        let mut conv = ResponsesSseConverter::new();
+        conv.feed(
+            "response.created",
+            &json!({"response":{"id":"r","model":"gpt-5.5"}}),
+        );
+        let events = conv.feed(
+            "response.completed",
+            &json!({"response":{
+                "status": "incomplete",
+                "incomplete_details": {"reason": "max_output_tokens"},
+                "usage": {
+                    "input_tokens": 100, "output_tokens": 10,
+                    "input_tokens_details": {"cached_tokens": 60}
+                }
+            }}),
+        );
+        let AnthropicEvent::MessageDelta { delta, usage } = &events[0] else {
+            panic!("expected MessageDelta");
+        };
+        assert_eq!(delta["stop_reason"], "max_tokens");
+        assert_eq!(usage["cache_read_input_tokens"], 60);
+    }
+
+    #[test]
+    fn sse_response_incomplete_event_treated_as_terminal() {
+        // 官方协议: 截断时发独立的 response.incomplete 事件, 不发 response.completed。
+        // 之前落 Unknown 被丢弃 → 客户端拿不到 stop_reason 和 usage。
+        let mut conv = ResponsesSseConverter::new();
+        conv.feed(
+            "response.created",
+            &json!({"response":{"id":"r","model":"gpt-5.5"}}),
+        );
+        let events = conv.feed(
+            "response.incomplete",
+            &json!({"response":{
+                "status": "incomplete",
+                "incomplete_details": {"reason": "max_tokens"},
+                "usage": {"input_tokens": 5, "output_tokens": 16}
+            }}),
+        );
+        assert_eq!(events.len(), 2, "message_delta + message_stop");
+        let AnthropicEvent::MessageDelta { delta, usage } = &events[0] else {
+            panic!("expected MessageDelta, got {:?}", events[0]);
+        };
+        assert_eq!(delta["stop_reason"], "max_tokens");
+        assert_eq!(usage["output_tokens"], 16);
+        assert_eq!(events[1].event_name(), "message_stop");
+    }
+
+    #[test]
+    fn nonstreaming_collector_preserves_stop_reason() {
+        // issue #39 关联: collector 的 stop_reason 之前硬编码 end_turn
+        let mut col = NonStreamingCollector::new();
+        col.feed(
+            "response.created",
+            &json!({"response":{"id":"r","model":"gpt-5.5"}}),
+        );
+        col.feed(
+            "response.output_item.added",
+            &json!({"output_index":0,"item":{"type":"message"}}),
+        );
+        col.feed(
+            "response.output_text.delta",
+            &json!({"output_index":0,"delta":"partial"}),
+        );
+        col.feed(
+            "response.output_item.done",
+            &json!({"output_index":0,"item":{"type":"message"}}),
+        );
+        col.feed(
+            "response.completed",
+            &json!({"response":{
+                "status": "incomplete",
+                "incomplete_details": {"reason": "max_output_tokens"},
+                "usage": {"input_tokens": 1, "output_tokens": 2}
+            }}),
+        );
+        let msg = col.finalize();
+        assert_eq!(msg["stop_reason"], "max_tokens");
     }
 
     #[test]

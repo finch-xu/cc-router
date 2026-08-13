@@ -385,20 +385,6 @@ fn finalize_streaming(
                     continue;
                 };
 
-                // 抽 usage 用于日志, 即使 converter 不返回事件
-                if event_name == "response.completed" {
-                    if let Some(usage) = data.get("response").and_then(|r| r.get("usage")) {
-                        input_tokens = usage
-                            .get("input_tokens")
-                            .and_then(|v| v.as_u64())
-                            .map(|v| v as u32);
-                        output_tokens = usage
-                            .get("output_tokens")
-                            .and_then(|v| v.as_u64())
-                            .map(|v| v as u32);
-                    }
-                }
-
                 let anth_events = converter.feed(&event_name, &data);
                 for evt in anth_events {
                     let frame = evt.to_sse_frame();
@@ -419,6 +405,29 @@ fn finalize_streaming(
         // 兜底 message_stop
         for evt in converter.finalize_if_needed() {
             let _ = client_tx.send(Ok(Bytes::from(evt.to_sse_frame()))).await;
+        }
+
+        // usage 从 converter 归一化后的 final_usage 读 (issue #39, 对齐 openai 路径;
+        // cache_read/cache_creation 由 responses_usage_to_anthropic 映射好)
+        let mut cache_read: Option<u32> = None;
+        let mut cache_creation: Option<u32> = None;
+        if let Some(usage) = converter.final_usage.as_ref() {
+            input_tokens = usage
+                .get("input_tokens")
+                .and_then(|v| v.as_u64())
+                .map(|v| v as u32);
+            output_tokens = usage
+                .get("output_tokens")
+                .and_then(|v| v.as_u64())
+                .map(|v| v as u32);
+            cache_read = usage
+                .get("cache_read_input_tokens")
+                .and_then(|v| v.as_u64())
+                .map(|v| v as u32);
+            cache_creation = usage
+                .get("cache_creation_input_tokens")
+                .and_then(|v| v.as_u64())
+                .map(|v| v as u32);
         }
 
         // 状态机 + 日志 — HTTP 200 但 SSE 内报错时按「上游 SSE 错误」处理 (对齐智谱前例)
@@ -462,8 +471,8 @@ fn finalize_streaming(
             total_latency_ms: Some(start.elapsed().as_millis() as u64),
             upstream_input_tokens: input_tokens,
             upstream_output_tokens: output_tokens,
-            upstream_cache_creation: None,
-            upstream_cache_read: None,
+            upstream_cache_creation: cache_creation,
+            upstream_cache_read: cache_read,
             retry_count,
             error_message: upstream_error.clone(),
             upstream_response_body: None,
@@ -550,18 +559,6 @@ async fn collect_to_json_response(
             let frame_str =
                 std::str::from_utf8(&frame_bytes[..frame_bytes.len() - sep_len]).unwrap_or("");
             if let Some((event_name, data)) = parse_sse_frame(frame_str) {
-                if event_name == "response.completed" {
-                    if let Some(usage) = data.get("response").and_then(|r| r.get("usage")) {
-                        input_tokens = usage
-                            .get("input_tokens")
-                            .and_then(|v| v.as_u64())
-                            .map(|v| v as u32);
-                        output_tokens = usage
-                            .get("output_tokens")
-                            .and_then(|v| v.as_u64())
-                            .map(|v| v as u32);
-                    }
-                }
                 collector.feed(&event_name, &data);
             }
         }
@@ -631,6 +628,28 @@ async fn collect_to_json_response(
 
     let final_msg = collector.finalize();
 
+    // usage 从归一化后的最终 JSON 读 (issue #39; final_usage 已过 responses_usage_to_anthropic)
+    let mut cache_read: Option<u32> = None;
+    let mut cache_creation: Option<u32> = None;
+    if let Some(usage) = final_msg.get("usage") {
+        input_tokens = usage
+            .get("input_tokens")
+            .and_then(|v| v.as_u64())
+            .map(|v| v as u32);
+        output_tokens = usage
+            .get("output_tokens")
+            .and_then(|v| v.as_u64())
+            .map(|v| v as u32);
+        cache_read = usage
+            .get("cache_read_input_tokens")
+            .and_then(|v| v.as_u64())
+            .map(|v| v as u32);
+        cache_creation = usage
+            .get("cache_creation_input_tokens")
+            .and_then(|v| v.as_u64())
+            .map(|v| v as u32);
+    }
+
     let _ = state_machine::apply(
         &pool,
         &app,
@@ -659,8 +678,8 @@ async fn collect_to_json_response(
         total_latency_ms: Some(start.elapsed().as_millis() as u64),
         upstream_input_tokens: input_tokens,
         upstream_output_tokens: output_tokens,
-        upstream_cache_creation: None,
-        upstream_cache_read: None,
+        upstream_cache_creation: cache_creation,
+        upstream_cache_read: cache_read,
         retry_count,
         error_message: None,
         upstream_response_body: None,

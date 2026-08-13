@@ -334,6 +334,7 @@ fn finalize_streaming(
         let mut input_tokens: Option<u32> = None;
         let mut output_tokens: Option<u32> = None;
         let mut cache_read: Option<u32> = None;
+        let mut cache_creation: Option<u32> = None;
         let mut response_model_observed: Option<String> = None;
         let mut upstream_error: Option<String> = None;
 
@@ -393,7 +394,7 @@ fn finalize_streaming(
             let _ = client_tx.send(Ok(Bytes::from(buf))).await;
         }
 
-        // 提取 usage / model (final_usage 是 pub(crate))
+        // 提取 usage / model (final_usage 是 pub(crate), 已过 responses_usage_to_anthropic 归一化)
         if let Some(usage) = converter.final_usage.as_ref() {
             input_tokens = usage
                 .get("input_tokens")
@@ -404,8 +405,11 @@ fn finalize_streaming(
                 .and_then(|v| v.as_u64())
                 .map(|v| v as u32);
             cache_read = usage
-                .get("input_tokens_details")
-                .and_then(|d| d.get("cached_tokens"))
+                .get("cache_read_input_tokens")
+                .and_then(|v| v.as_u64())
+                .map(|v| v as u32);
+            cache_creation = usage
+                .get("cache_creation_input_tokens")
                 .and_then(|v| v.as_u64())
                 .map(|v| v as u32);
         }
@@ -445,7 +449,7 @@ fn finalize_streaming(
             total_latency_ms: Some(start.elapsed().as_millis() as u64),
             upstream_input_tokens: input_tokens,
             upstream_output_tokens: output_tokens,
-            upstream_cache_creation: None,
+            upstream_cache_creation: cache_creation,
             upstream_cache_read: cache_read,
             retry_count,
             error_message: upstream_error.clone(),
@@ -519,8 +523,10 @@ fn finalize_non_streaming(
 ) -> Response {
     let start = std::time::Instant::now();
 
-    // 提取 usage 字段 (用于日志, 翻译前提)
-    let usage = upstream_body.get("usage").cloned();
+    // 提取 usage 字段 (用于日志, 翻译前提; 先过 responses_usage_to_anthropic 归一化缓存命名)
+    let usage = upstream_body
+        .get("usage")
+        .map(crate::proxy::transform::responses_common::responses_usage_to_anthropic);
     let input_tokens = usage
         .as_ref()
         .and_then(|u| u.get("input_tokens"))
@@ -533,8 +539,12 @@ fn finalize_non_streaming(
         .map(|v| v as u32);
     let cache_read = usage
         .as_ref()
-        .and_then(|u| u.get("input_tokens_details"))
-        .and_then(|d| d.get("cached_tokens"))
+        .and_then(|u| u.get("cache_read_input_tokens"))
+        .and_then(|v| v.as_u64())
+        .map(|v| v as u32);
+    let cache_creation = usage
+        .as_ref()
+        .and_then(|u| u.get("cache_creation_input_tokens"))
         .and_then(|v| v.as_u64())
         .map(|v| v as u32);
     let response_model = upstream_body
@@ -589,7 +599,7 @@ fn finalize_non_streaming(
             total_latency_ms: Some(start.elapsed().as_millis() as u64),
             upstream_input_tokens: input_tokens,
             upstream_output_tokens: output_tokens,
-            upstream_cache_creation: None,
+            upstream_cache_creation: cache_creation,
             upstream_cache_read: cache_read,
             retry_count,
             error_message: None,

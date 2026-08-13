@@ -218,11 +218,6 @@ pub fn responses_json_to_anthropic(
         .and_then(|v| v.as_str())
         .unwrap_or("")
         .to_string();
-    let status = upstream_body
-        .get("status")
-        .and_then(|v| v.as_str())
-        .unwrap_or("completed");
-
     let mut content: Vec<Value> = Vec::new();
     if let Some(output) = upstream_body.get("output").and_then(|v| v.as_array()) {
         for item in output {
@@ -234,9 +229,10 @@ pub fn responses_json_to_anthropic(
 
     let usage = upstream_body
         .get("usage")
-        .cloned()
+        .map(responses_common::responses_usage_to_anthropic)
         .unwrap_or_else(|| json!({"input_tokens": 0, "output_tokens": 0}));
-    let stop_reason = responses_common::map_status_to_anthropic_stop_reason(status);
+    // 顶层 body 就是 response 对象 (带 status / incomplete_details), 直接吃完整映射 (issue #39)
+    let stop_reason = responses_common::map_response_to_anthropic_stop_reason(upstream_body);
 
     Ok(json!({
         "id": id,
@@ -436,6 +432,26 @@ mod tests {
         assert_eq!(content[0]["type"], "text");
         assert_eq!(content[0]["text"], "Hello world");
         assert_eq!(out["usage"]["input_tokens"], 5);
+    }
+
+    #[test]
+    fn json_to_anthropic_maps_incomplete_reason_and_cache_usage() {
+        // issue #39 对称位: openai 真 JSON 非流式路径同样要吃 incomplete_details + 缓存 usage
+        let upstream = json!({
+            "id": "resp_ic",
+            "model": "gpt-5",
+            "status": "incomplete",
+            "incomplete_details": {"reason": "content_filter"},
+            "output": [],
+            "usage": {
+                "input_tokens": 100, "output_tokens": 1,
+                "input_tokens_details": {"cached_tokens": 40}
+            }
+        });
+        let cfg = ResponsesTransformConfig::openai_official(false);
+        let out = responses_json_to_anthropic(&upstream, &cfg).unwrap();
+        assert_eq!(out["stop_reason"], "end_turn", "content_filter 不是 max_tokens");
+        assert_eq!(out["usage"]["cache_read_input_tokens"], 40);
     }
 
     #[test]
