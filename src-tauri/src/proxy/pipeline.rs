@@ -1096,13 +1096,10 @@ pub async fn dispatch(
                 Some(e) => force_anthropic_effort(&mut upstream_body, e),
                 None => 0,
             };
-            // 第一道: 无条件 drop cc-router 翻译层 (openai_responses/gemini) 包装的 thinking blocks
-            let dropped_foreign = strip_foreign_thinking_blocks(&mut upstream_body);
-            // 第二道: 给缺 thinking 的 assistant 消息补空 placeholder. DeepSeek 要求每个含
-            // tool_use 的 assistant 消息必须有 thinking block 开头, 否则 400. 内置 provider 按
-            // yaml inject_missing_thinking_placeholder 显式 opt-in; custom 订阅无 yaml, 按
-            // URL/模型名启发式识别 deepseek (见 [`should_inject_thinking_placeholder`]).
-            let need_inject = should_inject_thinking_placeholder(
+            // deepseek 系上游判定 (内置 provider 按 yaml 显式 opt-in; custom 订阅无 yaml,
+            // 按 URL/模型名启发式, 见 [`should_inject_thinking_placeholder`]) —— 同时决定
+            // 第一道的明文解包与第二道的 placeholder 注入。
+            let is_deepseek_like = should_inject_thinking_placeholder(
                 state
                     .providers
                     .get(&provider_id)
@@ -1110,19 +1107,26 @@ pub async fn dispatch(
                 &url,
                 &real_model,
             );
-            let injected = if need_inject {
+            // 第一道: drop cc-router 翻译层 (openai_responses/gemini) 包装的 thinking blocks;
+            // deepseek 系上游对 openai_responses 明文变体改为解包保文本 (清空 signature)。
+            let (dropped_foreign, unwrapped_plaintext) =
+                strip_foreign_thinking_blocks(&mut upstream_body, is_deepseek_like);
+            // 第二道: 给缺 thinking 的 assistant 消息补空 placeholder. DeepSeek 要求每个含
+            // tool_use 的 assistant 消息必须有 thinking block 开头, 否则 400.
+            let injected = if is_deepseek_like {
                 inject_missing_thinking_placeholders(&mut upstream_body)
             } else {
                 0
             };
             // forced_effort 一起打进日志: 用户设了档位但 effort_written == 0 时 (客户端显式
             // thinking.type=disabled), 能直接从 Logs 页看出为什么没生效。
-            if dropped_foreign > 0 || injected > 0 || forced_effort.is_some() {
+            if dropped_foreign > 0 || unwrapped_plaintext > 0 || injected > 0 || forced_effort.is_some() {
                 info!(
                     %attempt_id,
                     %sub_id,
                     %provider_id,
                     dropped_foreign,
+                    unwrapped_plaintext,
                     injected,
                     effort_written,
                     forced_effort = ?forced_effort,

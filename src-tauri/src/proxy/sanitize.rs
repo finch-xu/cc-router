@@ -14,7 +14,9 @@
 
 use serde_json::Value;
 
-use crate::proxy::transform::responses_common::looks_like_cc_router_signature;
+use crate::proxy::transform::responses_common::{
+    decode_reasoning_signature_any, looks_like_cc_router_signature, DecodedReasoningSignature,
+};
 
 /// 剥离 cc-router 自家翻译层包装过的 thinking blocks. 本函数原地修改 body.
 ///
@@ -22,29 +24,50 @@ use crate::proxy::transform::responses_common::looks_like_cc_router_signature;
 /// (即 openai_responses 或 gemini 包装) 的 block → drop。空 signature / Anthropic 原生 UUID
 /// signature / 其他无法识别 → 保留 (上游各自校验)。
 ///
-/// 返回值: drop 的 block 数, 0 表示没动 body, 调用方可用于日志。
-pub fn strip_foreign_thinking_blocks(body: &mut Value) -> usize {
+/// `unwrap_plaintext`: deepseek 系上游 (与 placeholder 注入同一判定, 见
+/// [`should_inject_thinking_placeholder`]) 传 true —— openai_responses **明文变体** (`pt:1`,
+/// DeepSeek Responses 方言产生, 文本本体在 thinking 字段) 不剥离, 而是清空 signature 保留文本:
+/// deepseek Anthropic 端点实测接受非空 thinking + 空 signature (thinking 开关均 200), 剥掉
+/// 等于白丢已捕获的思维链。加密变体信息不可逆、gemini 包装暂不解包 (2026-08 决定), 均仍剥离;
+/// 会校验 signature 的上游 (anthropic 官方等) 传 false 维持全剥。
+///
+/// 返回值: (dropped, unwrapped), (0, 0) 表示没动 body, 调用方可用于日志。
+pub fn strip_foreign_thinking_blocks(body: &mut Value, unwrap_plaintext: bool) -> (usize, usize) {
     let Some(msgs) = body.get_mut("messages").and_then(|m| m.as_array_mut()) else {
-        return 0;
+        return (0, 0);
     };
     let mut dropped = 0usize;
+    let mut unwrapped = 0usize;
     for msg in msgs.iter_mut() {
         let Some(content) = msg.get_mut("content").and_then(|c| c.as_array_mut()) else {
             continue;
         };
-        content.retain(|blk| {
+        content.retain_mut(|blk| {
             if blk.get("type").and_then(|t| t.as_str()) != Some("thinking") {
                 return true;
             }
             let sig = blk.get("signature").and_then(|v| v.as_str()).unwrap_or("");
-            if looks_like_cc_router_signature(sig).is_some() {
-                dropped += 1;
-                return false;
+            if looks_like_cc_router_signature(sig).is_none() {
+                return true;
             }
-            true
+            if unwrap_plaintext {
+                let text = blk.get("thinking").and_then(|v| v.as_str()).unwrap_or("");
+                if !text.is_empty()
+                    && matches!(
+                        decode_reasoning_signature_any(sig),
+                        Some(DecodedReasoningSignature::Plaintext { .. })
+                    )
+                {
+                    blk["signature"] = Value::String(String::new());
+                    unwrapped += 1;
+                    return true;
+                }
+            }
+            dropped += 1;
+            false
         });
     }
-    dropped
+    (dropped, unwrapped)
 }
 
 /// 给 messages 数组里每个 `role: assistant` 消息检查: 若 content 数组没有任何 thinking
@@ -189,7 +212,9 @@ pub fn force_anthropic_effort(body: &mut Value, effort: &str) -> usize {
 mod tests {
     use super::*;
     use crate::proxy::transform::gemini::encode_gemini_thought_signature;
-    use crate::proxy::transform::responses_common::encode_reasoning_signature;
+    use crate::proxy::transform::responses_common::{
+        encode_plaintext_reasoning_signature, encode_reasoning_signature,
+    };
     use serde_json::json;
 
     fn body_with_thinking(signature: &str, thinking_text: &str) -> Value {
@@ -212,10 +237,65 @@ mod tests {
     }
 
     #[test]
+    fn unwraps_plaintext_thinking_when_enabled() {
+        // deepseek 系上游 (unwrap_plaintext=true): pt 明文变体解包保文本, signature 清空
+        // (deepseek Anthropic 端点实测接受非空 thinking + 空 signature, thinking 开关均 200)
+        let sig = encode_plaintext_reasoning_signature("ds-uuid-1");
+        let mut body = body_with_thinking(&sig, "deepseek 的真实思考文本");
+        let (dropped, unwrapped) = strip_foreign_thinking_blocks(&mut body, true);
+        assert_eq!((dropped, unwrapped), (0, 1));
+        let content = body["messages"][1]["content"].as_array().unwrap();
+        assert_eq!(content.len(), 2);
+        assert_eq!(content[0]["type"], "thinking");
+        assert_eq!(content[0]["thinking"], "deepseek 的真实思考文本");
+        assert_eq!(content[0]["signature"], "");
+    }
+
+    #[test]
+    fn plaintext_thinking_still_dropped_without_unwrap() {
+        // 非 deepseek 的 Anthropic 上游 (anthropic 官方等会校验 signature): 明文块仍剥离
+        let sig = encode_plaintext_reasoning_signature("ds-uuid-1");
+        let mut body = body_with_thinking(&sig, "text");
+        let (dropped, unwrapped) = strip_foreign_thinking_blocks(&mut body, false);
+        assert_eq!((dropped, unwrapped), (1, 0));
+        assert_eq!(body["messages"][1]["content"].as_array().unwrap().len(), 1);
+    }
+
+    #[test]
+    fn empty_plaintext_thinking_dropped_even_with_unwrap() {
+        // 空文本没有可保留的内容 → 剥离, 交给 placeholder 注入兜底
+        let sig = encode_plaintext_reasoning_signature("ds-uuid-1");
+        let mut body = body_with_thinking(&sig, "");
+        let (dropped, unwrapped) = strip_foreign_thinking_blocks(&mut body, true);
+        assert_eq!((dropped, unwrapped), (1, 0));
+    }
+
+    #[test]
+    fn encrypted_and_gemini_still_dropped_with_unwrap() {
+        // 加密变体信息不可逆, gemini 包装暂不解包 (2026-08 决定) — unwrap 开启时也剥离
+        let enc = encode_reasoning_signature("rs_1", "EC");
+        let gem = encode_gemini_thought_signature("gemini_thought_sig");
+        let mut body = json!({
+            "model": "deepseek-v4-pro",
+            "messages": [{
+                "role": "assistant",
+                "content": [
+                    { "type": "thinking", "thinking": "enc text", "signature": enc },
+                    { "type": "thinking", "thinking": "gem text", "signature": gem },
+                    { "type": "text", "text": "a" }
+                ]
+            }]
+        });
+        let (dropped, unwrapped) = strip_foreign_thinking_blocks(&mut body, true);
+        assert_eq!((dropped, unwrapped), (2, 0));
+        assert_eq!(body["messages"][0]["content"].as_array().unwrap().len(), 1);
+    }
+
+    #[test]
     fn drops_openai_responses_wrapped() {
         let sig = encode_reasoning_signature("rs_abc", "encrypted_payload");
         let mut body = body_with_thinking(&sig, "let me think");
-        let dropped = strip_foreign_thinking_blocks(&mut body);
+        let (dropped, _) = strip_foreign_thinking_blocks(&mut body, false);
         assert_eq!(dropped, 1);
         let assistant_content = body["messages"][1]["content"].as_array().unwrap();
         assert_eq!(assistant_content.len(), 1);
@@ -226,7 +306,7 @@ mod tests {
     fn drops_gemini_wrapped() {
         let sig = encode_gemini_thought_signature("some_gemini_thought_sig_base64");
         let mut body = body_with_thinking(&sig, "");
-        let dropped = strip_foreign_thinking_blocks(&mut body);
+        let (dropped, _) = strip_foreign_thinking_blocks(&mut body, false);
         assert_eq!(dropped, 1);
         assert_eq!(body["messages"][1]["content"].as_array().unwrap().len(), 1);
     }
@@ -234,7 +314,7 @@ mod tests {
     #[test]
     fn keeps_empty_signature() {
         let mut body = body_with_thinking("", "some thinking");
-        let dropped = strip_foreign_thinking_blocks(&mut body);
+        let (dropped, _) = strip_foreign_thinking_blocks(&mut body, false);
         assert_eq!(dropped, 0);
         assert_eq!(body["messages"][1]["content"].as_array().unwrap().len(), 2);
     }
@@ -242,7 +322,7 @@ mod tests {
     #[test]
     fn keeps_anthropic_native_uuid_signature() {
         let mut body = body_with_thinking("03ea0953-5ece-4386-afea-31404f331c5f", "thought");
-        let dropped = strip_foreign_thinking_blocks(&mut body);
+        let (dropped, _) = strip_foreign_thinking_blocks(&mut body, false);
         assert_eq!(dropped, 0);
         assert_eq!(body["messages"][1]["content"].as_array().unwrap().len(), 2);
     }
@@ -251,14 +331,14 @@ mod tests {
     fn keeps_random_base64_that_is_not_cc_router_format() {
         // base64url 解码出非 JSON 内容 → 不被识别为 cc-router signature
         let mut body = body_with_thinking("YWJjZGVmZ2hpams", "x");
-        let dropped = strip_foreign_thinking_blocks(&mut body);
+        let (dropped, _) = strip_foreign_thinking_blocks(&mut body, false);
         assert_eq!(dropped, 0);
     }
 
     #[test]
     fn handles_missing_messages_field() {
         let mut body = json!({ "model": "foo" });
-        let dropped = strip_foreign_thinking_blocks(&mut body);
+        let (dropped, _) = strip_foreign_thinking_blocks(&mut body, false);
         assert_eq!(dropped, 0);
     }
 
@@ -271,7 +351,7 @@ mod tests {
                 { "role": "user", "content": "plain text user message" }
             ]
         });
-        let dropped = strip_foreign_thinking_blocks(&mut body);
+        let (dropped, _) = strip_foreign_thinking_blocks(&mut body, false);
         assert_eq!(dropped, 0);
     }
 
@@ -300,7 +380,7 @@ mod tests {
                 }
             ]
         });
-        let dropped = strip_foreign_thinking_blocks(&mut body);
+        let (dropped, _) = strip_foreign_thinking_blocks(&mut body, false);
         assert_eq!(dropped, 2);
         // 第二条 assistant 应该还剩 thinking(空 sig) + text 两块
         assert_eq!(body["messages"][3]["content"].as_array().unwrap().len(), 2);
