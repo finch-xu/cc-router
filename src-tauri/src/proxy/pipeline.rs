@@ -24,7 +24,9 @@ use crate::proxy::openai_chat_completions_dispatch;
 use crate::proxy::openai_responses_dispatch;
 use crate::proxy::transform::gemini::{resolve_thinking_budget, GeminiExtras};
 use crate::proxy::transform::gemini_interactions::{resolve_thinking_level, InteractionsExtras};
-use crate::proxy::transform::openai::{resolve_reasoning_effort, OpenAiResponsesExtras};
+use crate::proxy::transform::openai::{
+    detect_responses_dialect, resolve_reasoning_effort, OpenAiResponsesExtras,
+};
 use crate::proxy::transform::openai_chat_completions::ChatCompletionsExtras;
 use crate::proxy::transform::openai_responses::CodexExtras;
 use crate::proxy::handler::error_body;
@@ -34,7 +36,8 @@ use crate::proxy::oauth_dispatch::{
 use crate::proxy::overloaded;
 use crate::proxy::retry::{classify_response, ShouldRetry};
 use crate::proxy::sanitize::{
-    force_anthropic_effort, inject_missing_thinking_placeholders, strip_foreign_thinking_blocks,
+    force_anthropic_effort, inject_missing_thinking_placeholders,
+    should_inject_thinking_placeholder, strip_foreign_thinking_blocks,
 };
 use crate::proxy::sse;
 use crate::proxy::upstream;
@@ -814,6 +817,9 @@ pub async fn dispatch(
                     yaml_default_effort.as_deref(),
                 ),
                 expose_reasoning: yaml_expose_reasoning,
+                // DeepSeek /v1/responses 走独立方言 (明文 reasoning + placeholder 注入),
+                // 由订阅 URL / 真实模型名识别 —— custom-openai 无 yaml 可挂配置
+                dialect: detect_responses_dialect(&url, &real_model),
             };
 
             emit_attempt_started(state, sub_id, vm_name);
@@ -1092,14 +1098,18 @@ pub async fn dispatch(
             };
             // 第一道: 无条件 drop cc-router 翻译层 (openai_responses/gemini) 包装的 thinking blocks
             let dropped_foreign = strip_foreign_thinking_blocks(&mut upstream_body);
-            // 第二道: 按 provider yaml inject_missing_thinking_placeholder 给缺 thinking 的
-            // assistant 消息补空 placeholder. 当前 DeepSeek 显式 opt-in: 它要求每个含 tool_use
-            // 的 assistant 消息必须有 thinking block 开头, 否则 400.
-            let need_inject = state
-                .providers
-                .get(&provider_id)
-                .map(|p| p.inject_missing_thinking_placeholder)
-                .unwrap_or(false);
+            // 第二道: 给缺 thinking 的 assistant 消息补空 placeholder. DeepSeek 要求每个含
+            // tool_use 的 assistant 消息必须有 thinking block 开头, 否则 400. 内置 provider 按
+            // yaml inject_missing_thinking_placeholder 显式 opt-in; custom 订阅无 yaml, 按
+            // URL/模型名启发式识别 deepseek (见 [`should_inject_thinking_placeholder`]).
+            let need_inject = should_inject_thinking_placeholder(
+                state
+                    .providers
+                    .get(&provider_id)
+                    .map(|p| p.inject_missing_thinking_placeholder),
+                &url,
+                &real_model,
+            );
             let injected = if need_inject {
                 inject_missing_thinking_placeholders(&mut upstream_body)
             } else {

@@ -32,7 +32,9 @@ use crate::proxy::openai_responses_dispatch::dispatch_openai_responses_attempt;
 use crate::proxy::pipeline::provider_reasoning_defaults;
 use crate::proxy::transform::gemini::{resolve_thinking_budget, GeminiExtras};
 use crate::proxy::transform::gemini_interactions::{resolve_thinking_level, InteractionsExtras};
-use crate::proxy::transform::openai::{resolve_reasoning_effort, OpenAiResponsesExtras};
+use crate::proxy::transform::openai::{
+    detect_responses_dialect, resolve_reasoning_effort, OpenAiResponsesExtras,
+};
 use crate::proxy::transform::openai_chat_completions::ChatCompletionsExtras;
 use crate::proxy::transform::openai_responses::CodexExtras;
 use crate::state::AppState;
@@ -283,6 +285,8 @@ pub async fn probe_subscription(
             let extras = OpenAiResponsesExtras {
                 reasoning_effort: resolve_reasoning_effort(&body, forced_effort.as_deref(), default_effort.as_deref()),
                 expose_reasoning: expose,
+                // 与 pipeline 真实 dispatch 同一方言判定 (探测必须复用真实 dispatch 行为)
+                dialect: detect_responses_dialect(&row.messages_url(), model),
             };
             let res = dispatch_openai_responses_attempt(
                 &state.probe_client,

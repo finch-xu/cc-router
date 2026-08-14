@@ -68,6 +68,31 @@ pub struct ResponsesTransformConfig {
     /// 客户端 messages 里出现 thinking content_block 时, 是否翻译成上游 input reasoning item.
     /// 与 emit_reasoning 配对使用; 关闭时 anthropic_messages_to_input 直接 drop thinking 块。
     pub roundtrip_reasoning: bool,
+
+    /// 明文签名 ([`encode_plaintext_reasoning_signature`]) 的 thinking 块是否回灌成
+    /// `{type:"reasoning", id, content:[{type:"reasoning_text", text}]}` 形状 (DeepSeek 方言,
+    /// 2026-08-14 P9/P10 实测 200)。false 时明文块 drop (OpenAI 官方要求 encrypted_content,
+    /// 明文形状无法合法构造)。
+    pub roundtrip_plaintext_reasoning: bool,
+
+    /// input 里的 function_call 在同一推理 step 内没有任何 reasoning item 时, 是否在其前
+    /// 注入非空文本的 placeholder reasoning。DeepSeek 方言必须 true: 混合路由下别家 provider
+    /// 的 tool_use (非 deepseek 格式 call_id) 进历史后, DeepSeek 对「无 reasoning 的外来
+    /// function_call」返回 400 "The `reasoning_text` in the thinking mode must be passed back"。
+    /// 空文本/空 content 的 placeholder 同样 400 (V8/V9 实测), 文本必须非空。
+    pub inject_missing_reasoning_placeholder: bool,
+}
+
+/// OpenAI Responses 兼容上游的方言. 决定 [`ResponsesTransformConfig`] 工厂选择。
+///
+/// DeepSeek `/v1/responses` (2026-08 实测, docs/responses-api-probe.md 同目录 fixture):
+/// reasoning 不用 `summary`/`encrypted_content`, 明文走 `content[].type=reasoning_text` +
+/// SSE `response.reasoning_text.delta`; 且要求 tool 调用 step 必须带 reasoning item 回灌。
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum ResponsesDialect {
+    #[default]
+    OpenaiOfficial,
+    Deepseek,
 }
 
 impl ResponsesTransformConfig {
@@ -88,6 +113,8 @@ impl ResponsesTransformConfig {
             lift_input_system_to_instructions: true,
             emit_reasoning: expose_reasoning,
             roundtrip_reasoning: expose_reasoning,
+            roundtrip_plaintext_reasoning: false,
+            inject_missing_reasoning_placeholder: false,
         }
     }
 
@@ -110,6 +137,28 @@ impl ResponsesTransformConfig {
             lift_input_system_to_instructions: false,
             emit_reasoning: expose_reasoning,
             roundtrip_reasoning: expose_reasoning,
+            roundtrip_plaintext_reasoning: false,
+            inject_missing_reasoning_placeholder: false,
+        }
+    }
+
+    /// DeepSeek `/v1/responses` 方言配置. 宽松侧与 [`Self::openai_official`] 一致
+    /// (跟随客户端 stream / 映射 max_tokens / 透传 temperature), 差异全在 reasoning:
+    /// - `include` 恒不注入 (DeepSeek 文档明确不支持, 明文 reasoning 无需 include 即返回)
+    /// - 明文 reasoning 回灌 + orphan function_call placeholder (字段文档见各自注释)
+    pub fn deepseek_responses(expose_reasoning: bool) -> Self {
+        Self {
+            force_upstream_streaming: false,
+            inject_store_false: true,
+            inject_default_include: vec![],
+            force_instructions_present: false,
+            drop_max_tokens: false,
+            drop_temperature: false,
+            lift_input_system_to_instructions: false,
+            emit_reasoning: expose_reasoning,
+            roundtrip_reasoning: expose_reasoning,
+            roundtrip_plaintext_reasoning: expose_reasoning,
+            inject_missing_reasoning_placeholder: true,
         }
     }
 }
@@ -161,6 +210,12 @@ pub fn build_responses_body(body: &Value, config: &ResponsesTransformConfig) -> 
                     instructions.push_str("\n\n");
                 }
                 instructions.push_str(&lifted);
+            }
+        }
+        if config.inject_missing_reasoning_placeholder {
+            let injected = inject_missing_reasoning_items(&mut input);
+            if injected > 0 {
+                tracing::info!(injected, "injected placeholder reasoning items for orphan function_call (deepseek dialect)");
             }
         }
         out["input"] = json!(input);
@@ -343,9 +398,10 @@ pub fn anthropic_messages_to_input(
                                 blk.get("signature").and_then(|v| v.as_str()).unwrap_or("");
                             let summary_text =
                                 blk.get("thinking").and_then(|v| v.as_str()).unwrap_or("");
-                            let decoded = decode_reasoning_signature(signature);
-                            match decoded {
-                                Some((id, ec)) if !id.is_empty() && !ec.is_empty() => {
+                            match decode_reasoning_signature_any(signature) {
+                                Some(DecodedReasoningSignature::Encrypted { id, ec })
+                                    if !id.is_empty() && !ec.is_empty() =>
+                                {
                                     let summary_payload = if summary_text.is_empty() {
                                         json!([])
                                     } else {
@@ -357,6 +413,27 @@ pub fn anthropic_messages_to_input(
                                         "encrypted_content": ec,
                                         "summary": summary_payload,
                                     }));
+                                }
+                                Some(DecodedReasoningSignature::Plaintext { id })
+                                    if config.roundtrip_plaintext_reasoning
+                                        && !summary_text.is_empty() =>
+                                {
+                                    // DeepSeek 方言: 明文 content 形状 (P9/P10 实测 200; id 可缺省)
+                                    let mut item = json!({
+                                        "type": "reasoning",
+                                        "content": [{"type": "reasoning_text", "text": summary_text}],
+                                    });
+                                    if !id.is_empty() {
+                                        item["id"] = json!(id);
+                                    }
+                                    out.push(item);
+                                }
+                                Some(DecodedReasoningSignature::Plaintext { .. }) => {
+                                    // 明文块进了 encrypted-only 方言 (openai/codex): 无法合法构造
+                                    // encrypted reasoning, drop。placeholder 注入不受影响。
+                                    tracing::warn!(
+                                        "drop plaintext thinking content_block: 当前方言仅接受 encrypted reasoning"
+                                    );
                                 }
                                 _ => {
                                     // signature 缺失/损坏 — drop, 不阻塞请求
@@ -376,6 +453,75 @@ pub fn anthropic_messages_to_input(
         }
     }
     Ok(out)
+}
+
+/// reasoning item 的明文思维链文本 (DeepSeek 方言: `content[].type=reasoning_text`)。
+/// OpenAI 官方 reasoning item 无 content 数组 → 恒空串。
+pub(crate) fn reasoning_item_content_text(item: &Value) -> String {
+    item.get("content")
+        .and_then(|v| v.as_array())
+        .map(|arr| {
+            arr.iter()
+                .filter(|part| part.get("type").and_then(|t| t.as_str()) == Some("reasoning_text"))
+                .filter_map(|part| part.get("text").and_then(|t| t.as_str()))
+                .collect::<Vec<_>>()
+                .join("")
+        })
+        .unwrap_or_default()
+}
+
+/// orphan function_call 前注入的 placeholder reasoning 文本. **必须非空** ——
+/// DeepSeek 对空文本 (`text:""`) 与空 `content:[]` 的 placeholder 同样 400 (2026-08-14 V8/V9 实测)。
+/// 内容是给模型看的中性英文说明, 不是 user-facing 文案。
+const REASONING_PLACEHOLDER_TEXT: &str = "(reasoning for this step was not recorded)";
+
+/// DeepSeek Responses 方言: 给同一推理 step 内没有 reasoning item 的 `function_call`
+/// 注入 placeholder reasoning (`config.inject_missing_reasoning_placeholder`)。
+///
+/// step 边界 = user message / `function_call_output` (DeepSeek 原生输出是每个 step 一个
+/// reasoning + N 个 function_call, tool 结果之后的下一 step 又有自己的 reasoning)。
+/// 同 step 内注入一次即可覆盖 parallel tool calls。
+///
+/// 背景: 混合路由 (round_robin 多订阅) 下, 别家 provider 产生的 tool_use (call_id 非
+/// deepseek `call_00_*` 格式) 进入发给 DeepSeek 的历史时, DeepSeek 400
+/// "The `reasoning_text` in the thinking mode must be passed back to the API."
+/// (deepseek 自家 call_id 的 function_call 缺 reasoning 反而被接受 —— P3/V2 实测。)
+/// 与 Anthropic 透传路径的 [`crate::proxy::sanitize::inject_missing_thinking_placeholders`]
+/// 是同一 DeepSeek 约束在两种协议下的镜像。
+pub(crate) fn inject_missing_reasoning_items(input: &mut Vec<Value>) -> usize {
+    let mut injected = 0usize;
+    let mut step_has_reasoning = false;
+    let mut i = 0usize;
+    while i < input.len() {
+        let item_type = input[i].get("type").and_then(|v| v.as_str()).unwrap_or("");
+        match item_type {
+            "reasoning" => step_has_reasoning = true,
+            "function_call" => {
+                if !step_has_reasoning {
+                    input.insert(
+                        i,
+                        json!({
+                            "type": "reasoning",
+                            "content": [{"type": "reasoning_text", "text": REASONING_PLACEHOLDER_TEXT}],
+                        }),
+                    );
+                    injected += 1;
+                    step_has_reasoning = true;
+                    i += 1; // 跳过刚插入的 placeholder, i 现在指向原 function_call
+                }
+            }
+            "function_call_output" => step_has_reasoning = false,
+            "message" => {
+                let role = input[i].get("role").and_then(|v| v.as_str()).unwrap_or("");
+                if role != "assistant" {
+                    step_has_reasoning = false;
+                }
+            }
+            _ => {}
+        }
+        i += 1;
+    }
+    injected
 }
 
 /// Anthropic thinking content_block 的 `signature` 字段编码 schema 版本号。
@@ -406,11 +552,37 @@ pub fn encode_reasoning_signature(id: &str, encrypted_content: &str) -> String {
     URL_SAFE_NO_PAD.encode(json_str.as_bytes())
 }
 
-/// 与 [`encode_reasoning_signature`] 配对的解码器, 返回 (id, encrypted_content). 失败 → None。
+/// 明文 reasoning (DeepSeek 方言, 上游无 encrypted_content) 的 signature 变体:
+/// `base64url(JSON{v:2, p:"openai_responses", id, pt:1})`。文本本体不进 signature ——
+/// 它已在 thinking 块的 `thinking` 字段里, 回灌时从那里取。
+///
+/// 老 build 的 [`decode_reasoning_signature`] 会因 `ec` 缺失把它当无效 drop (安全降级)。
+pub fn encode_plaintext_reasoning_signature(id: &str) -> String {
+    use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine as _};
+    let payload = json!({
+        "v": REASONING_SIG_VERSION,
+        "p": REASONING_SIG_PROVIDER,
+        "id": id,
+        "pt": 1,
+    });
+    let json_str = serde_json::to_string(&payload).unwrap_or_default();
+    URL_SAFE_NO_PAD.encode(json_str.as_bytes())
+}
+
+/// [`decode_reasoning_signature_any`] 的结果: cc-router openai_responses 家族的两种包装。
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum DecodedReasoningSignature {
+    /// OpenAI 官方 / codex: 回灌需要 `{id, encrypted_content, summary}` 形状
+    Encrypted { id: String, ec: String },
+    /// DeepSeek 明文: 回灌需要 `{id, content:[{type:"reasoning_text", text}]}` 形状
+    Plaintext { id: String },
+}
+
+/// 解码 openai_responses 家族 signature (加密/明文两种变体)。失败 → None。
 ///
 /// 兼容性: v=1 (老 build 包装的, 无 `p` 字段) 仍接受; v=2 必须 `p == "openai_responses"` 才解。
 /// 其他 v 或 p 不匹配 → None (例如 gemini wrap 喂进来会被拒)。
-pub fn decode_reasoning_signature(signature: &str) -> Option<(String, String)> {
+pub fn decode_reasoning_signature_any(signature: &str) -> Option<DecodedReasoningSignature> {
     use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine as _};
     if signature.is_empty() {
         return None;
@@ -436,8 +608,20 @@ pub fn decode_reasoning_signature(signature: &str) -> Option<(String, String)> {
         _ => return None,
     }
     let id = v.get("id").and_then(|x| x.as_str()).unwrap_or("").to_string();
+    if v.get("pt").and_then(|x| x.as_u64()) == Some(1) {
+        return Some(DecodedReasoningSignature::Plaintext { id });
+    }
     let ec = v.get("ec").and_then(|x| x.as_str()).unwrap_or("").to_string();
-    Some((id, ec))
+    Some(DecodedReasoningSignature::Encrypted { id, ec })
+}
+
+/// 与 [`encode_reasoning_signature`] 配对的解码器, 返回 (id, encrypted_content). 失败 → None。
+/// 明文变体也返回 None —— 既有调用方 (responses_inbound 等) 只处理加密形状。
+pub fn decode_reasoning_signature(signature: &str) -> Option<(String, String)> {
+    match decode_reasoning_signature_any(signature) {
+        Some(DecodedReasoningSignature::Encrypted { id, ec }) => Some((id, ec)),
+        _ => None,
+    }
 }
 
 /// 跨 transform 层的 signature 来源识别. 用于 Anthropic 协议透传分支 (xiaomi/deepseek/zhipu/
@@ -451,7 +635,8 @@ pub fn looks_like_cc_router_signature(signature: &str) -> Option<&'static str> {
     if signature.is_empty() {
         return None;
     }
-    if decode_reasoning_signature(signature).is_some() {
+    // 加密/明文两种变体都算自家包装 (明文变体来自 DeepSeek Responses 方言)
+    if decode_reasoning_signature_any(signature).is_some() {
         return Some("openai_responses");
     }
     if crate::proxy::transform::gemini::decode_gemini_thought_signature(signature).is_some() {
@@ -608,7 +793,9 @@ pub fn parse_upstream_event(event_name: &str, data: &Value) -> UpstreamEvent {
                 .to_string();
             UpstreamEvent::FunctionCallArgsDelta { output_index, delta }
         }
-        "response.reasoning_summary_text.delta" => {
+        // reasoning_text.delta 是 DeepSeek 方言的明文思维链增量 (payload 字段与 summary delta
+        // 同构: output_index + delta), OpenAI 官方从不发 → 与 summary delta 共用同一事件通道。
+        "response.reasoning_summary_text.delta" | "response.reasoning_text.delta" => {
             let output_index = data.get("output_index").and_then(|v| v.as_u64()).unwrap_or(0) as u32;
             let delta = data
                 .get("delta")
@@ -625,6 +812,7 @@ pub fn parse_upstream_event(event_name: &str, data: &Value) -> UpstreamEvent {
         | "response.reasoning_summary_part.added"
         | "response.reasoning_summary_part.done"
         | "response.reasoning_summary_text.done"
+        | "response.reasoning_text.done"
         | "response.refusal.done"
         | "response.output_text.annotation.added" => UpstreamEvent::Ignored,
         _ => UpstreamEvent::Unknown,
@@ -708,6 +896,9 @@ pub struct ResponsesSseConverter {
     /// 发过 delta 的 output_index — output_item.done 回填时避免重放内容 (issue #37)
     text_delta_seen: HashSet<u32>,
     tool_args_delta_seen: HashSet<u32>,
+    /// 发过 reasoning 文本 delta (summary 或 deepseek reasoning_text) 的 output_index —
+    /// done 时跳过 summary/content 文本回填, 避免重放
+    reasoning_delta_seen: HashSet<u32>,
     pub(crate) final_usage: Option<Value>,
     /// completed/incomplete 时算出的 stop_reason — NonStreamingCollector 靠它拼最终 JSON
     /// (MessageDelta 事件在 collector 的 absorb 里被丢弃, 不存字段就永远 end_turn)
@@ -740,6 +931,7 @@ impl ResponsesSseConverter {
             blocks: HashMap::new(),
             text_delta_seen: HashSet::new(),
             tool_args_delta_seen: HashSet::new(),
+            reasoning_delta_seen: HashSet::new(),
             final_usage: None,
             final_stop_reason: None,
             failure_message: None,
@@ -914,8 +1106,10 @@ impl ResponsesSseConverter {
         if delta.is_empty() {
             return Vec::new();
         }
+        let anthropic_index = block.anthropic_index;
+        self.reasoning_delta_seen.insert(output_index);
         vec![AnthropicEvent::ContentBlockDelta {
-            index: block.anthropic_index,
+            index: anthropic_index,
             delta: json!({"type": "thinking_delta", "thinking": delta}),
         }]
     }
@@ -986,30 +1180,45 @@ impl ResponsesSseConverter {
                 .and_then(|v| v.as_str())
                 .unwrap_or("")
                 .to_string();
+            // DeepSeek 方言: 明文思维链在 content[].type=reasoning_text (无 encrypted_content)
+            let content_text = reasoning_item_content_text(item);
+            let delta_seen = self.reasoning_delta_seen.contains(&output_index);
             let mut events = Vec::new();
+            // 文本回填 (没流过 delta 时): 优先 summary (OpenAI), 其次 content (DeepSeek 断流兜底)
+            if !delta_seen {
+                let summary_text: String = item
+                    .get("summary")
+                    .and_then(|v| v.as_array())
+                    .map(|summary| {
+                        summary
+                            .iter()
+                            .filter_map(|s| s.get("text").and_then(|t| t.as_str()).map(str::to_string))
+                            .collect::<Vec<_>>()
+                            .join("\n")
+                    })
+                    .unwrap_or_default();
+                let backfill = if !summary_text.is_empty() { summary_text } else { content_text.clone() };
+                if !backfill.is_empty() {
+                    events.push(AnthropicEvent::ContentBlockDelta {
+                        index: anthropic_index,
+                        delta: json!({"type": "thinking_delta", "thinking": backfill}),
+                    });
+                }
+            }
             if !encrypted_content.is_empty() {
                 let signature = encode_reasoning_signature(&reasoning_id, &encrypted_content);
                 events.push(AnthropicEvent::ContentBlockDelta {
                     index: anthropic_index,
                     delta: json!({"type": "signature_delta", "signature": signature}),
                 });
-            }
-            // 兜底: summary 在 done 时才出现的模型 (与提前 reasoning_summary_text.delta 互斥, 实测无重叠案例)
-            if let Some(summary) = item.get("summary").and_then(|v| v.as_array()) {
-                let text: String = summary
-                    .iter()
-                    .filter_map(|s| s.get("text").and_then(|t| t.as_str()).map(str::to_string))
-                    .collect::<Vec<_>>()
-                    .join("\n");
-                if !text.is_empty() {
-                    events.insert(
-                        0,
-                        AnthropicEvent::ContentBlockDelta {
-                            index: anthropic_index,
-                            delta: json!({"type": "thinking_delta", "thinking": text}),
-                        },
-                    );
-                }
+            } else if delta_seen || !content_text.is_empty() {
+                // 有明文思维链但没有 encrypted_content → 明文变体 signature, 回灌时按
+                // content 形状还原 (DeepSeek 方言)
+                let signature = encode_plaintext_reasoning_signature(&reasoning_id);
+                events.push(AnthropicEvent::ContentBlockDelta {
+                    index: anthropic_index,
+                    delta: json!({"type": "signature_delta", "signature": signature}),
+                });
             }
             events.push(AnthropicEvent::ContentBlockStop {
                 index: anthropic_index,
@@ -2193,5 +2402,254 @@ mod tests {
             panic!("expected backfilled input_json_delta, got {:?}", events[0]);
         }
         assert_eq!(events[1].event_name(), "content_block_stop");
+    }
+
+    // ============================================================
+    // DeepSeek Responses 方言 (fixture: tests/fixtures/openai_responses/deepseek/, 2026-08-14 实测)
+    // ============================================================
+
+    #[test]
+    fn deepseek_dialect_config_factory() {
+        let cfg = ResponsesTransformConfig::deepseek_responses(true);
+        assert!(cfg.emit_reasoning);
+        assert!(cfg.roundtrip_reasoning);
+        assert!(cfg.roundtrip_plaintext_reasoning, "deepseek 明文 reasoning 回灌");
+        assert!(cfg.inject_missing_reasoning_placeholder, "orphan function_call 补占位");
+        assert!(
+            cfg.inject_default_include.is_empty(),
+            "deepseek 文档明确 include 不支持, 不注入"
+        );
+        // 与 openai_official 相同的宽松侧
+        assert!(!cfg.force_upstream_streaming);
+        assert!(!cfg.drop_max_tokens);
+        // openai/codex 两个既有工厂不受新字段影响
+        let openai = ResponsesTransformConfig::openai_official(true);
+        assert!(!openai.roundtrip_plaintext_reasoning);
+        assert!(!openai.inject_missing_reasoning_placeholder);
+        let codex = ResponsesTransformConfig::codex_chatgpt(true);
+        assert!(!codex.roundtrip_plaintext_reasoning);
+        assert!(!codex.inject_missing_reasoning_placeholder);
+    }
+
+    #[test]
+    fn plaintext_signature_encode_decode() {
+        let sig = encode_plaintext_reasoning_signature("ds-uuid-1");
+        match decode_reasoning_signature_any(&sig) {
+            Some(DecodedReasoningSignature::Plaintext { id }) => assert_eq!(id, "ds-uuid-1"),
+            other => panic!("expected Plaintext, got {other:?}"),
+        }
+        // 老解码器视明文签名为无效 (向后兼容: 老 build 直接 drop)
+        assert!(decode_reasoning_signature(&sig).is_none());
+        // 加密签名在新解码器下仍正常
+        let enc = encode_reasoning_signature("rs_1", "EC");
+        match decode_reasoning_signature_any(&enc) {
+            Some(DecodedReasoningSignature::Encrypted { id, ec }) => {
+                assert_eq!(id, "rs_1");
+                assert_eq!(ec, "EC");
+            }
+            other => panic!("expected Encrypted, got {other:?}"),
+        }
+        // 明文签名仍被识别为 cc-router 家签名 (Anthropic 透传剥离依赖这一点)
+        assert!(looks_like_cc_router_signature(&sig).is_some());
+    }
+
+    #[test]
+    fn deepseek_reasoning_text_sse_flow() {
+        // 逐字节复刻 p2_turn1_stream.sse 的 reasoning 事件序列:
+        // output_item.added(content:[]) → content_part.added(reasoning_text)
+        // → reasoning_text.delta ×2 → reasoning_text.done → content_part.done
+        // → output_item.done(content 完整, 无 encrypted_content)
+        let mut cfg = ResponsesTransformConfig::deepseek_responses(true);
+        cfg.emit_reasoning = true;
+        let mut conv = ResponsesSseConverter::new_with_config(cfg);
+
+        conv.feed(
+            "response.created",
+            &json!({"response":{"id":"c2ba2ea1","model":"deepseek-v4-flash"}}),
+        );
+        let r = conv.feed(
+            "response.output_item.added",
+            &json!({"output_index":0,"item":{"type":"reasoning","id":"3e2bd6d6","status":"in_progress","content":[],"summary":[]}}),
+        );
+        assert_eq!(r.len(), 1);
+        assert_eq!(r[0].event_name(), "content_block_start");
+
+        conv.feed(
+            "response.content_part.added",
+            &json!({"content_index":0,"item_id":"3e2bd6d6","output_index":0,"part":{"type":"reasoning_text","text":""}}),
+        );
+        let r = conv.feed(
+            "response.reasoning_text.delta",
+            &json!({"content_index":0,"delta":"The user","item_id":"3e2bd6d6","output_index":0}),
+        );
+        assert_eq!(r.len(), 1, "reasoning_text.delta 应映射为 thinking_delta");
+        if let AnthropicEvent::ContentBlockDelta { delta, .. } = &r[0] {
+            assert_eq!(delta["type"], "thinking_delta");
+            assert_eq!(delta["thinking"], "The user");
+        } else {
+            panic!("expected thinking_delta");
+        }
+        conv.feed(
+            "response.reasoning_text.delta",
+            &json!({"content_index":0,"delta":" asks weather.","item_id":"3e2bd6d6","output_index":0}),
+        );
+        let r = conv.feed(
+            "response.reasoning_text.done",
+            &json!({"content_index":0,"item_id":"3e2bd6d6","output_index":0,"text":"The user asks weather."}),
+        );
+        assert!(r.is_empty(), "reasoning_text.done 只是终态确认, 不应重放文本");
+
+        let r = conv.feed(
+            "response.output_item.done",
+            &json!({"output_index":0,"item":{"type":"reasoning","id":"3e2bd6d6","status":"completed","content":[{"type":"reasoning_text","text":"The user asks weather."}],"summary":[]}}),
+        );
+        // 已流过 delta → done 不得重放 thinking 文本; 但要发明文 signature + stop
+        assert_eq!(r.len(), 2, "signature_delta + content_block_stop, got {r:?}");
+        if let AnthropicEvent::ContentBlockDelta { delta, .. } = &r[0] {
+            assert_eq!(delta["type"], "signature_delta");
+            let sig = delta["signature"].as_str().unwrap();
+            match decode_reasoning_signature_any(sig) {
+                Some(DecodedReasoningSignature::Plaintext { id }) => assert_eq!(id, "3e2bd6d6"),
+                other => panic!("expected Plaintext signature, got {other:?}"),
+            }
+        } else {
+            panic!("expected signature_delta");
+        }
+        assert_eq!(r[1].event_name(), "content_block_stop");
+    }
+
+    #[test]
+    fn deepseek_reasoning_done_backfills_content_without_deltas() {
+        // 非常规上游 (或断流恢复): 没收到 reasoning_text.delta, done 里才有完整 content
+        let mut cfg = ResponsesTransformConfig::deepseek_responses(true);
+        cfg.emit_reasoning = true;
+        let mut conv = ResponsesSseConverter::new_with_config(cfg);
+        conv.feed("response.created", &json!({"response":{"id":"r","model":"deepseek-v4-flash"}}));
+        conv.feed(
+            "response.output_item.added",
+            &json!({"output_index":0,"item":{"type":"reasoning","id":"ds1","content":[],"summary":[]}}),
+        );
+        let r = conv.feed(
+            "response.output_item.done",
+            &json!({"output_index":0,"item":{"type":"reasoning","id":"ds1","content":[{"type":"reasoning_text","text":"full text"}],"summary":[]}}),
+        );
+        // thinking_delta(回填) + signature_delta + stop
+        assert_eq!(r.len(), 3, "got {r:?}");
+        if let AnthropicEvent::ContentBlockDelta { delta, .. } = &r[0] {
+            assert_eq!(delta["type"], "thinking_delta");
+            assert_eq!(delta["thinking"], "full text");
+        } else {
+            panic!("expected thinking_delta backfill");
+        }
+    }
+
+    #[test]
+    fn plain_thinking_block_roundtrips_as_content_reasoning() {
+        let sig = encode_plaintext_reasoning_signature("ds-uuid-9");
+        let msgs = vec![json!({
+            "role": "assistant",
+            "content": [
+                {"type": "thinking", "thinking": "need to call tool", "signature": sig},
+                {"type": "tool_use", "id": "call_00_x", "name": "f", "input": {}},
+            ]
+        })];
+        // deepseek 方言: 还原成 content 形状 reasoning item (P9 实测 200 的形状)
+        let cfg = ResponsesTransformConfig::deepseek_responses(true);
+        let items = anthropic_messages_to_input(&msgs, &cfg).unwrap();
+        assert_eq!(items[0]["type"], "reasoning");
+        assert_eq!(items[0]["id"], "ds-uuid-9");
+        assert_eq!(
+            items[0]["content"],
+            json!([{"type": "reasoning_text", "text": "need to call tool"}])
+        );
+        assert!(items[0].get("encrypted_content").is_none());
+        assert!(items[0].get("summary").is_none());
+        assert_eq!(items[1]["type"], "function_call");
+
+        // openai 官方方言: 明文签名块无法变成合法 encrypted reasoning → drop
+        let cfg = ResponsesTransformConfig::openai_official(true);
+        let items = anthropic_messages_to_input(&msgs, &cfg).unwrap();
+        assert_eq!(items.len(), 1, "明文 thinking 在 openai 方言下应被 drop");
+        assert_eq!(items[0]["type"], "function_call");
+    }
+
+    #[test]
+    fn orphan_function_call_gets_placeholder_reasoning() {
+        // 复现 2026-08-14 真实 400: 混合路由下别家 (new-api/gpt) 的 tool_use 进了发给
+        // deepseek 的历史, call_id 非 deepseek 格式且无 reasoning → 400
+        // "The `reasoning_text` in the thinking mode must be passed back to the API."
+        // V5 实测: 补任意非空 reasoning_text 的 reasoning item → 200; V8/V9: 空文本/空 content 仍 400。
+        let body = json!({
+            "model": "deepseek-v4-flash",
+            "max_tokens": 1024,
+            "messages": [
+                {"role": "user", "content": "北京天气?"},
+                {"role": "assistant", "content": [
+                    {"type": "tool_use", "id": "call_ZNKiXUzUYM6BG3m8sqdRNBvZ", "name": "get_weather", "input": {"city": "北京"}}
+                ]},
+                {"role": "user", "content": [
+                    {"type": "tool_result", "tool_use_id": "call_ZNKiXUzUYM6BG3m8sqdRNBvZ", "content": "晴 32°C"}
+                ]}
+            ]
+        });
+        let cfg = ResponsesTransformConfig::deepseek_responses(true);
+        let out = build_responses_body(&body, &cfg).unwrap();
+        let input = out["input"].as_array().unwrap();
+        let types: Vec<&str> = input.iter().filter_map(|i| i["type"].as_str()).collect();
+        assert_eq!(
+            types,
+            vec!["message", "reasoning", "function_call", "function_call_output"],
+            "orphan function_call 前应插入 placeholder reasoning"
+        );
+        let ph_text = input[1]["content"][0]["text"].as_str().unwrap();
+        assert_eq!(input[1]["content"][0]["type"], "reasoning_text");
+        assert!(!ph_text.is_empty(), "V8 实测: 空文本 placeholder 仍 400, 必须非空");
+
+        // openai 官方方言不注入
+        let cfg = ResponsesTransformConfig::openai_official(true);
+        let out = build_responses_body(&body, &cfg).unwrap();
+        let types: Vec<&str> = out["input"].as_array().unwrap().iter().filter_map(|i| i["type"].as_str()).collect();
+        assert_eq!(types, vec!["message", "function_call", "function_call_output"]);
+    }
+
+    #[test]
+    fn placeholder_not_injected_when_reasoning_present_and_resets_per_step() {
+        // 已带 reasoning (真实回灌) 的 turn 不重复注入; function_call_output 之后的新 step 重新判定
+        let sig = encode_plaintext_reasoning_signature("ds1");
+        let body = json!({
+            "model": "deepseek-v4-flash",
+            "max_tokens": 1024,
+            "messages": [
+                {"role": "user", "content": "q"},
+                {"role": "assistant", "content": [
+                    {"type": "thinking", "thinking": "step1 思考", "signature": sig},
+                    {"type": "tool_use", "id": "call_00_a", "name": "f", "input": {}}
+                ]},
+                {"role": "user", "content": [
+                    {"type": "tool_result", "tool_use_id": "call_00_a", "content": "r1"}
+                ]},
+                {"role": "assistant", "content": [
+                    {"type": "tool_use", "id": "call_b", "name": "f", "input": {}}
+                ]},
+                {"role": "user", "content": [
+                    {"type": "tool_result", "tool_use_id": "call_b", "content": "r2"}
+                ]}
+            ]
+        });
+        let cfg = ResponsesTransformConfig::deepseek_responses(true);
+        let out = build_responses_body(&body, &cfg).unwrap();
+        let types: Vec<&str> = out["input"].as_array().unwrap().iter().filter_map(|i| i["type"].as_str()).collect();
+        assert_eq!(
+            types,
+            vec![
+                "message",              // user q
+                "reasoning",            // 真实回灌 (thinking block 还原)
+                "function_call",        // step1: 已有 reasoning, 不注入
+                "function_call_output", // r1 — 重置 step 状态
+                "reasoning",            // step2 orphan fc → 注入 placeholder
+                "function_call",
+                "function_call_output",
+            ]
+        );
     }
 }

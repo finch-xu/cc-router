@@ -179,8 +179,8 @@ pub async fn dispatch_openai_responses_attempt(
     }
 
     // 3. transform config: 与 anthropic_to_openai_responses 内部用同一份 (单一信息源在
-    // ResponsesTransformConfig::openai_official 工厂方法)，响应侧 SSE converter 复用此 config。
-    let transform_config = ResponsesTransformConfig::openai_official(extras.expose_reasoning);
+    // OpenAiResponsesExtras::transform_config, 按 extras.dialect 选工厂)，响应侧 SSE converter 复用此 config。
+    let transform_config = extras.transform_config();
 
     // 4. 发送请求
     let send_result =
@@ -684,6 +684,7 @@ mod tests {
             OpenAiResponsesExtras {
                 reasoning_effort: None,
                 expose_reasoning: true,
+                dialect: Default::default(),
             },
         )
         .await;
@@ -725,6 +726,7 @@ mod tests {
             OpenAiResponsesExtras {
                 reasoning_effort: None,
                 expose_reasoning: true,
+                dialect: Default::default(),
             },
         )
         .await;
@@ -779,6 +781,7 @@ mod tests {
             OpenAiResponsesExtras {
                 reasoning_effort: None,
                 expose_reasoning: true,
+                dialect: Default::default(),
             },
         )
         .await;

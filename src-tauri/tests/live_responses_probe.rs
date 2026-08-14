@@ -39,6 +39,7 @@ async fn dispatch(body: Value, streaming: bool) -> Result<OpenaiResponsesPayload
         OpenAiResponsesExtras {
             reasoning_effort: None,
             expose_reasoning: true,
+            dialect: Default::default(),
         },
     )
     .await;

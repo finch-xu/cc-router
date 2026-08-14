@@ -23,7 +23,8 @@ use serde_json::{json, Value};
 use crate::error::AppResult;
 
 use super::responses_common::{
-    self, encode_reasoning_signature, ResponsesTransformConfig,
+    self, encode_plaintext_reasoning_signature, encode_reasoning_signature, ResponsesDialect,
+    ResponsesTransformConfig,
 };
 
 /// OpenAI Responses `reasoning.effort` 枚举. 接受 6 个输入字符串, 内部 6 个 variant
@@ -99,6 +100,34 @@ pub struct OpenAiResponsesExtras {
     /// 是否在响应翻译时把 reasoning 内容暴露成 Anthropic thinking content_block
     /// (同时影响请求侧: include 注入 + 多轮回灌)
     pub expose_reasoning: bool,
+    /// 上游方言 (默认 OpenAI 官方)。DeepSeek `/v1/responses` 走
+    /// [`ResponsesTransformConfig::deepseek_responses`], 由 [`detect_responses_dialect`] 识别。
+    pub dialect: ResponsesDialect,
+}
+
+impl OpenAiResponsesExtras {
+    /// 按方言选 transform config — 请求翻译与响应侧 SSE converter 必须用同一份
+    /// (单一信息源, dispatch 层与 [`anthropic_to_openai_responses`] 都从这里拿)。
+    pub fn transform_config(&self) -> ResponsesTransformConfig {
+        match self.dialect {
+            ResponsesDialect::Deepseek => {
+                ResponsesTransformConfig::deepseek_responses(self.expose_reasoning)
+            }
+            ResponsesDialect::OpenaiOfficial => {
+                ResponsesTransformConfig::openai_official(self.expose_reasoning)
+            }
+        }
+    }
+}
+
+/// 识别 OpenAI Responses 兼容上游的方言. 判定谓词与 Anthropic 透传路径共用
+/// [`crate::proxy::sanitize::is_deepseek_upstream`] (单一信息源, 识别规则见其文档)。
+pub fn detect_responses_dialect(url: &str, real_model: &str) -> ResponsesDialect {
+    if crate::proxy::sanitize::is_deepseek_upstream(url, real_model) {
+        ResponsesDialect::Deepseek
+    } else {
+        ResponsesDialect::OpenaiOfficial
+    }
 }
 
 /// 把 Anthropic Messages 请求体转成 OpenAI `/v1/responses` 请求体 (官方/兼容路径).
@@ -106,7 +135,7 @@ pub fn anthropic_to_openai_responses(
     body: &Value,
     extras: &OpenAiResponsesExtras,
 ) -> AppResult<Value> {
-    let config = ResponsesTransformConfig::openai_official(extras.expose_reasoning);
+    let config = extras.transform_config();
     let mut out = responses_common::build_responses_body(body, &config)?;
     if let Some(effort) = extras.reasoning_effort {
         out["reasoning"] = json!({ "effort": effort.as_str() });
@@ -289,19 +318,24 @@ fn output_item_to_content_block(item: &Value, config: &ResponsesTransformConfig)
                         .join("\n")
                 })
                 .unwrap_or_default();
+            // DeepSeek 方言: 明文思维链在 content[].type=reasoning_text, summary 恒空
+            let content_text = responses_common::reasoning_item_content_text(item);
             let id = item.get("id").and_then(|v| v.as_str()).unwrap_or("");
             let ec = item
                 .get("encrypted_content")
                 .and_then(|v| v.as_str())
                 .unwrap_or("");
-            let signature = if ec.is_empty() {
-                String::new()
-            } else {
+            let thinking_text = if !summary_text.is_empty() { summary_text } else { content_text };
+            let signature = if !ec.is_empty() {
                 encode_reasoning_signature(id, ec)
+            } else if !thinking_text.is_empty() {
+                encode_plaintext_reasoning_signature(id)
+            } else {
+                String::new()
             };
             Some(json!({
                 "type": "thinking",
-                "thinking": summary_text,
+                "thinking": thinking_text,
                 "signature": signature,
             }))
         }
@@ -343,6 +377,7 @@ mod tests {
         let extras = OpenAiResponsesExtras {
             reasoning_effort: Some(ReasoningEffort::High),
             expose_reasoning: false,
+            dialect: Default::default(),
         };
         let out = anthropic_to_openai_responses(&body, &extras).unwrap();
         assert_eq!(out["reasoning"]["effort"], json!("high"));
@@ -357,6 +392,7 @@ mod tests {
         let extras = OpenAiResponsesExtras {
             reasoning_effort: None,
             expose_reasoning: true,
+            dialect: Default::default(),
         };
         let out = anthropic_to_openai_responses(&body, &extras).unwrap();
         assert_eq!(out["include"], json!(["reasoning.encrypted_content"]));
@@ -706,5 +742,86 @@ mod tests {
             resolve_reasoning_effort(&body, None, Some("medium")),
             Some(ReasoningEffort::Max)
         );
+    }
+
+    // ============================================================
+    // DeepSeek Responses 方言 (fixture: tests/fixtures/openai_responses/deepseek/)
+    // ============================================================
+
+    #[test]
+    fn detect_responses_dialect_by_base_url_or_model() {
+        use crate::proxy::transform::responses_common::ResponsesDialect;
+        assert_eq!(
+            detect_responses_dialect("https://api.deepseek.com", "gpt-x"),
+            ResponsesDialect::Deepseek
+        );
+        assert_eq!(
+            detect_responses_dialect("https://my-relay.example.com", "deepseek-v4-flash"),
+            ResponsesDialect::Deepseek,
+            "中转域名不含 deepseek 时按模型名识别"
+        );
+        assert_eq!(
+            detect_responses_dialect("https://my-relay.example.com", "DeepSeek-V4-Pro"),
+            ResponsesDialect::Deepseek,
+            "大小写不敏感"
+        );
+        assert_eq!(
+            detect_responses_dialect("https://api.openai.com", "gpt-5.5"),
+            ResponsesDialect::OpenaiOfficial
+        );
+    }
+
+    #[test]
+    fn deepseek_dialect_extras_selects_deepseek_config() {
+        use crate::proxy::transform::responses_common::ResponsesDialect;
+        let body = json!({
+            "model": "deepseek-v4-flash",
+            "max_tokens": 100,
+            "messages": [{"role": "user", "content": "hi"}],
+        });
+        let extras = OpenAiResponsesExtras {
+            reasoning_effort: None,
+            expose_reasoning: true,
+            dialect: ResponsesDialect::Deepseek,
+        };
+        let out = anthropic_to_openai_responses(&body, &extras).unwrap();
+        // deepseek 文档: include 不支持 → 即使 expose_reasoning=true 也不注入
+        assert!(out.get("include").is_none());
+        // 宽松侧与 openai 一致: max_tokens 映射
+        assert_eq!(out["max_output_tokens"], json!(100));
+    }
+
+    #[test]
+    fn deepseek_nonstream_reasoning_content_to_thinking() {
+        use crate::proxy::transform::responses_common::{
+            decode_reasoning_signature_any, DecodedReasoningSignature, ResponsesTransformConfig,
+        };
+        // p1_turn1_nonstream.json 实测形状: reasoning item 无 encrypted_content,
+        // 文本在 content[].type=reasoning_text, summary 恒空数组
+        let upstream = json!({
+            "id": "cd12d5fb",
+            "model": "deepseek-v4-flash",
+            "status": "completed",
+            "output": [
+                {"type": "reasoning", "id": "dc508a26", "status": "completed",
+                 "content": [{"type": "reasoning_text", "text": "Let me call the tool."}],
+                 "summary": []},
+                {"type": "function_call", "id": "fca334e4", "status": "completed",
+                 "arguments": "{\"city\": \"北京\"}",
+                 "call_id": "call_00_9cJ", "name": "get_weather"}
+            ],
+            "usage": {"input_tokens": 376, "output_tokens": 65}
+        });
+        let cfg = ResponsesTransformConfig::deepseek_responses(true);
+        let out = responses_json_to_anthropic(&upstream, &cfg).unwrap();
+        let content = out["content"].as_array().unwrap();
+        assert_eq!(content[0]["type"], "thinking");
+        assert_eq!(content[0]["thinking"], "Let me call the tool.");
+        let sig = content[0]["signature"].as_str().unwrap();
+        match decode_reasoning_signature_any(sig) {
+            Some(DecodedReasoningSignature::Plaintext { id }) => assert_eq!(id, "dc508a26"),
+            other => panic!("expected Plaintext signature, got {other:?}"),
+        }
+        assert_eq!(content[1]["type"], "tool_use");
     }
 }

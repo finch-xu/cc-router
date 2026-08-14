@@ -89,6 +89,32 @@ pub fn inject_missing_thinking_placeholders(body: &mut serde_json::Value) -> usi
     injected
 }
 
+/// 上游是否为 DeepSeek: 订阅 URL 或真实模型名 (slot 改写后) 任一含 "deepseek" (大小写不敏感)。
+///
+/// 跨协议共用的 DeepSeek 识别谓词 —— Anthropic 透传路径 ([`should_inject_thinking_placeholder`])
+/// 与 Responses 翻译路径 ([`crate::proxy::transform::openai::detect_responses_dialect`]) 都靠它:
+/// custom provider 没有 yaml 可挂配置, 这两个信号是仅有的稳定来源 (官方域 `api.deepseek.com`
+/// 命中前者, one-api/new-api 等泛域名中转代理 deepseek 模型时命中后者)。
+pub fn is_deepseek_upstream(url: &str, real_model: &str) -> bool {
+    url.to_lowercase().contains("deepseek") || real_model.to_lowercase().contains("deepseek")
+}
+
+/// Anthropic 透传路径是否需要 [`inject_missing_thinking_placeholders`]。
+///
+/// - `yaml_flag = Some(_)`: 内置 provider, yaml `inject_missing_thinking_placeholder` 显式值
+///   优先 (zhipu 等显式 false 的不受启发式影响)。
+/// - `yaml_flag = None`: custom / 未注册 provider, 落 [`is_deepseek_upstream`] 启发式 ——
+///   用户把自定义订阅指向 `api.deepseek.com/anthropic` (provider_id='custom') 时, 混合路由下
+///   别家 provider 生成的无 thinking 的 tool_use assistant 消息同样会触发 DeepSeek 400,
+///   与内置 deepseek 订阅是同一约束。
+pub fn should_inject_thinking_placeholder(
+    yaml_flag: Option<bool>,
+    url: &str,
+    real_model: &str,
+) -> bool {
+    yaml_flag.unwrap_or_else(|| is_deepseek_upstream(url, real_model))
+}
+
 /// 把订阅槽位级 forced effort 写进 Anthropic 透传 body —— **双写** `output_config.effort`
 /// 与 `thinking.effort`, 两处同值。本函数原地修改 body。
 ///
@@ -393,6 +419,42 @@ mod tests {
         let mut body = json!({ "model": "deepseek-v4-flash" });
         let injected = inject_missing_thinking_placeholders(&mut body);
         assert_eq!(injected, 0);
+    }
+
+    // ---------- should_inject_thinking_placeholder ----------
+
+    #[test]
+    fn placeholder_decision_yaml_flag_wins_over_heuristic() {
+        // 内置 provider (yaml 有显式值): 显式值优先, URL/模型无关
+        assert!(should_inject_thinking_placeholder(Some(true), "https://x.example.com", "m"));
+        assert!(!should_inject_thinking_placeholder(
+            Some(false),
+            "https://api.deepseek.com/anthropic",
+            "deepseek-v4-pro"
+        ));
+    }
+
+    #[test]
+    fn placeholder_decision_custom_provider_falls_back_to_deepseek_heuristic() {
+        // custom / 未注册 provider (yaml_flag=None): 按 URL 或真实模型名识别 deepseek
+        // (用户场景: 「自定义dp」订阅指向 api.deepseek.com/anthropic, provider_id='custom')
+        assert!(should_inject_thinking_placeholder(
+            None,
+            "https://api.deepseek.com/anthropic/v1/messages",
+            "deepseek-v4-pro"
+        ));
+        // 泛域名中转代理 deepseek 模型: 按模型名命中 (大小写不敏感)
+        assert!(should_inject_thinking_placeholder(
+            None,
+            "https://relay.example.com/v1/messages",
+            "DeepSeek-V4-Flash"
+        ));
+        // 非 deepseek 的自定义订阅: 不注入
+        assert!(!should_inject_thinking_placeholder(
+            None,
+            "https://relay.example.com/v1/messages",
+            "glm-5"
+        ));
     }
 
     // ---------- force_anthropic_effort ----------
