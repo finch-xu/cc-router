@@ -601,9 +601,133 @@ jobs:
             src-tauri/target/x86_64-unknown-linux-gnu/release/bundle/appimage/*.AppImage
             src-tauri/target/x86_64-unknown-linux-gnu/release/bundle/appimage/*.AppImage.sig
 
+  build-linux-arm:
+    name: Build Linux arm64
+    # 原生 arm64 runner (公开仓库免费); 与 build-windows-arm 同思路,
+    # 避免交叉编译 webkit2gtk/glib 这类系统 C 库所需的整套 sysroot。
+    # 选 22.04 而非 24.04: 与 x64 job 的 glibc 保持一致(2.35)。
+    # AppImage 只能向上兼容 glibc, 构建机越老, 能跑的发行版越多。
+    runs-on: ubuntu-22.04-arm
+    environment: APPLE_CERTIFICATE
+    env:
+      RELEASE_TAG: ${{ github.ref_name }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 9
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - name: Setup Rust (aarch64-unknown-linux-gnu)
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-unknown-linux-gnu
+
+      - name: Cache Cargo
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+          key: linux-arm64
+
+      - name: Install system deps (webkit2gtk + tray + AppImage tooling)
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libwebkit2gtk-4.1-dev \
+            librsvg2-dev \
+            patchelf \
+            libayatana-appindicator3-dev \
+            file
+
+      - name: Install frontend deps
+        run: pnpm install --frozen-lockfile
+
+      - name: Verify Tauri signing secrets are present
+        env:
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+        run: |
+          if [ -z "${TAURI_SIGNING_PRIVATE_KEY:-}" ]; then
+            echo "::error::TAURI_SIGNING_PRIVATE_KEY secret is empty - .sig files will not be generated."
+            exit 1
+          fi
+          if [ -z "${TAURI_SIGNING_PRIVATE_KEY_PASSWORD:-}" ]; then
+            echo "::error::TAURI_SIGNING_PRIVATE_KEY_PASSWORD secret is empty - bundle signing will fail."
+            exit 1
+          fi
+          echo "TAURI signing secrets present."
+
+      - name: Build
+        uses: tauri-apps/tauri-action@v0
+        env:
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+        with:
+          # 显式只打 deb + AppImage; 跳过 rpm (Ubuntu runner 上工具链不稳)
+          args: --target aarch64-unknown-linux-gnu --bundles deb,appimage
+
+      - name: List bundle contents (diagnostic)
+        if: always()
+        shell: bash
+        run: |
+          bundle_dir="src-tauri/target/aarch64-unknown-linux-gnu/release/bundle"
+          if [ -d "$bundle_dir" ]; then
+            find "$bundle_dir" -maxdepth 3 -type f | sort
+          else
+            echo "Bundle dir does not exist: $bundle_dir"
+          fi
+
+      - name: Rename artifacts to versionless names
+        shell: bash
+        run: |
+          set -euo pipefail
+          bundle_dir="src-tauri/target/aarch64-unknown-linux-gnu/release/bundle"
+          shopt -s nullglob
+          # 目标命名: cc-router_linux-arm64.{deb,AppImage} (不含版本号)
+          # "linux-arm64" 这个字面量是 scripts/generate-latest-json.mjs 的路由键,
+          # 靠它把两个架构的 .AppImage 分流到 linux-aarch64 / linux-x86_64, 不能随意改。
+          # deb 不参与 updater (无 .sig)
+          for f in "$bundle_dir"/deb/*.deb; do
+            mv -v "$f" "$bundle_dir/deb/cc-router_linux-arm64.deb"
+          done
+          # AppImage 是 updater 产物, 跟随的 .sig 一并改名
+          for f in "$bundle_dir"/appimage/*.AppImage; do
+            new="$bundle_dir/appimage/cc-router_linux-arm64.AppImage"
+            mv -v "$f" "$new"
+            if [ -f "${f}.sig" ]; then
+              mv -v "${f}.sig" "${new}.sig"
+            fi
+          done
+
+      - name: Upload .sig artifact (for manifest job)
+        uses: actions/upload-artifact@v4
+        with:
+          name: sig-linux-arm
+          path: src-tauri/target/aarch64-unknown-linux-gnu/release/bundle/appimage/*.AppImage.sig
+          if-no-files-found: error
+          retention-days: 1
+
+      - name: Upload to draft release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ env.RELEASE_TAG }}
+          draft: true
+          files: |
+            src-tauri/target/aarch64-unknown-linux-gnu/release/bundle/deb/*.deb
+            src-tauri/target/aarch64-unknown-linux-gnu/release/bundle/appimage/*.AppImage
+            src-tauri/target/aarch64-unknown-linux-gnu/release/bundle/appimage/*.AppImage.sig
+
   generate-manifest:
     name: Generate latest.json
-    needs: [build-macos, build-macos-x64, build-windows, build-windows-arm, build-linux]
+    needs: [build-macos, build-macos-x64, build-windows, build-windows-arm, build-linux, build-linux-arm]
     runs-on: ubuntu-latest
     env:
       RELEASE_TAG: ${{ github.ref_name }}

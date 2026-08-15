@@ -63,7 +63,12 @@ for (const sigName of files) {
       key = "windows-x86_64";
     }
   } else if (baseName.endsWith(".AppImage")) {
-    key = "linux-x86_64";
+    // Linux 双架构: 按文件名 linux-arm64 / linux-x64 分流 (否则两个 .AppImage 撞同一 key 互相覆盖)
+    if (baseName.includes("linux-arm64")) {
+      key = "linux-aarch64";
+    } else {
+      key = "linux-x86_64";
+    }
   }
   if (!key) {
     console.warn("跳过未识别平台的 sig:", baseName);
@@ -81,6 +86,7 @@ const required = [
   "windows-x86_64",
   "windows-aarch64",
   "linux-x86_64",
+  "linux-aarch64",
 ];
 for (const k of required) {
   if (!platforms[k]) {
