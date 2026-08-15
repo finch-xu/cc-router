@@ -212,7 +212,7 @@ const CSV_HEADER: &str = "id,timestamp,timestamp_iso,virtual_model_name,subscrip
 provider_id,endpoint_id,real_model_name,response_model_name,is_streaming,status,http_status,\
 total_latency_ms,input_tokens,output_tokens,cache_creation_tokens,cache_read_tokens,\
 error_message,client_tool,client_user_agent,client_version,client_ip,entry_kind,\
-downstream_http_version";
+downstream_http_version,client_effort,effective_effort,effort_source,upstream_effort";
 
 /// 按当前筛选条件把请求日志导出为 CSV 文件 (路径由前端 save dialog 提供)。
 /// 流式逐行写 BufWriter, 不整表载入内存; 返回导出的行数。
@@ -234,7 +234,8 @@ pub async fn export_requests_csv(
                 upstream_input_tokens, upstream_output_tokens,
                 upstream_cache_creation, upstream_cache_read, error_message,
                 client_tool, client_user_agent, client_version, client_ip,
-                entry_kind, downstream_http_version
+                entry_kind, downstream_http_version,
+                client_effort, effective_effort, effort_source, upstream_effort
          FROM requests{}
          ORDER BY timestamp ASC",
         where_clause
@@ -287,6 +288,10 @@ pub async fn export_requests_csv(
             opt_str(r.try_get("client_ip").ok()),
             opt_str(r.try_get("entry_kind").ok()),
             opt_str(r.try_get("downstream_http_version").ok()),
+            opt_str(r.try_get("client_effort").ok()),
+            opt_str(r.try_get("effective_effort").ok()),
+            opt_str(r.try_get("effort_source").ok()),
+            opt_str(r.try_get("upstream_effort").ok()),
         ]
         .join(",");
         writeln!(w, "{}", line).map_err(io_err)?;
@@ -306,7 +311,25 @@ pub async fn list_supported_client_tools() -> AppResult<Vec<&'static str>> {
 
 #[cfg(test)]
 mod tests {
-    use super::csv_field;
+    use super::{csv_field, CSV_HEADER};
+
+    /// CSV 列数锁 —— 加字段时必须同步改 header / SELECT / 行写入三处, 漏一处就会串列。
+    #[test]
+    fn csv_header_has_expected_columns() {
+        let cols: Vec<&str> = CSV_HEADER.split(',').collect();
+        assert_eq!(cols.len(), 28, "改了 CSV 列数? 同步 SELECT 与行写入");
+        assert_eq!(
+            &cols[cols.len() - 4..],
+            &[
+                "client_effort",
+                "effective_effort",
+                "effort_source",
+                "upstream_effort"
+            ]
+        );
+        // 刻意排除的大字段, 不能悄悄混进来
+        assert!(!CSV_HEADER.contains("upstream_response_body"));
+    }
 
     #[test]
     fn csv_field_escapes_specials() {

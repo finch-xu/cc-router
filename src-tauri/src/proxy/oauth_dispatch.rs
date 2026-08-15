@@ -495,7 +495,7 @@ fn finalize_streaming(
             client_effort: effort_log.client.clone(),
             effective_effort: effort_log.effective.clone(),
             effort_source: effort_log.source,
-            upstream_effort: upstream_effort_echo.clone(),
+            upstream_effort: upstream_effort_echo,
         };
         let _ = log_tx.try_send(entry);
         let (severity, summary) = match &upstream_error {

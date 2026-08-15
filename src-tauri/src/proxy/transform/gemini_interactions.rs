@@ -102,25 +102,43 @@ pub fn resolve_thinking_level(
     forced_effort: Option<&str>,
     yaml_default_effort: Option<&str>,
 ) -> Option<String> {
+    resolve_thinking_level_with_source(body, forced_effort, yaml_default_effort).0
+}
+
+/// 同 [`resolve_thinking_level`], 额外返回「哪一层胜出」供请求日志记录 (`slot` / `client` / `yaml`)。
+///
+/// 优先级顺序与 [`resolve_thinking_level`] **逐字一致** —— 本函数才是唯一实现, 上面那个是取 `.0`
+/// 的薄封装。日志侧必须用本函数而不是 [`super::openai::resolve_reasoning_effort`]:
+/// 两条链的层序刻意不同, 用错会记下一个从未发往上游的档位。
+pub fn resolve_thinking_level_with_source(
+    body: &Value,
+    forced_effort: Option<&str>,
+    yaml_default_effort: Option<&str>,
+) -> (Option<String>, Option<&'static str>) {
+    use crate::proxy::effort_log::{SOURCE_CLIENT, SOURCE_SLOT, SOURCE_YAML};
+
     if let Some(l) = forced_effort
         .filter(|s| !s.is_empty())
         .and_then(effort_to_thinking_level)
     {
-        return Some(l.to_string());
+        return (Some(l.to_string()), Some(SOURCE_SLOT));
     }
     if let Some(l) =
         super::openai::output_config_effort(body).and_then(effort_to_thinking_level)
     {
-        return Some(l.to_string());
+        return (Some(l.to_string()), Some(SOURCE_CLIENT));
     }
     if let Some(thinking) = body.get("thinking") {
         if let Some(s) = thinking.get("effort").and_then(|x| x.as_str()) {
             if let Some(l) = effort_to_thinking_level(s) {
-                return Some(l.to_string());
+                return (Some(l.to_string()), Some(SOURCE_CLIENT));
             }
         }
         if let Some(bt) = thinking.get("budget_tokens").and_then(|x| x.as_i64()) {
-            return Some(budget_to_thinking_level(bt).to_string());
+            return (
+                Some(budget_to_thinking_level(bt).to_string()),
+                Some(SOURCE_CLIENT),
+            );
         }
     }
     if let Some(s) = body
@@ -129,12 +147,13 @@ pub fn resolve_thinking_level(
         .and_then(|x| x.as_str())
     {
         if let Some(l) = effort_to_thinking_level(s) {
-            return Some(l.to_string());
+            return (Some(l.to_string()), Some(SOURCE_CLIENT));
         }
     }
-    yaml_default_effort
-        .and_then(effort_to_thinking_level)
-        .map(str::to_string)
+    match yaml_default_effort.and_then(effort_to_thinking_level) {
+        Some(l) => (Some(l.to_string()), Some(SOURCE_YAML)),
+        None => (None, None),
+    }
 }
 
 // ============================================================
@@ -1299,6 +1318,55 @@ mod tests {
         assert_eq!(
             resolve_thinking_level(&body, Some("low"), Some("high")),
             Some("low".to_string())
+        );
+    }
+
+    #[test]
+    fn resolve_thinking_level_with_source_diverges_from_reasoning_effort_chain() {
+        // reasoning_effort 链: extra_body 在 output_config 之前 → max;
+        // level 链: output_config 在 extra_body 之前 → low。日志必须记 level 链。
+        let body = json!({
+            "extra_body": {"reasoning_effort": "max"},
+            "output_config": {"effort": "low"}
+        });
+        assert_eq!(
+            super::super::openai::resolve_reasoning_effort(&body, None, None)
+                .map(|e| e.as_str().to_string()),
+            Some("max".to_string())
+        );
+        let (level, source) = resolve_thinking_level_with_source(&body, None, None);
+        assert_eq!(level, Some("low".to_string()));
+        assert_eq!(source, Some(crate::proxy::effort_log::SOURCE_CLIENT));
+        let log = crate::proxy::effort_log::gemini_interactions_effort_log(
+            &body,
+            level.as_deref(),
+            source,
+        );
+        assert_eq!(log.client, Some("max".to_string()));
+        assert_eq!(log.effective, Some("low".to_string()));
+        assert_eq!(log.source, Some(crate::proxy::effort_log::SOURCE_CLIENT));
+    }
+
+    #[test]
+    fn resolve_thinking_level_with_source_labels_slot_and_yaml() {
+        let body = json!({"thinking": {"effort": "high"}});
+        assert_eq!(
+            resolve_thinking_level_with_source(&body, Some("low"), Some("high")),
+            (
+                Some("low".to_string()),
+                Some(crate::proxy::effort_log::SOURCE_SLOT)
+            )
+        );
+        assert_eq!(
+            resolve_thinking_level_with_source(&json!({"model": "x"}), None, Some("medium")),
+            (
+                Some("medium".to_string()),
+                Some(crate::proxy::effort_log::SOURCE_YAML)
+            )
+        );
+        assert_eq!(
+            resolve_thinking_level_with_source(&json!({"model": "x"}), None, None),
+            (None, None)
         );
     }
 

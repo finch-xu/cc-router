@@ -22,8 +22,10 @@ use crate::proxy::gemini_dispatch;
 use crate::proxy::gemini_interactions_dispatch;
 use crate::proxy::openai_chat_completions_dispatch;
 use crate::proxy::openai_responses_dispatch;
-use crate::proxy::transform::gemini::{resolve_thinking_budget, GeminiExtras};
-use crate::proxy::transform::gemini_interactions::{resolve_thinking_level, InteractionsExtras};
+use crate::proxy::transform::gemini::{resolve_thinking_budget_with_source, GeminiExtras};
+use crate::proxy::transform::gemini_interactions::{
+    resolve_thinking_level_with_source, InteractionsExtras,
+};
 use crate::proxy::transform::openai::{
     detect_responses_dialect, resolve_reasoning_effort, OpenAiResponsesExtras,
 };
@@ -36,7 +38,8 @@ use crate::proxy::oauth_dispatch::{
 use crate::proxy::overloaded;
 use crate::proxy::retry::{classify_response, ShouldRetry};
 use crate::proxy::effort_log::{
-    client_effort_of, kiro_effort_log, passthrough_effort_log, translation_effort_log,
+    client_effort_of, gemini_effort_log, gemini_interactions_effort_log, kiro_effort_log,
+    passthrough_effort_log, translation_effort_log,
 };
 use crate::proxy::sanitize::{
     force_anthropic_effort, inject_missing_thinking_placeholders,
@@ -580,18 +583,16 @@ pub async fn dispatch(
         if matches!(auth_type, AuthType::GeminiApiKey) {
             let (yaml_expose_reasoning, yaml_default_effort) =
                 provider_reasoning_defaults(state, &provider_id);
-            // 本次 attempt 的思考强度三格 (纯观测, 与上面的 resolver 同参同源)
-            let effort_log = translation_effort_log(
+            // 思考强度: 日志必须复用 Gemini 自己的 resolver (层序与 resolve_reasoning_effort 不同),
+            // 否则会记下一个从未发往上游的档位。
+            let (thinking_budget, budget_source) = resolve_thinking_budget_with_source(
                 &request_body,
                 forced_effort.as_deref(),
                 yaml_default_effort.as_deref(),
             );
+            let effort_log = gemini_effort_log(&request_body, thinking_budget, budget_source);
             let gemini_extras = GeminiExtras {
-                thinking_budget: resolve_thinking_budget(
-                    &request_body,
-                    forced_effort.as_deref(),
-                    yaml_default_effort.as_deref(),
-                ),
+                thinking_budget,
                 include_thoughts: yaml_expose_reasoning,
             };
 
@@ -720,18 +721,19 @@ pub async fn dispatch(
         if matches!(auth_type, AuthType::GeminiInteractionsApiKey) {
             let (yaml_expose_reasoning, yaml_default_effort) =
                 provider_reasoning_defaults(state, &provider_id);
-            // 本次 attempt 的思考强度三格 (纯观测, 与上面的 resolver 同参同源)
-            let effort_log = translation_effort_log(
+            // 思考强度: 同上, 日志复用 Interactions 自己的 resolver (层序又与 generateContent 不同)。
+            let (thinking_level, level_source) = resolve_thinking_level_with_source(
                 &request_body,
                 forced_effort.as_deref(),
                 yaml_default_effort.as_deref(),
             );
+            let effort_log = gemini_interactions_effort_log(
+                &request_body,
+                thinking_level.as_deref(),
+                level_source,
+            );
             let interactions_extras = InteractionsExtras {
-                thinking_level: resolve_thinking_level(
-                    &request_body,
-                    forced_effort.as_deref(),
-                    yaml_default_effort.as_deref(),
-                ),
+                thinking_level,
                 include_thoughts: yaml_expose_reasoning,
             };
 

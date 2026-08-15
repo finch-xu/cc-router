@@ -104,22 +104,37 @@ pub fn resolve_thinking_budget(
     forced_effort: Option<&str>,
     yaml_default_effort: Option<&str>,
 ) -> Option<i64> {
+    resolve_thinking_budget_with_source(body, forced_effort, yaml_default_effort).0
+}
+
+/// 同 [`resolve_thinking_budget`], 额外返回「哪一层胜出」供请求日志记录 (`slot` / `client` / `yaml`)。
+///
+/// 优先级顺序与 [`resolve_thinking_budget`] **逐字一致** —— 本函数才是唯一实现, 上面那个是取 `.0`
+/// 的薄封装。日志侧必须用本函数而不是 [`super::openai::resolve_reasoning_effort`]:
+/// 两条链的层序刻意不同, 用错会记下一个从未发往上游的档位。
+pub fn resolve_thinking_budget_with_source(
+    body: &Value,
+    forced_effort: Option<&str>,
+    yaml_default_effort: Option<&str>,
+) -> (Option<i64>, Option<&'static str>) {
+    use crate::proxy::effort_log::{SOURCE_CLIENT, SOURCE_SLOT, SOURCE_YAML};
+
     if let Some(b) = forced_effort
         .filter(|s| !s.is_empty())
         .and_then(effort_to_budget)
     {
-        return Some(b);
+        return (Some(b), Some(SOURCE_SLOT));
     }
     if let Some(b) = super::openai::output_config_effort(body).and_then(effort_to_budget) {
-        return Some(b);
+        return (Some(b), Some(SOURCE_CLIENT));
     }
     if let Some(thinking) = body.get("thinking") {
         if let Some(bt) = thinking.get("budget_tokens").and_then(|x| x.as_i64()) {
-            return Some(bt);
+            return (Some(bt), Some(SOURCE_CLIENT));
         }
         if let Some(s) = thinking.get("effort").and_then(|x| x.as_str()) {
             if let Some(b) = effort_to_budget(s) {
-                return Some(b);
+                return (Some(b), Some(SOURCE_CLIENT));
             }
         }
     }
@@ -129,10 +144,13 @@ pub fn resolve_thinking_budget(
         .and_then(|x| x.as_str())
     {
         if let Some(b) = effort_to_budget(s) {
-            return Some(b);
+            return (Some(b), Some(SOURCE_CLIENT));
         }
     }
-    yaml_default_effort.and_then(effort_to_budget)
+    match yaml_default_effort.and_then(effort_to_budget) {
+        Some(b) => (Some(b), Some(SOURCE_YAML)),
+        None => (None, None),
+    }
 }
 
 // ============================================================
@@ -1512,6 +1530,47 @@ mod tests {
         // 修复后: 客户端传 xhigh → 131072
         let body = json!({"extra_body": {"reasoning_effort": "xhigh"}});
         assert_eq!(resolve_thinking_budget(&body, None, Some("medium")), Some(131072));
+    }
+
+    #[test]
+    fn resolve_thinking_budget_with_source_diverges_from_reasoning_effort_chain() {
+        // 两条链层序不同的活样本: reasoning_effort 链先看 extra_body → low;
+        // budget 链先看 thinking.budget_tokens → 65536 (= high 档)。
+        // 日志必须记 budget 链的结果, 否则会写下一个从未发往上游的档位。
+        let body = json!({
+            "extra_body": {"reasoning_effort": "low"},
+            "thinking": {"budget_tokens": 65536}
+        });
+        assert_eq!(
+            super::super::openai::resolve_reasoning_effort(&body, None, None)
+                .map(|e| e.as_str().to_string()),
+            Some("low".to_string())
+        );
+        let (budget, source) = resolve_thinking_budget_with_source(&body, None, None);
+        assert_eq!(budget, Some(65536));
+        assert_eq!(source, Some(crate::proxy::effort_log::SOURCE_CLIENT));
+        // 日志侧: effective 是 budget 折回的档位 (65536 → high), 而不是 client 的 low
+        let log = crate::proxy::effort_log::gemini_effort_log(&body, budget, source);
+        assert_eq!(log.client, Some("low".to_string()));
+        assert_eq!(log.effective, Some("high".to_string()));
+        assert_eq!(log.source, Some(crate::proxy::effort_log::SOURCE_CLIENT));
+    }
+
+    #[test]
+    fn resolve_thinking_budget_with_source_labels_slot_and_yaml() {
+        let body = json!({"thinking": {"budget_tokens": 12345}});
+        assert_eq!(
+            resolve_thinking_budget_with_source(&body, Some("max"), Some("low")),
+            (Some(-1), Some(crate::proxy::effort_log::SOURCE_SLOT))
+        );
+        assert_eq!(
+            resolve_thinking_budget_with_source(&json!({"model": "x"}), None, Some("low")),
+            (Some(4096), Some(crate::proxy::effort_log::SOURCE_YAML))
+        );
+        assert_eq!(
+            resolve_thinking_budget_with_source(&json!({"model": "x"}), None, None),
+            (None, None)
+        );
     }
 
     #[test]

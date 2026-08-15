@@ -10,6 +10,16 @@
 //!
 //! 上游回显 (`upstream_effort`) 只有 OpenAI Responses 系能拿到, 见
 //! [`crate::proxy::transform::responses_common::ResponsesSseConverter::upstream_effort`]。
+//!
+//! **已知偏差 (`/v1/responses` 入站口, 不修)**: 该入口先把 OpenAI `reasoning.effort` 折成
+//! Anthropic `thinking.budget_tokens`
+//! ([`crate::proxy::transform::responses_inbound`] 的 `effort_to_budget_tokens`:
+//! low=2048 / medium=8192 / high=16384), 而 `client_effort_of` 再用
+//! [`ReasoningEffort::from_budget_tokens`] 的阈值 (<4096 minimal / <16384 low / <65536 medium)
+//! 折回档位 —— 两张表不互逆, 于是 low/medium/high 各被降一档 (low→minimal, medium→low,
+//! high→medium)。即这条入口的 `client_effort` 可能比客户端原文低一级。
+//! 这是入站翻译既有的不对称, 两张映射表都被别处依赖, **刻意不改**;
+//! `effective_effort` 取自真实 resolver, 不受影响。
 
 use std::str::FromStr;
 
@@ -98,10 +108,16 @@ pub fn effort_source(
     None
 }
 
-/// 翻译类 provider (codex / openai responses / openai chat / gemini ×2) 的 EffortLog。
+/// **OpenAI 家族**分支 (codex / openai responses / openai chat completions) 的 EffortLog。
 ///
-/// `effective` 直接取 [`resolve_reasoning_effort`] 的结果 —— 与各分支实际塞进上游 body 的
-/// 值同源同参 (Gemini 两条路径最终落成 budget/level, 但输入完全相同, 这里记档位语义)。
+/// `effective` 直接取 [`resolve_reasoning_effort`] 的结果 —— 这三条路径的翻译层自己调的就是
+/// 同一个 resolver, 同源同参, 记下来的必然是真发出去的档位。
+///
+/// **Gemini 两条路径不能用本函数**: 它们分别走
+/// [`crate::proxy::transform::gemini::resolve_thinking_budget`] 与
+/// [`crate::proxy::transform::gemini_interactions::resolve_thinking_level`], 层序与
+/// [`resolve_reasoning_effort`] 刻意不同 (见各自 doc), 同一个 body 可能算出不同档位。
+/// 它们用 [`gemini_effort_log`] / [`gemini_interactions_effort_log`]。
 pub fn translation_effort_log(
     body: &Value,
     forced: Option<&str>,
@@ -114,6 +130,49 @@ pub fn translation_effort_log(
     EffortLog {
         client,
         effective,
+        source,
+    }
+}
+
+/// Gemini generateContent 分支的 EffortLog。
+///
+/// `budget` / `source` 必须来自
+/// [`crate::proxy::transform::gemini::resolve_thinking_budget_with_source`] —— 即真正塞进
+/// `generationConfig.thinkingConfig.thinkingBudget` 的那个值本身, 保证日志与线上实际一致。
+///
+/// `effective` 把整数预算折回档位语义 ([`ReasoningEffort::from_budget_tokens`]) 便于前端展示;
+/// 负数预算 (`-1` = Gemini 的 dynamic 信号, 对应 `max`) 无法用无符号阈值表达, 记 None
+/// 而不是瞎猜一个档位。
+pub fn gemini_effort_log(
+    body: &Value,
+    budget: Option<i64>,
+    source: Option<&'static str>,
+) -> EffortLog {
+    EffortLog {
+        client: client_effort_of(body),
+        effective: budget.filter(|b| *b >= 0).map(|b| {
+            ReasoningEffort::from_budget_tokens(b as u64)
+                .as_str()
+                .to_string()
+        }),
+        source,
+    }
+}
+
+/// Gemini Interactions 分支的 EffortLog。
+///
+/// `level` / `source` 必须来自
+/// [`crate::proxy::transform::gemini_interactions::resolve_thinking_level_with_source`] ——
+/// 即真正塞进 `generation_config.thinking_level` 的那个值本身。level 本身就是档位字符串
+/// (low / medium / high), 原样记入 `effective`。
+pub fn gemini_interactions_effort_log(
+    body: &Value,
+    level: Option<&str>,
+    source: Option<&'static str>,
+) -> EffortLog {
+    EffortLog {
+        client: client_effort_of(body),
+        effective: level.map(str::to_string),
         source,
     }
 }
@@ -279,6 +338,40 @@ mod tests {
     fn passthrough_log_no_client_no_slot() {
         let log = passthrough_effort_log(None, None, 0);
         assert_eq!(log, EffortLog::default());
+    }
+
+    #[test]
+    fn gemini_log_folds_budget_back_to_level() {
+        let body = json!({"thinking": {"budget_tokens": 65536}});
+        let log = gemini_effort_log(&body, Some(65536), Some(SOURCE_CLIENT));
+        assert_eq!(log.client, Some("high".to_string()));
+        assert_eq!(log.effective, Some("high".to_string()));
+        assert_eq!(log.source, Some(SOURCE_CLIENT));
+    }
+
+    #[test]
+    fn gemini_log_negative_budget_has_no_effective() {
+        // -1 = Gemini dynamic (max), 无法用无符号阈值表达 → 记 None 而不是瞎猜
+        let log = gemini_effort_log(&json!({"model": "x"}), Some(-1), Some(SOURCE_SLOT));
+        assert_eq!(log.effective, None);
+        assert_eq!(log.source, Some(SOURCE_SLOT));
+        // 完全没解析出 budget 时也是 None, 不 panic
+        let log = gemini_effort_log(&json!({"model": "x"}), None, None);
+        assert_eq!(log, EffortLog::default());
+    }
+
+    #[test]
+    fn gemini_interactions_log_records_level_verbatim() {
+        let body = json!({"output_config": {"effort": "xhigh"}});
+        let log = gemini_interactions_effort_log(&body, Some("high"), Some(SOURCE_CLIENT));
+        // client 记客户端原文档位 (xhigh), effective 记真发出去的 level (high)
+        assert_eq!(log.client, Some("xhigh".to_string()));
+        assert_eq!(log.effective, Some("high".to_string()));
+        assert_eq!(log.source, Some(SOURCE_CLIENT));
+        assert_eq!(
+            gemini_interactions_effort_log(&json!({"model": "x"}), None, None),
+            EffortLog::default()
+        );
     }
 
     #[test]
