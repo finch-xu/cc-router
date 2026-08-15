@@ -7,6 +7,7 @@ use uuid::Uuid;
 use crate::provider::model::{
     join_base_path, AuthHeaderFormat, AuthType, BalanceDiscovery, ModelDiscovery,
 };
+use crate::subscription::quota::{QuotaUsage, TokenQuotas};
 use crate::virtual_model::model::SubscriptionSlot;
 
 /// OAuth 凭据元数据, 持久化为 `subscriptions.oauth_metadata` 列 (JSON 字符串).
@@ -235,6 +236,8 @@ pub struct SubscriptionRow {
     pub model_slots: ModelSlots,
     /// 每槽位 reasoning effort 覆盖. 字段缺失 = auto (透传客户端值).
     pub slot_efforts: SlotEfforts,
+    /// 用户设的 token 限额 (cc-router 侧安全阀). 字段缺失 = 该周期不限.
+    pub token_quotas: TokenQuotas,
     pub enabled: bool,
     pub is_auth_failed: bool,
     pub last_error_message: Option<String>,
@@ -313,6 +316,9 @@ pub struct SubscriptionRuntime {
     /// 余额查询缓存 (运行时). None = 从未查过或 provider 不支持. 持久化在
     /// `subscription_balance_cache` 表, 启动时通过 store::load_balance_cache 装填.
     pub balance_cache: Option<BalanceSnapshot>,
+    /// 内存用量计数 (4 周期桶), 判定真值; 启动时由 store::load_quota_usage 装填,
+    /// request_log consumer 实时累加, flush 时按快照落 subscription_quota_usage 表.
+    pub quota_usage: QuotaUsage,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -381,6 +387,7 @@ impl SubscriptionRuntime {
             last_error_message,
             model_cache: None,
             balance_cache: None,
+            quota_usage: QuotaUsage::default(),
         }
     }
 
@@ -395,6 +402,9 @@ impl SubscriptionRuntime {
             if until > now {
                 return false;
             }
+        }
+        if self.row.token_quotas.any_exceeded(&self.quota_usage, now) {
+            return false;
         }
         true
     }
@@ -498,6 +508,7 @@ impl SubscriptionRow {
                 fallback: String::new(),
             },
             slot_efforts: SlotEfforts::default(),
+            token_quotas: TokenQuotas::default(),
             enabled: true,
             is_auth_failed: false,
             last_error_message: None,
@@ -657,5 +668,24 @@ mod tests {
             serde_json::from_str(r#"{"fable":"d","opus":"a","sonnet":"b","haiku":"c"}"#).unwrap();
         assert_eq!(slots.fallback, "");
         assert_eq!(slots.fallback_model(), None);
+    }
+
+    #[test]
+    fn is_dispatchable_false_when_quota_exceeded() {
+        use crate::subscription::quota::{QuotaPeriod, TokenQuotas};
+        let mut row = SubscriptionRow::test_fixture("p", "e");
+        row.token_quotas = TokenQuotas { total: Some(100), ..Default::default() };
+        let mut rt = SubscriptionRuntime::from_row(row);
+        let now = Utc::now();
+        assert!(rt.is_dispatchable(now));
+        rt.quota_usage.add(now, 60, 40, 0, 0); // 恰好 100 → 视为超
+        assert!(!rt.is_dispatchable(now));
+        // 未设限的订阅不受影响
+        let mut row2 = SubscriptionRow::test_fixture("p", "e");
+        row2.token_quotas = TokenQuotas::default();
+        let mut rt2 = SubscriptionRuntime::from_row(row2);
+        rt2.quota_usage.add(now, 1_000_000, 0, 0, 0);
+        assert!(rt2.is_dispatchable(now));
+        let _ = QuotaPeriod::Total;
     }
 }

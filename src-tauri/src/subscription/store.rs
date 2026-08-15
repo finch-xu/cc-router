@@ -15,6 +15,7 @@ use crate::subscription::model::{
     BalanceSnapshot, ModelCache, ModelInfo, ModelSlots, OAuthMetadata, SlotEfforts,
     SubscriptionRow, SubscriptionRuntime,
 };
+use crate::subscription::quota::TokenQuotas;
 
 /// 启动时从 DB 加载全部订阅，并初始化运行时状态。
 ///
@@ -33,7 +34,7 @@ pub async fn load_runtime(
                 base_url, messages_path, auth_header_name, auth_header_format,
                 required_headers, forward_headers, model_discovery, balance_discovery,
                 provider_display_name, provider_icon, is_user_defined,
-                auth_type, oauth_metadata, slot_efforts
+                auth_type, oauth_metadata, slot_efforts, token_quotas
          FROM subscriptions",
     )
     .fetch_all(pool)
@@ -115,6 +116,16 @@ fn row_to_row(row: &sqlx::sqlite::SqliteRow) -> AppResult<SubscriptionRow> {
             SlotEfforts::default()
         }
     };
+    // token_quotas 列在 migration 017 加, DEFAULT '{}' (= 全不限). 同 slot_efforts 走宽容降级:
+    // 解析失败不应让整条订阅从 UI 消失, 只是限额配置丢失回退到「不限」。
+    let token_quotas_json: String = row.try_get("token_quotas")?;
+    let token_quotas: TokenQuotas = match serde_json::from_str::<TokenQuotas>(&token_quotas_json) {
+        Ok(v) => v,
+        Err(e) => {
+            warn!(error = %e, raw = %token_quotas_json, "token_quotas JSON 解析失败, 该订阅视为未设限");
+            TokenQuotas::default()
+        }
+    };
     Ok(SubscriptionRow {
         id,
         provider_id: row.try_get("provider_id")?,
@@ -131,6 +142,7 @@ fn row_to_row(row: &sqlx::sqlite::SqliteRow) -> AppResult<SubscriptionRow> {
             fallback: row.try_get("model_slot_fallback")?,
         },
         slot_efforts,
+        token_quotas,
         enabled: {
             let v: i64 = row.try_get("enabled")?;
             v != 0
@@ -175,6 +187,7 @@ pub async fn insert(pool: &SqlitePool, sub: &SubscriptionRow) -> AppResult<()> {
     let balance_discovery_json = opt_to_json(sub.balance_discovery.as_ref())?;
     let oauth_json = serde_json::to_string(&sub.oauth_metadata)?;
     let slot_efforts_json = serde_json::to_string(&sub.slot_efforts)?;
+    let token_quotas_json = serde_json::to_string(&sub.token_quotas)?;
     sqlx::query(
         "INSERT INTO subscriptions (id, provider_id, endpoint_id, display_name, api_key,
             model_slot_fable, model_slot_opus, model_slot_sonnet, model_slot_haiku,
@@ -183,12 +196,12 @@ pub async fn insert(pool: &SqlitePool, sub: &SubscriptionRow) -> AppResult<()> {
             base_url, messages_path, auth_header_name, auth_header_format,
             required_headers, forward_headers, model_discovery, balance_discovery,
             provider_display_name, provider_icon, is_user_defined,
-            auth_type, oauth_metadata, slot_efforts)
+            auth_type, oauth_metadata, slot_efforts, token_quotas)
          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
                  ?, ?, ?, ?,
                  ?, ?, ?, ?,
                  ?, ?, ?,
-                 ?, ?, ?)",
+                 ?, ?, ?, ?)",
     )
     .bind(sub.id.to_string())
     .bind(&sub.provider_id)
@@ -219,6 +232,7 @@ pub async fn insert(pool: &SqlitePool, sub: &SubscriptionRow) -> AppResult<()> {
     .bind(sub.auth_type.as_str())
     .bind(oauth_json)
     .bind(slot_efforts_json)
+    .bind(token_quotas_json)
     .execute(pool)
     .await?;
     Ok(())
@@ -261,12 +275,14 @@ pub async fn update_row(pool: &SqlitePool, sub: &SubscriptionRow) -> AppResult<(
     let discovery_json = serde_json::to_string(&sub.model_discovery)?;
     let balance_discovery_json = opt_to_json(sub.balance_discovery.as_ref())?;
     let slot_efforts_json = serde_json::to_string(&sub.slot_efforts)?;
+    let token_quotas_json = serde_json::to_string(&sub.token_quotas)?;
     sqlx::query(
         "UPDATE subscriptions SET
             endpoint_id = ?, display_name = ?,
             model_slot_fable = ?, model_slot_opus = ?, model_slot_sonnet = ?, model_slot_haiku = ?,
             model_slot_fallback = ?,
             slot_efforts = ?,
+            token_quotas = ?,
             enabled = ?, is_auth_failed = ?, last_error_message = ?, updated_at = ?,
             base_url = ?, messages_path = ?, auth_header_name = ?, auth_header_format = ?,
             required_headers = ?, forward_headers = ?, model_discovery = ?, balance_discovery = ?,
@@ -281,6 +297,7 @@ pub async fn update_row(pool: &SqlitePool, sub: &SubscriptionRow) -> AppResult<(
     .bind(&sub.model_slots.haiku)
     .bind(&sub.model_slots.fallback)
     .bind(slot_efforts_json)
+    .bind(token_quotas_json)
     .bind(sub.enabled as i64)
     .bind(sub.is_auth_failed as i64)
     .bind(&sub.last_error_message)

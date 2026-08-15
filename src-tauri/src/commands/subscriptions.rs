@@ -19,7 +19,9 @@ use crate::subscription::{
         CUSTOM_GEMINI_SOURCE_MARKER, CUSTOM_OPENAI_CHAT_SOURCE_MARKER, CUSTOM_OPENAI_SOURCE_MARKER,
         CUSTOM_SOURCE_MARKER,
     },
-    model_discovery, ping, state_machine, store,
+    model_discovery, ping,
+    quota::TokenQuotas,
+    state_machine, store,
 };
 
 /// 自定义订阅的协议家族, 决定 cc-router 用哪条 dispatch 路径.
@@ -232,6 +234,7 @@ pub async fn create_subscription(
                 oauth_metadata: OAuthMetadata::default(),
                 model_slots: input.model_slots,
                 slot_efforts: SlotEfforts::default(),
+                token_quotas: TokenQuotas::default(),
                 enabled: true,
                 is_auth_failed: false,
                 last_error_message: None,
@@ -346,6 +349,7 @@ pub async fn create_subscription(
                 oauth_metadata: OAuthMetadata::default(),
                 model_slots: input.model_slots,
                 slot_efforts: SlotEfforts::default(),
+                token_quotas: TokenQuotas::default(),
                 enabled: true,
                 is_auth_failed: false,
                 last_error_message: None,
