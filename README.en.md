@@ -26,7 +26,7 @@
   <a href="https://ccrouter.app" target="_blank" rel="noopener">🌐 Official Site ccrouter.app</a>
 </p>
 
-Bundle your scattered `Token Plan`, `Coding Plan`, and LLM API quotas into a single virtual Plan, and plug it into Claude Code, Claude Desktop App, OpenClaw, OpenCode, Codex and more —— save money! save tokens! 100% local!
+A locally-running LLM aggregation gateway with a desktop GUI, zero-code setup: bundle your scattered `Token Plan`, `Coding Plan`, and LLM API quotas into a single virtual Plan, and plug it into Claude Code, Claude Desktop App, OpenClaw, OpenCode, Codex and more —— save money! save tokens! 100% local!
 
 > ⚠️ Notice: this tool only switches between subscription plans you already own. Request bodies are passed through almost verbatim — no reverse engineering, no jailbreak, no circumvention. You are responsible for complying with each plan's terms of service. cc-router is intended for use with coding tools like Claude Code only; do not use it for anything else.
 >
@@ -58,7 +58,7 @@ Architecture and request flow at a glance:
 
 Highlights:
 
-- **19 providers, one router** — built-in routing for DeepSeek, Qwen, Kimi, MiMo, MiniMax, GLM, Claude, Gemini, etc., across Token Plans / Coding Plans / pay-as-you-go APIs; mix and match opus / sonnet / haiku slots with sequential or round-robin dispatch
+- **19 providers, one router** — built-in routing for DeepSeek, Qwen, Kimi, MiMo, MiniMax, GLM, Claude, Gemini, etc., across Token Plans / Coding Plans / pay-as-you-go APIs; mix and match opus / sonnet / haiku slots with sequential / round-robin / session-affinity dispatch
 - **Bring your own endpoint** — when the built-in providers don't cover what you need, plug any Anthropic Messages-compatible, Gemini generateContent / Gemini Interactions-compatible, or OpenAI Responses / Chat Completions-compatible API in directly, dispatched alongside the built-in subscriptions
 - **Usage receipts** — export your token-spend snapshot as PNG / PDF / HTML in one click; mono / color modes, no pricing shown by default (usage only), QR code at the bottom links back to the repo
 - **Fully translated UI** — 简体中文 / English / 日本語, follows your system locale or pick manually in Settings
@@ -225,10 +225,11 @@ Example: subscription A = GLM-5 / MiniMax-2.7 / DeepSeek-Flash; subscription B =
 </details>
 
 <details>
-<summary>Scheduling mode: sequential or round-robin?</summary>
+<summary>Scheduling mode: sequential, round-robin, or session affinity?</summary>
 
 - **Sequential** — drain account A first, then switch to B. Better cache hit rate; ideal for **squeezing every token out of two small GLM Coding Plans**
 - **Round-robin** — both accounts share the load. Caveat: cross-account caches are independent, so you'll burn slightly more quota in exchange for true load balancing
+- **Session affinity** — each Claude Code session sticks to one subscription while different sessions are dealt out round-robin. Balanced like round-robin, but the prompt cache survives, and parallel sub-agents share it too. Automatically moves to another subscription when the pinned one is rate-limited or fails. **Recommended when several subscriptions are healthy and you care about cache hits.**
 
 </details>
 

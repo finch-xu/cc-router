@@ -26,7 +26,7 @@
   <a href="https://ccrouter.app" target="_blank" rel="noopener">🌐 公式サイト ccrouter.app</a>
 </p>
 
-バラバラの `Token Plan`、`Coding Plan`、LLM API クォータを 1 つの仮想 Plan にまとめ、Claude Code、Claude Desktop App、OpenClaw、OpenCode、Codex などのツールにワンクリックで接続——コスト削減！トークン節約！完全ローカル動作！
+ローカルで動く LLM 集約ゲートウェイ。GUI デスクトップアプリ、ノーコードで導入。バラバラの `Token Plan`、`Coding Plan`、LLM API クォータを 1 つの仮想 Plan にまとめ、Claude Code、Claude Desktop App、OpenClaw、OpenCode、Codex などのツールにワンクリックで接続——コスト削減！トークン節約！完全ローカル動作！
 
 > ⚠️ 注意: 本ツールは「すでに保有しているサブスクリプションプラン間の自動切り替え」のみを目的としています。リクエストボディはほぼそのまま透過するだけで、リバースエンジニアリングや脱獄、回避行為は一切含みません。各プランの利用規約は利用者ご自身で遵守してください。Claude Code などのコーディングツール用途専用であり、それ以外の用途には使用しないでください。
 >
@@ -58,7 +58,7 @@
 
 機能ハイライト：
 
-- **19 プロバイダーを 1 つのルーターで** —— DeepSeek・Qwen・Kimi・MiMo・MiniMax・GLM・Claude・Gemini などの Token Plan / Coding Plan / 従量課金 API を内蔵対応。opus / sonnet / haiku の 3 スロットに自由に割り当て、順次（sequential）またはラウンドロビン（round_robin）で自動切替
+- **19 プロバイダーを 1 つのルーターで** —— DeepSeek・Qwen・Kimi・MiMo・MiniMax・GLM・Claude・Gemini などの Token Plan / Coding Plan / 従量課金 API を内蔵対応。opus / sonnet / haiku の 3 スロットに自由に割り当て、順次（sequential）/ ラウンドロビン（round_robin）/ セッション親和（sticky）で自動切替
 - **任意のエンドポイントを追加可能** —— 内蔵プロバイダーで足りない場合、Anthropic Messages 互換 / Gemini generateContent・Gemini Interactions 互換 / OpenAI Responses・Chat Completions 互換 API なら何でも直接接続でき、内蔵サブスクと同等にディスパッチ
 - **利用レシート** —— トークン消費スナップショットを PNG / PDF / HTML へワンクリックでエクスポート。モノクロ / カラーの 2 モード、既定では料金非表示で利用量のみ、フッターの QR コードからリポジトリへジャンプ
 - **3 言語完全翻訳** —— 简体中文 / English / 日本語、システム言語追従または設定画面で手動切替
@@ -225,10 +225,11 @@ CC からのリクエストはこのマッピングに従って転送される�
 </details>
 
 <details>
-<summary>スケジューリング: 順次とラウンドロビン、どちらを選ぶ？</summary>
+<summary>スケジューリング: 順次・ラウンドロビン・セッション親和、どれを選ぶ？</summary>
 
 - **順次** —— アカウント A を使い切ってから B に切り替え。キャッシュヒット率が高く、**小枠 GLM Coding Plan 2 つを使い切るシナリオに最適**
 - **ラウンドロビン** —— 両アカウントが均等に負荷を分担。ただしアカウント跨ぎのキャッシュは独立しているので、若干余分に枠を消費する代わりに真のロードバランスが得られる
+- **セッション親和** —— 同じ Claude Code セッションは同じサブスクに固定し、別セッションはラウンドロビンで振り分け。ラウンドロビン並みに均等でありながら prompt cache を失わず、並列サブエージェントもキャッシュを共有できる。固定先がレート制限・失敗したら自動で別のサブスクへ切り替え。**複数サブスクが健全で、キャッシュヒットを重視するなら推奨。**
 
 </details>
 
