@@ -175,11 +175,15 @@ pub async fn run_consumer(
                                     summary: format!("{display_name} 已达 {} token 限额, 暂停调度至下一周期", period.label_zh()),
                                     payload: Some(serde_json::json!({ "period": period.as_str() })),
                                 };
-                                let _ = event_tx.try_send(ev);
-                                let _ = app.emit(
+                                if let Err(e) = event_tx.try_send(ev) {
+                                    warn!(?e, subscription_id = %entry.subscription_id, "quota_reached 事件投递失败");
+                                }
+                                if let Err(e) = app.emit(
                                     "subscription_quota_reached",
                                     serde_json::json!({ "subscription_id": entry.subscription_id.to_string(), "period": period.as_str() }),
-                                );
+                                ) {
+                                    warn!(?e, subscription_id = %entry.subscription_id, "quota_reached 事件投递失败");
+                                }
                             }
                         }
                         if buffer.len() >= BUFFER_MAX {
@@ -212,21 +216,25 @@ async fn flush(
     subscriptions: &Arc<RwLock<HashMap<Uuid, Arc<RwLock<SubscriptionRuntime>>>>>,
     dirty: &mut HashSet<Uuid>,
 ) {
-    if buffer.is_empty() {
+    if buffer.is_empty() && dirty.is_empty() {
         return;
     }
     let batch: Vec<RequestLogEntry> = buffer.drain(..).collect();
     debug!(count = batch.len(), "flushing request logs");
 
-    let mut quota_rows: Vec<QuotaUsageRow> = Vec::new();
-    {
+    // 先在外层读锁下把 dirty id 解析成 Arc clone 的列表, 再释放外层锁, 逐个取内层读锁——
+    // 与 run_consumer 的做法一致 (外层 guard 是临时值, 语句结束即释放), 不在持有外层锁时嵌套等内层锁。
+    let dirty_runtimes: Vec<(Uuid, Arc<RwLock<SubscriptionRuntime>>)> = {
         let map = subscriptions.read().await;
-        for id in dirty.drain() {
-            if let Some(rt) = map.get(&id) {
-                let g = rt.read().await;
-                quota_rows.extend(usage_to_rows(id, &g.quota_usage));
-            }
-        }
+        dirty
+            .drain()
+            .filter_map(|id| map.get(&id).cloned().map(|rt| (id, rt)))
+            .collect()
+    };
+    let mut quota_rows: Vec<QuotaUsageRow> = Vec::new();
+    for (id, rt) in dirty_runtimes {
+        let g = rt.read().await;
+        quota_rows.extend(usage_to_rows(id, &g.quota_usage));
     }
 
     match flush_batch(pool, batch, quota_rows).await {
