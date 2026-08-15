@@ -20,6 +20,7 @@ pub async fn load_all(
         .await?;
         let mode = match mode_str.as_deref() {
             Some("round_robin") => RoutingMode::RoundRobin,
+            Some("sticky") => RoutingMode::Sticky,
             _ => RoutingMode::Sequential,
         };
 
@@ -61,6 +62,7 @@ pub async fn save_mode(
     let mode_str = match mode {
         RoutingMode::Sequential => "sequential",
         RoutingMode::RoundRobin => "round_robin",
+        RoutingMode::Sticky => "sticky",
     };
     sqlx::query(
         "INSERT INTO virtual_model_config (virtual_model_name, mode)
@@ -97,4 +99,23 @@ pub async fn save_bindings(
     }
     tx.commit().await?;
     Ok(())
+}
+
+#[cfg(test)]
+mod sticky_tests {
+    use super::*;
+    use crate::db::run_migrations;
+    use sqlx::sqlite::SqlitePoolOptions;
+    use std::path::PathBuf;
+
+    #[tokio::test]
+    async fn sticky_mode_roundtrips_through_db() {
+        let pool = SqlitePoolOptions::new().max_connections(1).connect("sqlite::memory:").await.unwrap();
+        run_migrations(&pool, &PathBuf::from(".")).await.unwrap();
+        save_mode(&pool, VirtualModelName::Sonnet, RoutingMode::Sticky).await.unwrap();
+        let all = load_all(&pool).await.unwrap();
+        assert_eq!(all[&VirtualModelName::Sonnet].mode, RoutingMode::Sticky);
+        // serde 值
+        assert_eq!(serde_json::to_string(&RoutingMode::Sticky).unwrap(), "\"sticky\"");
+    }
 }

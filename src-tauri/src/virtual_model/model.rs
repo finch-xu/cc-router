@@ -117,6 +117,8 @@ pub enum SubscriptionSlot {
 pub enum RoutingMode {
     Sequential,
     RoundRobin,
+    /// 会话亲和: 同一会话钉住同一订阅, 新会话按轮询分配 (见 proxy::session_key / virtual_model::affinity)
+    Sticky,
 }
 
 #[derive(Debug, Clone)]

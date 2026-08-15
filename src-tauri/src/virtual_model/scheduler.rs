@@ -38,7 +38,9 @@ pub async fn build_candidate_order(
     // 构造扫描顺序
     let scan_order: Vec<usize> = match vm.mode {
         RoutingMode::Sequential => (0..n).collect(),
-        RoutingMode::RoundRobin => {
+        // Sticky 的会话亲和逻辑留给 Task 4（proxy::session_key / virtual_model::affinity）实现，
+        // 这里先按 round_robin 扫描顺序兜底，保持行为可用且可编译。
+        RoutingMode::RoundRobin | RoutingMode::Sticky => {
             let start = (vm.last_used_index + 1) % n;
             (0..n).map(|i| (start + i) % n).collect()
         }
