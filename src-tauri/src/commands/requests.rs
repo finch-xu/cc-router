@@ -46,6 +46,14 @@ pub struct RequestLogDto {
     pub entry_kind: Option<String>,
     /// 下游 (CC ↔ cc-router) 协商的 HTTP 协议, 形如 "HTTP/1.1" / "HTTP/2.0".
     pub downstream_http_version: Option<String>,
+    /// 思考强度 — 客户端本次请求携带的档位, 老日志/拿不到为 NULL
+    pub client_effort: Option<String>,
+    /// 思考强度 — cc-router 实际发往上游的档位
+    pub effective_effort: Option<String>,
+    /// `effective_effort` 的来源: "slot" / "client" / "yaml"
+    pub effort_source: Option<String>,
+    /// 上游响应回显的档位, 仅 OpenAI Responses 系有值
+    pub upstream_effort: Option<String>,
 }
 
 #[derive(Debug, Serialize)]
@@ -135,7 +143,8 @@ pub async fn list_requests(
                 upstream_cache_creation, upstream_cache_read, error_message,
                 upstream_response_body,
                 client_tool, client_user_agent, client_version, client_ip,
-                entry_kind, downstream_http_version
+                entry_kind, downstream_http_version,
+                client_effort, effective_effort, effort_source, upstream_effort
          FROM requests{}
          ORDER BY timestamp DESC
          LIMIT ? OFFSET ?",
@@ -178,6 +187,10 @@ pub async fn list_requests(
             client_ip: r.try_get("client_ip").ok(),
             entry_kind: r.try_get("entry_kind").ok(),
             downstream_http_version: r.try_get("downstream_http_version").ok(),
+            client_effort: r.try_get("client_effort").ok(),
+            effective_effort: r.try_get("effective_effort").ok(),
+            effort_source: r.try_get("effort_source").ok(),
+            upstream_effort: r.try_get("upstream_effort").ok(),
         })
         .collect();
 

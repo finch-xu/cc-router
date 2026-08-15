@@ -17,6 +17,33 @@ interface Props {
   onClose: () => void;
 }
 
+/**
+ * 「思考强度」一行的展示文案: 客户端请求 → 实际发往上游(来源) · 上游回显。
+ * 四项全空 (老日志 / 该 provider 无 effort 概念) 返回 null, 调用方渲染 "—"。
+ */
+function effortSummary(
+  request: RequestLogDto,
+  t: (key: string) => string,
+): string | null {
+  const { client_effort, effective_effort, effort_source, upstream_effort } = request;
+  if (!client_effort && !effective_effort && !effort_source && !upstream_effort) return null;
+
+  const dash = "—";
+  let text = `${t("requestLogs.detail.effortClient")} ${client_effort || dash} → ${t(
+    "requestLogs.detail.effortEffective",
+  )} ${effective_effort || dash}`;
+
+  const sourceKey = `requestLogs.detail.effortSource.${effort_source ?? ""}`;
+  const sourceLabel = effort_source ? t(sourceKey) : "";
+  // t() 找不到 key 时会原样回落成 key 本身, 未知来源不显示括号
+  if (sourceLabel && sourceLabel !== sourceKey) text += `（${sourceLabel}）`;
+
+  text += upstream_effort
+    ? ` · ${t("requestLogs.detail.effortUpstream")} ${upstream_effort}`
+    : ` · ${t("requestLogs.detail.effortUpstreamNone")}`;
+  return text;
+}
+
 export function RequestDetailDialog({ request, onClose }: Props) {
   const { t } = useT();
   const [copied, setCopied] = useState(false);
@@ -46,6 +73,7 @@ export function RequestDetailDialog({ request, onClose }: Props) {
       `virtual_model: ${request.virtual_model_name}`,
       `provider: ${customProviderLabel(request.provider_id, t) ?? request.provider_id}`,
       `real_model: ${request.real_model_name}`,
+      `effort: ${effortSummary(request, t) ?? "—"}`,
       `status: ${request.status}`,
       `http_status: ${request.http_status ?? "—"}`,
       `error_message: ${request.error_message ?? ""}`,
@@ -109,6 +137,12 @@ export function RequestDetailDialog({ request, onClose }: Props) {
               <KV
                 k={t("requestLogs.detail.realModel")}
                 v={<span className="mono strong">{request.real_model_name}</span>}
+              />
+              <KV
+                k={t("requestLogs.detail.effort")}
+                v={
+                  effortSummary(request, t) ?? <span className="muted">—</span>
+                }
               />
               <KV
                 k={t("requestLogs.detail.provider")}

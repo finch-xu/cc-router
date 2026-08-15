@@ -557,6 +557,14 @@ export interface RequestLogDto {
   entry_kind?: string;
   /** 下游 (CC ↔ cc-router) HTTP 协议版本, 形如 "HTTP/1.1" / "HTTP/2.0" */
   downstream_http_version?: string;
+  /** 思考强度: 客户端本次请求携带的档位, 老日志为 null */
+  client_effort?: string | null;
+  /** 思考强度: cc-router 实际发往上游的档位 */
+  effective_effort?: string | null;
+  /** effective_effort 的来源: "slot" / "client" / "yaml" */
+  effort_source?: string | null;
+  /** 上游响应回显的档位, 仅 OpenAI Responses 系有值 */
+  upstream_effort?: string | null;
 }
 
 export interface ListRequestsResult {
