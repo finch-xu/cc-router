@@ -554,6 +554,10 @@ fn finalize_streaming(
             client_ip: ctx.ip.clone(),
             entry_kind: Some(ctx.entry_kind.as_str()),
             downstream_http_version: ctx.http_version.clone(),
+            client_effort: None,
+            effective_effort: None,
+            effort_source: None,
+            upstream_effort: None,
         };
         let _ = log_tx.try_send(entry);
         let severity = match &outcome {
@@ -690,6 +694,10 @@ fn finalize_non_streaming(
             client_ip: ctx.ip.clone(),
             entry_kind: Some(ctx.entry_kind.as_str()),
             downstream_http_version: ctx.http_version.clone(),
+            client_effort: None,
+            effective_effort: None,
+            effort_source: None,
+            upstream_effort: None,
         };
         let _ = log_tx.try_send(entry);
         events::record_request(

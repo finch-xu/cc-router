@@ -93,6 +93,14 @@ pub struct RequestLogEntry {
     pub entry_kind: Option<&'static str>,
     /// 下游 (CC ↔ cc-router) 协商的 HTTP 协议版本, 形如 "HTTP/1.1" / "HTTP/2.0".
     pub downstream_http_version: Option<String>,
+    /// 思考强度 — 客户端本次请求携带的档位。拿不到为 None, 见 [`crate::proxy::effort_log`]。
+    pub client_effort: Option<String>,
+    /// 思考强度 — cc-router 实际发往上游的档位。
+    pub effective_effort: Option<String>,
+    /// `effective_effort` 的来源: "slot" / "client" / "yaml", 未知为 None。
+    pub effort_source: Option<&'static str>,
+    /// 上游响应回显的档位。仅 OpenAI Responses 系能拿到, 其余 provider 恒 None。
+    pub upstream_effort: Option<String>,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -328,8 +336,10 @@ pub(crate) async fn flush_batch(
                 upstream_cache_creation, upstream_cache_read,
                 retry_count, error_message, upstream_response_body,
                 client_tool, client_user_agent, client_version, client_ip,
-                entry_kind, downstream_http_version)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                entry_kind, downstream_http_version,
+                client_effort, effective_effort, effort_source, upstream_effort)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
+                     ?, ?, ?, ?)",
         )
         .bind(entry.id.to_string())
         .bind(entry.timestamp_ms)
@@ -357,6 +367,10 @@ pub(crate) async fn flush_batch(
         .bind(entry.client_ip)
         .bind(entry.entry_kind)
         .bind(entry.downstream_http_version)
+        .bind(entry.client_effort)
+        .bind(entry.effective_effort)
+        .bind(entry.effort_source)
+        .bind(entry.upstream_effort)
         .execute(&mut *tx)
         .await;
         if let Err(e) = result {
@@ -514,7 +528,77 @@ mod tests {
             client_ip: None,
             entry_kind: None,
             downstream_http_version: None,
+            client_effort: None,
+            effective_effort: None,
+            effort_source: None,
+            upstream_effort: None,
         }
+    }
+
+    /// 思考强度四列: 有值能读回, 老式全 None 的 entry 也照常落库 (NULL)。
+    #[tokio::test]
+    async fn flush_persists_effort_columns_and_tolerates_none() {
+        let pool = fresh_pool().await;
+        let sub = Uuid::new_v4();
+        let day_start = floor_to_utc_day(1_704_067_200_000);
+
+        let mut with_effort = make_entry(
+            day_start,
+            VirtualModelName::Sonnet,
+            sub,
+            "openai",
+            RequestStatus::Success,
+            Some(100),
+            Some(1),
+            Some(2),
+        );
+        with_effort.client_effort = Some("low".to_string());
+        with_effort.effective_effort = Some("max".to_string());
+        with_effort.effort_source = Some("slot");
+        with_effort.upstream_effort = Some("max".to_string());
+        let with_effort_id = with_effort.id.to_string();
+
+        let bare = make_entry(
+            day_start + 1000,
+            VirtualModelName::Sonnet,
+            sub,
+            "anthropic",
+            RequestStatus::Success,
+            Some(100),
+            Some(1),
+            Some(2),
+        );
+        let bare_id = bare.id.to_string();
+
+        flush_batch(&pool, vec![with_effort, bare], vec![])
+            .await
+            .expect("flush ok");
+
+        let row = sqlx::query(
+            "SELECT client_effort, effective_effort, effort_source, upstream_effort
+             FROM requests WHERE id = ?",
+        )
+        .bind(&with_effort_id)
+        .fetch_one(&pool)
+        .await
+        .expect("row");
+        assert_eq!(row.try_get::<String, _>("client_effort").unwrap(), "low");
+        assert_eq!(row.try_get::<String, _>("effective_effort").unwrap(), "max");
+        assert_eq!(row.try_get::<String, _>("effort_source").unwrap(), "slot");
+        assert_eq!(row.try_get::<String, _>("upstream_effort").unwrap(), "max");
+
+        let row = sqlx::query(
+            "SELECT client_effort, effective_effort, effort_source, upstream_effort
+             FROM requests WHERE id = ?",
+        )
+        .bind(&bare_id)
+        .fetch_one(&pool)
+        .await
+        .expect("row");
+        assert_eq!(row.try_get::<Option<String>, _>("client_effort").unwrap(), None);
+        assert_eq!(row.try_get::<Option<String>, _>("effective_effort").unwrap(), None);
+        assert_eq!(row.try_get::<Option<String>, _>("effort_source").unwrap(), None);
+        assert_eq!(row.try_get::<Option<String>, _>("upstream_effort").unwrap(), None);
     }
 
     #[test]

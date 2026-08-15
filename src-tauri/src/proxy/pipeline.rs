@@ -405,6 +405,10 @@ pub async fn dispatch(
                         client_ip: ctx.ip.clone(),
                         entry_kind: Some(ctx.entry_kind.as_str()),
                         downstream_http_version: ctx.http_version.clone(),
+                        client_effort: None,
+                        effective_effort: None,
+                        effort_source: None,
+                        upstream_effort: None,
                     };
                     let _ = state.request_log_tx.try_send(entry);
                     events::record_request(
@@ -528,6 +532,10 @@ pub async fn dispatch(
                         client_ip: ctx.ip.clone(),
                         entry_kind: Some(ctx.entry_kind.as_str()),
                         downstream_http_version: ctx.http_version.clone(),
+                        client_effort: None,
+                        effective_effort: None,
+                        effort_source: None,
+                        upstream_effort: None,
                     };
                     let _ = state.request_log_tx.try_send(entry);
                     events::record_request(
@@ -659,6 +667,10 @@ pub async fn dispatch(
                         client_ip: ctx.ip.clone(),
                         entry_kind: Some(ctx.entry_kind.as_str()),
                         downstream_http_version: ctx.http_version.clone(),
+                        client_effort: None,
+                        effective_effort: None,
+                        effort_source: None,
+                        upstream_effort: None,
                     };
                     let _ = state.request_log_tx.try_send(entry);
                     events::record_request(
@@ -798,6 +810,10 @@ pub async fn dispatch(
                         client_ip: ctx.ip.clone(),
                         entry_kind: Some(ctx.entry_kind.as_str()),
                         downstream_http_version: ctx.http_version.clone(),
+                        client_effort: None,
+                        effective_effort: None,
+                        effort_source: None,
+                        upstream_effort: None,
                     };
                     let _ = state.request_log_tx.try_send(entry);
                     events::record_request(
@@ -937,6 +953,10 @@ pub async fn dispatch(
                         client_ip: ctx.ip.clone(),
                         entry_kind: Some(ctx.entry_kind.as_str()),
                         downstream_http_version: ctx.http_version.clone(),
+                        client_effort: None,
+                        effective_effort: None,
+                        effort_source: None,
+                        upstream_effort: None,
                     };
                     let _ = state.request_log_tx.try_send(entry);
                     events::record_request(
@@ -1077,6 +1097,10 @@ pub async fn dispatch(
                         client_ip: ctx.ip.clone(),
                         entry_kind: Some(ctx.entry_kind.as_str()),
                         downstream_http_version: ctx.http_version.clone(),
+                        client_effort: None,
+                        effective_effort: None,
+                        effort_source: None,
+                        upstream_effort: None,
                     };
                     let _ = state.request_log_tx.try_send(entry);
                     events::record_request(
@@ -1327,6 +1351,10 @@ pub async fn dispatch(
                     client_ip: ctx.ip.clone(),
                     entry_kind: Some(ctx.entry_kind.as_str()),
                     downstream_http_version: ctx.http_version.clone(),
+                    client_effort: None,
+                    effective_effort: None,
+                    effort_source: None,
+                    upstream_effort: None,
                 };
                 let _ = state.request_log_tx.try_send(entry);
 
@@ -1455,6 +1483,10 @@ pub async fn dispatch(
                             client_ip: ctx.ip.clone(),
                             entry_kind: Some(ctx.entry_kind.as_str()),
                             downstream_http_version: ctx.http_version.clone(),
+                            client_effort: None,
+                            effective_effort: None,
+                            effort_source: None,
+                            upstream_effort: None,
                         };
                         let _ = state.request_log_tx.try_send(entry);
                         events::record_request(
@@ -1513,6 +1545,10 @@ pub async fn dispatch(
                             client_ip: ctx.ip.clone(),
                             entry_kind: Some(ctx.entry_kind.as_str()),
                             downstream_http_version: ctx.http_version.clone(),
+                            client_effort: None,
+                            effective_effort: None,
+                            effort_source: None,
+                            upstream_effort: None,
                         };
                         let _ = state.request_log_tx.try_send(entry);
                         events::record_request(
@@ -1653,6 +1689,10 @@ pub async fn dispatch(
                     client_ip: ctx.ip.clone(),
                     entry_kind: Some(ctx.entry_kind.as_str()),
                     downstream_http_version: ctx.http_version.clone(),
+                    client_effort: None,
+                    effective_effort: None,
+                    effort_source: None,
+                    upstream_effort: None,
                 };
                 let _ = state.request_log_tx.try_send(entry);
 

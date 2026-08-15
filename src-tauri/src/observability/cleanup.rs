@@ -112,6 +112,10 @@ mod tests {
             client_ip: None,
             entry_kind: None,
             downstream_http_version: None,
+            client_effort: None,
+            effective_effort: None,
+            effort_source: None,
+            upstream_effort: None,
         }
     }
 

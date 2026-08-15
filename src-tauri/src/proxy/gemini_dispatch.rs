@@ -393,6 +393,10 @@ fn finalize_gemini_streaming(
             client_ip: ctx.ip.clone(),
             entry_kind: Some(ctx.entry_kind.as_str()),
             downstream_http_version: ctx.http_version.clone(),
+            client_effort: None,
+            effective_effort: None,
+            effort_source: None,
+            upstream_effort: None,
         };
         let _ = log_tx.try_send(entry);
         events::record_request(
@@ -516,6 +520,10 @@ async fn collect_gemini_to_json_response(
         client_ip: ctx.ip.clone(),
         entry_kind: Some(ctx.entry_kind.as_str()),
         downstream_http_version: ctx.http_version.clone(),
+        client_effort: None,
+        effective_effort: None,
+        effort_source: None,
+        upstream_effort: None,
     };
     let _ = log_tx.try_send(entry);
     events::record_request(
