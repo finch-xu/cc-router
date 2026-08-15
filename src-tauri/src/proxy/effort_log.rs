@@ -150,12 +150,18 @@ pub fn gemini_effort_log(
 ) -> EffortLog {
     EffortLog {
         client: client_effort_of(body),
-        effective: budget.filter(|b| *b >= 0).map(|b| {
-            ReasoningEffort::from_budget_tokens(b as u64)
-                .as_str()
-                .to_string()
+        // Gemini 用 -1 表示 dynamic thinking (effort_to_budget("max") 的编码), 其余负数不认识 → None
+        effective: budget.and_then(|b| match b {
+            -1 => Some("max".to_string()),
+            b if b >= 0 => Some(
+                ReasoningEffort::from_budget_tokens(b as u64)
+                    .as_str()
+                    .to_string(),
+            ),
+            _ => None,
         }),
-        source,
+        // effective 拿不到时 source 也没意义, 保持「effective 与 source 同 Some 同 None」
+        source: source.filter(|_| budget.is_some_and(|b| b >= -1)),
     }
 }
 
@@ -350,12 +356,16 @@ mod tests {
     }
 
     #[test]
-    fn gemini_log_negative_budget_has_no_effective() {
-        // -1 = Gemini dynamic (max), 无法用无符号阈值表达 → 记 None 而不是瞎猜
+    fn gemini_log_dynamic_budget_is_max_and_unknown_negative_is_none() {
+        // -1 = Gemini dynamic thinking = effort_to_budget("max") 的编码 → 记 max
         let log = gemini_effort_log(&json!({"model": "x"}), Some(-1), Some(SOURCE_SLOT));
-        assert_eq!(log.effective, None);
+        assert_eq!(log.effective.as_deref(), Some("max"));
         assert_eq!(log.source, Some(SOURCE_SLOT));
-        // 完全没解析出 budget 时也是 None, 不 panic
+        // 其他负数不认识 → effective/source 同为 None (不 panic)
+        let log = gemini_effort_log(&json!({"model": "x"}), Some(-5), Some(SOURCE_CLIENT));
+        assert_eq!(log.effective, None);
+        assert_eq!(log.source, None);
+        // 完全没解析出 budget 时也是 None
         let log = gemini_effort_log(&json!({"model": "x"}), None, None);
         assert_eq!(log, EffortLog::default());
     }
