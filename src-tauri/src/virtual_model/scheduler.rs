@@ -15,8 +15,8 @@ use crate::virtual_model::model::{RoutingMode, VirtualModelConfig};
 
 pub struct ScheduleOrder {
     pub candidate_ids: Vec<Uuid>,
-    /// 本次调度选中的索引（用于更新 last_used_index）。
-    /// None 表示所有订阅都不可用。
+    /// 本次调度选中的索引（用于更新 last_used_index）。None = 不前进索引：所有订阅都不可用,
+    /// 或 sticky 命中已钉住的订阅。
     pub chosen_index: Option<usize>,
 }
 

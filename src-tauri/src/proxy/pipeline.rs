@@ -44,9 +44,8 @@ use crate::proxy::upstream;
 use crate::state::AppState;
 use crate::subscription::model::SlotEfforts;
 use crate::subscription::state_machine;
-use crate::virtual_model::model::RoutingMode;
 use crate::virtual_model::scheduler::build_candidate_order;
-use crate::virtual_model::VirtualModelName;
+use crate::virtual_model::{RoutingMode, VirtualModelName};
 
 const ERROR_BODY_LIMIT: usize = 4096;
 
@@ -143,13 +142,15 @@ pub async fn dispatch(
         return Ok(overloaded::response(vm_name, &[]));
     }
 
-    let now_instant = std::time::Instant::now();
+    let now_instant = Instant::now();
     let pinned: Option<Uuid> = match (vm_config.mode, ctx.session_key.as_deref()) {
-        (RoutingMode::Sticky, Some(key)) => state
-            .session_affinity
-            .lock()
-            .ok()
-            .and_then(|mut t| t.get(vm_name, key, now_instant)),
+        (RoutingMode::Sticky, Some(key)) => {
+            let mut t = state
+                .session_affinity
+                .lock()
+                .unwrap_or_else(|e| e.into_inner());
+            t.get(vm_name, key, now_instant)
+        }
         _ => None,
     };
     let subs_map = state.subscriptions.read().await.clone();
@@ -173,7 +174,7 @@ pub async fn dispatch(
         return Ok(overloaded::response_with_summary(vm_name, &summary));
     }
 
-    // 更新轮询索引（round_robin 模式）
+    // 更新轮询索引（round_robin / sticky 未命中时；sticky 命中钉住返回 None 不前进）
     if let Some(idx) = order.chosen_index {
         let mut guard = state.virtual_models.write().await;
         if let Some(cfg) = guard.get_mut(&vm_name) {
@@ -202,14 +203,6 @@ pub async fn dispatch(
 
     for sub_id in order.candidate_ids {
         let attempt_id = Uuid::new_v4();
-        // sticky: 每次把请求交给某个候选就立即改钉 (含 retry 切下家; 不弹回)
-        if vm_config.mode == RoutingMode::Sticky {
-            if let Some(key) = ctx.session_key.as_deref() {
-                if let Ok(mut t) = state.session_affinity.lock() {
-                    t.pin(vm_name, key, sub_id, std::time::Instant::now());
-                }
-            }
-        }
         let rt = {
             let subs_map = state.subscriptions.read().await;
             subs_map.get(&sub_id).cloned()
@@ -289,6 +282,18 @@ pub async fn dispatch(
             );
             skipped_no_fallback_slot.push(display_name.clone());
             continue;
+        }
+
+        // sticky: 候选真正被交付请求时才钉 (含 retry 切下家; 不弹回); 放在所有「跳过不试」的
+        // continue 之后
+        if vm_config.mode == RoutingMode::Sticky {
+            if let Some(key) = ctx.session_key.as_deref() {
+                let mut t = state
+                    .session_affinity
+                    .lock()
+                    .unwrap_or_else(|e| e.into_inner());
+                t.pin(vm_name, key, sub_id, Instant::now());
+            }
         }
 
         // ChatGPT OAuth 分支: 走独立的 dispatch + 翻译层 (proxy::oauth_dispatch).

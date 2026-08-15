@@ -58,7 +58,7 @@
 
 功能亮点：
 
-- **19 家 provider 一站调度** —— 内置 DeepSeek、Qwen、Kimi、MiMo、MiniMax、GLM、Claude、Gemini 等 Token Plan / Coding Plan / API 额度,opus / sonnet / haiku 三槽位任意搭配,顺序或轮询自动切换
+- **19 家 provider 一站调度** —— 内置 DeepSeek、Qwen、Kimi、MiMo、MiniMax、GLM、Claude、Gemini 等 Token Plan / Coding Plan / API 额度,opus / sonnet / haiku 三槽位任意搭配,顺序 / 轮询 / 会话亲和自动切换
 - **任意自定义端点** —— 内置厂商不够时,把任何 Anthropic Messages 兼容、Gemini generateContent / Gemini Interactions 兼容、OpenAI Responses / Chat Completions 兼容的 API 直接配进来,与内置订阅同等调度
 - **用量小票** —— token 消费快照一键导出 PNG / PDF / HTML,黑白 / 彩色双模式,默认不显示价格只展示用量,扫底部二维码即跳仓库
 - **三语完整翻译** —— 简体中文 / English / 日本語,可跟随系统或在设置页手动切换
@@ -225,7 +225,7 @@ CC 请求来了就按映射转发，不用再频繁改 `~/.claude/settings.json`
 </details>
 
 <details>
-<summary>调度模式：顺序还是轮询？</summary>
+<summary>调度模式：顺序、轮询还是会话亲和？</summary>
 
 - **顺序** —— 用完 A 再切 B。命中缓存好、能榨干小额度订阅，**推荐给两个小额 GLM Coding Plan 这类场景**
 - **轮询** —— 两家均衡分担。但跨账号的缓存是独立的，会多吃额度，换来的是真正的负载均衡

@@ -7,6 +7,8 @@
 //! 3. Responses entry only: `body.prompt_cache_key`, then `session_id` header (Codex CLI)
 //! 4. SHA-256 (first 32 hex) of the first `role=user` message text — NOT the system prompt,
 //!    which is identical across all Claude Code sessions and would pin everything to one sub
+//!    (Messages entry only — Responses bodies carry `input`, not `messages`, so this level
+//!    never fires on `/v1/responses`)
 //! 5. None → the request is not pinned.
 
 use axum::http::HeaderMap;
