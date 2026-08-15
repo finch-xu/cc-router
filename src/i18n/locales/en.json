@@ -378,7 +378,6 @@
   "subscriptions.empty.action": "Add your first subscription",
   "subscriptions.col.status": "Status",
   "subscriptions.col.provider": "Provider",
-  "subscriptions.col.note": "Note",
   "subscriptions.col.referenced": "Used by",
   "subscriptions.col.updatedAt": "Updated",
   "subscriptions.notUsed": "Unused",

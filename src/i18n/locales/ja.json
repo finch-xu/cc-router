@@ -378,7 +378,6 @@
   "subscriptions.empty.action": "最初のサブスクリプションを追加",
   "subscriptions.col.status": "ステータス",
   "subscriptions.col.provider": "プロバイダ",
-  "subscriptions.col.note": "備考",
   "subscriptions.col.referenced": "参照",
   "subscriptions.col.updatedAt": "更新日時",
   "subscriptions.notUsed": "未使用",

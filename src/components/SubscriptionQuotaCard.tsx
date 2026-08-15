@@ -16,7 +16,7 @@ interface Props {
 
 // 颜色与 src/routes/Statistics.tsx::TOKEN_BAR_SEGMENTS 保持一致 (同为 4 类 token 的配色),
 // 那边的常量是路由内部私有的, 这里按值复制而不是新开一个共享 lib 模块。
-const SEGMENTS: Array<{
+export const QUOTA_SEGMENTS: Array<{
   key: keyof Pick<QuotaUsageDto, "input" | "output" | "cache_creation" | "cache_read">;
   labelKey: string;
   color: string;
@@ -84,9 +84,9 @@ export function SubscriptionQuotaCard({ subscription, onChanged }: Props) {
                   warn && !q.exceeded && "ring-1 ring-amber-500",
                   q.exceeded && "ring-1 ring-red-500",
                 )}
-                title={SEGMENTS.map((s) => `${t(s.labelKey)} ${fmtCompact(q[s.key])}`).join(" · ")}
+                title={QUOTA_SEGMENTS.map((s) => `${t(s.labelKey)} ${fmtCompact(q[s.key])}`).join(" · ")}
               >
-                {SEGMENTS.map((s) => (
+                {QUOTA_SEGMENTS.map((s) => (
                   <div
                     key={s.key}
                     className="h-full shrink-0"
@@ -99,7 +99,7 @@ export function SubscriptionQuotaCard({ subscription, onChanged }: Props) {
               </div>
               <div className="flex items-center justify-between text-xs text-muted-foreground">
                 <span className="flex gap-3">
-                  {SEGMENTS.map((s) => (
+                  {QUOTA_SEGMENTS.map((s) => (
                     <span key={s.key} className="flex items-center gap-1">
                       <i
                         className="inline-block h-2 w-2 rounded-sm"
