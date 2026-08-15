@@ -66,3 +66,6 @@ CLAUDE.md
 !.claude/skills/
 
 .playwright-mcp/
+
+# superpowers 的 spec/plan 工作文档只留本地, 不进仓库
+docs/superpowers/
