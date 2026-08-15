@@ -73,6 +73,10 @@ const MIGRATIONS: &[(u32, &str)] = &[
         16,
         include_str!("../../migrations/016_add_model_slot_fallback.sql"),
     ),
+    (
+        17,
+        include_str!("../../migrations/017_add_token_quotas.sql"),
+    ),
 ];
 
 pub async fn init_pool(db_path: &Path) -> AppResult<SqlitePool> {
@@ -350,7 +354,7 @@ mod tests {
         run_migrations(&pool, &dir).await.expect("migrate fresh");
 
         let versions = applied_versions(&pool).await;
-        assert_eq!(versions, vec![1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16]);
+        assert_eq!(versions, vec![1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17]);
         assert!(!has_column(&pool, "subscriptions", "supports_thinking_blocks").await);
         assert!(!has_column(&pool, "subscriptions", "thinking_block_field_name").await);
         assert!(has_column(&pool, "requests", "upstream_response_body").await);
@@ -375,7 +379,7 @@ mod tests {
         run_migrations(&pool, &dir).await.expect("migrate legacy");
 
         let versions = applied_versions(&pool).await;
-        assert_eq!(versions, vec![1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16]); // baseline v=1, 然后跑增量
+        assert_eq!(versions, vec![1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17]); // baseline v=1, 然后跑增量
         assert!(!has_column(&pool, "subscriptions", "supports_thinking_blocks").await);
         assert!(!has_column(&pool, "subscriptions", "thinking_block_field_name").await);
         assert!(has_column(&pool, "requests", "upstream_response_body").await);
@@ -392,7 +396,7 @@ mod tests {
         run_migrations(&pool, &dir).await.expect("third run");
 
         let versions = applied_versions(&pool).await;
-        assert_eq!(versions, vec![1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16]); // 没有重复写
+        assert_eq!(versions, vec![1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17]); // 没有重复写
     }
 
     /// 在 v4 schema 状态下插一条订阅 (含已 v7 移除的 supports_thinking_blocks 列)。
@@ -458,7 +462,7 @@ mod tests {
         assert!(!has_table(&pool, "subscriptions_new").await);
         assert_eq!(
             applied_versions(&pool).await,
-            vec![1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16]
+            vec![1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17]
         );
 
         let count: (i64,) =
@@ -652,6 +656,42 @@ mod tests {
         .await
         .unwrap();
         assert_eq!(bucket, (2, 15, 25, 1, 2), "同桶两条聚合, NULL token 按 0 计, status 不过滤");
+    }
+
+    #[tokio::test]
+    async fn v17_adds_token_quotas_column_and_usage_table() {
+        let pool = SqlitePoolOptions::new()
+            .max_connections(1)
+            .connect("sqlite::memory:")
+            .await
+            .unwrap();
+        run_migrations(&pool, &std::path::PathBuf::from("."))
+            .await
+            .unwrap();
+
+        // 列存在: 能 SELECT
+        let v: String = sqlx::query_scalar("SELECT token_quotas FROM subscriptions LIMIT 0")
+            .fetch_optional(&pool)
+            .await
+            .unwrap()
+            .unwrap_or_else(|| "{}".to_string());
+        assert_eq!(v, "{}");
+
+        // 表存在: 能插入并读回
+        sqlx::query(
+            "INSERT INTO subscription_quota_usage
+             (subscription_id, period, period_start_ms, input_tokens, output_tokens,
+              cache_creation_tokens, cache_read_tokens, updated_at_ms)
+             VALUES ('s1', 'daily', 0, 1, 2, 3, 4, 0)",
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+        let n: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM subscription_quota_usage")
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+        assert_eq!(n, 1);
     }
 }
 

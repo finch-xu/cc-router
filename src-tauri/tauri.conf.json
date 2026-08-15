@@ -88,6 +88,7 @@
       "migrations/014_rename_custom_provider_ids.sql",
       "migrations/015_add_receipt_stats_daily.sql",
       "migrations/016_add_model_slot_fallback.sql",
+      "migrations/017_add_token_quotas.sql",
       "../LICENSE"
     ],
     "category": "DeveloperTool",
