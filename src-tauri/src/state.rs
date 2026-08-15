@@ -13,6 +13,7 @@ use crate::observability::request_log::RequestLogEntry;
 use crate::provider::model::Provider;
 use crate::settings::model::Settings;
 use crate::subscription::model::SubscriptionRuntime;
+use crate::virtual_model::affinity::AffinityTable;
 use crate::virtual_model::model::{VirtualModelConfig, VirtualModelName};
 
 /// 全局 app 状态。所有 Tauri commands、代理服务、后台任务都共享这份状态。
@@ -43,6 +44,8 @@ pub struct AppState {
     pub chatgpt_oauth: Arc<ChatGptOAuthManager>,
     pub kiro_oauth: Arc<KiroOAuthManager>,
     pub app_handle: AppHandle,
+    /// sticky 模式的会话 → 订阅亲和表. 内存, 不持久化.
+    pub session_affinity: Arc<std::sync::Mutex<AffinityTable>>,
 }
 
 impl AppState {

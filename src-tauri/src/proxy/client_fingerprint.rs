@@ -84,6 +84,8 @@ pub struct ClientContext {
     /// 下游 (CC ↔ cc-router) 协商的 HTTP 协议版本字符串, 形如 "HTTP/1.1" / "HTTP/2.0".
     /// 由 [`super::extractors::format_http_version`] 生成, 落 DB requests.downstream_http_version.
     pub http_version: Option<String>,
+    /// 会话亲和键 (见 proxy::session_key). None = 本请求不参与 sticky.
+    pub session_key: Option<String>,
 }
 
 /// 入口: 按规则识别 headers, 返回 ClientInfo.

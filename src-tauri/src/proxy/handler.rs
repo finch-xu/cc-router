@@ -13,6 +13,7 @@ use tracing::{error, info, warn};
 use crate::proxy::client_fingerprint::{self, ClientContext, RequestEntryKind};
 use crate::proxy::extractors::{format_http_version, HttpVersion};
 use crate::proxy::pipeline;
+use crate::proxy::session_key;
 use crate::proxy::transform::responses_inbound::{
     request_to_anthropic, response_to_responses_json, AnthropicToResponsesSseConverter,
 };
@@ -65,6 +66,7 @@ pub async fn messages(
         ip: Some(peer.ip().to_string()),
         entry_kind: RequestEntryKind::Messages,
         http_version: Some(format_http_version(version)),
+        session_key: session_key::extract(&headers, &parsed, RequestEntryKind::Messages),
     };
 
     info!(
@@ -73,6 +75,7 @@ pub async fn messages(
         client_tool = ?ctx.info.tool,
         client_ip = ?ctx.ip,
         http_version = ?ctx.http_version,
+        session_key_source = ?ctx.session_key.as_deref().map(|k| &k[..k.find(':').unwrap_or(0)]),
         "proxy received request"
     );
 
@@ -172,6 +175,8 @@ pub async fn responses(
         ip: Some(peer.ip().to_string()),
         entry_kind: RequestEntryKind::Responses,
         http_version: Some(format_http_version(version)),
+        // 用翻译前的原始 parsed: request_to_anthropic 会丢 prompt_cache_key.
+        session_key: session_key::extract(&headers, &parsed, RequestEntryKind::Responses),
     };
 
     info!(
@@ -181,6 +186,7 @@ pub async fn responses(
         client_tool = ?ctx.info.tool,
         client_ip = ?ctx.ip,
         http_version = ?ctx.http_version,
+        session_key_source = ?ctx.session_key.as_deref().map(|k| &k[..k.find(':').unwrap_or(0)]),
         "proxy received /v1/responses request"
     );
 

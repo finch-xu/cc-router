@@ -310,6 +310,9 @@ async fn bootstrap(
         chatgpt_oauth,
         kiro_oauth,
         app_handle: handle.clone(),
+        session_affinity: Arc::new(std::sync::Mutex::new(
+            virtual_model::affinity::AffinityTable::default(),
+        )),
     };
 
     // 8. 启动代理

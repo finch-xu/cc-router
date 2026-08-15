@@ -44,6 +44,7 @@ use crate::proxy::upstream;
 use crate::state::AppState;
 use crate::subscription::model::SlotEfforts;
 use crate::subscription::state_machine;
+use crate::virtual_model::model::RoutingMode;
 use crate::virtual_model::scheduler::build_candidate_order;
 use crate::virtual_model::VirtualModelName;
 
@@ -142,8 +143,17 @@ pub async fn dispatch(
         return Ok(overloaded::response(vm_name, &[]));
     }
 
+    let now_instant = std::time::Instant::now();
+    let pinned: Option<Uuid> = match (vm_config.mode, ctx.session_key.as_deref()) {
+        (RoutingMode::Sticky, Some(key)) => state
+            .session_affinity
+            .lock()
+            .ok()
+            .and_then(|mut t| t.get(vm_name, key, now_instant)),
+        _ => None,
+    };
     let subs_map = state.subscriptions.read().await.clone();
-    let order = build_candidate_order(&vm_config, &subs_map, Utc::now(), None).await;
+    let order = build_candidate_order(&vm_config, &subs_map, Utc::now(), pinned).await;
     drop(subs_map);
 
     if order.candidate_ids.is_empty() {
@@ -192,6 +202,14 @@ pub async fn dispatch(
 
     for sub_id in order.candidate_ids {
         let attempt_id = Uuid::new_v4();
+        // sticky: 每次把请求交给某个候选就立即改钉 (含 retry 切下家; 不弹回)
+        if vm_config.mode == RoutingMode::Sticky {
+            if let Some(key) = ctx.session_key.as_deref() {
+                if let Ok(mut t) = state.session_affinity.lock() {
+                    t.pin(vm_name, key, sub_id, std::time::Instant::now());
+                }
+            }
+        }
         let rt = {
             let subs_map = state.subscriptions.read().await;
             subs_map.get(&sub_id).cloned()
