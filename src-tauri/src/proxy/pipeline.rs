@@ -143,7 +143,7 @@ pub async fn dispatch(
     }
 
     let subs_map = state.subscriptions.read().await.clone();
-    let order = build_candidate_order(&vm_config, &subs_map, Utc::now()).await;
+    let order = build_candidate_order(&vm_config, &subs_map, Utc::now(), None).await;
     drop(subs_map);
 
     if order.candidate_ids.is_empty() {

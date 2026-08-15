@@ -26,6 +26,7 @@ pub async fn build_candidate_order(
     vm: &VirtualModelConfig,
     all_subs: &HashMap<Uuid, Arc<RwLock<SubscriptionRuntime>>>,
     now: DateTime<Utc>,
+    pinned: Option<Uuid>,
 ) -> ScheduleOrder {
     let n = vm.subscription_ids.len();
     if n == 0 {
@@ -35,11 +36,39 @@ pub async fn build_candidate_order(
         };
     }
 
-    // 构造扫描顺序
+    // Sticky: 钉住的订阅在本 vm 里且可调度 → 排首, 其余按轮询序兜底, 不前进索引.
+    if vm.mode == RoutingMode::Sticky {
+        if let Some(pin) = pinned {
+            let pin_ok = match all_subs.get(&pin) {
+                Some(rt) if vm.subscription_ids.contains(&pin) => {
+                    rt.read().await.is_dispatchable(now)
+                }
+                _ => false,
+            };
+            if pin_ok {
+                let start = (vm.last_used_index + 1) % n;
+                let mut candidate_ids = vec![pin];
+                for i in 0..n {
+                    let sub_id = vm.subscription_ids[(start + i) % n];
+                    if sub_id == pin {
+                        continue;
+                    }
+                    let Some(rt) = all_subs.get(&sub_id) else { continue };
+                    if rt.read().await.is_dispatchable(now) {
+                        candidate_ids.push(sub_id);
+                    }
+                }
+                return ScheduleOrder {
+                    candidate_ids,
+                    chosen_index: None,
+                };
+            }
+        }
+    }
+
+    // 构造扫描顺序 (Sticky 未命中时按轮询)
     let scan_order: Vec<usize> = match vm.mode {
         RoutingMode::Sequential => (0..n).collect(),
-        // Sticky 的会话亲和逻辑留给 Task 4（proxy::session_key / virtual_model::affinity）实现，
-        // 这里先按 round_robin 扫描顺序兜底，保持行为可用且可编译。
         RoutingMode::RoundRobin | RoutingMode::Sticky => {
             let start = (vm.last_used_index + 1) % n;
             (0..n).map(|i| (start + i) % n).collect()
@@ -99,7 +128,7 @@ mod tests {
             subscription_ids: ids.to_vec(),
             last_used_index: 0,
         };
-        let order = build_candidate_order(&vm, &map, Utc::now()).await;
+        let order = build_candidate_order(&vm, &map, Utc::now(), None).await;
         assert_eq!(order.chosen_index, Some(1));
         assert_eq!(order.candidate_ids, vec![ids[1], ids[2]]);
     }
@@ -121,7 +150,7 @@ mod tests {
             subscription_ids: ids.to_vec(),
             last_used_index: 0,
         };
-        let order = build_candidate_order(&vm, &map, Utc::now()).await;
+        let order = build_candidate_order(&vm, &map, Utc::now(), None).await;
         assert_eq!(order.chosen_index, Some(1));
         assert_eq!(order.candidate_ids[0], ids[1]);
     }
@@ -141,8 +170,92 @@ mod tests {
             subscription_ids: ids.to_vec(),
             last_used_index: 0,
         };
-        let order = build_candidate_order(&vm, &map, Utc::now()).await;
+        let order = build_candidate_order(&vm, &map, Utc::now(), None).await;
         assert!(order.chosen_index.is_none());
         assert!(order.candidate_ids.is_empty());
+    }
+
+    fn three(
+        map: &mut HashMap<Uuid, Arc<RwLock<SubscriptionRuntime>>>,
+        states: [SubscriptionState; 3],
+    ) -> [Uuid; 3] {
+        let mut ids = [Uuid::nil(); 3];
+        for (i, st) in states.into_iter().enumerate() {
+            let rt = make_rt(!matches!(st, SubscriptionState::Disabled), st);
+            ids[i] = rt.row.id;
+            map.insert(rt.row.id, Arc::new(RwLock::new(rt)));
+        }
+        ids
+    }
+
+    #[tokio::test]
+    async fn sticky_pinned_first_and_no_index_advance() {
+        let mut map = HashMap::new();
+        let ids = three(&mut map, [SubscriptionState::Healthy; 3]);
+        let vm = VirtualModelConfig {
+            name: VirtualModelName::Sonnet,
+            mode: RoutingMode::Sticky,
+            subscription_ids: ids.to_vec(),
+            last_used_index: 0,
+        };
+        let order = build_candidate_order(&vm, &map, Utc::now(), Some(ids[2])).await;
+        assert_eq!(order.candidate_ids[0], ids[2]);
+        assert_eq!(order.candidate_ids.len(), 3);
+        assert_eq!(order.chosen_index, None, "钉住命中不前进轮询索引");
+        // 其余按轮询序 (last_used=0 → 从 1 开始): [2, 1, 0]
+        assert_eq!(order.candidate_ids, vec![ids[2], ids[1], ids[0]]);
+    }
+
+    #[tokio::test]
+    async fn sticky_falls_back_to_round_robin_when_pin_unusable() {
+        let mut map = HashMap::new();
+        let ids = three(
+            &mut map,
+            [
+                SubscriptionState::Healthy,
+                SubscriptionState::Healthy,
+                SubscriptionState::RateLimited,
+            ],
+        );
+        let vm = VirtualModelConfig {
+            name: VirtualModelName::Sonnet,
+            mode: RoutingMode::Sticky,
+            subscription_ids: ids.to_vec(),
+            last_used_index: 0,
+        };
+        // 钉住的 ids[2] 不可调度 → 轮询: start=1
+        let order = build_candidate_order(&vm, &map, Utc::now(), Some(ids[2])).await;
+        assert_eq!(order.chosen_index, Some(1));
+        assert_eq!(order.candidate_ids, vec![ids[1], ids[0]]);
+        // 未钉 → 同上
+        let order = build_candidate_order(&vm, &map, Utc::now(), None).await;
+        assert_eq!(order.chosen_index, Some(1));
+        // 钉的 id 不属于本 vm → 同上
+        let order = build_candidate_order(&vm, &map, Utc::now(), Some(Uuid::new_v4())).await;
+        assert_eq!(order.chosen_index, Some(1));
+    }
+
+    #[tokio::test]
+    async fn sequential_and_round_robin_ignore_pinned() {
+        let mut map = HashMap::new();
+        let ids = three(&mut map, [SubscriptionState::Healthy; 3]);
+        let seq = VirtualModelConfig {
+            name: VirtualModelName::Opus,
+            mode: RoutingMode::Sequential,
+            subscription_ids: ids.to_vec(),
+            last_used_index: 0,
+        };
+        let o = build_candidate_order(&seq, &map, Utc::now(), Some(ids[2])).await;
+        assert_eq!(o.candidate_ids[0], ids[0]);
+        assert_eq!(o.chosen_index, Some(0));
+        let rr = VirtualModelConfig {
+            name: VirtualModelName::Opus,
+            mode: RoutingMode::RoundRobin,
+            subscription_ids: ids.to_vec(),
+            last_used_index: 0,
+        };
+        let o = build_candidate_order(&rr, &map, Utc::now(), Some(ids[2])).await;
+        assert_eq!(o.candidate_ids[0], ids[1]);
+        assert_eq!(o.chosen_index, Some(1));
     }
 }
