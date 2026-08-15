@@ -7,7 +7,7 @@ use uuid::Uuid;
 use crate::provider::model::{
     join_base_path, AuthHeaderFormat, AuthType, BalanceDiscovery, ModelDiscovery,
 };
-use crate::subscription::quota::{QuotaUsage, TokenQuotas};
+use crate::subscription::quota::{QuotaPeriod, QuotaUsage, TokenQuotas};
 use crate::virtual_model::model::SubscriptionSlot;
 
 /// OAuth 凭据元数据, 持久化为 `subscriptions.oauth_metadata` 列 (JSON 字符串).
@@ -410,6 +410,23 @@ impl SubscriptionRuntime {
     }
 }
 
+/// 单个周期的当前用量快照, 供前端渲染进度条 / 剩余额度. 前端 DTO, 与内部 `QuotaBucket` 分开维护.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct QuotaUsageDto {
+    pub period: QuotaPeriod,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub limit: Option<u64>,
+    pub input: u64,
+    pub output: u64,
+    pub cache_creation: u64,
+    pub cache_read: u64,
+    pub period_start_ms: i64,
+    /// `Total` 周期不滚动, 没有下一个周期边界.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub period_end_ms: Option<i64>,
+    pub exceeded: bool,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SubscriptionDto {
     pub id: Uuid,
@@ -421,6 +438,12 @@ pub struct SubscriptionDto {
     /// 刻意不加 `skip_serializing_if`: 前端把它声明为必填, DTO 必须总是带这个 key (可以是 `{}`).
     #[serde(default)]
     pub slot_efforts: SlotEfforts,
+    /// 用户设的 token 限额; 刻意不 skip: 前端声明为必填.
+    #[serde(default)]
+    pub token_quotas: TokenQuotas,
+    /// 4 个周期的当前用量 (始终 4 项, 顺序 daily/weekly/monthly/total).
+    #[serde(default)]
+    pub quota_usage: Vec<QuotaUsageDto>,
     pub enabled: bool,
     pub state: SubscriptionState,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -538,6 +561,29 @@ impl SubscriptionDto {
             display_name: rt.row.display_name.clone(),
             model_slots: rt.row.model_slots.clone(),
             slot_efforts: rt.row.slot_efforts.clone(),
+            token_quotas: rt.row.token_quotas.clone(),
+            quota_usage: {
+                let now = Utc::now();
+                crate::subscription::quota::ALL_PERIODS
+                    .into_iter()
+                    .map(|p| {
+                        let b = rt.quota_usage.effective(p, now);
+                        let limit = rt.row.token_quotas.limit(p);
+                        QuotaUsageDto {
+                            period: p,
+                            limit,
+                            input: b.input,
+                            output: b.output,
+                            cache_creation: b.cache_creation,
+                            cache_read: b.cache_read,
+                            period_start_ms: b.period_start.timestamp_millis(),
+                            period_end_ms: crate::subscription::quota::period_end(p, now)
+                                .map(|t| t.timestamp_millis()),
+                            exceeded: limit.is_some_and(|l| b.total() >= l),
+                        }
+                    })
+                    .collect()
+            },
             enabled: rt.row.enabled,
             state: rt.state,
             cooldown_until: rt.cooldown_until.map(|t| t.timestamp_millis()),
@@ -687,5 +733,35 @@ mod tests {
         rt2.quota_usage.add(now, 1_000_000, 0, 0, 0);
         assert!(rt2.is_dispatchable(now));
         let _ = QuotaPeriod::Total;
+    }
+
+    #[test]
+    fn dto_exposes_four_quota_periods_with_exceeded_flag() {
+        use crate::subscription::quota::{QuotaPeriod, TokenQuotas};
+        let mut row = SubscriptionRow::test_fixture("p", "e");
+        row.token_quotas = TokenQuotas {
+            weekly: Some(10),
+            ..Default::default()
+        };
+        let mut rt = SubscriptionRuntime::from_row(row);
+        rt.quota_usage.add(Utc::now(), 10, 0, 0, 0);
+        let dto = SubscriptionDto::from_runtime(&rt, vec![]);
+        assert_eq!(dto.quota_usage.len(), 4);
+        let weekly = dto
+            .quota_usage
+            .iter()
+            .find(|q| q.period == QuotaPeriod::Weekly)
+            .unwrap();
+        assert_eq!(weekly.limit, Some(10));
+        assert!(weekly.exceeded);
+        assert!(weekly.period_end_ms.is_some());
+        let total = dto
+            .quota_usage
+            .iter()
+            .find(|q| q.period == QuotaPeriod::Total)
+            .unwrap();
+        assert!(total.period_end_ms.is_none());
+        assert!(!total.exceeded);
+        assert_eq!(dto.token_quotas.weekly, Some(10));
     }
 }

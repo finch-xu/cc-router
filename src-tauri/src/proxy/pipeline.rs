@@ -149,14 +149,15 @@ pub async fn dispatch(
     if order.candidate_ids.is_empty() {
         let subs_map = state.subscriptions.read().await;
         let mut summary = Vec::new();
+        let now = Utc::now();
         for sub_id in &vm_config.subscription_ids {
             if let Some(rt) = subs_map.get(sub_id) {
                 let g = rt.read().await;
-                summary.push(format!(
-                    "- {}: {:?}",
-                    g.row.display_name,
-                    g.state,
-                ));
+                let reason = match g.row.token_quotas.first_exceeded(&g.quota_usage, now) {
+                    Some(p) => format!("已达 {} token 限额", p.label_zh()),
+                    None => format!("{:?}", g.state),
+                };
+                summary.push(format!("- {}: {}", g.row.display_name, reason));
             }
         }
         return Ok(overloaded::response_with_summary(vm_name, &summary));

@@ -841,6 +841,72 @@ fn validate_required_headers(
     Ok(())
 }
 
+/// 单个订阅被哪些虚拟模型引用. `collect_references` 的单条包装,
+/// `get_subscription` / `update_token_quotas` / `reset_total_quota_usage` 共用.
+async fn referenced_by_names(state: &AppState, id: &Uuid) -> Vec<String> {
+    collect_references(state)
+        .await
+        .remove(id)
+        .unwrap_or_default()
+}
+
+fn validate_token_quotas(q: &TokenQuotas) -> AppResult<()> {
+    for p in crate::subscription::quota::ALL_PERIODS {
+        if q.limit(p) == Some(0) {
+            return Err(AppError::BadRequest(format!(
+                "{} 限额必须大于 0 (不限请留空)",
+                p.label_zh()
+            )));
+        }
+    }
+    Ok(())
+}
+
+#[tauri::command]
+pub async fn update_token_quotas(
+    state: State<'_, AppState>,
+    id: String,
+    quotas: TokenQuotas,
+) -> AppResult<SubscriptionDto> {
+    let id = Uuid::parse_str(&id).map_err(|_| AppError::BadRequest("无效 id".into()))?;
+    validate_token_quotas(&quotas)?;
+    let rt = state
+        .get_subscription(&id)
+        .await
+        .ok_or_else(|| AppError::SubscriptionNotFound(id.to_string()))?;
+    let row_snapshot = {
+        let mut g = rt.write().await;
+        g.row.token_quotas = quotas;
+        g.row.updated_at = Utc::now();
+        g.row.clone()
+    };
+    store::update_row(&state.db, &row_snapshot).await?;
+    let referenced_by = referenced_by_names(&state, &id).await;
+    let guard = rt.read().await;
+    Ok(SubscriptionDto::from_runtime(&guard, referenced_by))
+}
+
+#[tauri::command]
+pub async fn reset_total_quota_usage(
+    state: State<'_, AppState>,
+    id: String,
+) -> AppResult<SubscriptionDto> {
+    let id = Uuid::parse_str(&id).map_err(|_| AppError::BadRequest("无效 id".into()))?;
+    let rt = state
+        .get_subscription(&id)
+        .await
+        .ok_or_else(|| AppError::SubscriptionNotFound(id.to_string()))?;
+    let usage = {
+        let mut g = rt.write().await;
+        g.quota_usage.reset_total(Utc::now());
+        g.quota_usage.clone()
+    };
+    store::save_quota_usage_snapshot(&state.db, &id, &usage).await?;
+    let referenced_by = referenced_by_names(&state, &id).await;
+    let guard = rt.read().await;
+    Ok(SubscriptionDto::from_runtime(&guard, referenced_by))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

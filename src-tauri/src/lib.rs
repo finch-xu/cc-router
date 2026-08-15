@@ -118,6 +118,8 @@ pub fn run() {
             commands::subscriptions::test_connection,
             commands::subscriptions::refresh_model_list,
             commands::subscriptions::refresh_subscription_balance,
+            commands::subscriptions::update_token_quotas,
+            commands::subscriptions::reset_total_quota_usage,
             commands::virtual_models::list_virtual_models,
             commands::virtual_models::update_virtual_model,
             commands::requests::list_requests,
