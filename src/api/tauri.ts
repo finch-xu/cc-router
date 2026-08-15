@@ -39,6 +39,7 @@ import type {
   SubscriptionPatch,
   TestConnectionResult,
   TlsStatus,
+  TokenQuotas,
   UpdateInfo,
   UpdateVirtualModelInput,
   VirtualModelDto,
@@ -69,6 +70,10 @@ export const api = {
     invoke<RefreshModelListResult>("refresh_model_list", { id }),
   refreshSubscriptionBalance: (id: string) =>
     invoke<RefreshBalanceResult>("refresh_subscription_balance", { id }),
+  updateTokenQuotas: (id: string, quotas: TokenQuotas) =>
+    invoke<SubscriptionDto>("update_token_quotas", { id, quotas }),
+  resetTotalQuotaUsage: (id: string) =>
+    invoke<SubscriptionDto>("reset_total_quota_usage", { id }),
 
   // ChatGPT OAuth (Phase 1, OpenAI Codex provider)
   startChatGptDeviceFlow: () =>

@@ -32,6 +32,15 @@ export function useSubscriptionEventBridge() {
       promise.then((unlisten) => unlisten()).catch(() => {});
     };
   }, [queryClient]);
+
+  useEffect(() => {
+    const promise = listen("subscription_quota_reached", () => {
+      invalidateSubscriptions(queryClient);
+    });
+    return () => {
+      promise.then((unlisten) => unlisten()).catch(() => {});
+    };
+  }, [queryClient]);
 }
 
 export function useSubscriptions() {

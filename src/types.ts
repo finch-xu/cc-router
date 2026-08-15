@@ -182,6 +182,34 @@ export interface SlotEfforts {
   haiku?: SlotEffort;
 }
 
+export type QuotaPeriod = "daily" | "weekly" | "monthly" | "total";
+
+/** 每周期 token 限额 (cc-router 侧安全阀)。字段缺失/undefined = 该周期不限。 */
+export interface TokenQuotas {
+  daily?: number | null;
+  weekly?: number | null;
+  monthly?: number | null;
+  total?: number | null;
+}
+
+/**
+ * 单个周期的用量快照。后端总是按 daily/weekly/monthly/total 顺序返回 4 条。
+ * `limit` / `period_end_ms` 缺失 (undefined) = 该周期未配置限额 / 无固定结束时间 (total)。
+ */
+export interface QuotaUsageDto {
+  period: QuotaPeriod;
+  limit?: number;
+  input: number;
+  output: number;
+  cache_creation: number;
+  cache_read: number;
+  /** Unix ms */
+  period_start_ms: number;
+  /** Unix ms */
+  period_end_ms?: number;
+  exceeded: boolean;
+}
+
 export interface ModelInfo {
   id: string;
   display_name?: string;
@@ -242,6 +270,10 @@ export interface SubscriptionDto {
   model_slots: ModelSlots;
   /** 每槽位 reasoning effort 覆盖。字段缺失 = auto。后端总是带这个 key (可以是 {})。 */
   slot_efforts: SlotEfforts;
+  /** 每周期 token 限额。字段缺失 = 该周期不限。后端总是带这个 key (可以是 {})。 */
+  token_quotas: TokenQuotas;
+  /** 四周期用量快照, 固定按 daily/weekly/monthly/total 顺序返回 4 条。 */
+  quota_usage: QuotaUsageDto[];
   enabled: boolean;
   state: SubscriptionState;
   cooldown_until?: number;
