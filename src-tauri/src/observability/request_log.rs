@@ -708,7 +708,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn flush_batch_persists_quota_rows_in_same_tx() {
+    async fn flush_batch_persists_quota_rows() {
         use crate::subscription::quota::{QuotaPeriod, QuotaUsage};
         use crate::subscription::store::usage_to_rows;
         let pool = fresh_pool().await;

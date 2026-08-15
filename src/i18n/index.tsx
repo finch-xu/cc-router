@@ -65,7 +65,8 @@ export function I18nProvider({ children }: { children: ReactNode }) {
 
   const t = useCallback<TFunction>(
     (key, params) => {
-      const tpl = dict[key] ?? key;
+      // en/ja 缺失的 key 先回退中文, 避免界面出现原始 key（zh-first 文案流程）.
+      const tpl = dict[key] ?? dictionaries.zh[key] ?? key;
       return params ? applyParams(tpl, params) : tpl;
     },
     [dict],

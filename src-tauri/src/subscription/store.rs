@@ -40,6 +40,10 @@ pub async fn load_runtime(
     .fetch_all(pool)
     .await?;
 
+    // 一次性装填全部订阅的用量, 按 subscription_id 分发给各条 runtime (镜像 load_balance_cache
+    // 的 per-row 用法, 但 quota_usage 没有独立 subscription_id 参数的查询接口, 批量查一次更省 IO)。
+    let mut quota_usage = load_quota_usage(pool).await?;
+
     let mut out = HashMap::new();
     for row in rows {
         let sub = match row_to_row(&row) {
@@ -61,6 +65,9 @@ pub async fn load_runtime(
         let mut rt = SubscriptionRuntime::from_row(sub);
         rt.model_cache = cache;
         rt.balance_cache = balance;
+        if let Some(usage) = quota_usage.remove(&rt.row.id) {
+            rt.quota_usage = usage;
+        }
         out.insert(rt.row.id, Arc::new(RwLock::new(rt)));
     }
     Ok(out)
@@ -666,6 +673,7 @@ mod quota_tests {
     use super::*;
     use crate::db::run_migrations;
     use crate::subscription::quota::{QuotaBucket, QuotaPeriod, QuotaUsage};
+    use crate::virtual_model::SubscriptionSlot;
     use chrono::{TimeZone, Utc};
     use sqlx::sqlite::SqlitePoolOptions;
     use std::path::PathBuf;
@@ -674,6 +682,55 @@ mod quota_tests {
         let pool = SqlitePoolOptions::new().max_connections(1).connect("sqlite::memory:").await.unwrap();
         run_migrations(&pool, &PathBuf::from(".")).await.unwrap();
         pool
+    }
+
+    /// insert → update_row (改 token_quotas + slot_efforts) → load_runtime 的完整往返,
+    /// 锁住 migration 017 新加的 token_quotas 列与 slot_efforts 列相邻不会互相错位 bind。
+    #[tokio::test]
+    async fn token_quotas_column_roundtrips_via_update_row_and_load_runtime() {
+        let pool = fresh_pool().await;
+
+        let mut row = SubscriptionRow::test_fixture("p", "e");
+        insert(&pool, &row).await.expect("insert");
+
+        row.token_quotas = TokenQuotas {
+            daily: Some(5_000_000),
+            weekly: Some(7),
+            ..Default::default()
+        };
+        row.slot_efforts = SlotEfforts {
+            opus: Some("high".into()),
+            ..Default::default()
+        };
+        update_row(&pool, &row).await.expect("update_row");
+
+        let loaded = load_runtime(&pool).await.expect("load_runtime");
+        let rt = loaded.get(&row.id).expect("subscription present");
+        let g = rt.read().await;
+        assert_eq!(g.row.token_quotas.daily, Some(5_000_000));
+        assert_eq!(g.row.token_quotas.weekly, Some(7));
+        assert_eq!(g.row.slot_efforts.get(SubscriptionSlot::Opus), Some("high"));
+    }
+
+    /// delete() 必须一并清掉 subscription_quota_usage 里该订阅的行, 否则孤儿用量行永久残留。
+    #[tokio::test]
+    async fn delete_removes_quota_usage_rows() {
+        let pool = fresh_pool().await;
+        let id = Uuid::new_v4();
+        let mut u = QuotaUsage::default();
+        u.add(Utc::now(), 1, 2, 3, 4);
+        save_quota_usage_snapshot(&pool, &id, &u).await.expect("save snapshot");
+
+        delete(&pool, &id).await.expect("delete");
+
+        let n: i64 = sqlx::query_scalar(
+            "SELECT COUNT(*) FROM subscription_quota_usage WHERE subscription_id = ?",
+        )
+        .bind(id.to_string())
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        assert_eq!(n, 0);
     }
 
     #[tokio::test]

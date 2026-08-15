@@ -14,15 +14,17 @@ interface Props {
   onChanged?: () => void;
 }
 
+// 颜色与 src/routes/Statistics.tsx::TOKEN_BAR_SEGMENTS 保持一致 (同为 4 类 token 的配色),
+// 那边的常量是路由内部私有的, 这里按值复制而不是新开一个共享 lib 模块。
 const SEGMENTS: Array<{
   key: keyof Pick<QuotaUsageDto, "input" | "output" | "cache_creation" | "cache_read">;
   labelKey: string;
-  className: string;
+  color: string;
 }> = [
-  { key: "input", labelKey: "quota.legend.input", className: "bg-sky-500" },
-  { key: "output", labelKey: "quota.legend.output", className: "bg-emerald-500" },
-  { key: "cache_creation", labelKey: "quota.legend.cacheCreation", className: "bg-amber-500" },
-  { key: "cache_read", labelKey: "quota.legend.cacheRead", className: "bg-violet-500" },
+  { key: "input", labelKey: "quota.legend.input", color: "oklch(0.62 0.13 240)" },
+  { key: "output", labelKey: "quota.legend.output", color: "oklch(0.50 0.16 240)" },
+  { key: "cache_creation", labelKey: "quota.legend.cacheCreation", color: "oklch(0.70 0.05 270)" },
+  { key: "cache_read", labelKey: "quota.legend.cacheRead", color: "var(--ink-4)" },
 ];
 
 export function SubscriptionQuotaCard({ subscription, onChanged }: Props) {
@@ -65,11 +67,14 @@ export function SubscriptionQuotaCard({ subscription, onChanged }: Props) {
                 <span
                   className={cn(
                     "text-muted-foreground",
-                    q.exceeded && "text-red-600 font-medium",
+                    q.exceeded && "text-destructive font-medium",
                   )}
                 >
                   {q.exceeded
-                    ? t("quota.exceeded")
+                    ? t("quota.exceededWithNumbers", {
+                        used: fmtCompact(used),
+                        limit: formatTokenShorthand(limit),
+                      })
                     : t("quota.usedOf", { used: fmtCompact(used), limit: formatTokenShorthand(limit) })}
                 </span>
               </div>
@@ -84,8 +89,11 @@ export function SubscriptionQuotaCard({ subscription, onChanged }: Props) {
                 {SEGMENTS.map((s) => (
                   <div
                     key={s.key}
-                    className={cn("h-full shrink-0", s.className)}
-                    style={{ width: `${(Math.min(q[s.key], limit) / limit) * 100}%` }}
+                    className="h-full shrink-0"
+                    style={{
+                      width: `${(Math.min(q[s.key], limit) / limit) * 100}%`,
+                      background: s.color,
+                    }}
                   />
                 ))}
               </div>
@@ -93,7 +101,10 @@ export function SubscriptionQuotaCard({ subscription, onChanged }: Props) {
                 <span className="flex gap-3">
                   {SEGMENTS.map((s) => (
                     <span key={s.key} className="flex items-center gap-1">
-                      <i className={cn("inline-block h-2 w-2 rounded-sm", s.className)} />
+                      <i
+                        className="inline-block h-2 w-2 rounded-sm"
+                        style={{ background: s.color }}
+                      />
                       {t(s.labelKey)} {fmtCompact(q[s.key])}
                     </span>
                   ))}

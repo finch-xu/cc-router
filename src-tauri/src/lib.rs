@@ -218,18 +218,8 @@ async fn bootstrap(
         }
     }
 
-    // 4. 订阅运行时状态初始化
+    // 4. 订阅运行时状态初始化 (load_runtime 内部已装填 token 限额用量, 见 store.rs)
     let subscription_map = subscription::store::load_runtime(&pool).await?;
-
-    // 4b. 装填 token 限额用量 (内存为真值, 表只做重启恢复)
-    {
-        let usage_map = subscription::store::load_quota_usage(&pool).await?;
-        for (id, rt) in subscription_map.iter() {
-            if let Some(u) = usage_map.get(id) {
-                rt.write().await.quota_usage = u.clone();
-            }
-        }
-    }
 
     // 5. 虚拟模型绑定
     let virtual_models = virtual_model::store::load_all(&pool).await?;

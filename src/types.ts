@@ -682,7 +682,11 @@ export interface ReceiptDto {
   grand_total: ReceiptTotalsDto;
 }
 
-export type EventKind = "request" | "subscription_state_change" | "system_error";
+export type EventKind =
+  | "request"
+  | "subscription_state_change"
+  | "system_error"
+  | "quota_reached";
 export type EventSeverity = "info" | "warn" | "error";
 
 export interface EventDto {
@@ -714,6 +718,11 @@ export interface StateChangePayload {
   to: SubscriptionState;
   reason: string;
   last_error?: string | null;
+}
+
+/** quota_reached 事件的 payload 反序列化形态 */
+export interface QuotaReachedPayload {
+  period: QuotaPeriod;
 }
 
 // 路由实时事件(对应 proxy/pipeline.rs 里 emit 的 payload)
