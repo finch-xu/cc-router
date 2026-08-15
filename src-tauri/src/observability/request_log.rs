@@ -3,16 +3,21 @@
 //! 生产端：请求 pipeline 发送 `RequestLogEntry`。
 //! 消费端：独立 tokio 任务累积到 50 条或 5 秒 flush 一次。
 
-use std::collections::{HashMap, VecDeque};
+use std::collections::{HashMap, HashSet, VecDeque};
+use std::sync::Arc;
 
-use chrono::Utc;
+use chrono::{DateTime, Utc};
 use sqlx::SqlitePool;
 use tauri::{AppHandle, Emitter};
-use tokio::sync::mpsc;
+use tokio::sync::{mpsc, RwLock};
 use tokio::time::{interval, Duration};
 use tracing::{debug, warn};
 use uuid::Uuid;
 
+use crate::observability::events::{EventEntry, EventKind, Severity};
+use crate::subscription::model::SubscriptionRuntime;
+use crate::subscription::quota::QuotaPeriod;
+use crate::subscription::store::{save_quota_usage_rows, usage_to_rows, QuotaUsageRow};
 use crate::virtual_model::VirtualModelName;
 
 pub(crate) const DAY_MS: i64 = 86_400_000;
@@ -111,50 +116,120 @@ const FLUSH_SIZE: usize = 50;
 const FLUSH_INTERVAL: Duration = Duration::from_secs(5);
 const BUFFER_MAX: usize = 1000;
 
+/// Add one finished request's usage to the subscription's in-memory quota buckets.
+/// Returns the first period that crossed its limit *because of this entry* (for one-shot alerting).
+pub fn apply_entry_to_quota(
+    rt: &mut SubscriptionRuntime,
+    entry: &RequestLogEntry,
+    now: DateTime<Utc>,
+) -> Option<QuotaPeriod> {
+    let input = entry.upstream_input_tokens.unwrap_or(0) as u64;
+    let output = entry.upstream_output_tokens.unwrap_or(0) as u64;
+    let cc = entry.upstream_cache_creation.unwrap_or(0) as u64;
+    let cr = entry.upstream_cache_read.unwrap_or(0) as u64;
+    if input + output + cc + cr == 0 {
+        return None;
+    }
+    let before = rt.row.token_quotas.first_exceeded(&rt.quota_usage, now);
+    rt.quota_usage.add(now, input, output, cc, cr);
+    let after = rt.row.token_quotas.first_exceeded(&rt.quota_usage, now);
+    match (before, after) {
+        (None, Some(p)) => Some(p),
+        _ => None,
+    }
+}
+
 pub async fn run_consumer(
     pool: SqlitePool,
     mut rx: mpsc::Receiver<RequestLogEntry>,
     app: AppHandle,
+    subscriptions: Arc<RwLock<HashMap<Uuid, Arc<RwLock<SubscriptionRuntime>>>>>,
+    event_tx: mpsc::Sender<EventEntry>,
 ) {
     let mut buffer: VecDeque<RequestLogEntry> = VecDeque::with_capacity(FLUSH_SIZE);
     let mut ticker = interval(FLUSH_INTERVAL);
+    let mut dirty: HashSet<Uuid> = HashSet::new();
 
     loop {
         tokio::select! {
             maybe_entry = rx.recv() => {
                 match maybe_entry {
                     Some(entry) => {
+                        let rt = subscriptions.read().await.get(&entry.subscription_id).cloned();
+                        if let Some(rt) = rt {
+                            let now = Utc::now();
+                            let crossed = {
+                                let mut g = rt.write().await;
+                                apply_entry_to_quota(&mut g, &entry, now)
+                            };
+                            dirty.insert(entry.subscription_id);
+                            if let Some(period) = crossed {
+                                let display_name = rt.read().await.row.display_name.clone();
+                                let ev = EventEntry {
+                                    id: Uuid::new_v4(),
+                                    timestamp_ms: now.timestamp_millis(),
+                                    kind: EventKind::QuotaReached,
+                                    severity: Severity::Warn,
+                                    subscription_id: Some(entry.subscription_id),
+                                    request_id: Some(entry.id),
+                                    summary: format!("{display_name} 已达 {} token 限额, 暂停调度至下一周期", period.label_zh()),
+                                    payload: Some(serde_json::json!({ "period": period.as_str() })),
+                                };
+                                let _ = event_tx.try_send(ev);
+                                let _ = app.emit(
+                                    "subscription_quota_reached",
+                                    serde_json::json!({ "subscription_id": entry.subscription_id.to_string(), "period": period.as_str() }),
+                                );
+                            }
+                        }
                         if buffer.len() >= BUFFER_MAX {
                             buffer.pop_front();
                         }
                         buffer.push_back(entry);
                         if buffer.len() >= FLUSH_SIZE {
-                            flush(&pool, &mut buffer, &app).await;
+                            flush(&pool, &mut buffer, &app, &subscriptions, &mut dirty).await;
                         }
                     }
                     None => {
-                        flush(&pool, &mut buffer, &app).await;
+                        flush(&pool, &mut buffer, &app, &subscriptions, &mut dirty).await;
                         break;
                     }
                 }
             }
             _ = ticker.tick() => {
                 if !buffer.is_empty() {
-                    flush(&pool, &mut buffer, &app).await;
+                    flush(&pool, &mut buffer, &app, &subscriptions, &mut dirty).await;
                 }
             }
         }
     }
 }
 
-async fn flush(pool: &SqlitePool, buffer: &mut VecDeque<RequestLogEntry>, app: &AppHandle) {
+async fn flush(
+    pool: &SqlitePool,
+    buffer: &mut VecDeque<RequestLogEntry>,
+    app: &AppHandle,
+    subscriptions: &Arc<RwLock<HashMap<Uuid, Arc<RwLock<SubscriptionRuntime>>>>>,
+    dirty: &mut HashSet<Uuid>,
+) {
     if buffer.is_empty() {
         return;
     }
     let batch: Vec<RequestLogEntry> = buffer.drain(..).collect();
     debug!(count = batch.len(), "flushing request logs");
 
-    match flush_batch(pool, batch).await {
+    let mut quota_rows: Vec<QuotaUsageRow> = Vec::new();
+    {
+        let map = subscriptions.read().await;
+        for id in dirty.drain() {
+            if let Some(rt) = map.get(&id) {
+                let g = rt.read().await;
+                quota_rows.extend(usage_to_rows(id, &g.quota_usage));
+            }
+        }
+    }
+
+    match flush_batch(pool, batch, quota_rows).await {
         Ok(()) => {}
         Err(FlushError::BeginFailed { batch, err }) => {
             warn!(?err, "无法开启事务, 放回 buffer");
@@ -184,6 +259,7 @@ pub(crate) enum FlushError {
 pub(crate) async fn flush_batch(
     pool: &SqlitePool,
     batch: Vec<RequestLogEntry>,
+    quota_rows: Vec<QuotaUsageRow>,
 ) -> Result<(), FlushError> {
     let mut tx = match pool.begin().await {
         Ok(tx) => tx,
@@ -361,6 +437,10 @@ pub(crate) async fn flush_batch(
         }
     }
 
+    if let Err(e) = save_quota_usage_rows(&mut tx, &quota_rows, now_ms()).await {
+        warn!(?e, "写 subscription_quota_usage 快照失败 (局部丢, 下次 flush 补写)");
+    }
+
     tx.commit().await.map_err(FlushError::CommitFailed)?;
     Ok(())
 }
@@ -466,7 +546,7 @@ mod tests {
                 Some(20),
             ));
         }
-        flush_batch(&pool, batch).await.expect("flush ok");
+        flush_batch(&pool, batch, vec![]).await.expect("flush ok");
 
         // requests 表应有 5 行
         let req_count: i64 = sqlx::query("SELECT COUNT(*) AS c FROM requests")
@@ -521,7 +601,7 @@ mod tests {
             make_entry(next_day, VirtualModelName::Sonnet, sub_a, "anthropic",
                        RequestStatus::Success, Some(500), Some(10), Some(20)),
         ];
-        flush_batch(&pool, batch).await.expect("flush ok");
+        flush_batch(&pool, batch, vec![]).await.expect("flush ok");
 
         let stats_count: i64 =
             sqlx::query("SELECT COUNT(*) AS c FROM request_stats_daily")
@@ -557,6 +637,7 @@ mod tests {
                 make_entry(day, VirtualModelName::Haiku, sub, "moonshot",
                            RequestStatus::Success, Some(50), Some(5), Some(10)),
             ],
+            vec![],
         )
         .await
         .expect("first flush");
@@ -572,6 +653,7 @@ mod tests {
                 make_entry(day, VirtualModelName::Haiku, sub, "moonshot",
                            RequestStatus::Timeout, None, None, None),
             ],
+            vec![],
         )
         .await
         .expect("second flush");
@@ -593,6 +675,51 @@ mod tests {
         assert_eq!(row.try_get::<i64, _>("total_duration_ms_count").unwrap(), 3);
     }
 
+    #[test]
+    fn apply_entry_to_quota_accumulates_and_reports_first_crossing() {
+        use crate::subscription::model::{SubscriptionRow, SubscriptionRuntime};
+        use crate::subscription::quota::{QuotaPeriod, TokenQuotas};
+        let mut row = SubscriptionRow::test_fixture("p", "e");
+        row.token_quotas = TokenQuotas { daily: Some(150), ..Default::default() };
+        let mut rt = SubscriptionRuntime::from_row(row);
+        let now = Utc::now();
+        let sub = rt.row.id;
+        let mut e = make_entry(now.timestamp_millis(), VirtualModelName::Sonnet, sub, "p", RequestStatus::Success, Some(1), Some(100), Some(20));
+        e.upstream_cache_creation = Some(0);
+        e.upstream_cache_read = Some(0);
+        assert_eq!(apply_entry_to_quota(&mut rt, &e, now), None); // 120 < 150
+        assert_eq!(rt.quota_usage.bucket(QuotaPeriod::Daily).total(), 120);
+        assert_eq!(apply_entry_to_quota(&mut rt, &e, now), Some(QuotaPeriod::Daily)); // 240 >= 150, 首次跨
+        assert_eq!(apply_entry_to_quota(&mut rt, &e, now), None); // 已达标, 不再重复报
+        // usage 为 None 的 entry (失败请求) 不改变计数
+        let mut e2 = e.clone();
+        e2.upstream_input_tokens = None; e2.upstream_output_tokens = None;
+        let before = rt.quota_usage.bucket(QuotaPeriod::Daily).total();
+        apply_entry_to_quota(&mut rt, &e2, now);
+        assert_eq!(rt.quota_usage.bucket(QuotaPeriod::Daily).total(), before);
+    }
+
+    #[tokio::test]
+    async fn flush_batch_persists_quota_rows_in_same_tx() {
+        use crate::subscription::quota::{QuotaPeriod, QuotaUsage};
+        use crate::subscription::store::usage_to_rows;
+        let pool = fresh_pool().await;
+        let sub = Uuid::new_v4();
+        let now = Utc::now();
+        let mut u = QuotaUsage::default();
+        u.add(now, 5, 6, 7, 8);
+        let rows = usage_to_rows(sub, &u);
+        flush_batch(&pool, vec![], rows).await.expect("flush ok");
+        let n: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM subscription_quota_usage").fetch_one(&pool).await.unwrap();
+        assert_eq!(n, 4);
+        let total: i64 = sqlx::query_scalar(
+            "SELECT input_tokens + output_tokens + cache_creation_tokens + cache_read_tokens
+             FROM subscription_quota_usage WHERE subscription_id = ? AND period = ?")
+            .bind(sub.to_string()).bind(QuotaPeriod::Weekly.as_str())
+            .fetch_one(&pool).await.unwrap();
+        assert_eq!(total, 26);
+    }
+
     #[tokio::test]
     async fn flush_writes_receipt_stats_with_real_model_dimension() {
         let pool = fresh_pool().await;
@@ -607,7 +734,7 @@ mod tests {
         let mut e3 = make_entry(day, VirtualModelName::Sonnet, sub, "anthropic",
                                 RequestStatus::Success, None, Some(1), Some(1));
         e3.real_model_name = "other-model".to_string();
-        flush_batch(&pool, vec![e1, e2, e3]).await.expect("first flush");
+        flush_batch(&pool, vec![e1, e2, e3], vec![]).await.expect("first flush");
 
         let count: i64 = sqlx::query("SELECT COUNT(*) AS c FROM receipt_stats_daily")
             .fetch_one(&pool).await.unwrap().try_get("c").unwrap();
@@ -628,7 +755,7 @@ mod tests {
         // 二次 flush 相同 key → UPSERT 累加而非新行
         let e4 = make_entry(day, VirtualModelName::Sonnet, sub, "anthropic",
                             RequestStatus::Success, None, Some(3), Some(4));
-        flush_batch(&pool, vec![e4]).await.expect("second flush");
+        flush_batch(&pool, vec![e4], vec![]).await.expect("second flush");
 
         let row = sqlx::query(
             "SELECT * FROM receipt_stats_daily WHERE real_model_name='claude-x'",

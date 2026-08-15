@@ -2,6 +2,7 @@
 //! - `request`                    每条请求结束的摘要(详情仍读 requests 表)
 //! - `subscription_state_change`  订阅健康状态机转换
 //! - `system_error`               系统级故障(DB / yaml / 端口监听 等)
+//! - `quota_reached`              订阅 token 用量首次达到用户设的限额
 //!
 //! 写入也走 mpsc + 批量 flush 模式, 与 request_log 一致但独立 channel/consumer。
 
@@ -23,6 +24,7 @@ pub enum EventKind {
     Request,
     SubscriptionStateChange,
     SystemError,
+    QuotaReached,
 }
 
 impl EventKind {
@@ -31,6 +33,7 @@ impl EventKind {
             Self::Request => "request",
             Self::SubscriptionStateChange => "subscription_state_change",
             Self::SystemError => "system_error",
+            Self::QuotaReached => "quota_reached",
         }
     }
 }

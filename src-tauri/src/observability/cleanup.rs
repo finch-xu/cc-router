@@ -131,7 +131,7 @@ mod tests {
         // 一条很老 (100 天前), 一条新鲜
         let old = entry_at(now - 100 * DAY_MS);
         let fresh = entry_at(now);
-        flush_batch(&pool, vec![old, fresh]).await.expect("flush");
+        flush_batch(&pool, vec![old, fresh], vec![]).await.expect("flush");
         assert_eq!(count(&pool, "requests").await, 2);
         assert_eq!(count(&pool, "request_stats_daily").await, 2);
 
@@ -153,6 +153,7 @@ mod tests {
         flush_batch(
             &pool,
             vec![entry_at(now - 1000 * DAY_MS), entry_at(now)],
+            vec![],
         )
         .await
         .unwrap();
@@ -179,6 +180,7 @@ mod tests {
                 entry_at(now - 15 * DAY_MS),
                 entry_at(now - 35 * DAY_MS),
             ],
+            vec![],
         )
         .await
         .unwrap();

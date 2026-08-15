@@ -20,6 +20,7 @@ pub mod updater_source;
 pub mod virtual_model;
 pub mod window;
 
+use std::collections::HashMap;
 use std::sync::Arc;
 
 use tauri::Manager;
@@ -223,14 +224,26 @@ async fn bootstrap(
     let virtual_models = virtual_model::store::load_all(&pool).await?;
 
     // 6. 请求日志 channel
+    // TODO(Task 6): subscriptions/event_tx 目前是占位符, 真实的
+    // Arc<RwLock<HashMap<..>>> 和 event_tx 发送端要在订阅运行时/事件 channel
+    // 建好之后再传入, 现在只求编译通过。
     let (log_tx, log_rx) = mpsc::channel(1024);
     let log_pool = pool.clone();
     let log_handle = handle.clone();
+    let log_subscriptions_placeholder = Arc::new(RwLock::new(HashMap::new()));
+    let log_event_tx_placeholder = mpsc::channel(1).0;
     tauri::async_runtime::spawn(async move {
-        observability::request_log::run_consumer(log_pool, log_rx, log_handle).await;
+        observability::request_log::run_consumer(
+            log_pool,
+            log_rx,
+            log_handle,
+            log_subscriptions_placeholder,
+            log_event_tx_placeholder,
+        )
+        .await;
     });
 
-    // 6b. 事件流 channel (kind=request/subscription_state_change/system_error)
+    // 6b. 事件流 channel (kind=request/subscription_state_change/system_error/quota_reached)
     let (event_tx, event_rx) = mpsc::channel(1024);
     let event_pool = pool.clone();
     let event_handle = handle.clone();
