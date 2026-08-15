@@ -15,7 +15,7 @@ use crate::subscription::model::{
     BalanceSnapshot, ModelCache, ModelInfo, ModelSlots, OAuthMetadata, SlotEfforts,
     SubscriptionRow, SubscriptionRuntime,
 };
-use crate::subscription::quota::TokenQuotas;
+use crate::subscription::quota::{QuotaBucket, QuotaPeriod, QuotaUsage, TokenQuotas, ALL_PERIODS};
 
 /// 启动时从 DB 加载全部订阅，并初始化运行时状态。
 ///
@@ -366,6 +366,10 @@ pub async fn delete(pool: &SqlitePool, id: &Uuid) -> AppResult<()> {
         .bind(id.to_string())
         .execute(pool)
         .await?;
+    sqlx::query("DELETE FROM subscription_quota_usage WHERE subscription_id = ?")
+        .bind(id.to_string())
+        .execute(pool)
+        .await?;
     Ok(())
 }
 
@@ -458,6 +462,101 @@ pub async fn save_balance_cache(
     .bind(json)
     .execute(pool)
     .await?;
+    Ok(())
+}
+
+/// One (subscription, period) row of `subscription_quota_usage`.
+#[derive(Debug, Clone)]
+pub struct QuotaUsageRow {
+    pub subscription_id: Uuid,
+    pub period: QuotaPeriod,
+    pub bucket: QuotaBucket,
+}
+
+pub fn usage_to_rows(subscription_id: Uuid, usage: &QuotaUsage) -> Vec<QuotaUsageRow> {
+    ALL_PERIODS
+        .into_iter()
+        .map(|p| QuotaUsageRow { subscription_id, period: p, bucket: usage.bucket(p) })
+        .collect()
+}
+
+/// Load every subscription's usage; expired calendar buckets are rolled to zero on load
+/// (covers app downtime crossing a period boundary).
+pub async fn load_quota_usage(pool: &SqlitePool) -> AppResult<HashMap<Uuid, QuotaUsage>> {
+    let rows = sqlx::query(
+        "SELECT subscription_id, period, period_start_ms, input_tokens, output_tokens,
+                cache_creation_tokens, cache_read_tokens
+         FROM subscription_quota_usage",
+    )
+    .fetch_all(pool)
+    .await?;
+    let mut out: HashMap<Uuid, QuotaUsage> = HashMap::new();
+    for row in rows {
+        let id_str: String = row.try_get("subscription_id")?;
+        let Ok(id) = Uuid::parse_str(&id_str) else { continue };
+        let period_str: String = row.try_get("period")?;
+        let Some(period) = QuotaPeriod::parse(&period_str) else { continue };
+        let start_ms: i64 = row.try_get("period_start_ms")?;
+        let bucket = QuotaBucket {
+            period_start: DateTime::<Utc>::from_timestamp_millis(start_ms).unwrap_or(DateTime::<Utc>::UNIX_EPOCH),
+            input: row.try_get::<i64, _>("input_tokens")?.max(0) as u64,
+            output: row.try_get::<i64, _>("output_tokens")?.max(0) as u64,
+            cache_creation: row.try_get::<i64, _>("cache_creation_tokens")?.max(0) as u64,
+            cache_read: row.try_get::<i64, _>("cache_read_tokens")?.max(0) as u64,
+        };
+        out.entry(id).or_default().set_bucket(period, bucket);
+    }
+    let now = Utc::now();
+    for u in out.values_mut() {
+        u.roll_if_needed(now);
+    }
+    Ok(out)
+}
+
+/// Snapshot UPSERT inside a caller-owned transaction (used by request_log flush).
+pub async fn save_quota_usage_rows(
+    tx: &mut sqlx::Transaction<'_, sqlx::Sqlite>,
+    rows: &[QuotaUsageRow],
+    now_ms: i64,
+) -> Result<(), sqlx::Error> {
+    for r in rows {
+        sqlx::query(
+            "INSERT INTO subscription_quota_usage
+               (subscription_id, period, period_start_ms, input_tokens, output_tokens,
+                cache_creation_tokens, cache_read_tokens, updated_at_ms)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+             ON CONFLICT(subscription_id, period) DO UPDATE SET
+               period_start_ms = excluded.period_start_ms,
+               input_tokens = excluded.input_tokens,
+               output_tokens = excluded.output_tokens,
+               cache_creation_tokens = excluded.cache_creation_tokens,
+               cache_read_tokens = excluded.cache_read_tokens,
+               updated_at_ms = excluded.updated_at_ms",
+        )
+        .bind(r.subscription_id.to_string())
+        .bind(r.period.as_str())
+        .bind(r.bucket.period_start.timestamp_millis())
+        .bind(r.bucket.input as i64)
+        .bind(r.bucket.output as i64)
+        .bind(r.bucket.cache_creation as i64)
+        .bind(r.bucket.cache_read as i64)
+        .bind(now_ms)
+        .execute(&mut **tx)
+        .await?;
+    }
+    Ok(())
+}
+
+/// Immediate single-subscription snapshot (manual total reset path).
+pub async fn save_quota_usage_snapshot(
+    pool: &SqlitePool,
+    subscription_id: &Uuid,
+    usage: &QuotaUsage,
+) -> AppResult<()> {
+    let rows = usage_to_rows(*subscription_id, usage);
+    let mut tx = pool.begin().await?;
+    save_quota_usage_rows(&mut tx, &rows, Utc::now().timestamp_millis()).await?;
+    tx.commit().await?;
     Ok(())
 }
 
@@ -559,5 +658,58 @@ mod tests {
         let loaded = load_runtime(&pool).await.expect("load");
         let rt = loaded.get(&row.id).expect("订阅不应被整条跳过");
         assert_eq!(rt.read().await.row.slot_efforts.get(SubscriptionSlot::Opus), None);
+    }
+}
+
+#[cfg(test)]
+mod quota_tests {
+    use super::*;
+    use crate::db::run_migrations;
+    use crate::subscription::quota::{QuotaBucket, QuotaPeriod, QuotaUsage};
+    use chrono::{TimeZone, Utc};
+    use sqlx::sqlite::SqlitePoolOptions;
+    use std::path::PathBuf;
+
+    async fn fresh_pool() -> SqlitePool {
+        let pool = SqlitePoolOptions::new().max_connections(1).connect("sqlite::memory:").await.unwrap();
+        run_migrations(&pool, &PathBuf::from(".")).await.unwrap();
+        pool
+    }
+
+    #[tokio::test]
+    async fn snapshot_roundtrip_and_upsert() {
+        let pool = fresh_pool().await;
+        let id = Uuid::new_v4();
+        let now = Utc::now();
+        let mut u = QuotaUsage::default();
+        u.add(now, 1, 2, 3, 4);
+        save_quota_usage_snapshot(&pool, &id, &u).await.unwrap();
+        // 再写一次 (upsert), 值覆盖
+        u.add(now, 1, 0, 0, 0);
+        save_quota_usage_snapshot(&pool, &id, &u).await.unwrap();
+        let loaded = load_quota_usage(&pool).await.unwrap();
+        let got = loaded.get(&id).expect("row loaded");
+        assert_eq!(got.bucket(QuotaPeriod::Total).input, 2);
+        assert_eq!(got.bucket(QuotaPeriod::Total).total(), 11);
+        let n: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM subscription_quota_usage").fetch_one(&pool).await.unwrap();
+        assert_eq!(n, 4);
+    }
+
+    #[tokio::test]
+    async fn load_rolls_expired_calendar_buckets() {
+        let pool = fresh_pool().await;
+        let id = Uuid::new_v4();
+        // 手工塞一个 period_start 在很久以前的 daily 桶
+        let mut u = QuotaUsage::default();
+        u.set_bucket(QuotaPeriod::Daily, QuotaBucket {
+            period_start: Utc.with_ymd_and_hms(2020, 1, 1, 0, 0, 0).unwrap(),
+            input: 999, output: 0, cache_creation: 0, cache_read: 0,
+        });
+        u.set_bucket(QuotaPeriod::Total, QuotaBucket { input: 999, ..Default::default() });
+        save_quota_usage_snapshot(&pool, &id, &u).await.unwrap();
+        let loaded = load_quota_usage(&pool).await.unwrap();
+        let got = loaded.get(&id).unwrap();
+        assert_eq!(got.bucket(QuotaPeriod::Daily).total(), 0, "过期 daily 桶装填时清零");
+        assert_eq!(got.bucket(QuotaPeriod::Total).total(), 999, "total 永不滚动");
     }
 }
