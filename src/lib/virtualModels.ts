@@ -65,4 +65,5 @@ export function vmNameToSlot(name: VirtualModelName): SubscriptionSlot | null {
 export const MODE_LABEL_KEY: Record<RoutingMode, string> = {
   sequential: "vm.mode.sequential",
   round_robin: "vm.mode.round_robin",
+  sticky: "vm.mode.sticky",
 };

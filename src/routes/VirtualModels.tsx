@@ -93,7 +93,9 @@ function VirtualModelCard({
   const modeHint =
     vm.mode === "round_robin"
       ? t("virtualModels.mode.roundRobinHint")
-      : t("virtualModels.mode.sequentialHint");
+      : vm.mode === "sticky"
+        ? t("virtualModels.mode.stickyHint")
+        : t("virtualModels.mode.sequentialHint");
   // fallback 是第 5 个虚拟模型, 语义上与 4 个槽位并列而非同级, 通栏独占一行
   const isFallback = vm.name === "model-fallback";
 
@@ -120,6 +122,13 @@ function VirtualModelCard({
             type="button"
           >
             {t("vm.mode.round_robin")}
+          </button>
+          <button
+            className={vm.mode === "sticky" ? "on" : ""}
+            onClick={() => update("sticky", vm.subscription_ids)}
+            type="button"
+          >
+            {t("vm.mode.sticky")}
           </button>
         </div>
       </div>

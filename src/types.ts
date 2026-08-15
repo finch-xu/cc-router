@@ -105,7 +105,7 @@ export type VirtualModelName =
   | "model-haiku"
   | "model-fallback";
 export type SubscriptionSlot = "fable" | "opus" | "sonnet" | "haiku";
-export type RoutingMode = "sequential" | "round_robin";
+export type RoutingMode = "sequential" | "round_robin" | "sticky";
 export type SubscriptionState =
   | "healthy"
   | "rate_limited"
