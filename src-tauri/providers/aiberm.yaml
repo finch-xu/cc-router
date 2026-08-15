@@ -24,6 +24,13 @@ compatibility: untested
 compatibility_notes: 
 
 endpoints:
+  - id: paygo_china
+    label: "国内 · 按量付费 API"
+    description: "Aiberm.org ,Anthropic Messages 兼容"
+    base_url: "https://aiberm.org"
+    messages_path: "/v1/messages"
+    region: china
+    billing: pay_as_you_go
   - id: paygo
     label: "全球 · 按量付费 API"
     description: "Aiberm.com ,Anthropic Messages 兼容"
@@ -32,7 +39,7 @@ endpoints:
     region: global
     billing: pay_as_you_go
 
-default_endpoint: paygo
+default_endpoint: paygo_china
 
 auth:
   type: api_key
