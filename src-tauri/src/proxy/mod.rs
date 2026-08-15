@@ -12,6 +12,7 @@ pub mod pipeline;
 pub mod retry;
 pub mod sanitize;
 pub mod server;
+pub mod session_key;
 pub mod sse;
 pub mod sse_framing;
 pub mod transform;
