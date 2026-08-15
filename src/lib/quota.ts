@@ -10,14 +10,19 @@ export function parseTokenShorthand(raw: string): number | null | undefined {
   return v > 0 && Number.isSafeInteger(v) ? v : null;
 }
 
-/** 5_000_000 → "5M"; 1_500_000 → "1.5M"; 800 → "800"; 与 parse 互逆 (小数最多 2 位). */
+/**
+ * 5_000_000 → "5M"; 1_500_000 → "1.5M"; 800 → "800"。
+ * 无损: 只有当紧凑形式经 parseTokenShorthand 还原回来精确等于 n (小数最多 2 位导致的精度丢失会被
+ * 检出) 才使用 k/M/B 简写, 否则退回 String(n) 原样数字, 避免重新保存时限额悄悄变了。
+ */
 export function formatTokenShorthand(n: number | null | undefined): string {
   if (n == null) return "";
   const units: Array<[number, string]> = [[1e9, "B"], [1e6, "M"], [1e3, "k"]];
   for (const [base, suf] of units) {
     if (n >= base) {
       const v = n / base;
-      return `${Number.isInteger(v) ? v : v.toFixed(2).replace(/\.?0+$/, "")}${suf}`;
+      const candidate = `${Number.isInteger(v) ? v : v.toFixed(2).replace(/\.?0+$/, "")}${suf}`;
+      return parseTokenShorthand(candidate) === n ? candidate : String(n);
     }
   }
   return String(n);

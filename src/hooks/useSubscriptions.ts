@@ -10,6 +10,7 @@ import { api } from "@/api/tauri";
 import type {
   CreateSubscriptionInput,
   SubscriptionPatch,
+  TokenQuotas,
 } from "@/types";
 
 export const SUBSCRIPTIONS_KEY = ["subscriptions"] as const;
@@ -93,6 +94,23 @@ export function useUpdateSubscriptionKey() {
   return useMutation({
     mutationFn: ({ id, newKey }: { id: string; newKey: string }) =>
       api.updateSubscriptionKey(id, newKey),
+    onSuccess: () => invalidateSubscriptions(queryClient),
+  });
+}
+
+export function useUpdateTokenQuotas() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, quotas }: { id: string; quotas: TokenQuotas }) =>
+      api.updateTokenQuotas(id, quotas),
+    onSuccess: () => invalidateSubscriptions(queryClient),
+  });
+}
+
+export function useResetTotalQuotaUsage() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (id: string) => api.resetTotalQuotaUsage(id),
     onSuccess: () => invalidateSubscriptions(queryClient),
   });
 }

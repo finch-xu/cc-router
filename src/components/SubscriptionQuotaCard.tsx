@@ -2,10 +2,10 @@ import { useState } from "react";
 import { Gauge } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { api } from "@/api/tauri";
+import { useResetTotalQuotaUsage } from "@/hooks/useSubscriptions";
 import { useT } from "@/i18n";
 import { cn } from "@/lib/utils";
-import { fmtCompact, fmtTimeShort } from "@/lib/format";
+import { fmtCompact, fmtTime, fmtTimeShort } from "@/lib/format";
 import { formatTokenShorthand } from "@/lib/quota";
 import type { QuotaUsageDto, SubscriptionDto } from "@/types";
 
@@ -27,17 +27,18 @@ const SEGMENTS: Array<{
 
 export function SubscriptionQuotaCard({ subscription, onChanged }: Props) {
   const { t } = useT();
-  const [resetting, setResetting] = useState(false);
+  const resetMut = useResetTotalQuotaUsage();
+  const [resetError, setResetError] = useState<string | null>(null);
   const rows = subscription.quota_usage.filter((q) => q.limit != null);
 
   async function resetTotal() {
     if (!window.confirm(t("quota.resetTotalConfirm"))) return;
-    setResetting(true);
+    setResetError(null);
     try {
-      await api.resetTotalQuotaUsage(subscription.id);
+      await resetMut.mutateAsync(subscription.id);
       onChanged?.();
-    } finally {
-      setResetting(false);
+    } catch (e) {
+      setResetError(String(e));
     }
   }
 
@@ -83,7 +84,7 @@ export function SubscriptionQuotaCard({ subscription, onChanged }: Props) {
                 {SEGMENTS.map((s) => (
                   <div
                     key={s.key}
-                    className={cn("h-full", s.className)}
+                    className={cn("h-full shrink-0", s.className)}
                     style={{ width: `${(Math.min(q[s.key], limit) / limit) * 100}%` }}
                   />
                 ))}
@@ -98,11 +99,23 @@ export function SubscriptionQuotaCard({ subscription, onChanged }: Props) {
                   ))}
                 </span>
                 {q.period_end_ms != null ? (
-                  <span>{t("quota.resetAt", { time: fmtTimeShort(q.period_end_ms) })}</span>
+                  <span>
+                    {t("quota.resetAt", {
+                      time: q.period === "daily" ? fmtTimeShort(q.period_end_ms) : fmtTime(q.period_end_ms),
+                    })}
+                  </span>
                 ) : (
-                  <Button variant="outline" size="sm" disabled={resetting} onClick={resetTotal}>
-                    {t("quota.resetTotal")}
-                  </Button>
+                  <div className="flex flex-col items-end gap-1">
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      disabled={resetMut.isPending}
+                      onClick={resetTotal}
+                    >
+                      {t("quota.resetTotal")}
+                    </Button>
+                    {resetError && <span className="text-destructive">{resetError}</span>}
+                  </div>
                 )}
               </div>
             </div>

@@ -38,6 +38,7 @@ import {
   useSetSubscriptionEnabled,
   useUpdateSubscription,
   useUpdateSubscriptionKey,
+  useUpdateTokenQuotas,
 } from "@/hooks/useSubscriptions";
 import { useT } from "@/i18n";
 import type {
@@ -67,6 +68,7 @@ export function SubscriptionEditPage() {
   });
   const providers = useProviders();
   const updateMut = useUpdateSubscription();
+  const updateQuotasMut = useUpdateTokenQuotas();
   const deleteMut = useDeleteSubscription();
   const enabledMut = useSetSubscriptionEnabled();
   const updateKeyMut = useUpdateSubscriptionKey();
@@ -207,9 +209,11 @@ export function SubscriptionEditPage() {
       if (v === null) return setQuotaError(t("quota.invalid"));
       if (v !== undefined) out[p] = v;
     }
-    await api.updateTokenQuotas(id, out);
-    queryClient.invalidateQueries({ queryKey: ["subscription", id] });
-    queryClient.invalidateQueries({ queryKey: ["subscriptions"] });
+    try {
+      await updateQuotasMut.mutateAsync({ id, quotas: out });
+    } catch (e) {
+      setQuotaError(String(e));
+    }
   }
 
   async function testConnection() {
@@ -444,7 +448,8 @@ export function SubscriptionEditPage() {
             </div>
           ))}
           {quotaError && <p className="text-sm text-destructive">{quotaError}</p>}
-          <Button size="sm" onClick={saveQuotas}>
+          <Button size="sm" onClick={saveQuotas} disabled={updateQuotasMut.isPending}>
+            {updateQuotasMut.isPending && <Loader2 className="h-4 w-4 animate-spin" />}
             {t("quota.save")}
           </Button>
         </CardContent>

@@ -562,7 +562,6 @@
   "quota.period.weekly": "每周",
   "quota.period.monthly": "每月",
   "quota.period.total": "累计总量",
-  "quota.unlimited": "不限",
   "quota.placeholder": "如 5M / 100M / 2.5B,留空不限",
   "quota.invalid": "限额格式不正确 (示例:5M、100M、500k)",
   "quota.usedOf": "已用 {used} / {limit}",
