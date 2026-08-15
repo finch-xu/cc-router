@@ -60,7 +60,14 @@ export function SubscriptionsPage() {
                 return (
                   <tr key={sub.id}>
                     <td>
-                      <StatusBadge state={sub.state} />
+                      <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                        <StatusBadge state={sub.state} />
+                        {sub.quota_usage.some((q) => q.exceeded) && (
+                          <span className="rounded-full bg-amber-100 px-2 py-0.5 text-xs text-amber-800">
+                            {t("quota.exceeded")}
+                          </span>
+                        )}
+                      </div>
                     </td>
                     <td>
                       <div style={{ display: "flex", alignItems: "center", gap: 10 }}>

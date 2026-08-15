@@ -28,6 +28,7 @@ import { StatusBadge } from "@/components/StatusBadge";
 import { ProviderIcon } from "@/components/ProviderIcon";
 import { ModelSlotPicker } from "@/components/ModelSlotPicker";
 import { SubscriptionBalanceCard } from "@/components/SubscriptionBalanceCard";
+import { SubscriptionQuotaCard } from "@/components/SubscriptionQuotaCard";
 import { api } from "@/api/tauri";
 import { KeyValueEditor, type KeyValueRow } from "@/components/KeyValueEditor";
 import { validateConnection, validateRequiredHeaders } from "@/lib/connectionValidation";
@@ -43,12 +44,15 @@ import type {
   AuthHeaderFormat,
   ModelInfo,
   ModelSlots,
+  QuotaPeriod,
   RefreshModelListResult,
   SlotEfforts,
   SubscriptionPatch,
   TestConnectionResult,
+  TokenQuotas,
 } from "@/types";
 import { uniformSlots } from "@/lib/modelSlots";
+import { formatTokenShorthand, parseTokenShorthand } from "@/lib/quota";
 
 export function SubscriptionEditPage() {
   const { t } = useT();
@@ -80,6 +84,13 @@ export function SubscriptionEditPage() {
   const [displayName, setDisplayName] = useState<string>("");
   const [slots, setSlots] = useState<ModelSlots>(uniformSlots(""));
   const [slotEfforts, setSlotEfforts] = useState<SlotEfforts>({});
+  const [quotaInputs, setQuotaInputs] = useState<Record<QuotaPeriod, string>>({
+    daily: "",
+    weekly: "",
+    monthly: "",
+    total: "",
+  });
+  const [quotaError, setQuotaError] = useState<string | null>(null);
 
   // 自定义订阅可编辑的连接字段
   const [baseUrl, setBaseUrl] = useState<string>("");
@@ -104,6 +115,14 @@ export function SubscriptionEditPage() {
       setDisplayName(subQuery.data.display_name);
       setSlots(subQuery.data.model_slots);
       setSlotEfforts(subQuery.data.slot_efforts ?? {});
+      const q = subQuery.data.token_quotas ?? {};
+      setQuotaInputs({
+        daily: formatTokenShorthand(q.daily),
+        weekly: formatTokenShorthand(q.weekly),
+        monthly: formatTokenShorthand(q.monthly),
+        total: formatTokenShorthand(q.total),
+      });
+      setQuotaError(null);
       setBaseUrl(subQuery.data.base_url);
       setMessagesPath(subQuery.data.messages_path);
       setAuthHeaderName(subQuery.data.auth_header_name);
@@ -177,6 +196,20 @@ export function SubscriptionEditPage() {
     } catch (e) {
       setSaveError(`${t("subscriptionEdit.errSave")}: ${e}`);
     }
+  }
+
+  async function saveQuotas() {
+    if (!id) return;
+    setQuotaError(null);
+    const out: TokenQuotas = {};
+    for (const p of ["daily", "weekly", "monthly", "total"] as QuotaPeriod[]) {
+      const v = parseTokenShorthand(quotaInputs[p]);
+      if (v === null) return setQuotaError(t("quota.invalid"));
+      if (v !== undefined) out[p] = v;
+    }
+    await api.updateTokenQuotas(id, out);
+    queryClient.invalidateQueries({ queryKey: ["subscription", id] });
+    queryClient.invalidateQueries({ queryKey: ["subscriptions"] });
   }
 
   async function testConnection() {
@@ -386,6 +419,38 @@ export function SubscriptionEditPage() {
       </Card>
 
       <SubscriptionBalanceCard
+        subscription={sub}
+        onChanged={() => {
+          queryClient.invalidateQueries({ queryKey: ["subscription", id] });
+          queryClient.invalidateQueries({ queryKey: ["subscriptions"] });
+        }}
+      />
+
+      <Card>
+        <CardHeader>
+          <CardTitle>{t("quota.title")}</CardTitle>
+        </CardHeader>
+        <CardContent className="space-y-3">
+          <p className="text-sm text-muted-foreground">{t("quota.desc")}</p>
+          {(["daily", "weekly", "monthly", "total"] as QuotaPeriod[]).map((p) => (
+            <div key={p} className="flex items-center gap-3">
+              <Label className="w-24 shrink-0">{t(`quota.period.${p}`)}</Label>
+              <Input
+                className="font-mono"
+                placeholder={t("quota.placeholder")}
+                value={quotaInputs[p]}
+                onChange={(e) => setQuotaInputs({ ...quotaInputs, [p]: e.target.value })}
+              />
+            </div>
+          ))}
+          {quotaError && <p className="text-sm text-destructive">{quotaError}</p>}
+          <Button size="sm" onClick={saveQuotas}>
+            {t("quota.save")}
+          </Button>
+        </CardContent>
+      </Card>
+
+      <SubscriptionQuotaCard
         subscription={sub}
         onChanged={() => {
           queryClient.invalidateQueries({ queryKey: ["subscription", id] });
