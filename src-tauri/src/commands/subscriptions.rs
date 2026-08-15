@@ -193,12 +193,12 @@ pub async fn get_subscription(
     id: String,
 ) -> AppResult<SubscriptionDto> {
     let id = Uuid::parse_str(&id).map_err(|_| AppError::BadRequest("无效 id".into()))?;
+    let referenced = referenced_by_names(&state, &id).await;
     let subs = state.subscriptions.read().await;
     let rt = subs
         .get(&id)
         .ok_or_else(|| AppError::SubscriptionNotFound(id.to_string()))?;
     let guard = rt.read().await;
-    let referenced = referenced_by_names(&state, &id).await;
     Ok(SubscriptionDto::from_runtime(&guard, referenced))
 }
 
