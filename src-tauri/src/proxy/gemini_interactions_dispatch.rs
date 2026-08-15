@@ -34,6 +34,7 @@ use crate::observability::body_dump::{BodyDumpEntry, BodyDumpKind};
 use crate::observability::events::{self, EventEntry, Severity};
 use crate::observability::request_log::{RequestLogEntry, RequestStatus};
 use crate::proxy::client_fingerprint::ClientContext;
+use crate::proxy::effort_log::EffortLog;
 use crate::proxy::oauth_dispatch::{OAuthDispatchError, OAuthDispatchOk};
 use crate::proxy::sse_framing::find_sse_frame_boundary;
 use crate::proxy::transform::gemini_interactions::{
@@ -222,6 +223,8 @@ pub fn finalize_gemini_interactions_response(
     app: AppHandle,
     sub_rt: Arc<RwLock<SubscriptionRuntime>>,
     ctx: ClientContext,
+    // 本次 attempt 的思考强度三格 (客户端 / 实际 / 来源), 只写请求日志; 拿不到就是 None。
+    effort_log: EffortLog,
     body_dump_tx: Option<mpsc::Sender<BodyDumpEntry>>,
 ) -> Response {
     let emit_thoughts = ok.gemini_emit_thoughts;
@@ -243,6 +246,7 @@ pub fn finalize_gemini_interactions_response(
             app,
             sub_rt,
             ctx,
+            effort_log,
             body_dump_tx,
         )
     } else {
@@ -263,6 +267,7 @@ pub fn finalize_gemini_interactions_response(
             app,
             sub_rt,
             ctx,
+            effort_log,
             body_dump_tx,
         );
         let stream = futures::stream::once(async move {
@@ -303,6 +308,8 @@ fn finalize_streaming(
     app: AppHandle,
     sub_rt: Arc<RwLock<SubscriptionRuntime>>,
     ctx: ClientContext,
+    // 本次 attempt 的思考强度三格 (客户端 / 实际 / 来源), 只写请求日志; 拿不到就是 None。
+    effort_log: EffortLog,
     body_dump_tx: Option<mpsc::Sender<BodyDumpEntry>>,
 ) -> Response {
     let (client_tx, client_rx) = mpsc::channel::<Result<Bytes, std::io::Error>>(64);
@@ -425,9 +432,9 @@ fn finalize_streaming(
             client_ip: ctx.ip.clone(),
             entry_kind: Some(ctx.entry_kind.as_str()),
             downstream_http_version: ctx.http_version.clone(),
-            client_effort: None,
-            effective_effort: None,
-            effort_source: None,
+            client_effort: effort_log.client.clone(),
+            effective_effort: effort_log.effective.clone(),
+            effort_source: effort_log.source,
             upstream_effort: None,
         };
         let _ = log_tx.try_send(entry);
@@ -474,6 +481,8 @@ async fn collect_to_json_response(
     app: AppHandle,
     sub_rt: Arc<RwLock<SubscriptionRuntime>>,
     ctx: ClientContext,
+    // 本次 attempt 的思考强度三格 (客户端 / 实际 / 来源), 只写请求日志; 拿不到就是 None。
+    effort_log: EffortLog,
     body_dump_tx: Option<mpsc::Sender<BodyDumpEntry>>,
 ) -> Response {
     let start = std::time::Instant::now();
@@ -568,9 +577,9 @@ async fn collect_to_json_response(
         client_ip: ctx.ip.clone(),
         entry_kind: Some(ctx.entry_kind.as_str()),
         downstream_http_version: ctx.http_version.clone(),
-        client_effort: None,
-        effective_effort: None,
-        effort_source: None,
+        client_effort: effort_log.client.clone(),
+        effective_effort: effort_log.effective.clone(),
+        effort_source: effort_log.source,
         upstream_effort: None,
     };
     let _ = log_tx.try_send(entry);

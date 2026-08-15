@@ -46,6 +46,7 @@ use crate::observability::events::{self, EventEntry, Severity};
 use crate::observability::request_log::{RequestLogEntry, RequestStatus};
 use crate::provider::model::AuthHeaderFormat;
 use crate::proxy::client_fingerprint::ClientContext;
+use crate::proxy::effort_log::EffortLog;
 use crate::proxy::handler::error_response;
 use crate::proxy::oauth_dispatch::OAuthDispatchError;
 use crate::proxy::sse_framing::find_sse_frame_boundary;
@@ -308,6 +309,8 @@ pub fn finalize_openai_chat_completions(
     app: AppHandle,
     sub_rt: Arc<RwLock<SubscriptionRuntime>>,
     ctx: ClientContext,
+    // 本次 attempt 的思考强度三格 (客户端 / 实际 / 来源), 只写请求日志; 拿不到就是 None。
+    effort_log: EffortLog,
 ) -> Response {
     let ChatCompletionsDispatchOk {
         transform_config,
@@ -333,6 +336,7 @@ pub fn finalize_openai_chat_completions(
             app,
             sub_rt,
             ctx,
+            effort_log,
         ),
         ChatCompletionsPayload::NonStreaming(body) => finalize_non_streaming(
             body,
@@ -351,6 +355,7 @@ pub fn finalize_openai_chat_completions(
             app,
             sub_rt,
             ctx,
+            effort_log,
         ),
     }
 }
@@ -374,6 +379,8 @@ fn finalize_streaming(
     app: AppHandle,
     sub_rt: Arc<RwLock<SubscriptionRuntime>>,
     ctx: ClientContext,
+    // 本次 attempt 的思考强度三格 (客户端 / 实际 / 来源), 只写请求日志; 拿不到就是 None。
+    effort_log: EffortLog,
 ) -> Response {
     let (client_tx, client_rx) = mpsc::channel::<Result<Bytes, std::io::Error>>(64);
 
@@ -554,9 +561,9 @@ fn finalize_streaming(
             client_ip: ctx.ip.clone(),
             entry_kind: Some(ctx.entry_kind.as_str()),
             downstream_http_version: ctx.http_version.clone(),
-            client_effort: None,
-            effective_effort: None,
-            effort_source: None,
+            client_effort: effort_log.client.clone(),
+            effective_effort: effort_log.effective.clone(),
+            effort_source: effort_log.source,
             upstream_effort: None,
         };
         let _ = log_tx.try_send(entry);
@@ -615,6 +622,8 @@ fn finalize_non_streaming(
     app: AppHandle,
     sub_rt: Arc<RwLock<SubscriptionRuntime>>,
     ctx: ClientContext,
+    // 本次 attempt 的思考强度三格 (客户端 / 实际 / 来源), 只写请求日志; 拿不到就是 None。
+    effort_log: EffortLog,
 ) -> Response {
     let start = std::time::Instant::now();
 
@@ -694,9 +703,9 @@ fn finalize_non_streaming(
             client_ip: ctx.ip.clone(),
             entry_kind: Some(ctx.entry_kind.as_str()),
             downstream_http_version: ctx.http_version.clone(),
-            client_effort: None,
-            effective_effort: None,
-            effort_source: None,
+            client_effort: effort_log.client.clone(),
+            effective_effort: effort_log.effective.clone(),
+            effort_source: effort_log.source,
             upstream_effort: None,
         };
         let _ = log_tx.try_send(entry);

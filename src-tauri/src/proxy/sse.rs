@@ -34,6 +34,7 @@ use crate::observability::body_dump::{BodyDumpEntry, BodyDumpKind};
 use crate::observability::events::{self, EventEntry, Severity};
 use crate::observability::request_log::{RequestLogEntry, RequestStatus};
 use crate::proxy::client_fingerprint::ClientContext;
+use crate::proxy::effort_log::EffortLog;
 use crate::subscription::model::SubscriptionRuntime;
 use crate::subscription::state_machine;
 use crate::virtual_model::VirtualModelName;
@@ -62,6 +63,8 @@ pub fn stream_response(
     // 单独传是为了避免 peek + state_machine apply 的耗时被错算到 TTFT 里.
     peek_first_byte_at: Option<Instant>,
     ctx: ClientContext,
+    // 本次 attempt 的思考强度三格 (客户端 / 实际 / 来源), 只写请求日志; 拿不到就是 None。
+    effort_log: EffortLog,
     // message_start 的 message.model 改写目标, 由调用方决定:
     // 非 fallback → 虚拟名; fallback 且订阅配置了兜底槽 → 客户端原始 model
     // (保持「响应 model = 请求 model」不变量); fallback 纯透传 → None 不改写。
@@ -214,9 +217,9 @@ pub fn stream_response(
             client_ip: ctx.ip.clone(),
             entry_kind: Some(ctx.entry_kind.as_str()),
             downstream_http_version: ctx.http_version.clone(),
-            client_effort: None,
-            effective_effort: None,
-            effort_source: None,
+            client_effort: effort_log.client.clone(),
+            effective_effort: effort_log.effective.clone(),
+            effort_source: effort_log.source,
             upstream_effort: None,
         };
         let _ = log_tx.try_send(entry);

@@ -44,6 +44,7 @@ use crate::oauth::kiro::{
 use crate::observability::events::{self, EventEntry, Severity};
 use crate::observability::request_log::{RequestLogEntry, RequestStatus};
 use crate::proxy::client_fingerprint::ClientContext;
+use crate::proxy::effort_log::EffortLog;
 use crate::proxy::handler::error_body;
 use crate::proxy::sse_framing::find_sse_frame_boundary;
 use crate::proxy::transform::aws_event_stream::EventStreamDecoder;
@@ -259,6 +260,8 @@ pub fn finalize_oauth_response(
     app: AppHandle,
     sub_rt: Arc<RwLock<SubscriptionRuntime>>,
     ctx: ClientContext,
+    // 本次 attempt 的思考强度三格 (客户端 / 实际 / 来源), 只写请求日志; 拿不到就是 None。
+    effort_log: EffortLog,
 ) -> Response {
     let transform_config = ok
         .transform_config
@@ -281,6 +284,7 @@ pub fn finalize_oauth_response(
             app,
             sub_rt,
             ctx,
+            effort_log,
         )
     } else {
         // 非流式: tokio task 收完, 然后返回 oneshot. 但 axum 需要同步返回 Response,
@@ -302,6 +306,7 @@ pub fn finalize_oauth_response(
             app,
             sub_rt,
             ctx,
+            effort_log,
         );
         // axum::response::Response 不能 hold a future. 需要 spawn 然后用 oneshot 返回.
         // 简单做法: block_on 是错的. 改用 streamed body 包一个一次性 chunk.
@@ -345,6 +350,8 @@ fn finalize_streaming(
     app: AppHandle,
     sub_rt: Arc<RwLock<SubscriptionRuntime>>,
     ctx: ClientContext,
+    // 本次 attempt 的思考强度三格 (客户端 / 实际 / 来源), 只写请求日志; 拿不到就是 None。
+    effort_log: EffortLog,
 ) -> Response {
     let (client_tx, client_rx) = mpsc::channel::<Result<Bytes, std::io::Error>>(64);
 
@@ -430,6 +437,9 @@ fn finalize_streaming(
                 .map(|v| v as u32);
         }
 
+        // 上游 response 对象回显的 reasoning.effort (仅观测; 上游不回显 → None)
+        let upstream_effort_echo = converter.upstream_effort().map(str::to_string);
+
         // 状态机 + 日志 — HTTP 200 但 SSE 内报错时按「上游 SSE 错误」处理 (对齐智谱前例)
         let state_event = if upstream_error.is_some() {
             state_machine::Event::UpstreamSseError {
@@ -482,10 +492,10 @@ fn finalize_streaming(
             client_ip: ctx.ip.clone(),
             entry_kind: Some(ctx.entry_kind.as_str()),
             downstream_http_version: ctx.http_version.clone(),
-            client_effort: None,
-            effective_effort: None,
-            effort_source: None,
-            upstream_effort: None,
+            client_effort: effort_log.client.clone(),
+            effective_effort: effort_log.effective.clone(),
+            effort_source: effort_log.source,
+            upstream_effort: upstream_effort_echo.clone(),
         };
         let _ = log_tx.try_send(entry);
         let (severity, summary) = match &upstream_error {
@@ -544,6 +554,8 @@ async fn collect_to_json_response(
     app: AppHandle,
     sub_rt: Arc<RwLock<SubscriptionRuntime>>,
     ctx: ClientContext,
+    // 本次 attempt 的思考强度三格 (客户端 / 实际 / 来源), 只写请求日志; 拿不到就是 None。
+    effort_log: EffortLog,
 ) -> Response {
     let start = std::time::Instant::now();
     let mut collector = NonStreamingCollector::new_with_config(transform_config);
@@ -567,6 +579,9 @@ async fn collect_to_json_response(
             }
         }
     }
+
+    // 上游 response 对象回显的 reasoning.effort (仅观测; finalize 会消费 collector, 先取出来)
+    let upstream_effort_echo = collector.upstream_effort().map(str::to_string);
 
     // 流中 response.failed / error: 非流式还没给客户端发过 header, 可以返回真实错误码 (issue #38)
     if let Some(message) = collector.failure_message().map(str::to_string) {
@@ -608,10 +623,10 @@ async fn collect_to_json_response(
             client_ip: ctx.ip.clone(),
             entry_kind: Some(ctx.entry_kind.as_str()),
             downstream_http_version: ctx.http_version.clone(),
-            client_effort: None,
-            effective_effort: None,
-            effort_source: None,
-            upstream_effort: None,
+            client_effort: effort_log.client.clone(),
+            effective_effort: effort_log.effective.clone(),
+            effort_source: effort_log.source,
+            upstream_effort: upstream_effort_echo.clone(),
         };
         let _ = log_tx.try_send(entry);
         events::record_request(
@@ -697,10 +712,10 @@ async fn collect_to_json_response(
         client_ip: ctx.ip.clone(),
         entry_kind: Some(ctx.entry_kind.as_str()),
         downstream_http_version: ctx.http_version.clone(),
-        client_effort: None,
-        effective_effort: None,
-        effort_source: None,
-        upstream_effort: None,
+        client_effort: effort_log.client.clone(),
+        effective_effort: effort_log.effective.clone(),
+        effort_source: effort_log.source,
+        upstream_effort: upstream_effort_echo.clone(),
     };
     let _ = log_tx.try_send(entry);
     events::record_request(
@@ -903,16 +918,18 @@ pub fn finalize_kiro_response(
     app: AppHandle,
     sub_rt: Arc<RwLock<SubscriptionRuntime>>,
     ctx: ClientContext,
+    // 本次 attempt 的思考强度三格 (客户端 / 实际 / 来源), 只写请求日志; 拿不到就是 None。
+    effort_log: EffortLog,
 ) -> Response {
     if ok.client_wants_streaming {
         finalize_kiro_streaming(
             ok.upstream_stream, vm_name, attempt_id, sub_id, provider_id, endpoint_id,
-            real_model, display_name, retry_count, log_tx, event_log_tx, pool, app, sub_rt, ctx,
+            real_model, display_name, retry_count, log_tx, event_log_tx, pool, app, sub_rt, ctx, effort_log,
         )
     } else {
         let fut = collect_kiro_to_json_response(
             ok.upstream_stream, vm_name, attempt_id, sub_id, provider_id, endpoint_id,
-            real_model, display_name, retry_count, log_tx, event_log_tx, pool, app, sub_rt, ctx,
+            real_model, display_name, retry_count, log_tx, event_log_tx, pool, app, sub_rt, ctx, effort_log,
         );
         let stream = futures::stream::once(async move {
             let resp = fut.await;
@@ -951,6 +968,8 @@ fn finalize_kiro_streaming(
     app: AppHandle,
     sub_rt: Arc<RwLock<SubscriptionRuntime>>,
     ctx: ClientContext,
+    // 本次 attempt 的思考强度三格 (客户端 / 实际 / 来源), 只写请求日志; 拿不到就是 None。
+    effort_log: EffortLog,
 ) -> Response {
     let (client_tx, client_rx) = mpsc::channel::<Result<Bytes, std::io::Error>>(64);
 
@@ -1050,9 +1069,9 @@ fn finalize_kiro_streaming(
             client_ip: ctx.ip.clone(),
             entry_kind: Some(ctx.entry_kind.as_str()),
             downstream_http_version: ctx.http_version.clone(),
-            client_effort: None,
-            effective_effort: None,
-            effort_source: None,
+            client_effort: effort_log.client.clone(),
+            effective_effort: effort_log.effective.clone(),
+            effort_source: effort_log.source,
             upstream_effort: None,
         };
         let _ = log_tx.try_send(entry);
@@ -1098,6 +1117,8 @@ async fn collect_kiro_to_json_response(
     app: AppHandle,
     sub_rt: Arc<RwLock<SubscriptionRuntime>>,
     ctx: ClientContext,
+    // 本次 attempt 的思考强度三格 (客户端 / 实际 / 来源), 只写请求日志; 拿不到就是 None。
+    effort_log: EffortLog,
 ) -> Response {
     let start = std::time::Instant::now();
     let mut decoder = EventStreamDecoder::new();
@@ -1169,9 +1190,9 @@ async fn collect_kiro_to_json_response(
         client_ip: ctx.ip.clone(),
         entry_kind: Some(ctx.entry_kind.as_str()),
         downstream_http_version: ctx.http_version.clone(),
-        client_effort: None,
-        effective_effort: None,
-        effort_source: None,
+        client_effort: effort_log.client.clone(),
+        effective_effort: effort_log.effective.clone(),
+        effort_source: effort_log.source,
         upstream_effort: None,
     };
     let _ = log_tx.try_send(entry);

@@ -905,6 +905,8 @@ pub struct ResponsesSseConverter {
     final_stop_reason: Option<&'static str>,
     /// 上游发过 response.failed / error 时的错误消息 — dispatch 层据此写失败日志与状态机 (issue #38)
     failure_message: Option<String>,
+    /// 上游 response 对象回显的 reasoning.effort — 只做请求日志观测, 拿不到就 None
+    upstream_effort: Option<String>,
     stopped: bool,
 }
 
@@ -935,6 +937,7 @@ impl ResponsesSseConverter {
             final_usage: None,
             final_stop_reason: None,
             failure_message: None,
+            upstream_effort: None,
             stopped: false,
         }
     }
@@ -982,9 +985,24 @@ impl ResponsesSseConverter {
         self.failure_message.as_deref()
     }
 
+    /// 上游 `response.created` / `response.completed` 里回显的 reasoning.effort。
+    /// 上游不回显 (多数中转 / 非 reasoning 模型) → None。
+    pub fn upstream_effort(&self) -> Option<&str> {
+        self.upstream_effort.as_deref()
+    }
+
+    /// created / completed 都可能带 reasoning.effort, 先到先得 (completed 通常更完整,
+    /// 但 created 已足够且能覆盖流中断场景)。
+    fn absorb_upstream_effort(&mut self, resp: &Value) {
+        if self.upstream_effort.is_none() {
+            self.upstream_effort = responses_upstream_effort(resp);
+        }
+    }
+
     // ---------- handlers ----------
 
     fn handle_created(&mut self, resp: &Value) -> Vec<AnthropicEvent> {
+        self.absorb_upstream_effort(resp);
         if self.started {
             return Vec::new();
         }
@@ -1268,6 +1286,7 @@ impl ResponsesSseConverter {
     }
 
     fn handle_completed(&mut self, resp: &Value) -> Vec<AnthropicEvent> {
+        self.absorb_upstream_effort(resp);
         if self.stopped {
             return Vec::new();
         }
@@ -1310,6 +1329,20 @@ impl ResponsesSseConverter {
 /// 从 `response.failed` / 顶层 `error` 事件的 data 里提取人类可读错误消息 (issue #38)。
 /// 两种 shape: response.failed 是 `{response:{error:{message}}}`, 顶层 error 事件是
 /// `{message}` 或 `{error:{message}}`。dispatch 层流首 peek 与 converter 共用。
+/// 上游回显的 reasoning effort。接受两种形状:
+/// - SSE 事件 data (`{"response": {...}}`, 如 `response.created` / `response.completed`)
+/// - 非流式响应体本身 (顶层就是 response 对象, `{"reasoning": {"effort": ...}}`)
+///
+/// 纯观测用途: 字段缺失 / 类型不对 / 空串 一律 None, 绝不影响主路径。
+pub fn responses_upstream_effort(value: &Value) -> Option<String> {
+    let obj = value.get("response").unwrap_or(value);
+    obj.get("reasoning")
+        .and_then(|r| r.get("effort"))
+        .and_then(|e| e.as_str())
+        .filter(|s| !s.is_empty())
+        .map(str::to_string)
+}
+
 pub fn failure_message_from_event(data: &Value) -> String {
     data.get("response")
         .and_then(|r| r.get("error"))
@@ -1431,6 +1464,12 @@ impl NonStreamingCollector {
     /// Some = 上游在流内报了应用层失败, 见 [`ResponsesSseConverter::failure_message`]。
     pub fn failure_message(&self) -> Option<&str> {
         self.converter.failure_message()
+    }
+
+    /// 上游回显的 reasoning effort, 见 [`ResponsesSseConverter::upstream_effort`]。
+    /// 注意 [`Self::finalize`] 消费 self, 需要的话在它之前读。
+    pub fn upstream_effort(&self) -> Option<&str> {
+        self.converter.upstream_effort()
     }
 
     pub fn feed(&mut self, event_name: &str, data: &Value) {
@@ -2651,5 +2690,71 @@ mod tests {
                 "function_call_output",
             ]
         );
+    }
+
+    // ---------- 上游 effort 回显 (请求日志观测) ----------
+
+    #[test]
+    fn upstream_effort_from_non_streaming_body() {
+        let body = json!({
+            "id": "resp_1",
+            "model": "gpt-5.5",
+            "reasoning": {"effort": "high", "summary": []},
+            "output": []
+        });
+        assert_eq!(responses_upstream_effort(&body), Some("high".to_string()));
+    }
+
+    #[test]
+    fn upstream_effort_none_when_missing_or_malformed() {
+        assert_eq!(responses_upstream_effort(&json!({"id": "resp_1"})), None);
+        // reasoning 存在但没有 effort
+        assert_eq!(
+            responses_upstream_effort(&json!({"reasoning": {"summary": []}})),
+            None
+        );
+        // effort 类型不对 / 空串 → None, 不 panic
+        assert_eq!(responses_upstream_effort(&json!({"reasoning": {"effort": 3}})), None);
+        assert_eq!(responses_upstream_effort(&json!({"reasoning": {"effort": ""}})), None);
+        assert_eq!(responses_upstream_effort(&Value::Null), None);
+    }
+
+    #[test]
+    fn upstream_effort_from_completed_event() {
+        let mut conv = ResponsesSseConverter::new();
+        assert_eq!(conv.upstream_effort(), None);
+        conv.feed(
+            "response.completed",
+            &json!({"response": {"status": "completed", "reasoning": {"effort": "medium"}}}),
+        );
+        assert_eq!(conv.upstream_effort(), Some("medium"));
+    }
+
+    #[test]
+    fn upstream_effort_from_created_event_and_none_without_reasoning() {
+        let mut conv = ResponsesSseConverter::new();
+        conv.feed(
+            "response.created",
+            &json!({"response": {"id": "resp_1", "model": "gpt-5.5", "reasoning": {"effort": "xhigh"}}}),
+        );
+        assert_eq!(conv.upstream_effort(), Some("xhigh"));
+
+        let mut conv = ResponsesSseConverter::new();
+        conv.feed(
+            "response.created",
+            &json!({"response": {"id": "resp_1", "model": "gpt-5.5"}}),
+        );
+        conv.feed("response.completed", &json!({"response": {"status": "completed"}}));
+        assert_eq!(conv.upstream_effort(), None);
+    }
+
+    #[test]
+    fn collector_exposes_upstream_effort() {
+        let mut c = NonStreamingCollector::new();
+        c.feed(
+            "response.created",
+            &json!({"response": {"id": "resp_1", "model": "gpt-5.5", "reasoning": {"effort": "low"}}}),
+        );
+        assert_eq!(c.upstream_effort(), Some("low"));
     }
 }

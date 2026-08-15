@@ -35,6 +35,9 @@ use crate::proxy::oauth_dispatch::{
 };
 use crate::proxy::overloaded;
 use crate::proxy::retry::{classify_response, ShouldRetry};
+use crate::proxy::effort_log::{
+    client_effort_of, kiro_effort_log, passthrough_effort_log, translation_effort_log,
+};
 use crate::proxy::sanitize::{
     force_anthropic_effort, inject_missing_thinking_placeholders,
     should_inject_thinking_placeholder, strip_foreign_thinking_blocks,
@@ -304,6 +307,12 @@ pub async fn dispatch(
 
             let (yaml_expose_reasoning, yaml_default_effort) =
                 provider_reasoning_defaults(state, &provider_id);
+            // 本次 attempt 的思考强度三格 (纯观测, 与上面的 resolver 同参同源)
+            let effort_log = translation_effort_log(
+                &request_body,
+                forced_effort.as_deref(),
+                yaml_default_effort.as_deref(),
+            );
             let codex_extras = CodexExtras {
                 reasoning_effort: resolve_reasoning_effort(
                     &request_body,
@@ -349,6 +358,7 @@ pub async fn dispatch(
                         state.app_handle.clone(),
                         rt.clone(),
                         ctx.clone(),
+                        effort_log.clone(),
                     ));
                 }
                 Err(err) => {
@@ -405,9 +415,9 @@ pub async fn dispatch(
                         client_ip: ctx.ip.clone(),
                         entry_kind: Some(ctx.entry_kind.as_str()),
                         downstream_http_version: ctx.http_version.clone(),
-                        client_effort: None,
-                        effective_effort: None,
-                        effort_source: None,
+                        client_effort: effort_log.client.clone(),
+                        effective_effort: effort_log.effective.clone(),
+                        effort_source: effort_log.source,
                         upstream_effort: None,
                     };
                     let _ = state.request_log_tx.try_send(entry);
@@ -440,6 +450,8 @@ pub async fn dispatch(
         // 的 expose_reasoning: false 与 kiro_codewhisperer.rs 丢弃客户端 thinking 块的注释)。
         // 即便订阅的 slot_efforts 里存了值也不读, 前端已把 Kiro 订阅的 effort 下拉灰掉。
         if matches!(auth_type, AuthType::KiroOauth) {
+            // CodeWhisperer 协议没有 reasoning 字段 → effective/source 恒 None, 只记客户端值
+            let effort_log = kiro_effort_log(&request_body);
             let mut kiro_body = request_body.clone();
             kiro_body["model"] = Value::String(real_model.clone());
             emit_attempt_started(state, sub_id, vm_name);
@@ -476,6 +488,7 @@ pub async fn dispatch(
                         state.app_handle.clone(),
                         rt.clone(),
                         ctx.clone(),
+                        effort_log.clone(),
                     ));
                 }
                 Err(err) => {
@@ -532,9 +545,9 @@ pub async fn dispatch(
                         client_ip: ctx.ip.clone(),
                         entry_kind: Some(ctx.entry_kind.as_str()),
                         downstream_http_version: ctx.http_version.clone(),
-                        client_effort: None,
-                        effective_effort: None,
-                        effort_source: None,
+                        client_effort: effort_log.client.clone(),
+                        effective_effort: effort_log.effective.clone(),
+                        effort_source: effort_log.source,
                         upstream_effort: None,
                     };
                     let _ = state.request_log_tx.try_send(entry);
@@ -567,6 +580,12 @@ pub async fn dispatch(
         if matches!(auth_type, AuthType::GeminiApiKey) {
             let (yaml_expose_reasoning, yaml_default_effort) =
                 provider_reasoning_defaults(state, &provider_id);
+            // 本次 attempt 的思考强度三格 (纯观测, 与上面的 resolver 同参同源)
+            let effort_log = translation_effort_log(
+                &request_body,
+                forced_effort.as_deref(),
+                yaml_default_effort.as_deref(),
+            );
             let gemini_extras = GeminiExtras {
                 thinking_budget: resolve_thinking_budget(
                     &request_body,
@@ -611,6 +630,7 @@ pub async fn dispatch(
                         state.app_handle.clone(),
                         rt.clone(),
                         ctx.clone(),
+                        effort_log.clone(),
                     ));
                 }
                 Err(err) => {
@@ -667,9 +687,9 @@ pub async fn dispatch(
                         client_ip: ctx.ip.clone(),
                         entry_kind: Some(ctx.entry_kind.as_str()),
                         downstream_http_version: ctx.http_version.clone(),
-                        client_effort: None,
-                        effective_effort: None,
-                        effort_source: None,
+                        client_effort: effort_log.client.clone(),
+                        effective_effort: effort_log.effective.clone(),
+                        effort_source: effort_log.source,
                         upstream_effort: None,
                     };
                     let _ = state.request_log_tx.try_send(entry);
@@ -700,6 +720,12 @@ pub async fn dispatch(
         if matches!(auth_type, AuthType::GeminiInteractionsApiKey) {
             let (yaml_expose_reasoning, yaml_default_effort) =
                 provider_reasoning_defaults(state, &provider_id);
+            // 本次 attempt 的思考强度三格 (纯观测, 与上面的 resolver 同参同源)
+            let effort_log = translation_effort_log(
+                &request_body,
+                forced_effort.as_deref(),
+                yaml_default_effort.as_deref(),
+            );
             let interactions_extras = InteractionsExtras {
                 thinking_level: resolve_thinking_level(
                     &request_body,
@@ -753,6 +779,7 @@ pub async fn dispatch(
                         state.app_handle.clone(),
                         rt.clone(),
                         ctx.clone(),
+                        effort_log.clone(),
                         dump_tx,
                     ));
                 }
@@ -810,9 +837,9 @@ pub async fn dispatch(
                         client_ip: ctx.ip.clone(),
                         entry_kind: Some(ctx.entry_kind.as_str()),
                         downstream_http_version: ctx.http_version.clone(),
-                        client_effort: None,
-                        effective_effort: None,
-                        effort_source: None,
+                        client_effort: effort_log.client.clone(),
+                        effective_effort: effort_log.effective.clone(),
+                        effort_source: effort_log.source,
                         upstream_effort: None,
                     };
                     let _ = state.request_log_tx.try_send(entry);
@@ -845,6 +872,12 @@ pub async fn dispatch(
             // 走 provider_reasoning_defaults 兜底 (expose=true + medium effort)。
             let (yaml_expose_reasoning, yaml_default_effort) =
                 provider_reasoning_defaults(state, &provider_id);
+            // 本次 attempt 的思考强度三格 (纯观测, 与上面的 resolver 同参同源)
+            let effort_log = translation_effort_log(
+                &request_body,
+                forced_effort.as_deref(),
+                yaml_default_effort.as_deref(),
+            );
 
             // model 改写到 slot 真实模型名 (与 codex / gemini 分支一致)
             let mut openai_body = request_body.clone();
@@ -897,6 +930,7 @@ pub async fn dispatch(
                         state.app_handle.clone(),
                         rt.clone(),
                         ctx.clone(),
+                        effort_log.clone(),
                     ));
                 }
                 Err(err) => {
@@ -953,9 +987,9 @@ pub async fn dispatch(
                         client_ip: ctx.ip.clone(),
                         entry_kind: Some(ctx.entry_kind.as_str()),
                         downstream_http_version: ctx.http_version.clone(),
-                        client_effort: None,
-                        effective_effort: None,
-                        effort_source: None,
+                        client_effort: effort_log.client.clone(),
+                        effective_effort: effort_log.effective.clone(),
+                        effort_source: effort_log.source,
                         upstream_effort: None,
                     };
                     let _ = state.request_log_tx.try_send(entry);
@@ -988,6 +1022,12 @@ pub async fn dispatch(
         if matches!(auth_type, AuthType::OpenaiChatCompletionsApiKey) {
             let (yaml_expose_reasoning, yaml_default_effort) =
                 provider_reasoning_defaults(state, &provider_id);
+            // 本次 attempt 的思考强度三格 (纯观测, 与上面的 resolver 同参同源)
+            let effort_log = translation_effort_log(
+                &request_body,
+                forced_effort.as_deref(),
+                yaml_default_effort.as_deref(),
+            );
 
             let mut chat_body = request_body.clone();
             chat_body["model"] = Value::String(real_model.clone());
@@ -1038,6 +1078,7 @@ pub async fn dispatch(
                             state.app_handle.clone(),
                             rt.clone(),
                             ctx.clone(),
+                            effort_log.clone(),
                         ),
                     );
                 }
@@ -1097,9 +1138,9 @@ pub async fn dispatch(
                         client_ip: ctx.ip.clone(),
                         entry_kind: Some(ctx.entry_kind.as_str()),
                         downstream_http_version: ctx.http_version.clone(),
-                        client_effort: None,
-                        effective_effort: None,
-                        effort_source: None,
+                        client_effort: effort_log.client.clone(),
+                        effective_effort: effort_log.effective.clone(),
+                        effort_source: effort_log.source,
                         upstream_effort: None,
                     };
                     let _ = state.request_log_tx.try_send(entry);
@@ -1132,7 +1173,7 @@ pub async fn dispatch(
         // 都走这一段, 上游不认 cc-router 自家翻译层 (openai_responses/gemini) 包装的 thinking
         // signature, 必须先剥离, 否则多 provider 轮询下会触发上游 400 "thinking/reasoning_content
         // must be passed back to the API"。详见 [`strip_foreign_thinking_blocks`].
-        let serialized_body = {
+        let (serialized_body, effort_log) = {
             let mut upstream_body = request_body.clone();
             if !is_fallback || fallback_override.is_some() {
                 upstream_body["model"] = Value::String(real_model.clone());
@@ -1181,7 +1222,14 @@ pub async fn dispatch(
                     "sanitized thinking blocks before anthropic passthrough"
                 );
             }
-            serde_json::to_vec(&upstream_body)?
+            // 透传分支没有翻译层也没有 yaml 默认: slot 真写进 body (effort_written > 0) 才算
+            // slot 生效, 否则客户端的值原样出站。
+            let effort_log = passthrough_effort_log(
+                client_effort_of(&request_body),
+                forced_effort.as_deref(),
+                effort_written,
+            );
+            (serde_json::to_vec(&upstream_body)?, effort_log)
         };
 
         // 调试模式: 把客户端原始请求体 + cc-router 改写后的出站请求体写盘.
@@ -1351,9 +1399,9 @@ pub async fn dispatch(
                     client_ip: ctx.ip.clone(),
                     entry_kind: Some(ctx.entry_kind.as_str()),
                     downstream_http_version: ctx.http_version.clone(),
-                    client_effort: None,
-                    effective_effort: None,
-                    effort_source: None,
+                    client_effort: effort_log.client.clone(),
+                    effective_effort: effort_log.effective.clone(),
+                    effort_source: effort_log.source,
                     upstream_effort: None,
                 };
                 let _ = state.request_log_tx.try_send(entry);
@@ -1483,9 +1531,9 @@ pub async fn dispatch(
                             client_ip: ctx.ip.clone(),
                             entry_kind: Some(ctx.entry_kind.as_str()),
                             downstream_http_version: ctx.http_version.clone(),
-                            client_effort: None,
-                            effective_effort: None,
-                            effort_source: None,
+                            client_effort: effort_log.client.clone(),
+                            effective_effort: effort_log.effective.clone(),
+                            effort_source: effort_log.source,
                             upstream_effort: None,
                         };
                         let _ = state.request_log_tx.try_send(entry);
@@ -1545,9 +1593,9 @@ pub async fn dispatch(
                             client_ip: ctx.ip.clone(),
                             entry_kind: Some(ctx.entry_kind.as_str()),
                             downstream_http_version: ctx.http_version.clone(),
-                            client_effort: None,
-                            effective_effort: None,
-                            effort_source: None,
+                            client_effort: effort_log.client.clone(),
+                            effective_effort: effort_log.effective.clone(),
+                            effort_source: effort_log.source,
                             upstream_effort: None,
                         };
                         let _ = state.request_log_tx.try_send(entry);
@@ -1643,6 +1691,7 @@ pub async fn dispatch(
                             dump_tx,
                             Some(first_byte_at),
                             ctx.clone(),
+                            effort_log.clone(),
                             virtual_name_override,
                         );
                         return Ok(response);
@@ -1689,9 +1738,9 @@ pub async fn dispatch(
                     client_ip: ctx.ip.clone(),
                     entry_kind: Some(ctx.entry_kind.as_str()),
                     downstream_http_version: ctx.http_version.clone(),
-                    client_effort: None,
-                    effective_effort: None,
-                    effort_source: None,
+                    client_effort: effort_log.client.clone(),
+                    effective_effort: effort_log.effective.clone(),
+                    effort_source: effort_log.source,
                     upstream_effort: None,
                 };
                 let _ = state.request_log_tx.try_send(entry);

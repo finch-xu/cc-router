@@ -42,6 +42,7 @@ use crate::observability::events::{self, EventEntry, Severity};
 use crate::observability::request_log::{RequestLogEntry, RequestStatus};
 use crate::provider::model::AuthHeaderFormat;
 use crate::proxy::client_fingerprint::ClientContext;
+use crate::proxy::effort_log::EffortLog;
 use crate::proxy::handler::error_response;
 use crate::proxy::oauth_dispatch::{peek_responses_first_frame, OAuthDispatchError};
 use crate::proxy::sse_framing::find_sse_frame_boundary;
@@ -264,6 +265,8 @@ pub fn finalize_openai_responses(
     app: AppHandle,
     sub_rt: Arc<RwLock<SubscriptionRuntime>>,
     ctx: ClientContext,
+    // 本次 attempt 的思考强度三格 (客户端 / 实际 / 来源), 只写请求日志; 拿不到就是 None。
+    effort_log: EffortLog,
 ) -> Response {
     let OpenaiResponsesDispatchOk { transform_config, payload } = ok;
     match payload {
@@ -284,6 +287,7 @@ pub fn finalize_openai_responses(
             app,
             sub_rt,
             ctx,
+            effort_log,
         ),
         OpenaiResponsesPayload::NonStreaming(body) => finalize_non_streaming(
             body,
@@ -302,6 +306,7 @@ pub fn finalize_openai_responses(
             app,
             sub_rt,
             ctx,
+            effort_log,
         ),
     }
 }
@@ -324,6 +329,8 @@ fn finalize_streaming(
     app: AppHandle,
     sub_rt: Arc<RwLock<SubscriptionRuntime>>,
     ctx: ClientContext,
+    // 本次 attempt 的思考强度三格 (客户端 / 实际 / 来源), 只写请求日志; 拿不到就是 None。
+    effort_log: EffortLog,
 ) -> Response {
     let (client_tx, client_rx) = mpsc::channel::<Result<Bytes, std::io::Error>>(64);
 
@@ -418,6 +425,9 @@ fn finalize_streaming(
             response_model_observed = Some(response_model.to_string());
         }
 
+        // 上游 response 对象回显的 reasoning.effort (仅观测; 上游不回显 → None)
+        let upstream_effort_echo = converter.upstream_effort().map(str::to_string);
+
         // 状态机 + 日志 — HTTP 200 但 SSE 内报错时按「上游 SSE 错误」处理 (对齐智谱前例)
         let state_event = if upstream_error.is_some() {
             state_machine::Event::UpstreamSseError {
@@ -460,10 +470,10 @@ fn finalize_streaming(
             client_ip: ctx.ip.clone(),
             entry_kind: Some(ctx.entry_kind.as_str()),
             downstream_http_version: ctx.http_version.clone(),
-            client_effort: None,
-            effective_effort: None,
-            effort_source: None,
-            upstream_effort: None,
+            client_effort: effort_log.client.clone(),
+            effective_effort: effort_log.effective.clone(),
+            effort_source: effort_log.source,
+            upstream_effort: upstream_effort_echo.clone(),
         };
         let _ = log_tx.try_send(entry);
         let (severity, summary) = match &upstream_error {
@@ -524,6 +534,8 @@ fn finalize_non_streaming(
     app: AppHandle,
     sub_rt: Arc<RwLock<SubscriptionRuntime>>,
     ctx: ClientContext,
+    // 本次 attempt 的思考强度三格 (客户端 / 实际 / 来源), 只写请求日志; 拿不到就是 None。
+    effort_log: EffortLog,
 ) -> Response {
     let start = std::time::Instant::now();
 
@@ -555,6 +567,10 @@ fn finalize_non_streaming(
         .get("model")
         .and_then(|v| v.as_str())
         .map(String::from);
+
+    // 上游 response 对象回显的 reasoning.effort (非流式: 顶层就是 response 对象)
+    let upstream_effort_echo =
+        crate::proxy::transform::responses_common::responses_upstream_effort(&upstream_body);
 
     let final_msg = match responses_json_to_anthropic(&upstream_body, &transform_config) {
         Ok(m) => m,
@@ -614,10 +630,10 @@ fn finalize_non_streaming(
             client_ip: ctx.ip.clone(),
             entry_kind: Some(ctx.entry_kind.as_str()),
             downstream_http_version: ctx.http_version.clone(),
-            client_effort: None,
-            effective_effort: None,
-            effort_source: None,
-            upstream_effort: None,
+            client_effort: effort_log.client.clone(),
+            effective_effort: effort_log.effective.clone(),
+            effort_source: effort_log.source,
+            upstream_effort: upstream_effort_echo.clone(),
         };
         let _ = log_tx.try_send(entry);
         events::record_request(
