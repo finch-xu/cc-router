@@ -422,6 +422,32 @@ export function SubscriptionEditPage() {
         </CardContent>
       </Card>
 
+      <Card>
+        <CardHeader>
+          <CardTitle>{t("subscriptionEdit.modelSlotsTitle")}</CardTitle>
+        </CardHeader>
+        <CardContent>
+          <ModelSlotPicker
+            value={slots}
+            onChange={setSlots}
+            efforts={slotEfforts}
+            onEffortsChange={setSlotEfforts}
+            effortDisabled={sub.auth_type === "kiro_oauth"}
+            effortDisabledReason={t("slotEffort.unsupportedKiro")}
+            models={models}
+            loading={fetchingModels}
+            error={modelError}
+            onRefresh={refreshModels}
+            exampleModels={sub.model_discovery.example_models}
+          />
+          {sub.model_cache && (
+            <div className="mt-3 text-xs text-muted-foreground">
+              {t("subscriptionEdit.modelCacheUpdated")}{new Date(sub.model_cache.fetched_at).toLocaleString()}
+            </div>
+          )}
+        </CardContent>
+      </Card>
+
       <SubscriptionBalanceCard
         subscription={sub}
         onChanged={() => {
@@ -462,32 +488,6 @@ export function SubscriptionEditPage() {
           queryClient.invalidateQueries({ queryKey: ["subscriptions"] });
         }}
       />
-
-      <Card>
-        <CardHeader>
-          <CardTitle>{t("subscriptionEdit.modelSlotsTitle")}</CardTitle>
-        </CardHeader>
-        <CardContent>
-          <ModelSlotPicker
-            value={slots}
-            onChange={setSlots}
-            efforts={slotEfforts}
-            onEffortsChange={setSlotEfforts}
-            effortDisabled={sub.auth_type === "kiro_oauth"}
-            effortDisabledReason={t("slotEffort.unsupportedKiro")}
-            models={models}
-            loading={fetchingModels}
-            error={modelError}
-            onRefresh={refreshModels}
-            exampleModels={sub.model_discovery.example_models}
-          />
-          {sub.model_cache && (
-            <div className="mt-3 text-xs text-muted-foreground">
-              {t("subscriptionEdit.modelCacheUpdated")}{new Date(sub.model_cache.fetched_at).toLocaleString()}
-            </div>
-          )}
-        </CardContent>
-      </Card>
 
       {testResult && (
         <Alert variant={testResult.ok ? "default" : "destructive"}>
