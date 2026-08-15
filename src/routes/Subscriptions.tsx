@@ -8,9 +8,6 @@ import { useSubscriptions } from "@/hooks/useSubscriptions";
 import { useT } from "@/i18n";
 import { fmtTimeShort } from "@/lib/format";
 
-// SubscriptionDto 不带 api_key 预览(CLAUDE.md), 用固定遮罩占位
-const MASKED_KEY = "•••••••••••••••";
-
 export function SubscriptionsPage() {
   const { t } = useT();
   const subs = useSubscriptions();
@@ -49,7 +46,6 @@ export function SubscriptionsPage() {
                 <th style={{ width: 100 }}>{t("subscriptions.col.status")}</th>
                 <th>{t("subscriptions.col.provider")}</th>
                 <th>{t("subscriptions.col.note")}</th>
-                <th style={{ width: 160 }}>API Key</th>
                 <th style={{ width: 90 }}>{t("subscriptions.col.referenced")}</th>
                 <th style={{ width: 100 }}>{t("subscriptions.col.updatedAt")}</th>
                 <th style={{ width: 80 }}></th>
@@ -90,9 +86,6 @@ export function SubscriptionsPage() {
                       </div>
                     </td>
                     <td>{sub.display_name}</td>
-                    <td className="mono" style={{ color: "var(--ink-3)", fontSize: 12 }}>
-                      {MASKED_KEY}
-                    </td>
                     <td>
                       {sub.referenced_by.length > 0 ? (
                         <span className="pill tag mono">used: {sub.referenced_by.length}</span>
