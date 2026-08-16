@@ -608,8 +608,10 @@ export interface OverallStatsDto {
 }
 
 export interface DailySeriesPointDto {
-  /** UTC 0 点 ms */
-  date_utc: number;
+  /** 本地日历日 YYYY-MM-DD */
+  day: string;
+  /** 本地小时 0–23, 仅 range=today 按小时分桶时有值 */
+  hour?: number;
   request_count: number;
   success_count: number;
   error_count: number;
@@ -632,13 +634,15 @@ export interface BreakdownDto {
   timeout_count: number;
   total_input_tokens: number;
   total_output_tokens: number;
+  total_cache_creation_tokens: number;
+  total_cache_read_tokens: number;
   avg_duration_ms?: number;
 }
 
 export interface HeatmapDayDto {
-  /** UTC 0 点 ms */
-  date_utc: number;
-  /** input + output tokens */
+  /** 本地日历日 YYYY-MM-DD */
+  day: string;
+  /** input + output tokens (不含缓存两项) */
   total_tokens: number;
   request_count: number;
 }

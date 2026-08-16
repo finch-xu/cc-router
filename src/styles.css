@@ -55,6 +55,20 @@
   --rf-err-line:    oklch(0.82 0.10 28);
   --rf-err-ink:     oklch(0.42 0.16 28);
 
+  /* === 统计图表 token (dataviz 验证脚本跑通, 明/暗各一套) ===
+   * --seq-1..4: 铁锈橙顺序色阶 (浅→深), 给「量级」类图: Token 4 段堆叠柱 + 年历 4 档
+   * --vm-*:     虚拟模型分类色, 颜色跟随实体固定不重排; fallback 用去强调灰
+   * 状态色 (成功/失败/超时) 直接用 --ok / --err / --ink-4, 不另设 */
+  --seq-1: oklch(0.77 0.09 42);
+  --seq-2: oklch(0.67 0.13 42);
+  --seq-3: oklch(0.57 0.14 42);
+  --seq-4: oklch(0.45 0.13 42);
+  --vm-fable:    oklch(0.52 0.17 295);
+  --vm-opus:     var(--accent);
+  --vm-sonnet:   oklch(0.58 0.14 245);
+  --vm-haiku:    oklch(0.66 0.14 85);
+  --vm-fallback: var(--ink-4);
+
   --shadow-sm: 0 1px 0 rgba(20,18,12,0.04), 0 1px 2px rgba(20,18,12,0.04);
   --shadow-md: 0 1px 0 rgba(20,18,12,0.04), 0 6px 18px -8px rgba(20,18,12,0.10);
   --shadow-lg: 0 1px 0 rgba(20,18,12,0.04), 0 24px 60px -28px rgba(20,18,12,0.22);
@@ -167,6 +181,15 @@
   --rf-up-bg:       oklch(0.19 0.04 250);
   --rf-err-line:    oklch(0.46 0.12 28);
   --rf-err-ink:     oklch(0.78 0.13 28);
+
+  /* 统计图表 token — 暗色: 顺序色阶反向取亮 (深底上浅=多), 分类色提亮 */
+  --seq-1: oklch(0.48 0.10 42);
+  --seq-2: oklch(0.58 0.13 42);
+  --seq-3: oklch(0.68 0.14 42);
+  --seq-4: oklch(0.80 0.09 42);
+  --vm-fable:    oklch(0.66 0.15 295);
+  --vm-sonnet:   oklch(0.64 0.13 245);
+  --vm-haiku:    oklch(0.66 0.13 85);
 
   /* Shadows — 暗色下加重 */
   --shadow-sm: 0 1px 0 rgba(0,0,0,0.30), 0 1px 2px rgba(0,0,0,0.30);
@@ -989,8 +1012,6 @@ input, select, textarea { font: inherit; color: inherit; }
 .stat-unit { font-size: 14px; color: var(--ink-3); }
 .cell-with-icon { display: flex; align-items: center; gap: 8px; }
 .cell-with-icon-label { font-size: 12.5px; }
-.bar-row-label { font-size: 12.5px; }
-.bar-meta-sub { color: var(--ink-4); margin-left: 6px; }
 
 /* Heatmap (GitHub-style) */
 .heatmap-wrap {
@@ -1025,6 +1046,7 @@ input, select, textarea { font: inherit; color: inherit; }
   position: absolute;
   white-space: nowrap;
 }
+/* 11px 格 + 3px gap = 14px/列, 与 YearHeatmap.tsx 的 HM_COL_PX 成对 (月份标签定位用), 改一处必改另一处 */
 .heatmap-grid {
   display: grid;
   grid-template-rows: repeat(7, 11px);
@@ -1036,10 +1058,11 @@ input, select, textarea { font: inherit; color: inherit; }
   border-radius: 2px;
   background: var(--surface-3);
 }
-.heatmap-cell.l1 { background: oklch(0.92 0.06 150); }
-.heatmap-cell.l2 { background: oklch(0.82 0.10 150); }
-.heatmap-cell.l3 { background: oklch(0.70 0.13 150); }
-.heatmap-cell.l4 { background: oklch(0.56 0.16 150); }
+.heatmap-cell.l1 { background: var(--seq-1); }
+.heatmap-cell.l2 { background: var(--seq-2); }
+.heatmap-cell.l3 { background: var(--seq-3); }
+.heatmap-cell.l4 { background: var(--seq-4); }
+.heatmap-cell.out { background: transparent; }
 .heatmap-legend {
   display: flex;
   align-items: center;
@@ -1050,28 +1073,6 @@ input, select, textarea { font: inherit; color: inherit; }
   justify-content: flex-end;
 }
 .heatmap-legend .heatmap-cell { width: 11px; height: 11px; }
-
-.token-legend {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 4px 14px;
-  font-size: 11px;
-  color: var(--ink-3);
-  margin-top: 8px;
-  justify-content: flex-end;
-}
-.token-legend-item {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-}
-.token-legend-swatch {
-  width: 11px;
-  height: 11px;
-  border-radius: 2px;
-  display: inline-block;
-}
 
 .recharts-tooltip-wrapper { outline: none; }
 .stats-tooltip {
@@ -1087,36 +1088,114 @@ input, select, textarea { font: inherit; color: inherit; }
   justify-content: space-between;
   gap: 12px;
 }
-.stats-tooltip .tt-label { color: var(--ink-3); }
+.stats-tooltip .tt-label { color: var(--ink-3); display: inline-flex; align-items: center; gap: 6px; }
 .stats-tooltip .tt-val { font-family: var(--font-mono); color: var(--ink); }
+.stats-tooltip .tt-title { color: var(--ink-3); margin-bottom: 4px; }
+.stats-tooltip .tt-row + .tt-row { margin-top: 2px; }
+.stats-tooltip .tt-row.strong .tt-val { font-weight: 600; }
+.stats-tooltip .tt-key { width: 10px; height: 3px; border-radius: 2px; display: inline-block; }
 
-.bar-row {
+
+/* === Statistics page v2: 区块头 / KPI 5 列 / 两列网格 / 环图 / 占比条 / 图例 / 加载态 === */
+.stats-block-head {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 16px;
+  margin: 6px 0 12px;
+}
+.stats-block-head .range-tabs { margin-bottom: 0; }
+.stats-block-title { font-size: 14px; font-weight: 600; color: var(--ink); letter-spacing: -0.005em; }
+.stats-block-sub { font-size: 11.5px; color: var(--ink-4); margin-top: 2px; }
+.stats-section + .stats-block-head { margin-top: 22px; }
+
+.stats-card-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; }
+.stats-card-right { flex-shrink: 0; }
+.stats-body { transition: opacity 160ms ease; }
+.stats-section.is-loading .stats-body { opacity: 0.6; }
+.stats-error { color: var(--err); }
+
+.stats-kpi {
   display: grid;
-  grid-template-columns: 100px 1fr 80px;
-  gap: 12px;
-  align-items: center;
-  padding: 8px 0;
-  font-size: 12.5px;
+  grid-template-columns: repeat(5, 1fr);
+  gap: var(--gap-md);
+  margin-bottom: 16px;
+  transition: opacity 160ms ease;
 }
-.bar-row + .bar-row { border-top: 1px solid var(--line); }
-.bar-track {
-  position: relative;
-  height: 18px;
+.stats-kpi.is-loading { opacity: 0.6; }
+@media (max-width: 1100px) { .stats-kpi { grid-template-columns: repeat(3, 1fr); } }
+@media (max-width: 720px)  { .stats-kpi { grid-template-columns: repeat(2, 1fr); } }
+
+.stats-grid-2 {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 16px;
+}
+.stats-grid-2 > .stats-section { margin-bottom: 16px; min-width: 0; }
+@media (max-width: 960px) { .stats-grid-2 { grid-template-columns: 1fr; } }
+
+/* 卡片内的小切换器: range-tabs 的缩小版, 不动 range-tabs 本身 (小票页复用) */
+.seg-tabs {
+  display: inline-flex;
   background: var(--surface-2);
+  border: 1px solid var(--line);
+  border-radius: var(--r-sm);
+  padding: 2px;
+  gap: 2px;
+}
+.seg-tab {
+  padding: 3px 9px;
+  font-size: 11px;
+  border: none;
+  background: transparent;
   border-radius: 3px;
-  overflow: hidden;
-}
-.bar-fill {
-  position: absolute;
-  left: 0; top: 0; bottom: 0;
-  background: var(--accent);
-  opacity: 0.85;
-}
-.bar-row .bar-meta {
-  text-align: right;
-  font-family: var(--font-mono);
   color: var(--ink-3);
+  cursor: pointer;
 }
+.seg-tab:hover { color: var(--ink); }
+.seg-tab.active { background: var(--surface); color: var(--ink); font-weight: 500; box-shadow: 0 1px 2px rgba(0,0,0,0.04); }
+.dark .seg-tab.active { box-shadow: 0 1px 2px rgba(0,0,0,0.25); }
+
+/* 环图 + 右侧图例表 */
+.donut-wrap { display: grid; grid-template-columns: 200px 1fr; gap: 16px; align-items: center; }
+@media (max-width: 1240px) { .donut-wrap { grid-template-columns: 170px 1fr; } }
+.donut-chart { position: relative; }
+.donut-center {
+  position: absolute; inset: 0;
+  display: flex; flex-direction: column; align-items: center; justify-content: center;
+  pointer-events: none;
+}
+.donut-center-val { font-family: var(--font-mono); font-size: 20px; font-weight: 600; color: var(--ink); letter-spacing: -0.01em; }
+.donut-center-label { font-size: 10.5px; color: var(--ink-4); margin-top: 2px; }
+.donut-legend { width: 100%; border-collapse: collapse; font-size: 12px; table-layout: auto; }
+.donut-legend td { padding: 6px 6px; border-top: 1px solid var(--line); white-space: nowrap; }
+.donut-legend td:first-child { max-width: 0; width: 100%; overflow: hidden; text-overflow: ellipsis; }
+.donut-legend tr:first-child td { border-top: none; }
+.donut-legend td:first-child { padding-left: 0; }
+.donut-legend td + td { text-align: right; }
+.donut-legend td:last-child { padding-right: 0; }
+.donut-legend tr { transition: opacity 120ms ease; cursor: default; }
+.donut-legend tr.dim { opacity: 0.4; }
+.donut-legend .muted { color: var(--ink-3); }
+.donut-legend .strong { color: var(--ink); font-weight: 600; }
+.donut-legend-dot { width: 9px; height: 9px; border-radius: 50%; display: inline-block; margin-right: 8px; vertical-align: -1px; }
+.recharts-sector:focus, .recharts-pie-sector:focus, .recharts-wrapper:focus, .recharts-surface:focus { outline: none; }
+
+/* 表格内占比细条 (请求数格): 条在左、数字在右, 条宽按 max 归一 */
+.share-cell { display: inline-flex; align-items: center; gap: 10px; justify-content: flex-end; width: 100%; }
+.share-bar { flex: 1; max-width: 90px; height: 6px; background: var(--surface-3); border-radius: 3px; overflow: hidden; }
+.share-bar-fill { display: block; height: 100%; background: var(--accent); opacity: 0.85; border-radius: 3px; }
+
+/* 图下通用图例 (替代 token-legend) */
+.chart-legend {
+  display: flex; flex-wrap: wrap; align-items: center;
+  gap: 4px 14px; font-size: 11px; color: var(--ink-3);
+  margin-top: 8px; justify-content: flex-end;
+}
+.chart-legend-item { display: inline-flex; align-items: center; gap: 6px; }
+.chart-legend-swatch { width: 11px; height: 11px; border-radius: 2px; display: inline-block; }
+.chart-legend-swatch.line { height: 3px; width: 14px; }
+
 
 /* === Add subscription wizard === */
 .wizard {

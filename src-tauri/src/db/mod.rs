@@ -81,6 +81,10 @@ const MIGRATIONS: &[(u32, &str)] = &[
         18,
         include_str!("../../migrations/018_add_request_effort.sql"),
     ),
+    (
+        19,
+        include_str!("../../migrations/019_stats_daily_local_day.sql"),
+    ),
 ];
 
 pub async fn init_pool(db_path: &Path) -> AppResult<SqlitePool> {
@@ -340,6 +344,21 @@ mod tests {
             .any(|r| r.try_get::<String, _>("name").map(|n| n == column).unwrap_or(false))
     }
 
+    /// 手动应用 MIGRATIONS[range] 并写版本记录 (照 v5 half-finished 测试的做法),
+    /// 让针对某个版本的测试锁定在被测版本, 不被后续 migration (如 v19 重建聚合表) 改写。
+    async fn apply_migrations(pool: &SqlitePool, range: std::ops::Range<usize>) {
+        for (v, sql) in &MIGRATIONS[range] {
+            for stmt in split_sql_statements(sql) {
+                sqlx::query(&stmt).execute(pool).await.unwrap();
+            }
+            sqlx::query("INSERT OR IGNORE INTO _schema_version (version, applied_at) VALUES (?, 0)")
+                .bind(*v as i64)
+                .execute(pool)
+                .await
+                .unwrap();
+        }
+    }
+
     async fn has_table(pool: &SqlitePool, table: &str) -> bool {
         let row: (i64,) = sqlx::query_as(
             "SELECT count(*) FROM sqlite_master WHERE type='table' AND name=?",
@@ -358,7 +377,7 @@ mod tests {
         run_migrations(&pool, &dir).await.expect("migrate fresh");
 
         let versions = applied_versions(&pool).await;
-        assert_eq!(versions, vec![1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18]);
+        assert_eq!(versions, vec![1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19]);
         assert!(!has_column(&pool, "subscriptions", "supports_thinking_blocks").await);
         assert!(!has_column(&pool, "subscriptions", "thinking_block_field_name").await);
         assert!(has_column(&pool, "requests", "upstream_response_body").await);
@@ -388,7 +407,7 @@ mod tests {
         run_migrations(&pool, &dir).await.expect("migrate legacy");
 
         let versions = applied_versions(&pool).await;
-        assert_eq!(versions, vec![1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18]); // baseline v=1, 然后跑增量
+        assert_eq!(versions, vec![1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19]); // baseline v=1, 然后跑增量
         assert!(!has_column(&pool, "subscriptions", "supports_thinking_blocks").await);
         assert!(!has_column(&pool, "subscriptions", "thinking_block_field_name").await);
         assert!(has_column(&pool, "requests", "upstream_response_body").await);
@@ -405,7 +424,7 @@ mod tests {
         run_migrations(&pool, &dir).await.expect("third run");
 
         let versions = applied_versions(&pool).await;
-        assert_eq!(versions, vec![1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18]); // 没有重复写
+        assert_eq!(versions, vec![1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19]); // 没有重复写
     }
 
     /// 在 v4 schema 状态下插一条订阅 (含已 v7 移除的 supports_thinking_blocks 列)。
@@ -471,7 +490,7 @@ mod tests {
         assert!(!has_table(&pool, "subscriptions_new").await);
         assert_eq!(
             applied_versions(&pool).await,
-            vec![1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18]
+            vec![1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19]
         );
 
         let count: (i64,) =
@@ -554,9 +573,8 @@ mod tests {
         .await
         .unwrap();
 
-        run_migrations(&pool, &std::path::PathBuf::from("."))
-            .await
-            .expect("apply v14");
+        // 只应用 v14 本身 (v19 会按 requests 重建 request_stats_daily, 会改写这里手插的 marker 行)
+        apply_migrations(&pool, 13..14).await;
 
         let fetch_one = |sql: &'static str| {
             let pool = pool.clone();
@@ -646,9 +664,8 @@ mod tests {
         .await
         .unwrap();
 
-        run_migrations(&pool, &std::path::PathBuf::from("."))
-            .await
-            .expect("apply v15");
+        // 只应用 v15 本身 (v19 会把 receipt_stats_daily 的 date_utc 换成本地日 key)
+        apply_migrations(&pool, 14..15).await;
 
         let rows: (i64,) = sqlx::query_as("SELECT count(*) FROM receipt_stats_daily")
             .fetch_one(&pool)
@@ -665,6 +682,147 @@ mod tests {
         .await
         .unwrap();
         assert_eq!(bucket, (2, 15, 25, 1, 2), "同桶两条聚合, NULL token 按 0 计, status 不过滤");
+    }
+
+    /// v19: 聚合表按本地日历日重建。用 requests 原始行 (含跨 UTC 日边界的时间戳) + 旧表 UTC 行验证:
+    /// - 重建行的 day 与 `local_day_key` (chrono::Local) 一致
+    /// - 早于原始日志覆盖范围的旧行按 UTC 日期近似搬入, 跨界 UTC 日的旧行丢弃
+    /// - 版本号 19 已写入; 再跑一次 run_migrations 幂等不报错
+    #[tokio::test]
+    async fn v19_rebuilds_daily_tables_by_local_day() {
+        use crate::observability::request_log::local_day_key;
+        let pool = in_memory_pool().await;
+        sqlx::query(
+            "CREATE TABLE _schema_version (version INTEGER PRIMARY KEY, applied_at INTEGER NOT NULL)",
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+        apply_migrations(&pool, 0..18).await;
+
+        const DAY: i64 = 86_400_000;
+        // 原始日志: 三条落在 UTC 第 100 天附近, 其中 t2 = 该 UTC 日 23:30 (东八区已是次日 07:30)
+        let base = 100 * DAY;
+        let t1 = base + 3_600_000; // 01:00Z
+        let t2 = base + DAY - 1_800_000; // 23:30Z
+        let t3 = base + DAY + 3_600_000; // 次日 01:00Z
+        sqlx::query(
+            "INSERT INTO requests (id, timestamp, virtual_model_name, subscription_id,
+                provider_id, endpoint_id, real_model_name, is_streaming, status,
+                total_latency_ms, ttft_ms, upstream_input_tokens, upstream_output_tokens,
+                upstream_cache_creation, upstream_cache_read, retry_count)
+             VALUES
+               ('r1', ?, 'model-opus', 's1', 'zhipu', 'cn', 'm1', 0, 'success', 100, 10, 10, 20, 1, 2, 0),
+               ('r2', ?, 'model-opus', 's1', 'zhipu', 'cn', 'm1', 0, 'error', NULL, NULL, 5, 5, NULL, NULL, 1),
+               ('r3', ?, 'model-opus', 's1', 'zhipu', 'cn', 'm1', 0, 'timeout', 300, NULL, 7, 7, 0, 0, 0)",
+        )
+        .bind(t1)
+        .bind(t2)
+        .bind(t3)
+        .execute(&pool)
+        .await
+        .unwrap();
+        // 旧聚合表: 一行早于覆盖范围 (UTC 第 50 天, 应搬入为 '1970-02-20'), 一行就是覆盖范围首日 (应丢弃)
+        sqlx::query(
+            "INSERT INTO request_stats_daily (date_utc, virtual_model_name, subscription_id, provider_id, request_count)
+             VALUES (?, 'model-haiku', 's9', 'anthropic', 42), (?, 'model-haiku', 's9', 'anthropic', 7)",
+        )
+        .bind(50 * DAY)
+        .bind(base)
+        .execute(&pool)
+        .await
+        .unwrap();
+        sqlx::query(
+            "INSERT INTO receipt_stats_daily (date_utc, virtual_model_name, subscription_id, real_model_name, provider_id, request_count)
+             VALUES (?, 'model-haiku', 's9', 'mx', 'anthropic', 42)",
+        )
+        .bind(50 * DAY)
+        .execute(&pool)
+        .await
+        .unwrap();
+
+        run_migrations(&pool, &std::path::PathBuf::from("."))
+            .await
+            .expect("apply v19");
+
+        // 版本号已写入
+        let has19: (i64,) =
+            sqlx::query_as("SELECT count(*) FROM _schema_version WHERE version = 19")
+                .fetch_one(&pool)
+                .await
+                .unwrap();
+        assert_eq!(has19.0, 1);
+
+        // 重建行: day 与 Rust 侧 local_day_key 一致 (无论机器时区)
+        let rows: Vec<(String, i64, i64, i64, i64, i64, i64, i64, i64, i64)> = sqlx::query_as(
+            "SELECT day, request_count, success_count, error_count, timeout_count,
+                    input_tokens, cache_creation_tokens, total_duration_ms_sum, total_duration_ms_count, retry_count_sum
+             FROM request_stats_daily WHERE subscription_id = 's1' ORDER BY day",
+        )
+        .fetch_all(&pool)
+        .await
+        .unwrap();
+        let mut expected: std::collections::BTreeMap<String, (i64, i64, i64, i64, i64, i64, i64, i64, i64)> =
+            std::collections::BTreeMap::new();
+        for (ts, st, lat, inp, cc, retry) in [
+            (t1, "success", Some(100), 10, 1, 0),
+            (t2, "error", None, 5, 0, 1),
+            (t3, "timeout", Some(300), 7, 0, 0),
+        ] {
+            let e = expected.entry(local_day_key(ts)).or_default();
+            e.0 += 1;
+            match st {
+                "success" => e.1 += 1,
+                "error" => e.2 += 1,
+                _ => e.3 += 1,
+            }
+            e.4 += inp;
+            e.5 += cc;
+            if let Some(l) = lat {
+                e.6 += l;
+                e.7 += 1;
+            }
+            e.8 += retry;
+        }
+        let got: std::collections::BTreeMap<String, (i64, i64, i64, i64, i64, i64, i64, i64, i64)> = rows
+            .into_iter()
+            .map(|r| (r.0, (r.1, r.2, r.3, r.4, r.5, r.6, r.7, r.8, r.9)))
+            .collect();
+        assert_eq!(got, expected, "按本地日重建, 口径与 flush_batch 一致");
+
+        // 旧行: 早于覆盖范围的搬入 (UTC 第 50 天 = 1970-02-20), 跨界那行丢弃
+        let legacy: Vec<(String, i64)> = sqlx::query_as(
+            "SELECT day, request_count FROM request_stats_daily WHERE subscription_id = 's9' ORDER BY day",
+        )
+        .fetch_all(&pool)
+        .await
+        .unwrap();
+        assert_eq!(legacy, vec![("1970-02-20".to_string(), 42)]);
+        let legacy_receipt: Vec<(String, i64)> = sqlx::query_as(
+            "SELECT day, request_count FROM receipt_stats_daily WHERE subscription_id = 's9'",
+        )
+        .fetch_all(&pool)
+        .await
+        .unwrap();
+        assert_eq!(legacy_receipt, vec![("1970-02-20".to_string(), 42)]);
+
+        // 小票表按 (day, vm, sub, real_model) 重建
+        let receipt_rows: (i64,) =
+            sqlx::query_as("SELECT count(*) FROM receipt_stats_daily WHERE subscription_id = 's1'")
+                .fetch_one(&pool)
+                .await
+                .unwrap();
+        assert_eq!(receipt_rows.0 as usize, expected.len());
+
+        // 幂等: 再跑一次不报错, 行数不变
+        run_migrations(&pool, &std::path::PathBuf::from("."))
+            .await
+            .expect("rerun is a no-op");
+        let again: (i64,) = sqlx::query_as("SELECT count(*) FROM request_stats_daily")
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+        assert_eq!(again.0 as usize, expected.len() + 1);
     }
 
     #[tokio::test]

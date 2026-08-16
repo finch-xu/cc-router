@@ -6,7 +6,7 @@
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::sync::Arc;
 
-use chrono::{DateTime, Utc};
+use chrono::{DateTime, Days, Local, NaiveDate, NaiveTime, TimeZone, Utc};
 use sqlx::SqlitePool;
 use tauri::{AppHandle, Emitter};
 use tokio::sync::{mpsc, RwLock};
@@ -50,10 +50,63 @@ struct ReceiptCounters {
     cache_read_tokens: i64,
 }
 
-/// 把 Unix ms 向下取整到 UTC 当天 0 点的 ms。
-/// 用 div_euclid 而非 / 是因为 i64 除法对负数会向 0 截断, 测试可能传非 1970 后的小值。
-pub(crate) fn floor_to_utc_day(ts_ms: i64) -> i64 {
-    ts_ms.div_euclid(DAY_MS) * DAY_MS
+/// 日聚合表 (`request_stats_daily` / `receipt_stats_daily`) 的 key: **本地日历日** `YYYY-MM-DD`。
+///
+/// 存日历日字符串而非「本地午夜的 UTC 瞬时」: 瞬时 → 本地日永远无歧义, 不需要 local → UTC
+/// 反算, DST / 换时区都不会让同一自然日分裂成两行。SQL `date(ts/1000,'unixepoch','localtime')`、
+/// 前端 `getFullYear/getMonth/getDate` 与这里三端天然一致 (migration 019 回填即用该 SQL 表达式)。
+/// 与限额 (`subscription::quota`) 一样按机器本地日历切桶。
+pub(crate) fn local_day_key(ts_ms: i64) -> String {
+    local_day_key_in(ts_ms, &Local)
+}
+
+/// 可注入时区的版本, 供单测用 `FixedOffset` 断言, 不依赖机器时区。
+pub(crate) fn local_day_key_in<Tz: TimeZone>(ts_ms: i64, tz: &Tz) -> String {
+    ms_to_local_date_in(ts_ms, tz).format("%Y-%m-%d").to_string()
+}
+
+/// `now_ms` 所在本地日往前推 `days_back` 天的日历日 key (days_back=0 即今天)。
+/// 用 NaiveDate 减天数而非 `N * DAY_MS` 硬减, DST 日不会偏移。
+pub(crate) fn local_days_ago_key(now_ms: i64, days_back: u32) -> String {
+    local_days_ago_key_in(now_ms, days_back, &Local)
+}
+
+pub(crate) fn local_days_ago_key_in<Tz: TimeZone>(now_ms: i64, days_back: u32, tz: &Tz) -> String {
+    local_days_ago_date_in(now_ms, days_back, tz)
+        .format("%Y-%m-%d")
+        .to_string()
+}
+
+/// `now_ms` 所在本地日往前推 `days_back` 天那一天的本地 0 点 **UTC 瞬时** (ms)。
+/// 只用于需要瞬时的场景: 查 `requests` 原始表 (`timestamp >= ?`) 与小票的 `range_start_ms` 展示;
+/// 聚合表过滤一律用日历日 key。DST gap 时取 earliest, 再退回按 UTC 解释兜底 (同 quota)。
+pub(crate) fn local_days_ago_start_ms(now_ms: i64, days_back: u32) -> i64 {
+    local_days_ago_start_ms_in(now_ms, days_back, &Local)
+}
+
+pub(crate) fn local_days_ago_start_ms_in<Tz: TimeZone>(now_ms: i64, days_back: u32, tz: &Tz) -> i64 {
+    let date = local_days_ago_date_in(now_ms, days_back, tz);
+    let midnight = date.and_time(NaiveTime::MIN);
+    tz.from_local_datetime(&midnight)
+        .earliest()
+        .map(|d| d.with_timezone(&Utc))
+        .unwrap_or_else(|| Utc.from_utc_datetime(&midnight))
+        .timestamp_millis()
+}
+
+fn ms_to_local_date_in<Tz: TimeZone>(ts_ms: i64, tz: &Tz) -> NaiveDate {
+    Utc.timestamp_millis_opt(ts_ms)
+        .single()
+        .unwrap_or(DateTime::<Utc>::UNIX_EPOCH)
+        .with_timezone(tz)
+        .date_naive()
+}
+
+fn local_days_ago_date_in<Tz: TimeZone>(now_ms: i64, days_back: u32, tz: &Tz) -> NaiveDate {
+    let today = ms_to_local_date_in(now_ms, tz);
+    today
+        .checked_sub_days(Days::new(days_back as u64))
+        .unwrap_or(today)
 }
 
 #[derive(Debug, Clone)]
@@ -283,20 +336,20 @@ pub(crate) async fn flush_batch(
     };
 
     // key → (provider_id, counters); provider_id 取首次写入的 entry 值。
-    let mut stats_acc: HashMap<(i64, String, String), (String, StatsCounters)> = HashMap::new();
+    let mut stats_acc: HashMap<(String, String, String), (String, StatsCounters)> = HashMap::new();
     // 小票聚合: key 多 real_model_name 一维 (receipt_stats_daily)。
-    let mut receipt_acc: HashMap<(i64, String, String, String), (String, ReceiptCounters)> =
+    let mut receipt_acc: HashMap<(String, String, String, String), (String, ReceiptCounters)> =
         HashMap::new();
 
     for entry in batch {
         let key = (
-            floor_to_utc_day(entry.timestamp_ms),
+            local_day_key(entry.timestamp_ms),
             entry.virtual_model_name.as_str().to_string(),
             entry.subscription_id.to_string(),
         );
 
         let (_, racc) = receipt_acc
-            .entry((key.0, key.1.clone(), key.2.clone(), entry.real_model_name.clone()))
+            .entry((key.0.clone(), key.1.clone(), key.2.clone(), entry.real_model_name.clone()))
             .or_insert_with(|| (entry.provider_id.clone(), ReceiptCounters::default()));
         racc.request_count += 1;
         racc.input_tokens += entry.upstream_input_tokens.unwrap_or(0) as i64;
@@ -380,16 +433,16 @@ pub(crate) async fn flush_batch(
 
     // 同事务 UPSERT 聚合结果。requests + 两张 stats 表同进同退,
     // 即使 cleanup 把 requests 老数据删了, stats 仍然完整。
-    for ((date_utc, vm, sub_id), (provider_id, acc)) in stats_acc {
+    for ((day, vm, sub_id), (provider_id, acc)) in stats_acc {
         let result = sqlx::query(
             "INSERT INTO request_stats_daily (
-                date_utc, virtual_model_name, subscription_id, provider_id,
+                day, virtual_model_name, subscription_id, provider_id,
                 request_count, success_count, error_count, timeout_count,
                 input_tokens, output_tokens, cache_creation_tokens, cache_read_tokens,
                 total_duration_ms_sum, total_duration_ms_count, ttft_ms_sum, ttft_ms_count,
                 retry_count_sum
              ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-             ON CONFLICT (date_utc, virtual_model_name, subscription_id) DO UPDATE SET
+             ON CONFLICT (day, virtual_model_name, subscription_id) DO UPDATE SET
                 request_count = request_count + excluded.request_count,
                 success_count = success_count + excluded.success_count,
                 error_count = error_count + excluded.error_count,
@@ -404,7 +457,7 @@ pub(crate) async fn flush_batch(
                 ttft_ms_count = ttft_ms_count + excluded.ttft_ms_count,
                 retry_count_sum = retry_count_sum + excluded.retry_count_sum",
         )
-        .bind(date_utc)
+        .bind(day)
         .bind(vm)
         .bind(sub_id)
         .bind(provider_id)
@@ -428,21 +481,21 @@ pub(crate) async fn flush_batch(
         }
     }
 
-    for ((date_utc, vm, sub_id, real_model), (provider_id, acc)) in receipt_acc {
+    for ((day, vm, sub_id, real_model), (provider_id, acc)) in receipt_acc {
         let result = sqlx::query(
             "INSERT INTO receipt_stats_daily (
-                date_utc, virtual_model_name, subscription_id, real_model_name, provider_id,
+                day, virtual_model_name, subscription_id, real_model_name, provider_id,
                 request_count, input_tokens, output_tokens,
                 cache_creation_tokens, cache_read_tokens
              ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-             ON CONFLICT (date_utc, virtual_model_name, subscription_id, real_model_name) DO UPDATE SET
+             ON CONFLICT (day, virtual_model_name, subscription_id, real_model_name) DO UPDATE SET
                 request_count = request_count + excluded.request_count,
                 input_tokens = input_tokens + excluded.input_tokens,
                 output_tokens = output_tokens + excluded.output_tokens,
                 cache_creation_tokens = cache_creation_tokens + excluded.cache_creation_tokens,
                 cache_read_tokens = cache_read_tokens + excluded.cache_read_tokens",
         )
-        .bind(date_utc)
+        .bind(day)
         .bind(vm)
         .bind(sub_id)
         .bind(real_model)
@@ -540,7 +593,7 @@ mod tests {
     async fn flush_persists_effort_columns_and_tolerates_none() {
         let pool = fresh_pool().await;
         let sub = Uuid::new_v4();
-        let day_start = floor_to_utc_day(1_704_067_200_000);
+        let day_start = 1_704_067_200_000; // 2024-01-01 00:00:00 UTC
 
         let mut with_effort = make_entry(
             day_start,
@@ -602,17 +655,44 @@ mod tests {
     }
 
     #[test]
-    fn floor_to_utc_day_works() {
-        // 1700000000000 ms = 2023-11-14 22:13:20 UTC
-        let day = floor_to_utc_day(1_700_000_000_000);
-        // 2023-11-14 00:00:00 UTC = 1699920000000
-        assert_eq!(day, 1_699_920_000_000);
-        // 该日整点不变
-        assert_eq!(floor_to_utc_day(1_699_920_000_000), 1_699_920_000_000);
-        // 该日最后一刻仍归当天
-        assert_eq!(floor_to_utc_day(1_699_920_000_000 + DAY_MS - 1), 1_699_920_000_000);
-        // 跨日
-        assert_eq!(floor_to_utc_day(1_699_920_000_000 + DAY_MS), 1_699_920_000_000 + DAY_MS);
+    fn local_day_key_follows_injected_timezone() {
+        use chrono::FixedOffset;
+        let cst = FixedOffset::east_opt(8 * 3600).unwrap();
+        let utc = Utc;
+        // 2026-08-15T17:00:00Z = 北京时间 08-16 01:00 → 东八区归 16 日, UTC 归 15 日
+        let ts = 1_786_813_200_000;
+        assert_eq!(local_day_key_in(ts, &cst), "2026-08-16");
+        assert_eq!(local_day_key_in(ts, &utc), "2026-08-15");
+        // 东八区当天最后一刻仍归当天; 再 +1ms 跨日
+        let cst_day_end = 1_786_895_999_999; // 2026-08-16T15:59:59.999Z = CST 08-16 23:59:59.999
+        assert_eq!(local_day_key_in(cst_day_end, &cst), "2026-08-16");
+        assert_eq!(local_day_key_in(cst_day_end + 1, &cst), "2026-08-17");
+    }
+
+    #[test]
+    fn local_days_ago_key_subtracts_calendar_days() {
+        use chrono::FixedOffset;
+        let cst = FixedOffset::east_opt(8 * 3600).unwrap();
+        let ts = 1_786_813_200_000; // CST 2026-08-16 01:00
+        assert_eq!(local_days_ago_key_in(ts, 0, &cst), "2026-08-16");
+        assert_eq!(local_days_ago_key_in(ts, 6, &cst), "2026-08-10");
+        assert_eq!(local_days_ago_key_in(ts, 29, &cst), "2026-07-18");
+        // 跨月/跨年
+        assert_eq!(local_days_ago_key_in(ts, 364, &cst), "2025-08-17");
+    }
+
+    #[test]
+    fn local_days_ago_start_ms_is_local_midnight_instant() {
+        use chrono::FixedOffset;
+        let cst = FixedOffset::east_opt(8 * 3600).unwrap();
+        let ts = 1_786_813_200_000; // CST 2026-08-16 01:00 (UTC 08-15 17:00)
+        // CST 08-16 00:00 = UTC 08-15 16:00 = 1_786_809_600_000
+        assert_eq!(local_days_ago_start_ms_in(ts, 0, &cst), 1_786_809_600_000);
+        assert_eq!(local_days_ago_start_ms_in(ts, 1, &cst), 1_786_809_600_000 - DAY_MS);
+        // 与 key 自洽: 起点瞬时的 key 就是那一天
+        let start = local_days_ago_start_ms_in(ts, 6, &cst);
+        assert_eq!(local_day_key_in(start, &cst), "2026-08-10");
+        assert_eq!(local_day_key_in(start - 1, &cst), "2026-08-09");
     }
 
     #[tokio::test]
@@ -620,7 +700,7 @@ mod tests {
         let pool = fresh_pool().await;
         let sub = Uuid::new_v4();
         // 同一天 (2024-01-01) / sonnet / 同一订阅, 灌 5 条
-        let day_start = floor_to_utc_day(1_704_067_200_000); // 2024-01-01 00:00:00 UTC
+        let day_start = 1_704_067_200_000; // 2024-01-01 00:00:00 UTC // 2024-01-01 00:00:00 UTC
         let mut batch = Vec::new();
         for i in 0..5 {
             batch.push(make_entry(
@@ -662,7 +742,7 @@ mod tests {
         // 5 条延迟样本: 100+101+102+103+104 = 510
         assert_eq!(row.try_get::<i64, _>("total_duration_ms_sum").unwrap(), 510);
         assert_eq!(row.try_get::<i64, _>("total_duration_ms_count").unwrap(), 5);
-        assert_eq!(row.try_get::<i64, _>("date_utc").unwrap(), day_start);
+        assert_eq!(row.try_get::<String, _>("day").unwrap(), local_day_key(day_start));
         assert_eq!(
             row.try_get::<String, _>("virtual_model_name").unwrap(),
             "model-sonnet"
@@ -674,7 +754,7 @@ mod tests {
         let pool = fresh_pool().await;
         let sub_a = Uuid::new_v4();
         let sub_b = Uuid::new_v4();
-        let day = floor_to_utc_day(1_704_067_200_000);
+        let day = 1_704_067_200_000; // 2024-01-01 00:00:00 UTC
         let next_day = day + DAY_MS;
 
         let batch = vec![
@@ -703,9 +783,9 @@ mod tests {
         // (day, sonnet, sub_a) 这一行 request_count=2
         let row = sqlx::query(
             "SELECT request_count FROM request_stats_daily
-             WHERE date_utc=? AND virtual_model_name=? AND subscription_id=?",
+             WHERE day=? AND virtual_model_name=? AND subscription_id=?",
         )
-        .bind(day)
+        .bind(local_day_key(day))
         .bind("model-sonnet")
         .bind(sub_a.to_string())
         .fetch_one(&pool)
@@ -718,7 +798,7 @@ mod tests {
     async fn flush_upserts_existing_stats_row() {
         let pool = fresh_pool().await;
         let sub = Uuid::new_v4();
-        let day = floor_to_utc_day(1_704_067_200_000);
+        let day = 1_704_067_200_000; // 2024-01-01 00:00:00 UTC
 
         // 第一次 flush 2 条
         flush_batch(
@@ -816,7 +896,7 @@ mod tests {
     async fn flush_writes_receipt_stats_with_real_model_dimension() {
         let pool = fresh_pool().await;
         let sub = Uuid::new_v4();
-        let day = floor_to_utc_day(1_704_067_200_000);
+        let day = 1_704_067_200_000; // 2024-01-01 00:00:00 UTC
 
         // 同 (day, vm, sub) 下两个 real_model: claude-x ×2 + other-model ×1
         let e1 = make_entry(day, VirtualModelName::Sonnet, sub, "anthropic",
@@ -841,7 +921,7 @@ mod tests {
         assert_eq!(row.try_get::<i64, _>("request_count").unwrap(), 2);
         assert_eq!(row.try_get::<i64, _>("input_tokens").unwrap(), 15);
         assert_eq!(row.try_get::<i64, _>("output_tokens").unwrap(), 25);
-        assert_eq!(row.try_get::<i64, _>("date_utc").unwrap(), day);
+        assert_eq!(row.try_get::<String, _>("day").unwrap(), local_day_key(day));
         assert_eq!(row.try_get::<String, _>("provider_id").unwrap(), "anthropic");
 
         // 二次 flush 相同 key → UPSERT 累加而非新行

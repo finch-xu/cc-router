@@ -20,14 +20,14 @@ use sqlx::Row;
 use tauri::State;
 
 use crate::error::AppResult;
-use crate::observability::request_log::{floor_to_utc_day, now_ms, DAY_MS};
+use crate::observability::request_log::{local_days_ago_key, local_days_ago_start_ms, now_ms, DAY_MS};
 use crate::state::AppState;
 use crate::virtual_model::model::VirtualModelName;
 
 /// Receipts 专用的时间范围 enum。
 ///
 /// 与 `StatsRange` 故意不共用——StatsRange 全走 daily 聚合表;
-/// 这里 Last24Hours 查 requests 原始表 (滚动窗口), 其余走 receipt_stats_daily。
+/// 这里 Last24Hours 查 requests 原始表 (滚动窗口), 其余走 receipt_stats_daily (本地日历日 key)。
 #[derive(Debug, Clone, Copy, Deserialize, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum ReceiptRange {
@@ -39,17 +39,32 @@ pub enum ReceiptRange {
 }
 
 impl ReceiptRange {
+    /// 「最近 N 天」包含今天共 N 天, 天数往回推; None = 不按天 (24h 滚动 / 全部)。
+    fn days_back(self) -> Option<u32> {
+        match self {
+            Self::Last24Hours | Self::AllTime => None,
+            Self::Last7Days => Some(6),
+            Self::Last30Days => Some(29),
+            Self::LastYear => Some(364),
+        }
+    }
+
+    /// 范围起点瞬时 (ms): 24h 是滚动窗口 `now - 24h`; 按天的范围是起始本地日的 0 点瞬时
+    /// (仅用于 requests 原始表过滤、小票展示与单号, 聚合表过滤走 `since_day`)。
     fn since_ms(self) -> i64 {
         let now = now_ms();
-        let today = floor_to_utc_day(now);
         match self {
-            // 滚动窗口: now - 24h, 不对齐 UTC 0 点
             Self::Last24Hours => now - DAY_MS,
-            // 「最近 N 天」沿用 statistics.rs 习惯: 包含今天共 N 天, 按 UTC 0 点对齐
-            Self::Last7Days => today - 6 * DAY_MS,
-            Self::Last30Days => today - 29 * DAY_MS,
-            Self::LastYear => today - 364 * DAY_MS,
             Self::AllTime => 0,
+            _ => local_days_ago_start_ms(now, self.days_back().unwrap_or(0)),
+        }
+    }
+
+    /// 聚合表 (`receipt_stats_daily.day`, 本地日历日 key) 过滤下限, 空串 = 全部。
+    fn since_day(self) -> String {
+        match self.days_back() {
+            Some(n) => local_days_ago_key(now_ms(), n),
+            None => String::new(),
         }
     }
 }
@@ -151,8 +166,7 @@ pub async fn get_receipt_summary(
                AND r.virtual_model_name IN ({in_clause})
              GROUP BY r.virtual_model_name, r.subscription_id, r.real_model_name"
         ),
-        // 7d/30d/1y 的 since 本就 UTC 0 点对齐 (since_ms), all_time=0,
-        // 对日粒度表 `date_utc >= since` 与旧版逐条过滤严格等价
+        // 7d/30d/1y 按本地日历日过滤聚合表 (`day >= since_day`), all_time 用空串
         _ => format!(
             "SELECT
                 r.virtual_model_name,
@@ -168,12 +182,15 @@ pub async fn get_receipt_summary(
                 COALESCE(SUM(r.cache_read_tokens), 0)                   AS cache_read_tokens
              FROM receipt_stats_daily r
              LEFT JOIN subscriptions sub ON sub.id = r.subscription_id
-             WHERE r.date_utc >= ?
+             WHERE r.day >= ?
                AND r.virtual_model_name IN ({in_clause})
              GROUP BY r.virtual_model_name, r.subscription_id, r.real_model_name"
         ),
     };
-    let rows = sqlx::query(&sql).bind(since).fetch_all(&state.db).await?;
+    let rows = match range {
+        ReceiptRange::Last24Hours => sqlx::query(&sql).bind(since).fetch_all(&state.db).await?,
+        _ => sqlx::query(&sql).bind(range.since_day()).fetch_all(&state.db).await?,
+    };
 
     let mut buckets: std::collections::HashMap<String, Vec<ReceiptSubItemDto>> =
         std::collections::HashMap::new();
@@ -299,5 +316,18 @@ mod tests {
     #[test]
     fn since_ms_all_time_is_zero() {
         assert_eq!(ReceiptRange::AllTime.since_ms(), 0);
+        assert_eq!(ReceiptRange::AllTime.since_day(), "");
+    }
+
+    #[test]
+    fn since_day_is_local_calendar_key_matching_since_ms() {
+        use crate::observability::request_log::local_day_key;
+        // 按天的范围: since_ms 就是 since_day 那一天的本地 0 点, 两者自洽
+        for r in [ReceiptRange::Last7Days, ReceiptRange::Last30Days, ReceiptRange::LastYear] {
+            let day = r.since_day();
+            assert_eq!(day.len(), 10, "YYYY-MM-DD");
+            assert_eq!(local_day_key(r.since_ms()), day);
+            assert_ne!(local_day_key(r.since_ms() - 1), day);
+        }
     }
 }
