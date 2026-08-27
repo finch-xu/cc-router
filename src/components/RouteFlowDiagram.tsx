@@ -6,6 +6,7 @@ import { useSubscriptions } from "@/hooks/useSubscriptions";
 import { useProviders } from "@/hooks/useProviders";
 import { useAnyRouteFlashState } from "@/hooks/useRouteFlash";
 import { fmtCooldownLeft } from "@/lib/format";
+import { isCustomProviderId } from "@/lib/providerLabels";
 import { VM_ORDER } from "@/lib/virtualModels";
 import { useT, type TFunction } from "@/i18n";
 import logoUrl from "@/assets/logo.png";
@@ -113,7 +114,8 @@ function upstreamArc(hubCy: number, cy: number, inner: boolean): string {
 const CLIENT_NAMES = ["Claude Code", "Codex", "OpenCode", "Others"];
 
 interface UpstreamNode {
-  providerId: string;
+  /** 聚合 key: 内置 provider = provider_id; 自定义订阅 = provider_id + 订阅 id (每条独立成云) */
+  key: string;
   name: string;
   icon?: string;
   healthy: boolean;
@@ -200,7 +202,7 @@ export function RouteFlowDiagram() {
               if (!u.healthy) {
                 return (
                   <path
-                    key={u.providerId}
+                    key={u.key}
                     d={d}
                     stroke="var(--rf-err-line)"
                     strokeWidth={1.5}
@@ -209,7 +211,7 @@ export function RouteFlowDiagram() {
                 );
               }
               return (
-                <g key={u.providerId}>
+                <g key={u.key}>
                   <path d={d} stroke="var(--rf-up-line)" strokeWidth={1.5} />
                   {running && (
                     <path
@@ -246,7 +248,7 @@ export function RouteFlowDiagram() {
           <div className="rf-hub-label">cc-router</div>
 
           {upstreams.map((u, i) => (
-            <UpstreamCloud key={u.providerId} node={u} slot={upSlots[i]} />
+            <UpstreamCloud key={u.key} node={u} slot={upSlots[i]} />
           ))}
         </div>
       </div>
@@ -288,6 +290,10 @@ function UpstreamCloud({ node, slot }: { node: UpstreamNode; slot: UpstreamSlot 
  * 收集「在用」的上游: 只算被虚拟模型引用到的订阅, 按 provider 去重。
  * 一家 provider 下任一在用订阅非 healthy 就整体标异常 —— 图上一朵云代表一家,
  * 没有半健康的表达方式, 报警比报平安安全。
+ *
+ * 自定义订阅例外: 它们共享同一个 marker 作 provider_id (custom / custom-openai / ...),
+ * 按 provider 聚合会把互不相关的端点并成一朵云, 状态互相污染 (issue #40) ——
+ * 改为每条自定义订阅独立成云, 云朵名取订阅自己的 provider_display_name。
  */
 function collectUpstreams(
   vms: VirtualModelDto[],
@@ -300,22 +306,25 @@ function collectUpstreams(
     for (const sid of vm.subscription_ids) {
       const sub = subsMap.get(sid);
       if (!sub) continue;
-      const list = byProvider.get(sub.provider_id);
+      const groupKey = isCustomProviderId(sub.provider_id)
+        ? `${sub.provider_id}:${sub.id}`
+        : sub.provider_id;
+      const list = byProvider.get(groupKey);
       if (list) {
         if (!list.some((s) => s.id === sub.id)) list.push(sub);
       } else {
-        byProvider.set(sub.provider_id, [sub]);
+        byProvider.set(groupKey, [sub]);
       }
     }
   }
 
-  return Array.from(byProvider.entries()).map(([providerId, list]) => {
-    const info = providers?.find((p) => p.id === providerId);
+  return Array.from(byProvider.entries()).map(([groupKey, list]) => {
+    const info = providers?.find((p) => p.id === list[0].provider_id);
     const bad = list.find((s) => s.state !== "healthy");
     const cooldown = bad ? fmtCooldownLeft(bad.cooldown_until) : null;
     return {
-      providerId,
-      name: info?.display_name ?? list[0].provider_display_name ?? providerId,
+      key: groupKey,
+      name: info?.display_name ?? list[0].provider_display_name ?? list[0].provider_id,
       icon: info?.icon ?? list[0].provider_icon,
       healthy: !bad,
       statusText: bad

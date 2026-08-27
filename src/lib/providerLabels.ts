@@ -50,3 +50,12 @@ export function customProviderLabel(
 export function providerIconId(providerId: string): string {
   return metaOf(providerId)?.iconId ?? providerId;
 }
+
+/**
+ * 是否为自定义订阅的来源标记 (含 legacy 别名)。
+ * 自定义订阅共享同一个 marker 作 provider_id, 任何按 provider 维度聚合的
+ * 展示逻辑都必须用它降级为按订阅聚合, 否则互不相关的自定义端点会被并在一起。
+ */
+export function isCustomProviderId(providerId: string): boolean {
+  return metaOf(providerId) !== undefined;
+}
