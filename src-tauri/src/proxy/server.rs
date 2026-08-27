@@ -16,9 +16,15 @@ use crate::state::AppState;
 const MAX_PORT_TRIES: u16 = 100;
 
 pub async fn start(state: AppState) -> AppResult<()> {
-    let (mode, http_port_pref, https_port_pref, listen_all) = {
+    let (mode, http_port_pref, https_port_pref, listen_all, body_limit) = {
         let g = state.settings.read().await;
-        (g.proxy_mode, g.proxy_port, g.https_port, g.listen_all)
+        (
+            g.proxy_mode,
+            g.proxy_port,
+            g.https_port,
+            g.listen_all,
+            g.max_request_body_bytes(),
+        )
     };
     let host: IpAddr = if listen_all {
         IpAddr::V4(Ipv4Addr::UNSPECIFIED)
@@ -26,7 +32,7 @@ pub async fn start(state: AppState) -> AppResult<()> {
         IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1))
     };
 
-    let router = build_router(state.clone());
+    let router = build_router(state.clone(), body_limit);
 
     let mut tasks: Vec<JoinHandle<AppResult<()>>> = Vec::new();
 
@@ -88,12 +94,15 @@ pub async fn start(state: AppState) -> AppResult<()> {
     Ok(())
 }
 
-fn build_router(state: AppState) -> Router {
+fn build_router(state: AppState, body_limit: usize) -> Router {
     Router::new()
         .route("/v1/messages", post(handler::messages))
         .route("/v1/responses", post(handler::responses))
         .route("/v1/models", axum::routing::get(handler::models))
         .route("/health", axum::routing::get(handler::health))
+        // axum 对 Bytes extractor 默认 2 MiB 上限, Codex 多图 base64 请求会 413
+        // (issue #41); 上限来自 settings.max_request_body_mb, 改动需重启生效
+        .layer(axum::extract::DefaultBodyLimit::max(body_limit))
         .layer(axum::middleware::from_fn_with_state(
             state.clone(),
             cc_middleware::auth_layer,

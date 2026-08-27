@@ -46,6 +46,7 @@ export function SettingsPage() {
   const [proxyMode, setProxyMode] = useState<ProxyMode>("http");
   const [httpsPort, setHttpsPort] = useState<number>(23457);
   const [listenAll, setListenAll] = useState(false);
+  const [maxBodyMb, setMaxBodyMb] = useState(32);
   const [autostart, setAutostart] = useState(false);
   const [retentionDays, setRetentionDays] = useState(30);
   const [dbLimitMb, setDbLimitMb] = useState(500);
@@ -72,6 +73,7 @@ export function SettingsPage() {
     https_port: number;
     tls_extra_sans: string[];
     https_enable_h2: boolean;
+    max_request_body_mb: number;
   } | null>(null);
 
   const generateTokenMut = useGenerateNewToken();
@@ -92,11 +94,13 @@ export function SettingsPage() {
       https_port: settings.data.https_port ?? 23457,
       tls_extra_sans: settings.data.tls_extra_sans ?? [],
       https_enable_h2: settings.data.https_enable_h2 ?? true,
+      max_request_body_mb: settings.data.max_request_body_mb ?? 32,
     };
     setPort(settings.data.proxy_port);
     setProxyMode(settings.data.proxy_mode ?? "http");
     setHttpsPort(settings.data.https_port ?? 23457);
     setListenAll(settings.data.listen_all);
+    setMaxBodyMb(settings.data.max_request_body_mb ?? 32);
     setAutostart(settings.data.autostart);
     setRetentionDays(settings.data.log_retention_days);
     setDbLimitMb(settings.data.db_size_limit_mb);
@@ -119,7 +123,8 @@ export function SettingsPage() {
         baselineRef.current.tls_extra_sans,
       ) ||
       (settings.data?.https_enable_h2 ?? true) !==
-        baselineRef.current.https_enable_h2);
+        baselineRef.current.https_enable_h2 ||
+      maxBodyMb !== baselineRef.current.max_request_body_mb);
 
   const httpsEnabled = proxyMode === "https" || proxyMode === "both";
 
@@ -150,6 +155,10 @@ export function SettingsPage() {
   async function changeListenAll(next: boolean) {
     setListenAll(next);
     await patch({ listen_all: next });
+  }
+  async function changeMaxBodyMb(next: number) {
+    setMaxBodyMb(next);
+    await patch({ max_request_body_mb: next });
   }
   async function changeProxyPort(next: number) {
     setPort(next);
@@ -585,6 +594,29 @@ export function SettingsPage() {
                 </div>
               )}
             </div>
+          </div>
+
+          {/* 请求体上限: axum 默认 2 MiB 会让 Codex 多图请求 413 (issue #41) */}
+          <div className="setting-row">
+            <div className="label-col">
+              {t("settings.proxy.bodyLimit.label")}
+              <div className="desc">{t("settings.proxy.bodyLimit.desc")}</div>
+            </div>
+            <Select
+              value={String(maxBodyMb)}
+              onValueChange={(v) => void changeMaxBodyMb(Number(v))}
+            >
+              <SelectTrigger style={{ maxWidth: 200 }}>
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="8">8 MB</SelectItem>
+                <SelectItem value="16">16 MB</SelectItem>
+                <SelectItem value="32">{t("settings.proxy.bodyLimit.default32")}</SelectItem>
+                <SelectItem value="64">64 MB</SelectItem>
+                <SelectItem value="128">128 MB</SelectItem>
+              </SelectContent>
+            </Select>
           </div>
 
           {needsRestart && (

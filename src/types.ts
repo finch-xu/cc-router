@@ -437,6 +437,8 @@ export interface Settings {
    * 默认关闭。
    */
   debug_mode: boolean;
+  /** 入站请求体上限 (MiB), 默认 32。修改需重启 app 才生效 (router 构建时读取)。 */
+  max_request_body_mb: number;
 }
 
 export type UpdateSource = "international" | "china";
@@ -457,6 +459,7 @@ export interface SettingsPatch {
   preferred_language?: "system" | "zh" | "en" | "ja";
   update_source?: UpdateSource;
   debug_mode?: boolean;
+  max_request_body_mb?: number;
   // 注意: auth_token 不在 patch 里,必须通过 generateNewToken() 改
 }
 

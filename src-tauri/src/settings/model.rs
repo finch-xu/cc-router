@@ -87,6 +87,11 @@ pub struct Settings {
     /// 用于排查协议适配类问题. 默认关闭(file IO 与磁盘占用代价).
     #[serde(default)]
     pub debug_mode: bool,
+    /// 入站请求体上限 (MiB)。axum 默认 2 MiB 会让 Codex 多图 base64 请求 413
+    /// (issue #41), 默认 32 对齐 Anthropic /v1/messages 官方请求上限。
+    /// 改动需要重启 app 才生效 (router 构建时读取, 同端口/监听地址)。
+    #[serde(default = "default_max_request_body_mb")]
+    pub max_request_body_mb: u32,
 }
 
 fn default_port() -> u16 {
@@ -118,6 +123,9 @@ fn default_preferred_language() -> String {
 fn default_https_enable_h2() -> bool {
     true
 }
+fn default_max_request_body_mb() -> u32 {
+    32
+}
 
 impl Default for Settings {
     fn default() -> Self {
@@ -138,6 +146,7 @@ impl Default for Settings {
             preferred_language: default_preferred_language(),
             update_source: None,
             debug_mode: false,
+            max_request_body_mb: default_max_request_body_mb(),
         }
     }
 }
@@ -159,6 +168,7 @@ pub struct SettingsPatch {
     pub preferred_language: Option<String>,
     pub update_source: Option<String>,
     pub debug_mode: Option<bool>,
+    pub max_request_body_mb: Option<u32>,
 }
 
 impl Settings {
@@ -208,6 +218,15 @@ impl Settings {
         if let Some(p) = patch.debug_mode {
             self.debug_mode = p;
         }
+        if let Some(p) = patch.max_request_body_mb {
+            self.max_request_body_mb = p;
+        }
+    }
+
+    /// 入站 body 上限的字节数。0 (或用户手改出的异常小值) 按 1 MiB 兜底,
+    /// 防止把代理配成完全收不了请求。
+    pub fn max_request_body_bytes(&self) -> usize {
+        self.max_request_body_mb.max(1) as usize * 1024 * 1024
     }
 }
 
@@ -268,6 +287,44 @@ mod tests {
         }"#;
         let s: Settings = serde_json::from_str(raw).unwrap();
         assert!(s.update_source.is_none());
+    }
+
+    #[test]
+    fn default_max_request_body_mb_is_32() {
+        // 对齐 Anthropic /v1/messages 官方 32MB 请求上限; axum 默认 2MiB 会让
+        // Codex 多图 base64 请求 413 (issue #41)
+        assert_eq!(Settings::default().max_request_body_mb, 32);
+    }
+
+    #[test]
+    fn legacy_settings_json_without_max_request_body_mb_gets_default() {
+        // 老版本 settings.json 没有该字段, #[serde(default)] 必须填 32
+        let raw = r#"{ "proxy_port": 23456 }"#;
+        let s: Settings = serde_json::from_str(raw).unwrap();
+        assert_eq!(s.max_request_body_mb, 32);
+    }
+
+    #[test]
+    fn apply_patch_sets_max_request_body_mb() {
+        let mut s = Settings::default();
+        s.apply_patch(SettingsPatch {
+            max_request_body_mb: Some(8),
+            ..Default::default()
+        });
+        assert_eq!(s.max_request_body_mb, 8);
+    }
+
+    #[test]
+    fn max_request_body_bytes_clamps_zero_to_one_mib() {
+        // 用户手改 settings.json 填 0 时按 1 MiB 兜底, 不能把代理配成完全收不了请求
+        let mut s = Settings::default();
+        s.max_request_body_mb = 0;
+        assert_eq!(s.max_request_body_bytes(), 1024 * 1024);
+    }
+
+    #[test]
+    fn max_request_body_bytes_converts_mib() {
+        assert_eq!(Settings::default().max_request_body_bytes(), 32 * 1024 * 1024);
     }
 
     #[test]
