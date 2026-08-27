@@ -28,9 +28,12 @@ use crate::virtual_model::model::VirtualModelName;
 ///
 /// 与 `StatsRange` 故意不共用——StatsRange 全走 daily 聚合表;
 /// 这里 Last24Hours 查 requests 原始表 (滚动窗口), 其余走 receipt_stats_daily (本地日历日 key)。
-#[derive(Debug, Clone, Copy, Deserialize, Serialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum ReceiptRange {
+    /// serde snake_case 不会在「数字→大写字母」边界插下划线: 默认会得到 "last24_hours",
+    /// 与前端契约 "last_24_hours" 不符导致反序列化失败 (24h 小票永远空), 这里显式改名。
+    #[serde(rename = "last_24_hours")]
     Last24Hours,
     Last7Days,
     Last30Days,
@@ -317,6 +320,32 @@ mod tests {
     fn since_ms_all_time_is_zero() {
         assert_eq!(ReceiptRange::AllTime.since_ms(), 0);
         assert_eq!(ReceiptRange::AllTime.since_day(), "");
+    }
+
+    /// 前后端契约回归测试: 前端 src/types.ts::ReceiptRange 用的是
+    /// "last_24_hours" / "last7_days" / "last30_days" / "last_year" / "all_time"。
+    /// serde snake_case 对含数字的 variant 不会在数字后插下划线
+    /// ("Last24Hours" 默认 → "last24_hours"), 必须靠显式 rename 对齐。
+    #[test]
+    fn receipt_range_serde_names_match_frontend_contract() {
+        let cases = [
+            (ReceiptRange::Last24Hours, "last_24_hours"),
+            (ReceiptRange::Last7Days, "last7_days"),
+            (ReceiptRange::Last30Days, "last30_days"),
+            (ReceiptRange::LastYear, "last_year"),
+            (ReceiptRange::AllTime, "all_time"),
+        ];
+        for (range, name) in cases {
+            // 序列化 (后端 → 前端 ReceiptDto.range)
+            assert_eq!(
+                serde_json::to_string(&range).unwrap(),
+                format!("\"{name}\"")
+            );
+            // 反序列化 (前端 → 后端 command 参数)
+            let parsed: ReceiptRange =
+                serde_json::from_str(&format!("\"{name}\"")).unwrap();
+            assert_eq!(parsed, range);
+        }
     }
 
     #[test]
