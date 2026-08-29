@@ -101,6 +101,7 @@ export function SubscriptionEditPage() {
   const [authHeaderFormat, setAuthHeaderFormat] = useState<AuthHeaderFormat>("bearer");
   const [providerDisplayName, setProviderDisplayName] = useState<string>("");
   const [requiredHeaders, setRequiredHeaders] = useState<KeyValueRow[]>([]);
+  const [forwardClientHeaders, setForwardClientHeaders] = useState(false);
 
   const [models, setModels] = useState<ModelInfo[] | null>(null);
   const [fetchingModels, setFetchingModels] = useState(false);
@@ -130,6 +131,7 @@ export function SubscriptionEditPage() {
       setAuthHeaderName(subQuery.data.auth_header_name);
       setAuthHeaderFormat(subQuery.data.auth_header_format);
       setProviderDisplayName(subQuery.data.provider_display_name);
+      setForwardClientHeaders(subQuery.data.forward_client_headers ?? false);
       setRequiredHeaders(
         Object.entries(subQuery.data.required_headers ?? {}).map(([key, value]) => ({
           key,
@@ -171,6 +173,10 @@ export function SubscriptionEditPage() {
       model_slots: slots,
       slot_efforts: slotEfforts,
     };
+    // 仅透传订阅有此开关 (翻译类订阅不渲染也不提交, 保持后端字段不变)
+    if (sub.auth_type === "api_key") {
+      patch.forward_client_headers = forwardClientHeaders;
+    }
     if (sub.is_user_defined) {
       const connErrKey = validateConnection({ base_url: baseUrl, messages_path: messagesPath });
       if (connErrKey) return setSaveError(t(connErrKey));
@@ -419,6 +425,22 @@ export function SubscriptionEditPage() {
               </Button>
             </div>
           </div>
+
+          {/* 仅 Anthropic 透传订阅: 透传客户端请求头开关 (翻译类协议不消费此字段) */}
+          {sub.auth_type === "api_key" && (
+            <div className="grid grid-cols-[120px_1fr] gap-3 items-start">
+              <Label className="mt-0.5">{t("subscriptionEdit.forwardClientHeaders")}</Label>
+              <div className="space-y-1">
+                <Switch
+                  checked={forwardClientHeaders}
+                  onCheckedChange={setForwardClientHeaders}
+                />
+                <p className="text-xs text-muted-foreground">
+                  {t("subscriptionEdit.forwardClientHeadersHint")}
+                </p>
+              </div>
+            </div>
+          )}
         </CardContent>
       </Card>
 

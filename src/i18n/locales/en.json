@@ -550,6 +550,8 @@
   "subscriptionEdit.requiredHeaderKeyPh": "X-Custom-Header",
   "subscriptionEdit.requiredHeaderValuePh": "custom value",
   "subscriptionEdit.requiredHeadersHint": "Custom request headers attached to every forwarded request, e.g. routing headers required by enterprise gateways. Overrides default headers with the same name. Use \"Test connection\" after saving to verify.",
+  "subscriptionEdit.forwardClientHeaders": "Forward client headers",
+  "subscriptionEdit.forwardClientHeadersHint": "When enabled, the client's x-claude-code-session-id, anthropic-beta, anthropic-version, x-app and x-stainless-* headers are forwarded to the upstream as-is (relays can use them for per-session rate limiting). Credentials and User-Agent are never forwarded; forwarding anthropic-beta may enable the corresponding beta features upstream. Off by default.",
   "subscriptionEdit.modelSlotsTitle": "Model slots",
   "subscriptionEdit.modelCacheUpdated": "Models updated: ",
   "subscriptionEdit.testModel": "Test model: ",

@@ -1,6 +1,7 @@
 pub mod client_fingerprint;
 pub mod effort_log;
 pub mod extractors;
+pub mod forward;
 pub mod gemini_dispatch;
 pub mod gemini_interactions_dispatch;
 pub mod handler;

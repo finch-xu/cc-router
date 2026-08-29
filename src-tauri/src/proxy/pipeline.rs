@@ -6,7 +6,6 @@ use axum::http::{HeaderMap, HeaderName, HeaderValue, StatusCode};
 use axum::response::{IntoResponse, Response};
 use axum::Json;
 use chrono::Utc;
-use reqwest::header::{HeaderMap as ReqHeaderMap, HeaderName as ReqHeaderName, HeaderValue as ReqHeaderValue};
 use serde_json::Value;
 use tauri::Emitter;
 use tracing::{info, warn};
@@ -18,6 +17,7 @@ use crate::observability::events::{self, Severity};
 use crate::observability::request_log::{RequestLogEntry, RequestStatus};
 use crate::provider::model::AuthType;
 use crate::proxy::client_fingerprint::ClientContext;
+use crate::proxy::forward;
 use crate::proxy::gemini_dispatch;
 use crate::proxy::gemini_interactions_dispatch;
 use crate::proxy::openai_chat_completions_dispatch;
@@ -228,6 +228,7 @@ pub async fn dispatch(
             api_key_raw,
             required_headers,
             forward_headers,
+            forward_client_headers,
             auth_type,
             oauth_metadata,
             forced_effort,
@@ -264,6 +265,7 @@ pub async fn dispatch(
                 guard.row.api_key.clone(),
                 guard.row.required_headers.clone(),
                 guard.row.forward_headers.clone(),
+                guard.row.forward_client_headers,
                 guard.row.auth_type,
                 guard.row.oauth_metadata.clone(),
                 forced_effort,
@@ -1251,37 +1253,15 @@ pub async fn dispatch(
             ));
         }
 
-        let mut upstream_headers = ReqHeaderMap::new();
-        if let (Ok(name), Ok(value)) = (
-            ReqHeaderName::try_from(auth_header_name.as_str()),
-            ReqHeaderValue::from_str(&auth_header_value),
-        ) {
-            upstream_headers.insert(name, value);
-        }
-        // required headers (从订阅 snapshot 读)
-        for (k, v) in required_headers.iter() {
-            if let (Ok(name), Ok(value)) = (
-                ReqHeaderName::try_from(k.as_str()),
-                ReqHeaderValue::from_str(v),
-            ) {
-                upstream_headers.insert(name, value);
-            }
-        }
-        // forward headers (白名单, 从订阅 snapshot 读)
-        for fwd in forward_headers.iter() {
-            if let Some(val) = client_headers.get(fwd.as_str()) {
-                if let (Ok(name), Ok(value)) = (
-                    ReqHeaderName::try_from(fwd.as_str()),
-                    ReqHeaderValue::from_bytes(val.as_bytes()),
-                ) {
-                    upstream_headers.insert(name, value);
-                }
-            }
-        }
-        // content-type: application/json
-        upstream_headers.insert(
-            reqwest::header::CONTENT_TYPE,
-            ReqHeaderValue::from_static("application/json"),
+        // 出站头组装 (forward → required → auth → content-type, 后插覆盖):
+        // forward_client_headers 开关打开时按内置白名单转发客户端头 (proxy/forward.rs)。
+        let upstream_headers = forward::build_anthropic_passthrough_headers(
+            &client_headers,
+            forward_client_headers,
+            &forward_headers,
+            &required_headers,
+            &auth_header_name,
+            &auth_header_value,
         );
 
         info!(

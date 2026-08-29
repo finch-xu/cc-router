@@ -550,6 +550,8 @@
   "subscriptionEdit.requiredHeaderKeyPh": "X-Custom-Header",
   "subscriptionEdit.requiredHeaderValuePh": "カスタム値",
   "subscriptionEdit.requiredHeadersHint": "転送リクエストごとに付加されるカスタムリクエストヘッダーです。企業ゲートウェイが要求するルーティングヘッダーなどに使用します。同名のデフォルトヘッダーを上書きします。保存後に「接続テスト」で実際に検証できます。",
+  "subscriptionEdit.forwardClientHeaders": "クライアントヘッダーの転送",
+  "subscriptionEdit.forwardClientHeadersHint": "有効にすると、クライアントの x-claude-code-session-id、anthropic-beta、anthropic-version、x-app、x-stainless-* をそのまま上流へ転送します (中継サーバーはセッション単位のレート制限に利用できます)。認証情報と User-Agent は転送しません。anthropic-beta の転送により上流で対応する beta 機能が有効になる場合があります。デフォルトはオフです。",
   "subscriptionEdit.modelSlotsTitle": "モデルスロット",
   "subscriptionEdit.modelCacheUpdated": "モデル一覧を更新: ",
   "subscriptionEdit.testModel": "テストモデル: ",

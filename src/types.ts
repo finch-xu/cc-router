@@ -295,6 +295,8 @@ export interface SubscriptionDto {
   auth_header_format: AuthHeaderFormat;
   required_headers: Record<string, string>;
   forward_headers: string[];
+  /** 「透传客户端请求头」开关 (仅 auth_type=api_key 的透传路径消费, 默认 false) */
+  forward_client_headers: boolean;
   model_discovery: ModelDiscoveryDto;
   /** true 表示该 provider 声明且启用了余额查询接口. */
   balance_supported: boolean;
@@ -361,6 +363,8 @@ export interface SubscriptionPatch {
   model_slots?: ModelSlots;
   /** 每槽位 effort 覆盖, 整块替换 (与 model_slots 一致, 无 per-slot patch) */
   slot_efforts?: SlotEfforts;
+  /** 「透传客户端请求头」开关 (仅透传订阅显示, 内置/自定义均可改) */
+  forward_client_headers?: boolean;
   /** 内置订阅: 切换 endpoint, 后端 re-snapshot */
   endpoint_id?: string;
   /** 自定义订阅: 改连接信息 */

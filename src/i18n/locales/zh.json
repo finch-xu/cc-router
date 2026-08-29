@@ -562,6 +562,8 @@
   "subscriptionEdit.requiredHeaderKeyPh": "X-Custom-Header",
   "subscriptionEdit.requiredHeaderValuePh": "自定义值",
   "subscriptionEdit.requiredHeadersHint": "每次转发请求时附加的自定义请求头, 如企业网关要求的路由头。会覆盖同名默认头。保存后点「测试连接」可实际验证。",
+  "subscriptionEdit.forwardClientHeaders": "透传客户端请求头",
+  "subscriptionEdit.forwardClientHeadersHint": "打开后将客户端的 x-claude-code-session-id、anthropic-beta、anthropic-version、x-app、x-stainless-* 原样转发给上游 (中转站可据此按会话限流)。凭据与 User-Agent 不转发; anthropic-beta 转发后上游可能启用相应 beta 特性。默认关闭。",
   "subscriptionEdit.modelSlotsTitle": "模型槽位",
   "subscriptionEdit.modelCacheUpdated": "模型列表更新: ",
   "subscriptionEdit.testModel": "测试模型: ",

@@ -250,6 +250,10 @@ pub struct SubscriptionRow {
     pub auth_header_format: AuthHeaderFormat,
     pub required_headers: BTreeMap<String, String>,
     pub forward_headers: Vec<String>,
+    /// 「透传客户端请求头」开关 (migration 020, 默认 false = 历史行为)。
+    /// 打开后 Anthropic 透传路径按 proxy/forward.rs 的内置白名单转发客户端头;
+    /// 翻译类 auth_type 不消费此字段。
+    pub forward_client_headers: bool,
     pub model_discovery: ModelDiscovery,
     /// 余额查询配置 snapshot. provider yaml 不声明则为 None, UI 不显示余额卡片.
     pub balance_discovery: Option<BalanceDiscovery>,
@@ -462,6 +466,9 @@ pub struct SubscriptionDto {
     pub auth_header_format: AuthHeaderFormat,
     pub required_headers: BTreeMap<String, String>,
     pub forward_headers: Vec<String>,
+    /// 「透传客户端请求头」开关. 默认 false 兼容老 DTO 消费者.
+    #[serde(default)]
+    pub forward_client_headers: bool,
     pub model_discovery: ModelDiscovery,
     /// Whether this subscription's provider exposes a balance/quota endpoint.
     /// Derived from `balance_discovery.is_some_and(|b| b.enabled)` server-side;
@@ -543,6 +550,7 @@ impl SubscriptionRow {
             auth_header_format: AuthHeaderFormat::Bearer,
             required_headers: BTreeMap::new(),
             forward_headers: Vec::new(),
+            forward_client_headers: false,
             model_discovery: ModelDiscovery::default(),
             balance_discovery: None,
             provider_display_name: String::new(),
@@ -601,6 +609,7 @@ impl SubscriptionDto {
             auth_header_format: rt.row.auth_header_format.clone(),
             required_headers: rt.row.required_headers.clone(),
             forward_headers: rt.row.forward_headers.clone(),
+            forward_client_headers: rt.row.forward_client_headers,
             model_discovery: rt.row.model_discovery.clone(),
             balance_supported: rt
                 .row

@@ -115,6 +115,9 @@ pub struct SubscriptionPatch {
     /// 每槽位 reasoning effort 覆盖. 整块替换 (与 model_slots 一致, 无 per-slot patch)。
     /// 字段缺失 = auto, 即透传客户端请求携带的 effort。
     pub slot_efforts: Option<SlotEfforts>,
+    /// 「透传客户端请求头」开关。仅 Anthropic 透传路径 (auth_type=api_key) 消费;
+    /// 内置/自定义订阅均可改 (不属于 connection 信息)。
+    pub forward_client_headers: Option<bool>,
     /// 内置订阅: 切到同 provider 的另一个 endpoint, 后端 re-snapshot base_url/messages_path。
     /// 自定义订阅传该字段会被拒绝。
     pub endpoint_id: Option<String>,
@@ -245,6 +248,7 @@ pub async fn create_subscription(
                 auth_header_format: provider.auth.header_format.clone(),
                 required_headers: provider.required_headers.clone(),
                 forward_headers: provider.forward_headers.clone(),
+                forward_client_headers: false,
                 model_discovery: provider.model_discovery.clone(),
                 balance_discovery: provider.balance_discovery.clone(),
                 provider_display_name: provider.display_name.clone(),
@@ -360,6 +364,7 @@ pub async fn create_subscription(
                 auth_header_format,
                 required_headers: BTreeMap::new(),
                 forward_headers: Vec::new(),
+                forward_client_headers: false,
                 model_discovery: discovery,
                 balance_discovery: None,
                 provider_display_name,
@@ -460,6 +465,9 @@ pub async fn update_subscription(
         }
         if let Some(efforts) = patch.slot_efforts {
             guard.row.slot_efforts = efforts;
+        }
+        if let Some(v) = patch.forward_client_headers {
+            guard.row.forward_client_headers = v;
         }
         if let Some((eid, base, path)) = endpoint_resnapshot {
             guard.row.endpoint_id = eid;

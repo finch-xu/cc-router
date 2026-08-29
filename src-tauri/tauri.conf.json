@@ -91,6 +91,7 @@
       "migrations/017_add_token_quotas.sql",
       "migrations/018_add_request_effort.sql",
       "migrations/019_stats_daily_local_day.sql",
+      "migrations/020_add_forward_client_headers.sql",
       "../LICENSE"
     ],
     "category": "DeveloperTool",
