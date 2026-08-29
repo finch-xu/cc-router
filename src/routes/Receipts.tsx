@@ -77,7 +77,7 @@ export function ReceiptsPage() {
   const [options, setOptions] = useState<ReceiptDisplayOptions>({
     showCacheTokens: true,
     showRequestCounts: true,
-    colorMode: "color",
+    theme: "color",
     showProviderLogo: true,
     compactTokens: true,
     groupMode: "virtual_model",
@@ -136,7 +136,7 @@ export function ReceiptsPage() {
       } else if (kind === "pdf") {
         await exportPdf(el, slip, r);
       } else {
-        await exportHtml(el, slip, r);
+        await exportHtml(el, slip, r, options.theme);
       }
       showFlash(t("receipts.savedToDownloads"));
     } catch (err) {

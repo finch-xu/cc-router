@@ -1,7 +1,45 @@
 import { toPng } from "html-to-image";
 import jsPDF from "jspdf";
+import type { ReceiptTheme } from "@/components/receipts/ReceiptSlip";
+// ?inline: 拿到构建后的 css 文本 (双 CDN @font-face), 不注入页面
+import receiptFontsCss from "@/receipt-fonts.css?inline";
 
 const FILE_PREFIX = "cc-router-receipt";
+
+/** 各主题实际使用的 webfont family; 经典主题走系统字体不需要内嵌 */
+const THEME_FONT_FAMILIES: Record<ReceiptTheme, string[]> = {
+  mono: [],
+  color: [],
+  jp_konbini: ["DotGothic16"],
+  us_grocery: ["Courier Prime"],
+  de_discount: ["IBM Plex Mono"],
+  fr_market: ["Space Mono", "Cormorant Garamond"],
+  pharmacy: ["Archivo", "IBM Plex Mono"],
+  diner_check: ["Caveat", "Oswald"],
+  car_label: ["Oswald", "Archivo Narrow"],
+};
+
+/**
+ * 从 receipt-fonts.css 里挑出当前主题用到的 @font-face 块。
+ * 小票本体是纯 inline style, 唯独 @font-face 无法内联到元素上——导出的 HTML
+ * 必须自带这些规则, 否则主题字体整体回退系统字体。字体文件仍指公共 CDN
+ * (导出的 HTML 无 CSP), 打开时有网即加载, 离线回退系统字体。
+ */
+function fontFaceCssFor(theme: ReceiptTheme): string {
+  const families = THEME_FONT_FAMILIES[theme] ?? [];
+  if (families.length === 0) return "";
+  const blocks: string[] = [];
+  const parts = receiptFontsCss.split("@font-face");
+  for (const part of parts.slice(1)) {
+    const end = part.indexOf("}");
+    if (end < 0) continue;
+    const block = "@font-face" + part.slice(0, end + 1);
+    if (families.some((f) => block.includes(`font-family: '${f}'`) || block.includes(`font-family: "${f}"`) || block.includes(`font-family:${f}`))) {
+      blocks.push(block);
+    }
+  }
+  return blocks.join("\n");
+}
 
 /** 内联失败时的兜底 logo (公网)。app 内的 logo 是打包资源路径, 独立打开的 HTML 里解析不到会空白。 */
 const PUBLIC_LOGO_URL = "https://ccrouter.app/assets/icon.png";
@@ -70,7 +108,12 @@ export async function exportPdf(el: HTMLElement, slipNo: string, range: string):
 /** 小票本体全 inline-style, 不依赖外部 CSS, outerHTML 直接复制即可在任何浏览器打开。
  *  唯一例外是 logo <img>: 打包资源路径离开 app 无法解析, 导出前克隆 DOM 把 src
  *  内联成 base64 data URI (离线可看); 取不到时兜底公网 URL。 */
-export async function exportHtml(el: HTMLElement, slipNo: string, range: string): Promise<void> {
+export async function exportHtml(
+  el: HTMLElement,
+  slipNo: string,
+  range: string,
+  theme: ReceiptTheme,
+): Promise<void> {
   const clone = el.cloneNode(true) as HTMLElement;
   const logo = clone.querySelector("img[data-receipt-logo]");
   if (logo) {
@@ -78,12 +121,14 @@ export async function exportHtml(el: HTMLElement, slipNo: string, range: string)
     logo.setAttribute("src", inline ?? PUBLIC_LOGO_URL);
   }
 
+  const fontCss = fontFaceCssFor(theme);
   const html = `<!doctype html>
 <html lang="zh">
 <head>
 <meta charset="utf-8">
 <title>cc-router receipt ${slipNo}</title>
 <style>body { margin: 0; padding: 32px; background: #f0ece2; display: flex; justify-content: center; }</style>
+${fontCss ? `<style>\n${fontCss}\n</style>` : ""}
 </head>
 <body>
 ${clone.outerHTML}

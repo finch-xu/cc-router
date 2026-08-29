@@ -3,7 +3,20 @@ import { ChevronDown, FileImage, FileText, FileCode, RefreshCw } from "lucide-re
 import { useT } from "@/i18n";
 import { useSubscriptions } from "@/hooks/useSubscriptions";
 import type { ReceiptRange, SubscriptionDto } from "@/types";
-import type { ReceiptDisplayOptions } from "./ReceiptSlip";
+import { isClassicTheme, type ReceiptDisplayOptions, type ReceiptTheme } from "./ReceiptSlip";
+
+/** 主题顺序: 经典两配色在前, 之后按设计稿 A-G 排列 */
+const RECEIPT_THEMES: ReceiptTheme[] = [
+  "mono",
+  "color",
+  "jp_konbini",
+  "us_grocery",
+  "de_discount",
+  "fr_market",
+  "pharmacy",
+  "diner_check",
+  "car_label",
+];
 
 /** 时间范围选择器渲染在页面标题行 (Receipts.tsx), 这里只导出选项表 */
 export const RECEIPT_RANGES: { key: ReceiptRange; labelKey: string }[] = [
@@ -52,6 +65,8 @@ export function ReceiptControls({
   const subs = useSubscriptions();
 
   const subsList: SubscriptionDto[] = subs.data ?? [];
+  // 主题小票是固定排版, 聚合视图/识别码/细项开关只对经典主题生效
+  const classic = isClassicTheme(options.theme);
 
   // 收集所有出现过的 provider — 来自订阅列表的 provider_id (含自定义 marker)
   const providerOptions = useMemo(() => {
@@ -114,9 +129,30 @@ export function ReceiptControls({
         </div>
       </Section>
 
-      {/* Section 2 — 显示选项: 两个分段控件并排, 5 个勾选项双列 */}
+      {/* Section 2 — 显示选项: 主题选择器置顶; 细项仅经典主题可用 */}
       <Section title={t("receipts.controls.display.title")}>
-        <div className="receipt-field-row">
+        <div style={{ marginBottom: 12 }}>
+          <div className="receipt-field-label">
+            {t("receipts.controls.display.theme.label")}
+          </div>
+          <div className="range-tabs" style={{ flexWrap: "wrap" }}>
+            {RECEIPT_THEMES.map((m) => (
+              <button
+                key={m}
+                type="button"
+                className={"range-tab" + (options.theme === m ? " active" : "")}
+                onClick={() => onOptionsChange({ ...options, theme: m })}
+              >
+                {t(`receipts.controls.display.theme.${m}`)}
+              </button>
+            ))}
+          </div>
+          <div className="receipt-field-desc">
+            {t("receipts.controls.display.theme.desc")}
+          </div>
+        </div>
+
+        <div className="receipt-field-row" style={classic ? undefined : { opacity: 0.45 }}>
           <div>
             <div className="receipt-field-label">
               {t("receipts.controls.display.groupMode.label")}
@@ -126,6 +162,7 @@ export function ReceiptControls({
                 <button
                   key={m}
                   type="button"
+                  disabled={!classic}
                   className={"range-tab" + (options.groupMode === m ? " active" : "")}
                   onClick={() => onOptionsChange({ ...options, groupMode: m })}
                 >
@@ -146,6 +183,7 @@ export function ReceiptControls({
                 <button
                   key={s}
                   type="button"
+                  disabled={!classic}
                   className={"range-tab" + (options.footerCodeStyle === s ? " active" : "")}
                   onClick={() => onOptionsChange({ ...options, footerCodeStyle: s })}
                 >
@@ -159,33 +197,34 @@ export function ReceiptControls({
           </div>
         </div>
 
-        <div className="receipt-check-grid" style={{ marginTop: 12 }}>
-          <CheckboxRow
-            checked={options.colorMode === "color"}
-            label={t("receipts.controls.display.colorMode")}
-            desc={t("receipts.controls.display.colorModeDesc")}
-            onChange={(v) => onOptionsChange({ ...options, colorMode: v ? "color" : "mono" })}
-          />
+        <div
+          className="receipt-check-grid"
+          style={{ marginTop: 12, ...(classic ? null : { opacity: 0.45 }) }}
+        >
           <CheckboxRow
             checked={options.showProviderLogo}
+            disabled={!classic}
             label={t("receipts.controls.display.showProviderLogo")}
             desc={t("receipts.controls.display.showProviderLogoDesc")}
             onChange={(v) => onOptionsChange({ ...options, showProviderLogo: v })}
           />
           <CheckboxRow
             checked={options.showCacheTokens}
+            disabled={!classic}
             label={t("receipts.controls.display.showCache")}
             desc={t("receipts.controls.display.showCacheDesc")}
             onChange={(v) => onOptionsChange({ ...options, showCacheTokens: v })}
           />
           <CheckboxRow
             checked={options.showRequestCounts}
+            disabled={!classic}
             label={t("receipts.controls.display.showCounts")}
             desc={t("receipts.controls.display.showCountsDesc")}
             onChange={(v) => onOptionsChange({ ...options, showRequestCounts: v })}
           />
           <CheckboxRow
             checked={options.compactTokens}
+            disabled={!classic}
             label={t("receipts.controls.display.compactTokens")}
             desc={t("receipts.controls.display.compactTokensDesc")}
             onChange={(v) => onOptionsChange({ ...options, compactTokens: v })}
@@ -246,17 +285,20 @@ function CheckboxRow({
   label,
   desc,
   onChange,
+  disabled,
 }: {
   checked: boolean;
   label: string;
   desc?: string;
   onChange: (v: boolean) => void;
+  disabled?: boolean;
 }) {
   return (
-    <label className="receipt-check">
+    <label className="receipt-check" style={disabled ? { cursor: "default" } : undefined}>
       <input
         type="checkbox"
         checked={checked}
+        disabled={disabled}
         onChange={(e) => onChange(e.target.checked)}
       />
       <span className="receipt-check-text">

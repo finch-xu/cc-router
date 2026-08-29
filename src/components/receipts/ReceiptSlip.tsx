@@ -22,11 +22,53 @@ import type {
 import { version as VERSION } from "../../../package.json";
 import logoUrl from "@/assets/logo.png";
 
+import { useSettings } from "@/hooks/useSettings";
+import { useVirtualModels } from "@/hooks/useVirtualModels";
+import { JpKonbiniSlip } from "./themes/JpKonbiniSlip";
+import { UsGrocerySlip } from "./themes/UsGrocerySlip";
+import { DeDiscountSlip } from "./themes/DeDiscountSlip";
+import { FrMarketSlip } from "./themes/FrMarketSlip";
+import { PharmacySlip } from "./themes/PharmacySlip";
+import { DinerCheckSlip } from "./themes/DinerCheckSlip";
+import { CarLabelSlip } from "./themes/CarLabelSlip";
+import type { ThemeSlipProps } from "./themes/shared";
+
 const SITE_URL = "https://ccrouter.app";
 const SITE_LABEL = "ccrouter.app";
 const REPO_LABEL = "github.com/finch-xu/cc-router";
 
 export type ReceiptColorMode = "mono" | "color";
+
+/**
+ * 小票主题: mono/color 是原有经典排版的两个配色; 其余 7 个是完整的独立排版方案
+ * (标签语言/分隔线/装饰随主题固定, 不响应经典排版的细项开关)。
+ */
+export type ReceiptTheme =
+  | ReceiptColorMode
+  | "jp_konbini"
+  | "us_grocery"
+  | "de_discount"
+  | "fr_market"
+  | "pharmacy"
+  | "diner_check"
+  | "car_label";
+
+export function isClassicTheme(theme: ReceiptTheme): theme is ReceiptColorMode {
+  return theme === "mono" || theme === "color";
+}
+
+const THEME_SLIPS: Record<
+  Exclude<ReceiptTheme, ReceiptColorMode>,
+  (props: ThemeSlipProps) => React.ReactElement
+> = {
+  jp_konbini: JpKonbiniSlip,
+  us_grocery: UsGrocerySlip,
+  de_discount: DeDiscountSlip,
+  fr_market: FrMarketSlip,
+  pharmacy: PharmacySlip,
+  diner_check: DinerCheckSlip,
+  car_label: CarLabelSlip,
+};
 
 /** 小票底部识别码样式: 二维码 (默认) 或 Code128 条形码 */
 export type ReceiptFooterCodeStyle = "qr" | "barcode";
@@ -44,8 +86,8 @@ export interface ReceiptDisplayOptions {
   showCacheTokens: boolean;
   /** 在每行子项展示请求次数;关掉只展示 token */
   showRequestCounts: boolean;
-  /** 默认 mono 黑白(打印小票感)/ color 米色纸彩色 */
-  colorMode: ReceiptColorMode;
+  /** 小票主题: mono/color 为经典排版配色, 其余为独立主题排版 */
+  theme: ReceiptTheme;
   /** 子项行展示 provider 品牌 logo (来自 lobehub/icons), 默认关 */
   showProviderLogo: boolean;
   /** 把 token 数字压缩成 K/M 紧凑形式 (2 位小数), 默认开启; 仅作用于 token, 不影响请求次数 */
@@ -133,7 +175,24 @@ export const ReceiptSlip = forwardRef<HTMLDivElement, Props>(function ReceiptSli
   ref,
 ) {
   const { t } = useT();
-  const palette = PALETTE[options.colorMode];
+  // 主题小票需要的真实运行时数据 (hooks 必须无条件调用)
+  const settings = useSettings();
+  const vms = useVirtualModels();
+
+  if (!isClassicTheme(options.theme)) {
+    const port = settings.data?.proxy_port ?? 23456;
+    const modes = new Set((vms.data ?? []).map((v) => v.mode));
+    const sched =
+      modes.size === 1 ? [...modes][0] : modes.size === 0 ? "—" : "mixed";
+    const Slip = THEME_SLIPS[options.theme];
+    return (
+      <div ref={ref} style={{ width: 360 }}>
+        <Slip dto={dto} port={port} sched={sched} />
+      </div>
+    );
+  }
+
+  const palette = PALETTE[options.theme];
 
   const periodLabel = formatPeriod(dto.range_start_ms, dto.range_end_ms);
   const issuedLabel = formatIssued(dto.generated_at_ms);
@@ -154,7 +213,7 @@ export const ReceiptSlip = forwardRef<HTMLDivElement, Props>(function ReceiptSli
         lineHeight: 1.55,
         fontVariantNumeric: "tabular-nums",
         boxShadow:
-          options.colorMode === "color"
+          options.theme === "color"
             ? "0 1px 2px rgba(0,0,0,0.04), 0 8px 24px -8px rgba(0,0,0,0.08)"
             : "0 0 0 1px " + palette.border,
         border: "1px solid " + palette.border,
@@ -434,7 +493,7 @@ function SubItemRows({
             <ProviderIcon
               iconId={providerIconId(sub.provider_id)}
               size={12}
-              monochrome={options.colorMode === "mono"}
+              monochrome={options.theme === "mono"}
             />
           </span>
         )}
@@ -647,7 +706,7 @@ function SubscriptionBlock({
               <ProviderIcon
                 iconId={providerIconId(group.provider_id)}
                 size={12}
-                monochrome={options.colorMode === "mono"}
+                monochrome={options.theme === "mono"}
               />
             </span>
           )}
@@ -845,7 +904,7 @@ function TotalsSection({
                   <ProviderIcon
                     iconId={providerIconId(r.provider_id)}
                     size={11}
-                    monochrome={options.colorMode === "mono"}
+                    monochrome={options.theme === "mono"}
                   />
                 </span>
               )}

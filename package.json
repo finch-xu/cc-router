@@ -51,6 +51,15 @@
     "tailwind-merge": "^2.5.4"
   },
   "devDependencies": {
+    "@fontsource/archivo": "^5.3.0",
+    "@fontsource/archivo-narrow": "^5.3.0",
+    "@fontsource/caveat": "^5.3.0",
+    "@fontsource/cormorant-garamond": "^5.3.0",
+    "@fontsource/courier-prime": "^5.3.0",
+    "@fontsource/dotgothic16": "^5.3.0",
+    "@fontsource/ibm-plex-mono": "^5.3.0",
+    "@fontsource/oswald": "^5.3.0",
+    "@fontsource/space-mono": "^5.3.0",
     "@tauri-apps/cli": "^2.11.2",
     "@types/react": "^19.0.0",
     "@types/react-dom": "^19.0.0",
