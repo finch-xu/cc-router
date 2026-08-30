@@ -1593,6 +1593,55 @@ input, select, textarea { font: inherit; color: inherit; }
   flex-shrink: 0;
 }
 
+/* 居中内容列。顶栏 / 内容 / 底栏三处套同一个类 —— 栏内控件与卡片的左右边缘
+ * 因此严格对齐, 宽度也只在这里定义一次 (三处各写一份迟早会漏掉一处)。
+ * 880 是按详情页里「120px 标签 + 输入框」的两栏布局和长说明文字量出来的。 */
+.page-col {
+  width: 100%;
+  max-width: 880px;
+  margin: 0 auto;
+}
+
+/* 顶栏标题组: 整组可收缩, 名称过长时省略。
+ * 与 .nav-label / .vm-map 那两处「刻意不省略」不同: 那两处是固定译文, 长度可以量;
+ * 这里是用户自己填的备注名, 长度不设上限。
+ * (overflow:hidden 顺带把 flex item 的 min-width:auto 解析成 0, 所以省略号才生效) */
+.page-bar-lead {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+}
+.page-bar-lead h1 { overflow: hidden; text-overflow: ellipsis; }
+
+/* .page-flow 自身不留白 (通栏页面靠 .flush-section 自己的 padding);
+ * 走卡片体系的页面套这一层拿到与顶栏一致的 24px 水平留白。 */
+.page-flow-pad { padding: 24px; }
+
+/* 底部常驻操作区: 与 .page-bar 对称, 挂在 .page-flow 之后, 同样不随内容滚动。
+ * 反馈 (保存 / 测试结果) 与按钮行合并在同一个容器里 —— 分隔线只画在外层,
+ * 拆成两个各带边框的兄弟节点就会出现两条线。 */
+.page-foot {
+  flex-shrink: 0;
+  background: var(--surface);
+  border-top: 1px solid var(--line);
+}
+.page-foot-feedback { padding: 12px 24px 0; }
+.page-foot-bar {
+  display: flex;
+  align-items: center;
+  min-height: 56px;
+  padding: 10px 24px;
+}
+.page-foot-inner { display: flex; align-items: center; gap: 10px; }
+.page-foot-actions {
+  margin-left: auto;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-shrink: 0;
+}
+
 /* 厂商 logo 重叠堆 */
 .logo-stack { display: flex; align-items: center; }
 .logo-stack > .logo {
