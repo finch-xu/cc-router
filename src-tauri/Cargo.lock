@@ -564,7 +564,7 @@ dependencies = [
 
 [[package]]
 name = "cc-router"
-version = "4.6.0"
+version = "4.8.0"
 dependencies = [
  "anyhow",
  "async-trait",
