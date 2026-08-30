@@ -306,4 +306,6 @@ Provider brand logos come from [@lobehub/icons](https://github.com/lobehub/lobe-
 
 ## License
 
-MIT
+Released under the [MIT](LICENSE) license.
+
+The 9 fonts used by the receipt themes are all under the SIL Open Font License 1.1; attributions and the full license text are in [THIRD-PARTY-NOTICES.md](THIRD-PARTY-NOTICES.md).

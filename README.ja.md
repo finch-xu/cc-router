@@ -306,4 +306,6 @@ Get-NetTCPConnection -LocalPort 1420 -State Listen |
 
 ## ライセンス
 
-MIT
+本プロジェクトは [MIT](LICENSE) ライセンスで公開しています。
+
+レシートテーマで使用する 9 書体はすべて SIL Open Font License 1.1 です。帰属表示とライセンス全文は [THIRD-PARTY-NOTICES.md](THIRD-PARTY-NOTICES.md) を参照してください。

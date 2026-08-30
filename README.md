@@ -306,4 +306,6 @@ Provider 品牌 logo 来自 [@lobehub/icons](https://github.com/lobehub/lobe-ico
 
 ## 证书
 
-MIT
+本项目以 [MIT](LICENSE) 许可证发布。
+
+小票主题使用的 9 款字体均为 SIL Open Font License 1.1，归属声明与许可证全文见 [THIRD-PARTY-NOTICES.md](THIRD-PARTY-NOTICES.md)。
