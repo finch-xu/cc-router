@@ -1,4 +1,4 @@
-import { Loader2 } from "lucide-react";
+import { LoaderCircle } from "lucide-react";
 
 interface Props {
   size?: number;
@@ -6,5 +6,5 @@ interface Props {
 }
 
 export function Spinner({ size = 12, className }: Props) {
-  return <Loader2 size={size} className={"spin" + (className ? " " + className : "")} />;
+  return <LoaderCircle size={size} className={"spin" + (className ? " " + className : "")} />;
 }

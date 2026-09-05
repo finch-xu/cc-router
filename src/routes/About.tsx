@@ -1,4 +1,5 @@
-import { Github, ExternalLink, Globe, AlertTriangle } from "lucide-react";
+import { ExternalLink, Globe, TriangleAlert } from "lucide-react";
+import Github from "@lobehub/icons/es/Github";
 import { open as openShell } from "@tauri-apps/plugin-shell";
 import { version as VERSION } from "../../package.json";
 import logoUrl from "@/assets/logo.png";
@@ -57,7 +58,7 @@ export function AboutPage() {
 
       <div className="card disclaimer-card">
         <div className="disclaimer-title">
-          <AlertTriangle size={13} />
+          <TriangleAlert size={13} />
           {t("about.disclaimer.title")}
         </div>
         <p>{t("about.disclaimer.usage")}</p>

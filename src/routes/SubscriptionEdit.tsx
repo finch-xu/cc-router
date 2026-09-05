@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
-import { Link, useNavigate, useParams } from "react-router-dom";
-import { ArrowLeft, AlertTriangle, Loader2 } from "lucide-react";
+import { Link, useNavigate, useParams } from "react-router";
+import { ArrowLeft, TriangleAlert, LoaderCircle } from "lucide-react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { invoke } from "@tauri-apps/api/core";
 import { Button } from "@/components/ui/button";
@@ -500,7 +500,7 @@ export function SubscriptionEditPage() {
                 ))}
                 {quotaError && <p className="text-sm text-destructive">{quotaError}</p>}
                 <Button size="sm" onClick={saveQuotas} disabled={updateQuotasMut.isPending}>
-                  {updateQuotasMut.isPending && <Loader2 className="h-4 w-4 animate-spin" />}
+                  {updateQuotasMut.isPending && <LoaderCircle className="h-4 w-4 animate-spin" />}
                   {t("quota.save")}
                 </Button>
               </CardContent>
@@ -563,7 +563,7 @@ export function SubscriptionEditPage() {
                 {t("common.delete")}
               </Button>
               <Button size="sm" onClick={save} disabled={updateMut.isPending}>
-                {updateMut.isPending && <Loader2 className="h-4 w-4 animate-spin" />}
+                {updateMut.isPending && <LoaderCircle className="h-4 w-4 animate-spin" />}
                 {t("common.save")}
               </Button>
             </div>
@@ -599,7 +599,7 @@ export function SubscriptionEditPage() {
           <DialogHeader>
             <DialogTitle>
               <div className="flex items-center gap-2">
-                <AlertTriangle className="h-4 w-4 text-destructive" />
+                <TriangleAlert className="h-4 w-4 text-destructive" />
                 {t("subscriptionEdit.deleteDialog.titlePrefix")}{sub.display_name}{t("subscriptionEdit.deleteDialog.titleSuffix")}
               </div>
             </DialogTitle>

@@ -4,7 +4,7 @@ import { useState, useEffect, useRef } from "react";
 function arraysEqual<T>(a: readonly T[], b: readonly T[]): boolean {
   return a.length === b.length && a.every((v, i) => v === b[i]);
 }
-import { AlertTriangle, RefreshCw, Check } from "lucide-react";
+import { TriangleAlert, RefreshCw, Check } from "lucide-react";
 import { Toggle } from "@/components/Toggle";
 import { Spinner } from "@/components/Spinner";
 import {
@@ -621,7 +621,7 @@ export function SettingsPage() {
 
           {needsRestart && (
             <div className="alert warn">
-              <AlertTriangle size={14} />
+              <TriangleAlert size={14} />
               {t("settings.proxy.needsRestart")}
             </div>
           )}
@@ -726,7 +726,7 @@ export function SettingsPage() {
               marginBottom: 6,
             }}
           >
-            <AlertTriangle size={14} /> {t("settings.section.danger")}
+            <TriangleAlert size={14} /> {t("settings.section.danger")}
           </div>
           <div style={{ fontSize: 12, color: "var(--ink-3)", lineHeight: 1.6 }}>
             {t("settings.danger.desc")}
@@ -777,7 +777,7 @@ export function SettingsPage() {
           <DialogHeader>
             <DialogTitle>
               <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                <AlertTriangle size={16} style={{ color: "var(--err)" }} />
+                <TriangleAlert size={16} style={{ color: "var(--err)" }} />
                 {t("settings.danger.dialog.title")}
               </div>
             </DialogTitle>

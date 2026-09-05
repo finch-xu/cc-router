@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { useSearchParams } from "react-router-dom";
+import { useSearchParams } from "react-router";
 import { Download, RefreshCw, ScrollText, X } from "lucide-react";
 import { save } from "@tauri-apps/plugin-dialog";
 import { api } from "@/api/tauri";

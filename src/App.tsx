@@ -1,4 +1,4 @@
-import { Navigate, Route, Routes } from "react-router-dom";
+import { Navigate, Route, Routes } from "react-router";
 import { AppShell } from "@/components/layout/AppShell";
 import { VirtualModelsPage } from "@/routes/VirtualModels";
 import { LiveRoutingPage } from "@/routes/LiveRouting";

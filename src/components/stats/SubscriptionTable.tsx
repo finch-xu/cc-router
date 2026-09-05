@@ -1,5 +1,5 @@
 import { useMemo } from "react";
-import { useNavigate } from "react-router-dom";
+import { useNavigate } from "react-router";
 import { ProviderLogo } from "@/components/ProviderLogo";
 import { useProviders } from "@/hooks/useProviders";
 import { useSubscriptions } from "@/hooks/useSubscriptions";

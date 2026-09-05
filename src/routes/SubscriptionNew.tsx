@@ -1,5 +1,5 @@
 import { useState, useMemo, useRef } from "react";
-import { Link, useNavigate, useSearchParams } from "react-router-dom";
+import { Link, useNavigate, useSearchParams } from "react-router";
 import { ArrowLeft, ArrowRight, ExternalLink, Check } from "lucide-react";
 import { invoke } from "@tauri-apps/api/core";
 import { open as openShell } from "@tauri-apps/plugin-shell";

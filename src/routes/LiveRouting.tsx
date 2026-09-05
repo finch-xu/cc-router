@@ -1,5 +1,5 @@
 import { useMemo, useState } from "react";
-import { useNavigate } from "react-router-dom";
+import { useNavigate } from "react-router";
 import { ArrowRight, Check, Copy, Lock } from "lucide-react";
 import { writeText } from "@tauri-apps/plugin-clipboard-manager";
 import { RouteFlowDiagram } from "@/components/RouteFlowDiagram";

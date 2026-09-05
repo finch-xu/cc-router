@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { CheckCircle2, ExternalLink, X } from "lucide-react";
+import { CircleCheck, ExternalLink, X } from "lucide-react";
 import { open as openShell } from "@tauri-apps/plugin-shell";
 import { downloadDir } from "@tauri-apps/api/path";
 import { useT } from "@/i18n";
@@ -226,7 +226,7 @@ export function ReceiptsPage() {
             color: "white",
           }}
         >
-          <CheckCircle2 size={15} style={{ flexShrink: 0 }} />
+          <CircleCheck size={15} style={{ flexShrink: 0 }} />
           <span style={{ fontWeight: 500 }}>{flash}</span>
           <button
             type="button"

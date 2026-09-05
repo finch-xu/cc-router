@@ -1,5 +1,5 @@
-import { useNavigate } from "react-router-dom";
-import { AlertTriangle } from "lucide-react";
+import { useNavigate } from "react-router";
+import { TriangleAlert } from "lucide-react";
 import logoUrl from "@/assets/logo.png";
 import { useT } from "@/i18n";
 
@@ -25,7 +25,7 @@ export function OnboardingDisclaimerPage() {
           <img src={logoUrl} alt="cc-router" />
         </div>
         <h1 className="onboarding-disclaimer-title">
-          <AlertTriangle size={18} />
+          <TriangleAlert size={18} />
           {t("onboarding.disclaimer.title")}
         </h1>
         <div className="onboarding-disclaimer-subtitle">

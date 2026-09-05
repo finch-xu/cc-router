@@ -1,4 +1,4 @@
-import { Plus, Trash2 } from "lucide-react";
+import { Plus, Trash } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 
@@ -47,7 +47,7 @@ export function KeyValueEditor({
             aria-label={removeAriaLabel}
             onClick={() => onChange(value.filter((_, j) => j !== i))}
           >
-            <Trash2 className="h-4 w-4" />
+            <Trash className="h-4 w-4" />
           </Button>
         </div>
       ))}

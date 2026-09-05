@@ -1,4 +1,4 @@
-import { Link } from "react-router-dom";
+import { Link } from "react-router";
 import { Plus, Key } from "lucide-react";
 import { StatusBadge } from "@/components/StatusBadge";
 import { ProviderLogo } from "@/components/ProviderLogo";

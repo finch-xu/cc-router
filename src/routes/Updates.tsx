@@ -1,6 +1,6 @@
 import {
-  AlertCircle,
-  CheckCircle2,
+  CircleAlert,
+  CircleCheck,
   Download,
   ExternalLink,
   RefreshCw,
@@ -241,11 +241,11 @@ function UpdaterStatusSection() {
         </span>
       ) : status === "up_to_date" ? (
         <span className="pill ok">
-          <CheckCircle2 size={11} /> {t("about.updater.upToDate")} v{VERSION}
+          <CircleCheck size={11} /> {t("about.updater.upToDate")} v{VERSION}
         </span>
       ) : (
         <span className="pill">
-          <AlertCircle size={11} /> {t("about.updater.idle")}
+          <CircleAlert size={11} /> {t("about.updater.idle")}
         </span>
       )}
     </div>

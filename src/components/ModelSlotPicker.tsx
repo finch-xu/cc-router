@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { RefreshCw, AlertCircle, HelpCircle } from "lucide-react";
+import { RefreshCw, CircleAlert, CircleQuestionMark } from "lucide-react";
 import { useT, type TFunction } from "@/i18n";
 import { SLOT_EFFORT_LEVELS } from "@/lib/modelSlots";
 import {
@@ -155,7 +155,7 @@ export function ModelSlotPicker({
 
       {error && (
         <div className="alert warn" style={{ marginBottom: 12 }}>
-          <AlertCircle size={14} />
+          <CircleAlert size={14} />
           <span>{t("modelSlot.errPrefix")}{error}{t("modelSlot.errSuffix")}</span>
         </div>
       )}
@@ -190,7 +190,7 @@ export function ModelSlotPicker({
             aria-expanded={showEffortHelp}
             onClick={() => setShowEffortHelp((v) => !v)}
           >
-            <HelpCircle size={13} />
+            <CircleQuestionMark size={13} />
           </button>
         </div>
       </div>
@@ -250,7 +250,7 @@ export function ModelSlotPicker({
                           title={t("modelSlot.historicalTitle", { model: current })}
                           style={{ color: "var(--warn, #d97706)", display: "inline-flex" }}
                         >
-                          <AlertCircle size={14} />
+                          <CircleAlert size={14} />
                         </span>
                       )}
                     </>

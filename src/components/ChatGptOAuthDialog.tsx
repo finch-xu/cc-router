@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { ExternalLink, Loader2, Copy, Check, X } from "lucide-react";
+import { ExternalLink, LoaderCircle, Copy, Check, X } from "lucide-react";
 import { open as openShell } from "@tauri-apps/plugin-shell";
 import { Spinner } from "@/components/Spinner";
 import { useT } from "@/i18n";
@@ -214,7 +214,7 @@ export function ChatGptOAuthDialog({ open, onClose, onSuccess }: Props) {
                 color: "var(--ink-3)",
               }}
             >
-              <Loader2 size={12} className="spin" />
+              <LoaderCircle size={12} className="spin" />
               {t("oauth.chatgpt.waitingForAuth")}
             </div>
           </>

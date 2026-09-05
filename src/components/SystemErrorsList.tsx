@@ -1,5 +1,5 @@
 import { useMemo, useState } from "react";
-import { AlertTriangle, RefreshCw } from "lucide-react";
+import { TriangleAlert, RefreshCw } from "lucide-react";
 import { EmptyState } from "@/components/EmptyState";
 import { Pagination } from "@/components/Pagination";
 import {
@@ -52,7 +52,7 @@ export function SystemErrorsList() {
       {query.isLoading && <div className="field-hint">{t("common.loading")}</div>}
 
       {query.data && total === 0 && (
-        <EmptyState icon={AlertTriangle} message={t("logs.systemErrors.empty")} />
+        <EmptyState icon={TriangleAlert} message={t("logs.systemErrors.empty")} />
       )}
 
       {items.length > 0 && (

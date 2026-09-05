@@ -1,5 +1,5 @@
 import { useState, type ReactNode } from "react";
-import { Link } from "react-router-dom";
+import { Link } from "react-router";
 import { Bot, Boxes } from "lucide-react";
 import ClaudeCode from "@lobehub/icons/es/ClaudeCode";
 import Cline from "@lobehub/icons/es/Cline";
