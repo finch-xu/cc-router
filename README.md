@@ -156,7 +156,7 @@ cc-router 夹在你的工具和大模型厂商中间：工具从**入口**连进
 - 这是主入口，请求原样透传不做协议翻译，thinking、`output_config.effort`、`cache_control`、图片、工具调用全部按 Anthropic 原生语义工作。
 - Claude Code 的完整 env 示例见上方「在 Claude Code 中使用」；Claude Desktop 需要本地 HTTPS，见[配置教程](https://ccrouter.app/docs/claude-desktop-integration/)。
 - 会话亲和优先按 `x-claude-code-session-id` 请求头、其次 `metadata.user_id` 识别会话。
-- 设置页开启「透传客户端请求头」后，`anthropic-beta` / `anthropic-version` 等白名单头会原样转发给上游，默认关闭。
+- 在订阅编辑页为某条订阅开启「透传客户端请求头」后，`anthropic-beta` / `anthropic-version` 等白名单头会原样转发给该上游，按订阅单独设置，默认关闭。
 
 </details>
 

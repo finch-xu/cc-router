@@ -156,7 +156,7 @@ All three inbound endpoints share the same subscriptions, virtual models, quotas
 - This is the primary inbound: requests are passed through verbatim with no protocol translation, so thinking, `output_config.effort`, `cache_control`, images and tool calls all keep their native Anthropic semantics.
 - The full Claude Code env example is in "Using with Claude Code" above; Claude Desktop needs local HTTPS, see the [setup guide](https://ccrouter.app/docs/claude-desktop-integration/).
 - Session affinity keys on the `x-claude-code-session-id` header first, then `metadata.user_id`.
-- With "Forward client headers" enabled in Settings, whitelisted headers such as `anthropic-beta` / `anthropic-version` are forwarded to the upstream as-is; off by default.
+- With "Forward client headers" enabled on a subscription's edit page, whitelisted headers such as `anthropic-beta` / `anthropic-version` are forwarded to that upstream as-is; set per subscription, off by default.
 
 </details>
 
