@@ -566,6 +566,8 @@ impl AnthropicToChatSseConverter {
             "content_block_delta" if self.started => self.on_block_delta(data),
             "message_delta" if self.started => self.on_message_delta(data),
             "message_stop" if self.started => self.terminate(),
+            // 刻意不加 `if self.started` 守卫: 上游可能在 message_start 之前就报错
+            // (鉴权失败 / 限流等), 必须把错误帧 + 终结 [DONE] 送达客户端, 否则客户端会一直挂起等待.
             "error" => self.on_error(data),
             // ping / content_block_stop / 未 started 的增量 / 未知事件
             _ => Vec::new(),
@@ -1212,6 +1214,21 @@ mod tests {
     fn sse_nothing_before_message_start_and_no_finalize_when_never_started() {
         let mut conv = AnthropicToChatSseConverter::new("m".into());
         assert!(conv.feed("content_block_delta", &json!({"index":0,"delta":{"type":"text_delta","text":"x"}})).is_empty());
+        assert!(conv.finalize_if_needed().is_empty());
+    }
+
+    #[test]
+    fn sse_error_before_message_start_still_emits_error_and_done() {
+        let mut conv = AnthropicToChatSseConverter::new("m".into());
+        let frames = conv.feed("error", &json!({"type":"error","error":{"type":"authentication_error","message":"bad key"}}));
+        assert_eq!(frames.len(), 2);
+        let err = frame_json(&frames[0]).unwrap();
+        assert_eq!(err["error"]["type"], "invalid_request_error");
+        assert_eq!(err["error"]["code"], "authentication_error");
+        assert_eq!(err["error"]["message"], "bad key");
+        assert!(frame_json(&frames[1]).is_none(), "[DONE]");
+        // 之后 message_start 也不再输出
+        assert!(conv.feed("message_start", &json!({"type":"message_start","message":{"id":"msg_1"}})).is_empty());
         assert!(conv.finalize_if_needed().is_empty());
     }
 }
