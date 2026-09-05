@@ -20,7 +20,6 @@
 //! - 历史消息里的 `reasoning_content` → 丢弃 (客户端拿不到合法 signature, Anthropic 透传会拒)
 //! - 音频 / 文件类 content part → 400
 
-#[allow(unused_imports)]
 use std::collections::HashMap;
 
 use serde_json::{json, Value};
@@ -498,6 +497,250 @@ pub fn chat_error_body(anthropic_type: &str, message: &str) -> Value {
     })
 }
 
+// ============================================================
+// SSE: Anthropic 事件流 → chat.completion.chunk 帧
+// ============================================================
+
+/// Anthropic SSE → OpenAI Chat Completions SSE 转换器 (spec §4.2).
+///
+/// 输入: Anthropic 事件名 + data JSON (由 handler 拆帧后喂入).
+/// 输出: 已序列化的 `data: {...}\n\n` 帧; 末尾 `data: [DONE]\n\n`.
+///
+/// 生命周期: `message_start` 置 started → 各 delta → `message_delta` 发 finish_reason 帧
+/// (finished) → `message_stop` 发 usage 帧 + [DONE] (done). `error` 事件直接发错误帧 + [DONE].
+/// done 之后任何输入都不再产生输出. 上游断流时 handler 调 `finalize_if_needed` 兜底.
+pub struct AnthropicToChatSseConverter {
+    id: String,
+    model: String,
+    created: i64,
+    started: bool,
+    finished: bool,
+    done: bool,
+    /// Anthropic content_block index → 块类型 (tool_use 记 OpenAI tool_calls 序号).
+    blocks: HashMap<u32, ChatBlock>,
+    next_tool_index: u32,
+    input_tokens: i64,
+    cache_creation_tokens: i64,
+    cache_read_tokens: i64,
+    output_tokens: i64,
+    stop_reason: Option<String>,
+}
+
+#[derive(Debug, Clone, Copy)]
+enum ChatBlock {
+    Text,
+    Thinking,
+    ToolUse { tool_index: u32 },
+    Other,
+}
+
+const DONE_FRAME: &str = "data: [DONE]\n\n";
+
+impl AnthropicToChatSseConverter {
+    pub fn new(requested_model: String) -> Self {
+        Self {
+            id: chat_id_from(None),
+            model: requested_model,
+            created: now_unix(),
+            started: false,
+            finished: false,
+            done: false,
+            blocks: HashMap::new(),
+            next_tool_index: 0,
+            input_tokens: 0,
+            cache_creation_tokens: 0,
+            cache_read_tokens: 0,
+            output_tokens: 0,
+            stop_reason: None,
+        }
+    }
+
+    /// 喂入一个 Anthropic SSE 事件, 返回若干 chunk 帧.
+    pub fn feed(&mut self, event_name: &str, data: &Value) -> Vec<String> {
+        if self.done {
+            return Vec::new();
+        }
+        match event_name {
+            "message_start" => self.on_message_start(data),
+            "content_block_start" if self.started => self.on_block_start(data),
+            "content_block_delta" if self.started => self.on_block_delta(data),
+            "message_delta" if self.started => self.on_message_delta(data),
+            "message_stop" if self.started => self.terminate(),
+            "error" => self.on_error(data),
+            // ping / content_block_stop / 未 started 的增量 / 未知事件
+            _ => Vec::new(),
+        }
+    }
+
+    /// 上游断流兜底: started 且未 done 时补 finish + usage + [DONE].
+    pub fn finalize_if_needed(&mut self) -> Vec<String> {
+        if self.started && !self.done {
+            self.terminate()
+        } else {
+            Vec::new()
+        }
+    }
+
+    // ---------- handlers ----------
+
+    fn on_message_start(&mut self, data: &Value) -> Vec<String> {
+        if self.started {
+            return Vec::new();
+        }
+        self.started = true;
+        let msg = data.get("message");
+        self.id = chat_id_from(msg.and_then(|m| m.get("id")).and_then(|v| v.as_str()));
+        self.absorb_usage(msg.and_then(|m| m.get("usage")));
+        vec![self.chunk(json!({"role": "assistant", "content": ""}), None)]
+    }
+
+    fn on_block_start(&mut self, data: &Value) -> Vec<String> {
+        let Some(index) = data.get("index").and_then(|v| v.as_u64()).map(|v| v as u32) else {
+            return Vec::new();
+        };
+        let block = data.get("content_block");
+        match block.and_then(|b| b.get("type")).and_then(|t| t.as_str()).unwrap_or("") {
+            "text" => {
+                self.blocks.insert(index, ChatBlock::Text);
+                Vec::new()
+            }
+            "thinking" => {
+                self.blocks.insert(index, ChatBlock::Thinking);
+                Vec::new()
+            }
+            "tool_use" => {
+                let tool_index = self.next_tool_index;
+                self.next_tool_index += 1;
+                self.blocks.insert(index, ChatBlock::ToolUse { tool_index });
+                let id = block.and_then(|b| b.get("id")).cloned().unwrap_or(Value::Null);
+                let name = block.and_then(|b| b.get("name")).cloned().unwrap_or(Value::Null);
+                vec![self.chunk(
+                    json!({"tool_calls": [{
+                        "index": tool_index,
+                        "id": id,
+                        "type": "function",
+                        "function": {"name": name, "arguments": ""},
+                    }]}),
+                    None,
+                )]
+            }
+            _ => {
+                self.blocks.insert(index, ChatBlock::Other);
+                Vec::new()
+            }
+        }
+    }
+
+    fn on_block_delta(&mut self, data: &Value) -> Vec<String> {
+        let Some(index) = data.get("index").and_then(|v| v.as_u64()).map(|v| v as u32) else {
+            return Vec::new();
+        };
+        let Some(delta) = data.get("delta") else {
+            return Vec::new();
+        };
+        let block = self.blocks.get(&index).copied().unwrap_or(ChatBlock::Other);
+        match (delta.get("type").and_then(|t| t.as_str()).unwrap_or(""), block) {
+            ("text_delta", _) => {
+                let text = delta.get("text").and_then(|t| t.as_str()).unwrap_or("");
+                vec![self.chunk(json!({"content": text}), None)]
+            }
+            ("thinking_delta", _) => {
+                let text = delta.get("thinking").and_then(|t| t.as_str()).unwrap_or("");
+                vec![self.chunk(json!({"reasoning_content": text}), None)]
+            }
+            ("input_json_delta", ChatBlock::ToolUse { tool_index }) => {
+                let partial = delta.get("partial_json").and_then(|t| t.as_str()).unwrap_or("");
+                vec![self.chunk(
+                    json!({"tool_calls": [{"index": tool_index, "function": {"arguments": partial}}]}),
+                    None,
+                )]
+            }
+            // signature_delta / 不认识的 delta / 没登记的块
+            _ => Vec::new(),
+        }
+    }
+
+    fn on_message_delta(&mut self, data: &Value) -> Vec<String> {
+        if let Some(sr) = data.get("delta").and_then(|d| d.get("stop_reason")).and_then(|v| v.as_str()) {
+            self.stop_reason = Some(sr.to_string());
+        }
+        self.absorb_usage(data.get("usage"));
+        self.finish_frame()
+    }
+
+    fn on_error(&mut self, data: &Value) -> Vec<String> {
+        let err = data.get("error");
+        let etype = err.and_then(|e| e.get("type")).and_then(|v| v.as_str()).unwrap_or("api_error");
+        let msg = err.and_then(|e| e.get("message")).and_then(|v| v.as_str()).unwrap_or("upstream error");
+        self.done = true;
+        vec![
+            format!("data: {}\n\n", chat_error_body(etype, msg)),
+            DONE_FRAME.to_string(),
+        ]
+    }
+
+    /// message_stop / 兜底共用: (未发过 finish 则补) + usage 帧 + [DONE].
+    fn terminate(&mut self) -> Vec<String> {
+        let mut out = self.finish_frame();
+        out.push(self.usage_frame());
+        out.push(DONE_FRAME.to_string());
+        self.done = true;
+        out
+    }
+
+    fn finish_frame(&mut self) -> Vec<String> {
+        if self.finished {
+            return Vec::new();
+        }
+        self.finished = true;
+        let reason = map_finish_reason(self.stop_reason.as_deref());
+        vec![self.chunk(json!({}), Some(reason))]
+    }
+
+    fn usage_frame(&self) -> String {
+        let usage = usage_to_chat(Some(&json!({
+            "input_tokens": self.input_tokens,
+            "cache_creation_input_tokens": self.cache_creation_tokens,
+            "cache_read_input_tokens": self.cache_read_tokens,
+            "output_tokens": self.output_tokens,
+        })));
+        let body = json!({
+            "id": self.id,
+            "object": "chat.completion.chunk",
+            "created": self.created,
+            "model": self.model,
+            "choices": [],
+            "usage": usage,
+        });
+        format!("data: {body}\n\n")
+    }
+
+    /// message_start 与 message_delta 都可能带 usage; 有值就覆盖 (Anthropic 语义是累计值).
+    fn absorb_usage(&mut self, usage: Option<&Value>) {
+        let Some(u) = usage else { return };
+        let read = |k: &str| u.get(k).and_then(|v| v.as_i64());
+        if let Some(v) = read("input_tokens") { self.input_tokens = v; }
+        if let Some(v) = read("cache_creation_input_tokens") { self.cache_creation_tokens = v; }
+        if let Some(v) = read("cache_read_input_tokens") { self.cache_read_tokens = v; }
+        if let Some(v) = read("output_tokens") { self.output_tokens = v; }
+    }
+
+    fn chunk(&self, delta: Value, finish_reason: Option<&str>) -> String {
+        let body = json!({
+            "id": self.id,
+            "object": "chat.completion.chunk",
+            "created": self.created,
+            "model": self.model,
+            "choices": [{
+                "index": 0,
+                "delta": delta,
+                "finish_reason": finish_reason.map(Value::from).unwrap_or(Value::Null),
+            }],
+        });
+        format!("data: {body}\n\n")
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -822,5 +1065,153 @@ mod tests {
         assert_eq!(chat_error_body("permission_error", "x")["error"]["type"], "invalid_request_error");
         assert_eq!(chat_error_body("api_error", "x")["error"]["type"], "server_error");
         assert_eq!(chat_error_body("api_error", "x")["error"]["code"], "api_error");
+    }
+
+    // ---- SSE 状态机 ----
+
+    /// 解析 "data: {...}\n\n" 帧为 JSON; "[DONE]" 返回 None.
+    fn frame_json(frame: &str) -> Option<Value> {
+        let payload = frame.strip_prefix("data: ").unwrap().trim_end();
+        if payload == "[DONE]" { None } else { Some(serde_json::from_str(payload).unwrap()) }
+    }
+
+    fn feed_all(conv: &mut AnthropicToChatSseConverter, events: &[(&str, Value)]) -> Vec<String> {
+        let mut out = Vec::new();
+        for (name, data) in events {
+            out.extend(conv.feed(name, data));
+        }
+        out
+    }
+
+    fn msg_start() -> (&'static str, Value) {
+        ("message_start", json!({"type":"message_start","message":{"id":"msg_1","model":"model-opus","usage":{"input_tokens":10,"cache_read_input_tokens":2,"cache_creation_input_tokens":0,"output_tokens":1}}}))
+    }
+
+    #[test]
+    fn sse_text_flow_emits_role_content_finish_usage_done() {
+        let mut conv = AnthropicToChatSseConverter::new("gpt-5.5".into());
+        let frames = feed_all(&mut conv, &[
+            msg_start(),
+            ("ping", json!({"type":"ping"})),
+            ("content_block_start", json!({"type":"content_block_start","index":0,"content_block":{"type":"text","text":""}})),
+            ("content_block_delta", json!({"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"Hel"}})),
+            ("content_block_delta", json!({"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"lo"}})),
+            ("content_block_stop", json!({"type":"content_block_stop","index":0})),
+            ("message_delta", json!({"type":"message_delta","delta":{"stop_reason":"end_turn"},"usage":{"output_tokens":5}})),
+            ("message_stop", json!({"type":"message_stop"})),
+        ]);
+        assert!(frames.iter().all(|f| f.starts_with("data: ") && f.ends_with("\n\n")));
+        let jsons: Vec<Option<Value>> = frames.iter().map(|f| frame_json(f)).collect();
+        // 首帧 role
+        let first = jsons[0].as_ref().unwrap();
+        assert_eq!(first["id"], "chatcmpl-1");
+        assert_eq!(first["object"], "chat.completion.chunk");
+        assert_eq!(first["model"], "gpt-5.5");
+        assert_eq!(first["choices"][0]["delta"], json!({"role":"assistant","content":""}));
+        assert_eq!(first["choices"][0]["finish_reason"], Value::Null);
+        // 文本增量
+        assert_eq!(jsons[1].as_ref().unwrap()["choices"][0]["delta"]["content"], "Hel");
+        assert_eq!(jsons[2].as_ref().unwrap()["choices"][0]["delta"]["content"], "lo");
+        // finish 帧
+        let fin = jsons[3].as_ref().unwrap();
+        assert_eq!(fin["choices"][0]["delta"], json!({}));
+        assert_eq!(fin["choices"][0]["finish_reason"], "stop");
+        // usage 帧: choices 空 + usage
+        let usage = jsons[4].as_ref().unwrap();
+        assert_eq!(usage["choices"], json!([]));
+        assert_eq!(usage["usage"], json!({"prompt_tokens":12,"completion_tokens":5,"total_tokens":17,"prompt_tokens_details":{"cached_tokens":2}}));
+        // [DONE]
+        assert!(jsons[5].is_none());
+        assert_eq!(frames.len(), 6);
+        // 之后再 feed / finalize 不再输出
+        assert!(conv.feed("message_stop", &json!({})).is_empty());
+        assert!(conv.finalize_if_needed().is_empty());
+    }
+
+    #[test]
+    fn sse_thinking_and_two_parallel_tool_calls() {
+        let mut conv = AnthropicToChatSseConverter::new("m".into());
+        let frames = feed_all(&mut conv, &[
+            msg_start(),
+            ("content_block_start", json!({"type":"content_block_start","index":0,"content_block":{"type":"thinking","thinking":""}})),
+            ("content_block_delta", json!({"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":"hmm"}})),
+            ("content_block_delta", json!({"type":"content_block_delta","index":0,"delta":{"type":"signature_delta","signature":"sig"}})),
+            ("content_block_stop", json!({"type":"content_block_stop","index":0})),
+            ("content_block_start", json!({"type":"content_block_start","index":1,"content_block":{"type":"tool_use","id":"toolu_a","name":"get_weather","input":{}}})),
+            ("content_block_delta", json!({"type":"content_block_delta","index":1,"delta":{"type":"input_json_delta","partial_json":"{\"city\""}})),
+            ("content_block_start", json!({"type":"content_block_start","index":2,"content_block":{"type":"tool_use","id":"toolu_b","name":"get_time","input":{}}})),
+            ("content_block_delta", json!({"type":"content_block_delta","index":1,"delta":{"type":"input_json_delta","partial_json":":\"SH\"}"}})),
+            ("content_block_delta", json!({"type":"content_block_delta","index":2,"delta":{"type":"input_json_delta","partial_json":"{}"}})),
+            ("content_block_stop", json!({"type":"content_block_stop","index":1})),
+            ("content_block_stop", json!({"type":"content_block_stop","index":2})),
+            ("message_delta", json!({"type":"message_delta","delta":{"stop_reason":"tool_use"},"usage":{"output_tokens":9}})),
+            ("message_stop", json!({"type":"message_stop"})),
+        ]);
+        let deltas: Vec<Value> = frames.iter().filter_map(|f| frame_json(f)).map(|j| j["choices"].get(0).map(|c| c["delta"].clone()).unwrap_or(Value::Null)).collect();
+        assert_eq!(deltas[1], json!({"reasoning_content":"hmm"}));
+        // signature_delta 不输出, 所以下一个是 tool_call 开头帧
+        assert_eq!(deltas[2], json!({"tool_calls":[{"index":0,"id":"toolu_a","type":"function","function":{"name":"get_weather","arguments":""}}]}));
+        assert_eq!(deltas[3], json!({"tool_calls":[{"index":0,"function":{"arguments":"{\"city\""}}]}));
+        assert_eq!(deltas[4], json!({"tool_calls":[{"index":1,"id":"toolu_b","type":"function","function":{"name":"get_time","arguments":""}}]}));
+        assert_eq!(deltas[5], json!({"tool_calls":[{"index":0,"function":{"arguments":":\"SH\"}"}}]}));
+        assert_eq!(deltas[6], json!({"tool_calls":[{"index":1,"function":{"arguments":"{}"}}]}));
+        assert_eq!(deltas[7], json!({}));
+        let fin = frame_json(&frames[7]).unwrap();
+        assert_eq!(fin["choices"][0]["finish_reason"], "tool_calls");
+    }
+
+    #[test]
+    fn sse_finalize_without_message_stop_adds_finish_usage_done() {
+        let mut conv = AnthropicToChatSseConverter::new("m".into());
+        let mut frames = feed_all(&mut conv, &[
+            msg_start(),
+            ("content_block_start", json!({"type":"content_block_start","index":0,"content_block":{"type":"text","text":""}})),
+            ("content_block_delta", json!({"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"partial"}})),
+        ]);
+        assert_eq!(frames.len(), 2);
+        frames.extend(conv.finalize_if_needed());
+        assert_eq!(frames.len(), 5, "补 finish + usage + [DONE]");
+        assert_eq!(frame_json(&frames[2]).unwrap()["choices"][0]["finish_reason"], "stop");
+        assert_eq!(frame_json(&frames[3]).unwrap()["choices"], json!([]));
+        assert!(frame_json(&frames[4]).is_none());
+        assert!(conv.finalize_if_needed().is_empty());
+    }
+
+    #[test]
+    fn sse_finalize_after_message_delta_does_not_duplicate_finish() {
+        let mut conv = AnthropicToChatSseConverter::new("m".into());
+        let mut frames = feed_all(&mut conv, &[
+            msg_start(),
+            ("message_delta", json!({"type":"message_delta","delta":{"stop_reason":"max_tokens"},"usage":{"output_tokens":1}})),
+        ]);
+        frames.extend(conv.finalize_if_needed());
+        // role + finish(length) + usage + DONE
+        assert_eq!(frames.len(), 4);
+        assert_eq!(frame_json(&frames[1]).unwrap()["choices"][0]["finish_reason"], "length");
+        assert_eq!(frame_json(&frames[2]).unwrap()["choices"], json!([]));
+    }
+
+    #[test]
+    fn sse_error_event_emits_error_then_done() {
+        let mut conv = AnthropicToChatSseConverter::new("m".into());
+        let frames = feed_all(&mut conv, &[
+            msg_start(),
+            ("error", json!({"type":"error","error":{"type":"overloaded_error","message":"busy"}})),
+            ("message_stop", json!({"type":"message_stop"})),
+        ]);
+        assert_eq!(frames.len(), 3);
+        let err = frame_json(&frames[1]).unwrap();
+        assert_eq!(err["error"]["type"], "rate_limit_error");
+        assert_eq!(err["error"]["code"], "overloaded_error");
+        assert_eq!(err["error"]["message"], "busy");
+        assert!(frame_json(&frames[2]).is_none());
+        assert!(conv.finalize_if_needed().is_empty());
+    }
+
+    #[test]
+    fn sse_nothing_before_message_start_and_no_finalize_when_never_started() {
+        let mut conv = AnthropicToChatSseConverter::new("m".into());
+        assert!(conv.feed("content_block_delta", &json!({"index":0,"delta":{"type":"text_delta","text":"x"}})).is_empty());
+        assert!(conv.finalize_if_needed().is_empty());
     }
 }
