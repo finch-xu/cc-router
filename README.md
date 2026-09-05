@@ -37,14 +37,14 @@
 架构与请求走向一览：
 
 ```text
- Claude Code     OpenCode      OpenClaw     pi ...            Codex ...
-      |              |             |           |                  |
-      ------------------------------------------                  |
-                          |                                       |
-               Anthropic Messages API                   OpenAI Responses API
-                   (/v1/messages)                          (/v1/responses)
-                          |                                       |
-                          -----------------------------------------
+ Claude Code     OpenCode      OpenClaw     pi ...        Codex ...      Open WebUI / Cherry Studio ...
+      |              |             |           |              |                     |
+      ------------------------------------------              |                     |
+                          |                                   |                     |
+               Anthropic Messages API               OpenAI Responses API   OpenAI Chat Completions API
+                   (/v1/messages)                      (/v1/responses)        (/v1/chat/completions)
+                          |                                   |                     |
+                          -----------------------------------------------------------
                                               |
                                           cc-router
                                    (本地 127.0.0.1:23456)
@@ -65,7 +65,7 @@
 - **虚拟模型多别名** —— fable / opus / sonnet / haiku 四个槽位各识别多种命名,以 opus 为例,`model-opus` / `claude-opus-4-7` / `anthropic/model-opus` / `anthropic/claude-opus-4-7` 都路由到同一虚拟模型,工具用什么命名都不挑
 - **本地 HTTPS** —— 一键生成自签 CA 与服务器证书,让只支持 HTTPS 的客户端也能接入 cc-router,详见[配置教程](https://ccrouter.app/docs/claude-desktop-integration/)
 - **接入 Claude Desktop App** —— 借助本地 HTTPS 与虚拟模型别名,Anthropic 官方桌面端可直接走 cc-router 聚合的多家订阅,详见[配置教程](https://ccrouter.app/docs/claude-desktop-integration/)
-- **双协议 API 入口** —— `Anthropic /v1/messages` 与 `OpenAI /v1/responses` 两套端点并行,Claude Code / Codex 等 Anthropic 与 OpenAI 生态的客户端都能一键接入
+- **三协议 API 入口** —— `Anthropic /v1/messages`、`OpenAI /v1/responses`、`OpenAI /v1/chat/completions` 三套端点并行,Claude Code / Codex 以及 Open WebUI、Cherry Studio 等任何 OpenAI 兼容客户端都能一键接入
 
 <table align="center">
   <tr>
@@ -180,6 +180,25 @@
 |  `model-haiku` |  `anthropic/model-haiku` `anthropic/claude-haiku*` `claude-haiku*`  `gpt-*-mini` `openai/gpt-*-mini` |
 
 > `claude-opus*` 的含义是模糊匹配，你可以传入任意符合规则的模型名，都会被归一为虚拟模型`model-opus`，比如 `claude-opus-4-8` `claude-opus-4-7-20260101` `claude-opus-100` 都没问题。`gpt-*-sol` 这类按档位段匹配：`gpt-5.6-sol` `gpt-6-sol` `gpt-5.6-sol-20261201` 都命中 sol 档（terra/luna/mini 同理）。
+
+## 在其他 AI 工具中使用（OpenAI Chat Completions 兼容）
+
+Open WebUI、Cherry Studio、Cline、LobeChat 等只支持 OpenAI Chat Completions 的工具，把「OpenAI 兼容」端点指向 cc-router 即可：
+
+| 配置项 | 填写 |
+|---|---|
+| Base URL | `http://127.0.0.1:23456/v1`（有的工具要求不带 `/v1`，按工具提示调整） |
+| API Key | cc-router 设置页里的 token（关闭鉴权时随便填一个非空值） |
+| 模型名 | `model-fable` / `model-opus` / `model-sonnet` / `model-haiku`，或 `gpt-5.6` / `gpt-5.5` / `gpt-5.4` / `gpt-5.4-mini` 等别名，从 `GET /v1/models` 可直接拉取 |
+
+行为说明：
+
+- 请求在 cc-router 内部翻译成 Anthropic Messages 走同一套调度，订阅、虚拟模型、限额、会话亲和全部生效；请求日志里「入口接口」显示 `/v1/chat/completions`。
+- 上游的 thinking 以 `reasoning_content` 字段返回（DeepSeek 惯例，主流客户端都能折叠显示）；对话历史里客户端回传的 `reasoning_content` 会被丢弃，不影响后续对话。
+- 图片支持 `data:` base64 与 `http(s)` 两种 `image_url`；工具调用双向支持；流式响应末尾总会带一帧 `usage`。
+- 不支持旧版 `functions` / `function_call` 字段、`n>1`、`logprobs`；`response_format` 的 JSON Schema 强制会被忽略。
+- 会话亲和（sticky）优先按 `user` 字段、其次 `x-session-id` 请求头识别会话，两者都没有时按首条用户消息内容。
+- 响应里出现工具调用时 `finish_reason` 恒为 `tool_calls`，客户端可放心据此判断是否执行工具。
 
 ## 常见问题&使用场景
 
