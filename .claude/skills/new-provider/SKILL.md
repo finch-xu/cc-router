@@ -1,18 +1,18 @@
 ---
 name: new-provider
-description: 用于在 cc-router 仓库新增一个 LLM provider（即在 src-tauri/providers/ 下添加 YAML 描述符并完成 5 处同步改动）。当用户说「加 provider」「接入 XX 厂商」「新增订阅源」「provider YAML」「让 cc-router 支持 OpenRouter/Together/Groq/Ollama 之类」时必须触发本 skill；即便用户只甩了一个厂商名或一个文档 URL，只要看起来在 cc-router 仓库内做新增 provider，就走本 skill 的工作流，不要绕过。本 skill 只覆盖「描述符层」扩展（YAML + 配置 + 测试 + 文档），不涉及调度/状态机的 Rust 改动。
+description: 用于在 cc-router 仓库新增一个 LLM provider（即在 src-tauri/providers/ 下添加 YAML 描述符并完成配套的同步改动）。当用户说「加 provider」「接入 XX 厂商」「新增订阅源」「provider YAML」「让 cc-router 支持 OpenRouter/Together/Groq/Ollama 之类」时必须触发本 skill；即便用户只甩了一个厂商名或一个文档 URL，只要看起来在 cc-router 仓库内做新增 provider，就走本 skill 的工作流，不要绕过。本 skill 只覆盖「描述符层」扩展（YAML + 配置 + 测试 + 文档），不涉及调度/状态机的 Rust 改动。
 ---
 
 # 新增 Provider 工作流
 
 ## 这个 skill 在做什么
 
-cc-router 的 Provider 抽象 = 「YAML 描述符」。把一个新厂商接入路由层不需要写 Rust——只需要一份遵循 `providers/_schema.json` 的 YAML，加上 4 处机械同步改动（bundle resources / 测试白名单 / README / 可选图标）。
+cc-router 的 Provider 抽象 = 「YAML 描述符」。把一个新厂商接入路由层不需要写 Rust——只需要一份遵循 `providers/_schema.json` 的 YAML，加上 2 处机械同步改动（bundle resources / 可选图标）。
 
 这份 skill 的价值在于：
 
 1. **决策清单**：哪些字段是「研究上游文档才能填对」的关键字段（auth、base_url、/models 端点）
-2. **同步检查清单**：5 处改动一处不漏（漏一处会导致 release 包加载失败 / 测试断言失败 / 文档失同步）
+2. **同步检查清单**：配套改动一处不漏（漏一处会导致 release 包加载失败 / 测试断言失败 / 文档失同步）
 3. **常见陷阱**：哪些上游 API 设计会让默认假设崩塌（无 /models、key 被忽略、messages 与 /models 不同域）
 
 ## 触发条件
@@ -138,13 +138,9 @@ assert_eq!(providers.len(), N+1);    // 数字递增 1
 
 **为什么是双更新**：白名单查存在，`providers.len()` 锁总数。后者能在 YAML 文件被加进目录但漏写 `bundle.resources` 时炸出错——这是它存在的意义。两者必须同步改。
 
-### Step 5：README 表格 + 可选图标
+### Step 5：可选图标
 
-**README**（位置：`README.md` 「内置 Provider」表）：
-
-```markdown
-| `<new_id>` | <一句话描述厂商特征> | <verified/partial/untested> |
-```
+**README 不用改**：README 已不再维护 provider 表格（2026-09 删除），「入口与出口」章节只按协议家族分类并点名主要厂商，完整清单以 app 内「添加订阅」页为准。只有当新厂商是知名品牌、值得在出口章节的点名列表里露脸时才加一个名字，普通中转站不加。
 
 **ProviderIcon BRAND_MAP**（仅当 `@lobehub/icons` 有该品牌图标时）：
 

@@ -37,35 +37,38 @@
 架构与请求走向一览：
 
 ```text
- Claude Code     OpenCode      OpenClaw     pi ...        Codex ...      Open WebUI / Cherry Studio ...
-      |              |             |           |              |                     |
-      ------------------------------------------              |                     |
-                          |                                   |                     |
-               Anthropic Messages API               OpenAI Responses API   OpenAI Chat Completions API
-                   (/v1/messages)                      (/v1/responses)        (/v1/chat/completions)
-                          |                                   |                     |
-                          -----------------------------------------------------------
-                                              |
-                                          cc-router
-                                   (本地 127.0.0.1:23456)
-                                              |
-      -----------------------------------------------------------------------------------
-      |             |             |             |             |             |           |
-  DeepSeek         GLM          Kimi        Anthropic      OpenAI        Gemini      ......
-     API         Coding        Coding       Messages     Responses &       API
-                  Plan          Plan           API       Completions
+ Claude Code    OpenCode    OpenClaw   pi ...   Codex ...      Open WebUI / Cherry Studio ...
+      |             |           |         |         |                         |
+      -------------------------------------         |                         |
+                        |                           |                         |
+                    Anthropic                    OpenAI                    OpenAI
+                  Messages API                Responses API         Chat Completions API
+                 (/v1/messages)              (/v1/responses)       (/v1/chat/completions)
+                        |                           |                         |
+                        -------------------------------------------------------
+                                                  |  入口 · 虚拟模型
+                                                  |
+                                              cc-router
+                                        (本地 127.0.0.1:23456)
+                                                  |
+                                                  |  出口 · 真实模型
+           -----------------------------------------------------------------------------
+           |            |            |            |            |            |          |
+       DeepSeek        GLM         Kimi       Anthropic     OpenAI       Gemini     ......
+          API        Coding       Coding      Messages    Responses &      API
+                      Plan         Plan          API      Completions
 ```
 
 功能亮点：
 
-- **19 家 provider 一站调度** —— 内置 DeepSeek、Qwen、Kimi、MiMo、MiniMax、GLM、Claude、Gemini 等 Token Plan / Coding Plan / API 额度,opus / sonnet / haiku 三槽位任意搭配,顺序 / 轮询 / 会话亲和自动切换
-- **任意自定义端点** —— 内置厂商不够时,把任何 Anthropic Messages 兼容、Gemini generateContent / Gemini Interactions 兼容、OpenAI Responses / Chat Completions 兼容的 API 直接配进来,与内置订阅同等调度
-- **用量小票** —— token 消费快照一键导出 PNG / PDF / HTML,黑白 / 彩色双模式,默认不显示价格只展示用量,扫底部二维码即跳仓库
-- **三语完整翻译** —— 简体中文 / English / 日本語,可跟随系统或在设置页手动切换
-- **虚拟模型多别名** —— fable / opus / sonnet / haiku 四个槽位各识别多种命名,以 opus 为例,`model-opus` / `claude-opus-4-7` / `anthropic/model-opus` / `anthropic/claude-opus-4-7` 都路由到同一虚拟模型,工具用什么命名都不挑
-- **本地 HTTPS** —— 一键生成自签 CA 与服务器证书,让只支持 HTTPS 的客户端也能接入 cc-router,详见[配置教程](https://ccrouter.app/docs/claude-desktop-integration/)
-- **接入 Claude Desktop App** —— 借助本地 HTTPS 与虚拟模型别名,Anthropic 官方桌面端可直接走 cc-router 聚合的多家订阅,详见[配置教程](https://ccrouter.app/docs/claude-desktop-integration/)
-- **三协议 API 入口** —— `Anthropic /v1/messages`、`OpenAI /v1/responses`、`OpenAI /v1/chat/completions` 三套端点并行,Claude Code / Codex 以及 Open WebUI、Cherry Studio 等任何 OpenAI 兼容客户端都能一键接入
+- **入口三协议，工具随便接** —— 同时开放 Anthropic Messages / OpenAI Responses / OpenAI Chat Completions 三个端点，Claude Code、Codex、OpenClaw、Hermes Agent、Kimi Code、ZCode、Cherry Studio 等无需改造直接接入
+- **出口三协议，订阅一站调度** —— 内置 24 家厂商预设（DeepSeek、Qwen、Kimi、MiMo、MiniMax、GLM、Claude、OpenAI、Gemini 等），任何 Anthropic / OpenAI / Gemini 兼容端点也能直接配进来
+- **聚合所有模型Token** —— 顺序 / 轮询 / 会话亲和、自动切换、故障转移
+- **用量小票** —— token 用量一键导出成一张「超市小票」样式的消费凭证，晒图、留档都方便
+- **三语完整翻译** —— 简体中文 / English / 日本語，可跟随系统或在设置页手动切换
+- **虚拟模型多别名** —— fable / opus / sonnet / haiku 四个槽位各识别多种命名，以 opus 为例，`model-opus` / `claude-opus-4-7` / `anthropic/model-opus` / `anthropic/claude-opus-4-7` 都路由到同一虚拟模型，工具用什么命名都不挑
+- **本地 HTTPS** —— 一键生成自签 CA 与服务器证书，让只支持 HTTPS 的客户端也能接入 cc-router，详见[配置教程](https://ccrouter.app/docs/claude-desktop-integration/)
+- **接入 Claude Desktop App** —— 借助本地 HTTPS 与虚拟模型别名，Anthropic 官方桌面端可直接走 cc-router 聚合的多家订阅，详见[配置教程](https://ccrouter.app/docs/claude-desktop-integration/)
 
 <table align="center">
   <tr>
@@ -81,70 +84,22 @@
 
 ## 接入指南
 
-下方的 AI Agent / Coding Agent 工具都支持接入cc-router并使用你的所有大模型plan。
+下方这些 AI Agent / Coding Agent 工具都能接入 cc-router，用上你手里的全部大模型 Plan：
 
 <p>
 <a href="https://ccrouter.app/docs/getting-started/" target="_blank" rel="noopener">Claude Code cli</a> · 
 <a href="https://ccrouter.app/docs/claude-desktop-integration/" target="_blank" rel="noopener">Claude Desktop App</a> · 
 <a href="https://ccrouter.app/docs/codex-integration/" target="_blank" rel="noopener">OpenAI Codex cli</a> · 
-<a href="https://ccrouter.app/docs/codex-integration/" target="_blank" rel="noopener">OpenAI Codex Desktop App</a> · OpenCode · OpenClaw · Kimi code cli · pi coding agent 等等还有好多。
+<a href="https://ccrouter.app/docs/codex-integration/" target="_blank" rel="noopener">OpenAI Codex Desktop App</a> · OpenCode · OpenClaw · Kimi code cli · pi coding agent 等，还有很多。
 </p>
-
-## 支持的编程套餐和API
-
-| id | 名称 | Token Plan | API | 兼容性 |
-|---|---|---|---|---|
-| `anthropic` | Anthropic 官方 API（仅按量付费，不含 Plan） | ❌ | ✅ | verified |
-| `openai_codex` | **OpenAI Codex (ChatGPT Plus/Pro 订阅)** 有封号风险，不推荐使用 | ✅ | ❌ | tested |
-| `kiro` | **Kiro IDE (AWS)** 免费 Claude 订阅额度，灰色地带有封号风险，不推荐使用 | ✅ | ❌ | tested |
-| `google_ai_studio` | **Google AI Studio (Gemini)** 按量付费 + 免费 quota | ❌ | ✅ | verified |
-| `google_gemini_interactions` | **Google Gemini (Interactions API)** 新统一接口 `/v1beta/interactions`（协议翻译） | ❌ | ✅ | partial |
-| `zhipu` | 智谱 GLM（按量付费/中国订阅） | ✅ | ✅ | verified |
-| `deepseek` | DeepSeek（按量付费） | ❌ | ✅ | verified |
-| `moonshot` | Moonshot Kimi（按量付费/中国订阅/国际订阅） | ✅ | ✅ | untested |
-| `minimax` | MiniMax（按量付费/中国订阅/国际订阅） | ✅ | ✅ | verified |
-| `xiaomi` | 小米 MiMo（按量付费/中国订阅/国际订阅） | ✅ | ✅ | verified |
-| `alibaba` | 阿里云百炼（Token Plan 团队版 + 按量付费 2 地域 + 停售的 Coding Plan） | ✅ | ✅ | verified |
-| `volcengine` | 字节跳动 火山方舟（Coding Plan 订阅 + Agent Plan 订阅 + 按量付费） | ✅ | ✅ | untested |
-| `openrouter` | OpenRouter 聚合平台（500+ 模型路由） | ❌ | ✅ | untested |
-| `tencent` | 腾讯云大模型（Token Plan 订阅 + TokenHub 按量付费境内/境外） | ✅ | ✅ | untested |
-| `aiberm` | Aiberm（按量付费 API，模型按 token group 动态返回） | ❌ | ✅ | untested |
-| `whatai` | 神马中转 API（按量付费，OpenAI/Anthropic 双协议中转，仅用 Anthropic 路径） | ❌ | ✅ | untested |
-| `ollama` | Ollama 本地推理（仅 localhost:11434，含云端模型 tag 如 `glm-4.7:cloud`） | ❌ | ✅| partial |
-| `fireworks` | Fireworks AI（按量付费/国际订阅Fire Pass） | ✅ | ✅ | verified |
-| `stepfun` | 阶跃星辰（按量付费/中国订阅/国际订阅） | ✅ | ✅ | untested |
-| `baidu` | 百度千帆（按量付费/中国订阅） | ✅ | ✅ | untested |
-| `modelscope` | 魔搭 ModelScope（按量付费） | ❌ | ✅ | partial |
-| `ucloud` | 优云智算 UCloud Modelverse（Coding Plan 订阅 + 按量付费 API 国内/海外） | ✅ | ✅ | untested |
-| `openai` | **OpenAI 官方 API**（按量付费，含 GPT-5 / o3 / 4.1 等 reasoning 模型，自动翻译 Anthropic thinking ↔ OpenAI reasoning） | ❌ | ✅ | untested |
-| `xai` | xAI Grok（按量付费，含 Grok 4.5 / 4.3，官方 Anthropic 兼容端点） | ❌ | ✅ | untested |
-| `自定义` | 自定义任意Anthropic协议API | ✅ | ✅ | verified |
-| `自定义 (Gemini 兼容)` | 接入任意 Gemini generateContent 兼容端点（中转站等），messages_path 用 `{model}` 占位符 | ❌ | ✅ | tested |
-| `自定义 (Gemini Interactions 兼容)` | 接入任意 Gemini Interactions API `/v1beta/interactions` 兼容端点（Google 新统一接口 / 兼容中转站），自动协议翻译；与旧 generateContent 不同，model 在请求 body 里，无需 `{model}` 占位符 | ❌ | ✅ | partial |
-| `自定义 (OpenAI Responses 兼容)` | 接入任意 OpenAI `/v1/responses` 兼容端点（one-api / new-api 等中转站），自动协议翻译 | ❌ | ✅ | tested |
-| `自定义 (OpenAI Chat Completions 兼容)` | 接入任意 OpenAI `/v1/chat/completions` 兼容端点（DeepSeek / Together / Groq / Ollama / one-api / new-api 等中转站），自动协议翻译，DeepSeek R1 等模型的 reasoning_content 暴露为 Claude Code thinking 块 | ❌ | ✅ | tested |
-
-> Token Plan 列包含各厂商的套餐订阅形态（Token Plan / Coding Plan / Agent Plan 等）；API 列指按量付费的 Anthropic Messages 兼容端点。
-
-社区可 PR 补充。
-
-## 技术栈
-
-- Tauri 2
-- Tailwind 4
-- React 19
 
 ## 安装使用
 
-1. 在release里下载客户端并安装。
-2. 配置多厂商的大模型，配置虚拟模型对应的真实模型和调度模式。
-3. 配置到Claude Code中使用。
-
-> **macOS 上 cc-router 的 Dock 图标随窗口显隐**：窗口打开时 Dock 有图标、可 Cmd+Tab 切换；关闭窗口后图标消失，入口只剩屏幕右上角的菜单栏。关闭窗口只是隐藏，代理会继续运行；要再打开窗口，点菜单栏图标、或在 Spotlight 里再搜一次 cc-router 即可。彻底退出请用菜单栏图标 →「退出 cc-router」。
+1. 在 Release 页下载对应平台的安装包并安装。
+2. 添加各家厂商的订阅，给虚拟模型绑定真实模型并选好调度模式。
+3. 把生成的配置粘到 Claude Code 等工具里即可使用。
 
 ## 在 Claude Code 中使用
-
-`设置` 页会动态显示完整的 env snippet；默认端口被占用时自动 +1 递增。
 
 ```json
 {
@@ -181,7 +136,63 @@
 
 > `claude-opus*` 的含义是模糊匹配，你可以传入任意符合规则的模型名，都会被归一为虚拟模型`model-opus`，比如 `claude-opus-4-8` `claude-opus-4-7-20260101` `claude-opus-100` 都没问题。`gpt-*-sol` 这类按档位段匹配：`gpt-5.6-sol` `gpt-6-sol` `gpt-5.6-sol-20261201` 都命中 sol 档（terra/luna/mini 同理）。
 
-## 在其他 AI 工具中使用（OpenAI Chat Completions 兼容）
+## 入口与出口
+
+cc-router 夹在你的工具和大模型厂商中间：工具从**入口**连进来，请求从**出口**发给厂商。两头各支持三种主流大模型接口，可以任意组合——比如 Codex 从 OpenAI Responses 入口进来，最终由 DeepSeek 的 Anthropic 端点作答。
+
+### 入口：你的工具怎么连 cc-router
+
+三个入口共用同一套订阅、虚拟模型、限额与会话亲和，请求日志的「入口接口」一栏能看到每条请求从哪个入口进来。按你的工具支持的协议展开对应一节：
+
+<details>
+<summary><b>Anthropic Messages</b> <code>/v1/messages</code> —— Claude Code、Claude Desktop、OpenCode、OpenClaw、pi、Kimi code cli 等</summary>
+
+| 配置项 | 填写 |
+|---|---|
+| Base URL | `http://127.0.0.1:23456`（不带 `/v1`，工具会自己拼 `/v1/messages`） |
+| 鉴权 | `x-api-key: <token>` 或 `Authorization: Bearer <token>`，对应 Claude Code 的 `ANTHROPIC_API_KEY` / `ANTHROPIC_AUTH_TOKEN` |
+| 模型名 | `model-fable` / `model-opus` / `model-sonnet` / `model-haiku`，或上方别名表里的任意写法（含 `anthropic/` 前缀） |
+
+- 这是主入口，请求原样透传不做协议翻译，thinking、`output_config.effort`、`cache_control`、图片、工具调用全部按 Anthropic 原生语义工作。
+- Claude Code 的完整 env 示例见上方「在 Claude Code 中使用」；Claude Desktop 需要本地 HTTPS，见[配置教程](https://ccrouter.app/docs/claude-desktop-integration/)。
+- 会话亲和优先按 `x-claude-code-session-id` 请求头、其次 `metadata.user_id` 识别会话。
+- 设置页开启「透传客户端请求头」后，`anthropic-beta` / `anthropic-version` 等白名单头会原样转发给上游，默认关闭。
+
+</details>
+
+<details>
+<summary><b>OpenAI Responses</b> <code>/v1/responses</code> —— Codex CLI、Codex Desktop App 及其他 Responses 客户端</summary>
+
+| 配置项 | 填写 |
+|---|---|
+| Base URL | `http://127.0.0.1:23456/v1` |
+| API Key | cc-router 设置页里的 token，Codex 从 `OPENAI_API_KEY` 或 `~/.codex/auth.json` 读取 |
+| 模型名 | `gpt-5.6` / `gpt-5.5` / `gpt-5.4` / `gpt-5.4-mini`，或 `openai/` 前缀、`gpt-*-sol/terra/luna/mini` 档位名，分别落到 fable / opus / sonnet / haiku；也接受 `model-*` 写法 |
+
+`~/.codex/config.toml` 片段（设置页「集成」可一键写入并自动备份原文件，之后用 `codex -p cc-router` 启动）：
+
+```toml
+[model_providers.cc-router]
+name = "cc-router"
+base_url = "http://127.0.0.1:23456/v1"
+wire_api = "responses"
+env_key = "OPENAI_API_KEY"
+
+[profiles.cc-router]
+model_provider = "cc-router"
+model = "model-sonnet"
+```
+
+- 请求在内部翻译为 Anthropic Messages：`instructions` 与 developer 消息并入 system，`reasoning.effort` 映射为 thinking 预算，`max_output_tokens` 映射为 `max_tokens`（缺省 4096，并会自动抬高到覆盖 thinking 预算）。
+- reasoning 双向：上游的 thinking 以带签名的 reasoning item 返回，客户端下一轮原样回传即可保持多轮推理上下文。
+- 不支持图片输入，也不支持 `file_search` / `web_search` / `computer_use` 这类 OpenAI 专有工具；`parallel_tool_calls` 会被忽略。
+- 会话亲和按 `prompt_cache_key`、其次 `session_id` 请求头识别，Codex 都会自带。
+- 详细步骤见[配置教程](https://ccrouter.app/docs/codex-integration/)。
+
+</details>
+
+<details>
+<summary><b>OpenAI Chat Completions</b> <code>/v1/chat/completions</code> —— Open WebUI、Cherry Studio、Cline、LobeChat 等</summary>
 
 Open WebUI、Cherry Studio、Cline、LobeChat 等只支持 OpenAI Chat Completions 的工具，把「OpenAI 兼容」端点指向 cc-router 即可：
 
@@ -200,6 +211,48 @@ Open WebUI、Cherry Studio、Cline、LobeChat 等只支持 OpenAI Chat Completio
 - `n>1`、`logprobs`、`response_format` 的 JSON Schema 强制均会被忽略（不报错）。
 - 会话亲和（sticky）优先按 `user` 字段、其次 `x-session-id` 请求头识别会话，两者都没有时按首条用户消息内容。
 - 响应里出现工具调用时 `finish_reason` 恒为 `tool_calls`，客户端可放心据此判断是否执行工具。
+
+</details>
+
+### 出口：cc-router 怎么连厂商
+
+出口按协议分三类，另有一类走 OAuth 登录的订阅账号。内置厂商预设和自定义端点走的是同一条路，区别只是内置预设已经替你填好地址、鉴权方式和模型列表。完整内置清单以 app 内「添加订阅」页为准，描述文件在 [`src-tauri/providers/`](src-tauri/providers/)，欢迎 PR 补充。
+
+<details>
+<summary><b>Anthropic Messages 兼容</b> —— 主路径，请求原样透传</summary>
+
+- 内置：Anthropic 官方、DeepSeek、智谱 GLM、Moonshot Kimi、MiniMax、小米 MiMo、阿里云百炼、火山方舟、腾讯云、百度千帆、阶跃星辰、魔搭 ModelScope、优云智算、Fireworks、OpenRouter、xAI Grok、Aiberm、神马中转、Ollama 等，覆盖各家的 Token Plan / Coding Plan / Agent Plan 订阅与按量付费 API
+- 自定义：任何 Anthropic Messages 兼容端点（中转站、自建网关等），填 Base URL + Key 即可
+- 不做协议翻译，thinking、`output_config.effort`、`cache_control`、图片、工具调用全部按 Anthropic 原生语义工作。**只要厂商提供原生 Anthropic 端点，就优先走这条路**，翻译路径多少会丢内容
+
+</details>
+
+<details>
+<summary><b>OpenAI 兼容</b> <code>/v1/responses</code> · <code>/v1/chat/completions</code> —— 协议翻译</summary>
+
+- 内置：OpenAI 官方 API（GPT-5 / o3 / 4.1 等 reasoning 模型）
+- 自定义：任意 OpenAI Responses 或 Chat Completions 兼容端点，如 one-api / new-api 中转站、Groq、Together、本地 vLLM / llama.cpp
+- cc-router 把 Anthropic Messages 翻译成对应协议再发出：Anthropic thinking ↔ OpenAI reasoning 双向映射，多轮推理上下文自动回灌；Chat Completions 返回的 `reasoning_content`（DeepSeek R1 等）会以 thinking 块的形式交给 Claude Code
+- 翻译层表达不了的内容（如 `cache_control`）会被丢弃，所以有原生 Anthropic 端点的厂商请配到上一类，不要配到这里
+
+</details>
+
+<details>
+<summary><b>Gemini 兼容</b> <code>generateContent</code> · <code>/v1beta/interactions</code> —— 协议翻译</summary>
+
+- 内置：Google AI Studio（generateContent，按量付费 + 免费 quota）、Google Gemini Interactions API（新统一接口）
+- 自定义：任意 Gemini generateContent 兼容端点（messages_path 用 `{model}` 占位符），或 Interactions 兼容端点（model 在请求 body 里，无需占位符）
+- thinking 双向映射，工具调用往返时自动携带 thought signature
+
+</details>
+
+<details>
+<summary><b>订阅账号出口（OAuth）</b> —— Codex（ChatGPT Plus/Pro）、Kiro（AWS）</summary>
+
+- 不用 API Key，通过 OAuth 设备码登录，把 ChatGPT 订阅 / Kiro 免费 Claude 额度当作出口
+- **属于灰色地带，有封号风险，不推荐当主力**，建议只做兜底或副号；由此导致的限速、封禁或订阅取消，作者概不负责
+
+</details>
 
 ## 常见问题&使用场景
 
@@ -255,6 +308,10 @@ CC 请求来了就按映射转发，不用再频繁改 `~/.claude/settings.json`
 
 ## 开发
 
+- Tauri 2
+- Tailwind 4
+- React 19
+
 依赖：Node.js ≥ 20（推荐 pnpm），Rust ≥ 1.88（建议直接用 rustup 最新 stable），Xcode CLT（macOS）。
 
 ```bash
@@ -265,12 +322,8 @@ pnpm tauri dev      # 启动开发模式（同时运行前端 + Rust 后端 + �
 首次启动 app 会进入 onboarding：
 
 1. 添加一个订阅（选厂商 → 选接入点 → 填 API Key → 自动抓取模型列表）
-2. 一键把订阅绑定到三个虚拟模型
+2. 一键把订阅绑定到四个虚拟模型
 3. 复制 Claude Code 环境变量配置，粘到你的 `~/.claude/settings.json`
-
-## 添加新provider
-
-如果你使用`Claude Code`，我提供了一个`SKILL`，可以执行`new-provider`并附加provider的官方文档或接口地址等信息，能够自动创建provider的配置。
 
 ## 打包
 
@@ -320,12 +373,14 @@ Get-NetTCPConnection -LocalPort 1420 -State Listen |
 
 </details>
 
-## 图标
+## 添加新provider
 
-Provider 品牌 logo 来自 [@lobehub/icons](https://github.com/lobehub/lobe-icons)（MIT）。各品牌商标归原所有者所有。
+如果你使用`Claude Code`，我提供了一个`SKILL`，可以执行`new-provider`并附加provider的官方文档或接口地址等信息，能够自动创建provider的配置。
 
 ## 证书
 
 本项目以 [MIT](LICENSE) 许可证发布。
 
-小票主题使用的 9 款字体均为 SIL Open Font License 1.1，归属声明与许可证全文见 [THIRD-PARTY-NOTICES.md](THIRD-PARTY-NOTICES.md)。
+字体：小票主题使用的 9 款字体均为 SIL Open Font License 1.1，归属声明与许可证全文见 [THIRD-PARTY-NOTICES.md](THIRD-PARTY-NOTICES.md)。
+
+图标：Provider 品牌 logo 来自 [@lobehub/icons](https://github.com/lobehub/lobe-icons)（MIT）。各品牌商标归原所有者所有。

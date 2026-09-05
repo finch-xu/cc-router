@@ -37,35 +37,38 @@
 アーキテクチャとリクエストの流れ：
 
 ```text
- Claude Code     OpenCode      OpenClaw     pi ...            Codex ...
-      |              |             |           |                  |
-      ------------------------------------------                  |
-                          |                                       |
-               Anthropic Messages API                   OpenAI Responses API
-                   (/v1/messages)                          (/v1/responses)
-                          |                                       |
-                          -----------------------------------------
-                                              |
-                                          cc-router
-                                 (ローカル 127.0.0.1:23456)
-                                              |
-      -----------------------------------------------------------------------------------
-      |             |             |             |             |             |           |
-  DeepSeek         GLM          Kimi        Anthropic      OpenAI        Gemini      ......
-     API         Coding        Coding       Messages     Responses &       API
-                  Plan          Plan           API       Completions
+ Claude Code    OpenCode    OpenClaw   pi ...   Codex ...      Open WebUI / Cherry Studio ...
+      |             |           |         |         |                         |
+      -------------------------------------         |                         |
+                        |                           |                         |
+                    Anthropic                    OpenAI                    OpenAI
+                  Messages API                Responses API         Chat Completions API
+                 (/v1/messages)              (/v1/responses)       (/v1/chat/completions)
+                        |                           |                         |
+                        -------------------------------------------------------
+                                                  |  入口 · 仮想モデル
+                                                  |
+                                              cc-router
+                                       (ローカル 127.0.0.1:23456)
+                                                  |
+                                                  |  出口 · 実モデル
+           -----------------------------------------------------------------------------
+           |            |            |            |            |            |          |
+       DeepSeek        GLM         Kimi       Anthropic     OpenAI       Gemini     ......
+          API        Coding       Coding      Messages    Responses &      API
+                      Plan         Plan          API      Completions
 ```
 
 機能ハイライト：
 
-- **19 プロバイダーを 1 つのルーターで** —— DeepSeek・Qwen・Kimi・MiMo・MiniMax・GLM・Claude・Gemini などの Token Plan / Coding Plan / 従量課金 API を内蔵対応。opus / sonnet / haiku の 3 スロットに自由に割り当て、順次（sequential）/ ラウンドロビン（round_robin）/ セッション親和（sticky）で自動切替
-- **任意のエンドポイントを追加可能** —— 内蔵プロバイダーで足りない場合、Anthropic Messages 互換 / Gemini generateContent・Gemini Interactions 互換 / OpenAI Responses・Chat Completions 互換 API なら何でも直接接続でき、内蔵サブスクと同等にディスパッチ
-- **利用レシート** —— トークン消費スナップショットを PNG / PDF / HTML へワンクリックでエクスポート。モノクロ / カラーの 2 モード、既定では料金非表示で利用量のみ、フッターの QR コードからリポジトリへジャンプ
+- **入口は 3 プロトコル、どのツールもそのまま接続** —— Anthropic Messages / OpenAI Responses / OpenAI Chat Completions の 3 エンドポイントを同時に公開。Claude Code、Codex、OpenClaw、Hermes Agent、Kimi Code、ZCode、Cherry Studio などが改造なしで接続できます
+- **出口は 3 プロトコル、全サブスクを一括ディスパッチ** —— 24 社のプロバイダプリセットを内蔵（DeepSeek・Qwen・Kimi・MiMo・MiniMax・GLM・Claude・OpenAI・Gemini など）。Anthropic / OpenAI / Gemini 互換のエンドポイントなら何でも追加可能
+- **手持ちのトークンをすべて集約** —— 順次 / ラウンドロビン / セッション親和のディスパッチ、自動切替とフェイルオーバー
+- **利用レシート** —— トークン使用量を「スーパーのレシート」風の画像にワンクリックで書き出し。共有にも記録にも便利
 - **3 言語完全翻訳** —— 简体中文 / English / 日本語、システム言語追従または設定画面で手動切替
 - **仮想モデルのエイリアス対応** —— fable / opus / sonnet / haiku の各スロットが複数の命名を識別。opus を例にすると `model-opus` / `claude-opus-4-7` / `anthropic/model-opus` / `anthropic/claude-opus-4-7` がすべて同じ仮想モデルにルーティングされ、ツール側の命名規約に左右されません
 - **ローカル HTTPS** —— ワンクリックで自己署名 CA とサーバー証明書を生成し、HTTPS しか受け付けないクライアントからも cc-router を呼び出せます。詳細は[設定ガイド](https://ccrouter.app/docs/claude-desktop-integration/)を参照
 - **Claude Desktop App 対応** —— ローカル HTTPS と仮想モデルエイリアスを組み合わせることで、Anthropic 公式デスクトップアプリから cc-router で集約した複数サブスクへ直接接続できます。詳細は[設定ガイド](https://ccrouter.app/docs/claude-desktop-integration/)を参照
-- **デュアルプロトコル API エンドポイント** —— `Anthropic /v1/messages` と `OpenAI /v1/responses` を並行して公開。Claude Code / Codex など Anthropic・OpenAI 両エコシステムのクライアントが同じ cc-router にワンクリックで接続可能
 
 <table align="center">
   <tr>
@@ -81,7 +84,7 @@
 
 ## 連携ガイド
 
-以下の AI Agent / Coding Agent ツールはいずれも cc-router に接続でき、ご契約中のすべての LLM プランを利用できます。
+以下の AI Agent / Coding Agent ツールはいずれも cc-router に接続でき、ご契約中のすべての LLM プランを利用できます：
 
 <p>
 <a href="https://ccrouter.app/docs/getting-started/" target="_blank" rel="noopener">Claude Code cli</a> · 
@@ -90,61 +93,13 @@
 <a href="https://ccrouter.app/docs/codex-integration/" target="_blank" rel="noopener">OpenAI Codex Desktop App</a> · OpenCode · OpenClaw · Kimi code cli · pi coding agent など、ほかにも多数。
 </p>
 
-## 対応プラン・API 一覧
-
-| id | 名称 | Token Plan | API | 動作確認 |
-|---|---|---|---|---|
-| `anthropic` | Anthropic 公式 API（従量課金のみ、サブスクリプションプラン非対応） | ❌ | ✅ | verified |
-| `openai_codex` | **OpenAI Codex（ChatGPT Plus/Pro サブスクリプション）** — アカウント停止リスクあり、推奨しません | ✅ | ❌ | tested |
-| `kiro` | **Kiro IDE（AWS）** — Claude サブスクリプション無料枠、アカウント停止リスクあり、推奨しません | ✅ | ❌ | tested |
-| `google_ai_studio` | **Google AI Studio（Gemini）** 従量課金 + 無料枠 | ❌ | ✅ | verified |
-| `google_gemini_interactions` | **Google Gemini（Interactions API）** 新しい統合エンドポイント `/v1beta/interactions`（プロトコル変換） | ❌ | ✅ | partial |
-| `zhipu` | 智譜 GLM（従量課金 / 中国サブスク） | ✅ | ✅ | verified |
-| `deepseek` | DeepSeek（従量課金） | ❌ | ✅ | verified |
-| `moonshot` | Moonshot Kimi（従量課金 / 中国サブスク / グローバルサブスク） | ✅ | ✅ | untested |
-| `minimax` | MiniMax（従量課金 / 中国サブスク / グローバルサブスク） | ✅ | ✅ | verified |
-| `xiaomi` | Xiaomi MiMo（従量課金 / 中国サブスク / グローバルサブスク） | ✅ | ✅ | verified |
-| `alibaba` | Alibaba Cloud Bailian（チーム版 Token Plan + 2 リージョン従量課金 + 販売終了の Coding Plan） | ✅ | ✅ | verified |
-| `volcengine` | バイトダンス 火山方舟 Volcengine Ark（Coding Plan サブスクリプション + Agent Plan サブスクリプション + 従量課金） | ✅ | ✅ | untested |
-| `openrouter` | OpenRouter アグリゲーター（500+ モデルをルーティング） | ❌ | ✅ | untested |
-| `tencent` | Tencent Cloud LLM（Token Plan サブスクリプション + TokenHub 従量課金、中国本土/海外） | ✅ | ✅ | untested |
-| `aiberm` | Aiberm（従量課金 API、token group ごとに動的にモデル返却） | ❌ | ✅ | untested |
-| `whatai` | 神馬中継 API（従量課金、OpenAI/Anthropic デュアルプロトコル中継、Anthropic 経路のみ使用） | ❌ | ✅ | untested |
-| `ollama` | Ollama ローカル推論（localhost:11434 のみ、`glm-4.7:cloud` のようなクラウドタグも含む） | ❌ | ✅ | partial |
-| `fireworks` | Fireworks AI（従量課金 / Fire Pass グローバルサブスク） | ✅ | ✅ | verified |
-| `stepfun` | 階躍星辰 Stepfun（従量課金 / 中国サブスク / グローバルサブスク） | ✅ | ✅ | untested |
-| `baidu` | 百度千帆（従量課金 / 中国サブスク） | ✅ | ✅ | untested |
-| `modelscope` | ModelScope 魔搭（従量課金） | ❌ | ✅ | partial |
-| `ucloud` | 優雲智算 UCloud Modelverse（Coding Plan サブスク + 従量課金 API、中国国内/海外） | ✅ | ✅ | untested |
-| `openai` | **OpenAI 公式 API**（従量課金、GPT-5 / o3 / 4.1 などの reasoning モデル対応、Anthropic thinking ↔ OpenAI reasoning を自動変換） | ❌ | ✅ | untested |
-| `xai` | xAI Grok（従量課金、Grok 4.5 / 4.3 対応、公式 Anthropic 互換エンドポイント） | ❌ | ✅ | untested |
-| `カスタム` | Anthropic プロトコル準拠の任意の API を自前で追加 | ✅ | ✅ | verified |
-| `カスタム (Gemini 互換)` | Gemini generateContent 互換の任意のエンドポイント（中継など）を追加。`messages_path` に `{model}` プレースホルダを含める必要があります | ❌ | ✅ | tested |
-| `カスタム (Gemini Interactions 互換)` | Gemini Interactions API `/v1beta/interactions` 互換の任意のエンドポイント（Google の新しい統合 API / 互換中継）を追加、プロトコル自動変換。旧来の generateContent と異なり、model はリクエスト body 内にあるため、`{model}` プレースホルダは不要 | ❌ | ✅ | partial |
-| `カスタム (OpenAI Responses 互換)` | OpenAI `/v1/responses` 互換の任意のエンドポイント（one-api / new-api などの中継）を追加、プロトコル自動変換 | ❌ | ✅ | tested |
-| `カスタム (OpenAI Chat Completions 互換)` | OpenAI `/v1/chat/completions` 互換の任意のエンドポイント（DeepSeek、Together、Groq、Ollama、one-api / new-api などの中継）を追加、プロトコル自動変換。DeepSeek R1 などの `reasoning_content` を Claude Code の thinking ブロックとして表示 | ❌ | ✅ | tested |
-
-> 「Token Plan」列はサブスクリプション形式のクォータ全般（Token Plan / Coding Plan / Agent Plan 等）を指し、「API」列は従量課金の Anthropic Messages 互換エンドポイントを指します。
-
-コミュニティからの PR 歓迎です。
-
-## 技術スタック
-
-- Tauri 2
-- Tailwind 4
-- React 19
-
 ## クイックスタート
 
-1. Releases からインストーラをダウンロードして実行します。
-2. LLM サブスクリプションを追加し、仮想モデルに紐付けてディスパッチモードを選択します。
-3. 下記の env スニペットで Claude Code を cc-router に向けます。
-
-> **macOS では cc-router はメニューバーアプリとして動作します** —— Dock にアイコンは表示されません。ウィンドウを閉じても非表示になるだけで、プロキシは動き続けます。メニューバーのアイコンをクリックする（または Spotlight から cc-router をもう一度開く）とウィンドウが戻ります。完全に終了するにはメニューバーのアイコン →「cc-router を終了」を使ってください。
+1. Releases からお使いのプラットフォーム向けインストーラをダウンロードして実行します。
+2. 各プロバイダのサブスクリプションを追加し、仮想モデルに実モデルを紐付けてディスパッチモードを選択します。
+3. 生成された設定を Claude Code などのツールに貼り付ければ完了です。
 
 ## Claude Code での利用
-
-**設定** ページが完全な env スニペットを動的に表示します。デフォルトポートが使用中の場合は、最大 100 回まで自動でインクリメントして空きを探します。
 
 ```json
 {
@@ -180,6 +135,124 @@ LiteLLM 形式の `anthropic/` プレフィックスにも対応しています:
 |  `model-haiku` |  `anthropic/model-haiku` `anthropic/claude-haiku*` `claude-haiku*`  `gpt-*-mini` `openai/gpt-*-mini` |
 
 > `claude-opus*` はワイルドカード（前方一致）です。パターンに一致するモデル名を渡せば、すべて仮想モデル `model-opus` に正規化されます。例えば `claude-opus-4-8`、`claude-opus-4-7-20260101`、`claude-opus-100` などはすべて問題なく動作します。`gpt-*-sol` 系のエイリアスはティアセグメントで一致します: `gpt-5.6-sol`、`gpt-6-sol`、`gpt-5.6-sol-20261201` はいずれも sol ティアに一致します（terra/luna/mini も同様）。
+
+## 入口と出口
+
+cc-router はツールと LLM プロバイダの間に入ります。ツールは**入口**から接続し、リクエストは**出口**からプロバイダへ送られます。入口・出口それぞれが主要 3 種類の LLM API に対応しており、組み合わせは自由です——たとえば Codex が OpenAI Responses の入口から入り、最終的に DeepSeek の Anthropic エンドポイントが応答する、といった構成も可能です。
+
+### 入口：ツールから cc-router への接続
+
+3 つの入口はサブスクリプション・仮想モデル・クォータ・セッション親和を共有します。リクエストログの「受信エンドポイント」列で、各リクエストがどの入口から来たかを確認できます。お使いのツールが対応するプロトコルのセクションを展開してください：
+
+<details>
+<summary><b>Anthropic Messages</b> <code>/v1/messages</code> —— Claude Code、Claude Desktop、OpenCode、OpenClaw、pi、Kimi code cli など</summary>
+
+| 設定項目 | 値 |
+|---|---|
+| Base URL | `http://127.0.0.1:23456`（`/v1` は付けない。ツール側が `/v1/messages` を補います） |
+| 認証 | `x-api-key: <token>` または `Authorization: Bearer <token>`。Claude Code の `ANTHROPIC_API_KEY` / `ANTHROPIC_AUTH_TOKEN` に相当 |
+| モデル名 | `model-fable` / `model-opus` / `model-sonnet` / `model-haiku`、または上記エイリアス表の任意の記法（`anthropic/` プレフィックス含む） |
+
+- これがメインの入口です。リクエストはプロトコル変換なしでそのまま透過され、thinking、`output_config.effort`、`cache_control`、画像、ツール呼び出しはすべて Anthropic ネイティブの意味論で動作します。
+- Claude Code の完全な env 例は上記「Claude Code での利用」を参照。Claude Desktop はローカル HTTPS が必要です。[設定ガイド](https://ccrouter.app/docs/claude-desktop-integration/)を参照してください。
+- セッション親和は `x-claude-code-session-id` ヘッダーを優先し、次に `metadata.user_id` でセッションを識別します。
+- 設定画面で「クライアントヘッダーの転送」を有効にすると、`anthropic-beta` / `anthropic-version` などのホワイトリストヘッダーがそのまま上流へ転送されます。既定では無効です。
+
+</details>
+
+<details>
+<summary><b>OpenAI Responses</b> <code>/v1/responses</code> —— Codex CLI、Codex Desktop App、その他の Responses クライアント</summary>
+
+| 設定項目 | 値 |
+|---|---|
+| Base URL | `http://127.0.0.1:23456/v1` |
+| API Key | cc-router 設定画面の token。Codex は `OPENAI_API_KEY` または `~/.codex/auth.json` から読み込みます |
+| モデル名 | `gpt-5.6` / `gpt-5.5` / `gpt-5.4` / `gpt-5.4-mini`、または `openai/` プレフィックス、`gpt-*-sol/terra/luna/mini` のティア名。それぞれ fable / opus / sonnet / haiku に対応。`model-*` 記法も受け付けます |
+
+`~/.codex/config.toml` の断片（設定画面の「連携」からワンクリックで書き込めます。元ファイルは自動でバックアップされ、その後 `codex -p cc-router` で起動）：
+
+```toml
+[model_providers.cc-router]
+name = "cc-router"
+base_url = "http://127.0.0.1:23456/v1"
+wire_api = "responses"
+env_key = "OPENAI_API_KEY"
+
+[profiles.cc-router]
+model_provider = "cc-router"
+model = "model-sonnet"
+```
+
+- リクエストは内部で Anthropic Messages に変換されます: `instructions` と developer メッセージは system に統合、`reasoning.effort` は thinking 予算に、`max_output_tokens` は `max_tokens` にマッピング（既定 4096、thinking 予算をカバーするよう自動で引き上げ）。
+- reasoning は双方向: 上流の thinking は署名付き reasoning item として返され、次のターンでそのまま送り返せばマルチターンの推論コンテキストが維持されます。
+- 画像入力は非対応。`file_search` / `web_search` / `computer_use` などの OpenAI 専用ツールも非対応。`parallel_tool_calls` は無視されます。
+- セッション親和は `prompt_cache_key`、次に `session_id` ヘッダーで識別します。Codex はどちらも自動で付与します。
+- 詳しい手順は[設定ガイド](https://ccrouter.app/docs/codex-integration/)を参照。
+
+</details>
+
+<details>
+<summary><b>OpenAI Chat Completions</b> <code>/v1/chat/completions</code> —— Open WebUI、Cherry Studio、Cline、LobeChat など</summary>
+
+Open WebUI、Cherry Studio、Cline、LobeChat など OpenAI Chat Completions しか対応していないツールは、「OpenAI 互換」エンドポイントを cc-router に向けるだけで使えます：
+
+| 設定項目 | 値 |
+|---|---|
+| Base URL | `http://127.0.0.1:23456/v1`（ツールによっては `/v1` なしを要求するので、ツールの案内に従ってください） |
+| API Key | cc-router 設定画面の token（認証を無効にしている場合は空でない任意の値） |
+| モデル名 | `model-fable` / `model-opus` / `model-sonnet` / `model-haiku`、または `gpt-5.6` / `gpt-5.5` / `gpt-5.4` / `gpt-5.4-mini` などのエイリアス。`GET /v1/models` で一覧を取得できます |
+
+動作について：
+
+- リクエストは cc-router 内部で Anthropic Messages に変換され、同じディスパッチを通ります。サブスクリプション・仮想モデル・クォータ・セッション親和はすべて有効で、リクエストログの「受信エンドポイント」には `/v1/chat/completions` と表示されます。
+- 上流の thinking は `reasoning_content` フィールドで返されます（DeepSeek の慣例で、主要クライアントは折りたたみ表示に対応）。会話履歴でクライアントが送り返す `reasoning_content` は破棄されますが、以降の会話には影響しません。
+- 画像は `data:` base64 と `http(s)` の両形式の `image_url` に対応。ツール呼び出しは双方向対応。ストリーミング応答の末尾には必ず `usage` フレームが付きます。
+- 旧式の `functions` / `function_call` フィールドは非対応で、送ると 400 を返します。`tools` / `tool_choice` を使ってください。
+- `n>1`、`logprobs`、`response_format` による JSON Schema 強制は無視されます（エラーにはなりません）。
+- セッション親和（sticky）は `user` フィールドを優先し、次に `x-session-id` ヘッダー、どちらもなければ最初のユーザーメッセージの内容で識別します。
+- 応答にツール呼び出しが含まれる場合、`finish_reason` は常に `tool_calls` になります。クライアントはこれを頼りにツール実行の要否を判断できます。
+
+</details>
+
+### 出口：cc-router からプロバイダへの接続
+
+出口はプロトコルごとに 3 分類、加えて OAuth ログインを使うサブスクリプションアカウントが 1 分類あります。内蔵プロバイダプリセットもカスタムエンドポイントも同じ経路を通り、違いはプリセットがアドレス・認証方式・モデル一覧をあらかじめ埋めてくれる点だけです。内蔵プロバイダの完全な一覧はアプリ内「サブスクリプションを追加」画面が正となり、記述ファイルは [`src-tauri/providers/`](src-tauri/providers/) にあります。PR 歓迎です。
+
+<details>
+<summary><b>Anthropic Messages 互換</b> —— メイン経路、リクエストをそのまま透過</summary>
+
+- 内蔵: Anthropic 公式、DeepSeek、智譜 GLM、Moonshot Kimi、MiniMax、Xiaomi MiMo、Alibaba Cloud Bailian、Volcengine Ark、Tencent Cloud、百度千帆、Stepfun、ModelScope、UCloud、Fireworks、OpenRouter、xAI Grok、Aiberm、神馬中継、Ollama など。各社の Token Plan / Coding Plan / Agent Plan サブスクリプションと従量課金 API をカバー
+- カスタム: Anthropic Messages 互換の任意のエンドポイント（中継、自前ゲートウェイなど）。Base URL と Key を入力するだけ
+- プロトコル変換なし。thinking、`output_config.effort`、`cache_control`、画像、ツール呼び出しはすべて Anthropic ネイティブの意味論で動作します。**プロバイダがネイティブの Anthropic エンドポイントを提供しているなら、この経路を優先してください。** 変換経路では多かれ少なかれ情報が失われます
+
+</details>
+
+<details>
+<summary><b>OpenAI 互換</b> <code>/v1/responses</code> · <code>/v1/chat/completions</code> —— プロトコル変換</summary>
+
+- 内蔵: OpenAI 公式 API（GPT-5 / o3 / 4.1 などの reasoning モデル）
+- カスタム: OpenAI Responses または Chat Completions 互換の任意のエンドポイント。one-api / new-api 中継、Groq、Together、ローカルの vLLM / llama.cpp など
+- cc-router は Anthropic Messages を対応プロトコルに変換してから送信します: Anthropic thinking ↔ OpenAI reasoning を双方向にマッピングし、マルチターンの推論コンテキストを自動で送り返します。Chat Completions が返す `reasoning_content`（DeepSeek R1 など）は thinking ブロックとして Claude Code に渡されます
+- 変換層で表現できない内容（`cache_control` など）は破棄されます。ネイティブの Anthropic エンドポイントを持つプロバイダは上の分類に登録し、ここには登録しないでください
+
+</details>
+
+<details>
+<summary><b>Gemini 互換</b> <code>generateContent</code> · <code>/v1beta/interactions</code> —— プロトコル変換</summary>
+
+- 内蔵: Google AI Studio（generateContent、従量課金 + 無料枠）、Google Gemini Interactions API（新しい統合エンドポイント）
+- カスタム: Gemini generateContent 互換の任意のエンドポイント（messages_path に `{model}` プレースホルダを使用）、または Interactions 互換エンドポイント（model はリクエスト body 内にあるため、プレースホルダ不要）
+- thinking は双方向マッピング。ツール呼び出しの往復時に thought signature を自動で引き継ぎます
+
+</details>
+
+<details>
+<summary><b>サブスクリプションアカウント出口（OAuth）</b> —— Codex（ChatGPT Plus/Pro）、Kiro（AWS）</summary>
+
+- API Key 不要。OAuth のデバイスコードでログインし、ChatGPT サブスクリプション / Kiro の無料 Claude 枠を出口として使います
+- **グレーゾーンでアカウント停止のリスクがあるため、メインとしての利用は推奨しません。** フォールバックやサブアカウントとしての利用に留めてください。これに起因するレート制限、BAN、サブスクリプション解約について作者は一切責任を負いません
+
+</details>
 
 ## FAQ・ユースケース
 
@@ -235,6 +308,10 @@ CC からのリクエストはこのマッピングに従って転送される�
 
 ## 開発
 
+- Tauri 2
+- Tailwind 4
+- React 19
+
 前提条件: Node.js ≥ 20（pnpm 推奨）、Rust ≥ 1.88（rustup の最新 stable 推奨）、Xcode Command Line Tools（macOS）。
 
 ```bash
@@ -245,12 +322,8 @@ pnpm tauri dev      # フロントエンド + Rust バックエンド + プロ�
 初回起動時は onboarding フローが表示されます:
 
 1. サブスクリプションを追加（プロバイダ選択 → エンドポイント選択 → API Key 入力 → モデル一覧を自動取得）
-2. ワンクリックで 3 つの仮想モデルすべてに紐付け
+2. ワンクリックで 4 つの仮想モデルすべてに紐付け
 3. 生成された env スニペットを `~/.claude/settings.json` に貼り付け
-
-## 新しいプロバイダの追加
-
-**Claude Code** を使用している場合、本リポジトリには `new-provider` という `SKILL` が同梱されています。対象プロバイダの公式ドキュメント URL またはエンドポイント情報を渡して実行すると、YAML のスキャフォールディングと関連箇所の修正を自動で行います。
 
 ## ビルド
 
@@ -300,12 +373,14 @@ Get-NetTCPConnection -LocalPort 1420 -State Listen |
 
 </details>
 
-## アイコン
+## 新しいプロバイダの追加
 
-プロバイダのブランドロゴは [@lobehub/icons](https://github.com/lobehub/lobe-icons)（MIT）を使用しています。各商標は各権利者に帰属します。
+**Claude Code** を使用している場合、本リポジトリには `new-provider` という `SKILL` が同梱されています。対象プロバイダの公式ドキュメント URL またはエンドポイント情報を渡して実行すると、YAML のスキャフォールディングと関連箇所の修正を自動で行います。
 
 ## ライセンス
 
 本プロジェクトは [MIT](LICENSE) ライセンスで公開しています。
 
-レシートテーマで使用する 9 書体はすべて SIL Open Font License 1.1 です。帰属表示とライセンス全文は [THIRD-PARTY-NOTICES.md](THIRD-PARTY-NOTICES.md) を参照してください。
+フォント: レシートテーマで使用する 9 書体はすべて SIL Open Font License 1.1 です。帰属表示とライセンス全文は [THIRD-PARTY-NOTICES.md](THIRD-PARTY-NOTICES.md) を参照してください。
+
+アイコン: プロバイダのブランドロゴは [@lobehub/icons](https://github.com/lobehub/lobe-icons)（MIT）を使用しています。各商標は各権利者に帰属します。

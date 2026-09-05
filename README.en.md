@@ -37,35 +37,38 @@ A locally-running LLM aggregation gateway with a desktop GUI, zero-code setup: b
 Architecture and request flow at a glance:
 
 ```text
- Claude Code     OpenCode      OpenClaw     pi ...            Codex ...
-      |              |             |           |                  |
-      ------------------------------------------                  |
-                          |                                       |
-               Anthropic Messages API                   OpenAI Responses API
-                   (/v1/messages)                          (/v1/responses)
-                          |                                       |
-                          -----------------------------------------
-                                              |
-                                          cc-router
-                                   (local 127.0.0.1:23456)
-                                              |
-      -----------------------------------------------------------------------------------
-      |             |             |             |             |             |           |
-  DeepSeek         GLM          Kimi        Anthropic      OpenAI        Gemini      ......
-     API         Coding        Coding       Messages     Responses &       API
-                  Plan          Plan           API       Completions
+ Claude Code    OpenCode    OpenClaw   pi ...   Codex ...      Open WebUI / Cherry Studio ...
+      |             |           |         |         |                         |
+      -------------------------------------         |                         |
+                        |                           |                         |
+                    Anthropic                    OpenAI                    OpenAI
+                  Messages API                Responses API         Chat Completions API
+                 (/v1/messages)              (/v1/responses)       (/v1/chat/completions)
+                        |                           |                         |
+                        -------------------------------------------------------
+                                                  |  inbound · virtual models
+                                                  |
+                                              cc-router
+                                        (local 127.0.0.1:23456)
+                                                  |
+                                                  |  outbound · real models
+           -----------------------------------------------------------------------------
+           |            |            |            |            |            |          |
+       DeepSeek        GLM         Kimi       Anthropic     OpenAI       Gemini     ......
+          API        Coding       Coding      Messages    Responses &      API
+                      Plan         Plan          API      Completions
 ```
 
 Highlights:
 
-- **19 providers, one router** — built-in routing for DeepSeek, Qwen, Kimi, MiMo, MiniMax, GLM, Claude, Gemini, etc., across Token Plans / Coding Plans / pay-as-you-go APIs; mix and match opus / sonnet / haiku slots with sequential / round-robin / session-affinity dispatch
-- **Bring your own endpoint** — when the built-in providers don't cover what you need, plug any Anthropic Messages-compatible, Gemini generateContent / Gemini Interactions-compatible, or OpenAI Responses / Chat Completions-compatible API in directly, dispatched alongside the built-in subscriptions
-- **Usage receipts** — export your token-spend snapshot as PNG / PDF / HTML in one click; mono / color modes, no pricing shown by default (usage only), QR code at the bottom links back to the repo
+- **Three inbound protocols, any tool plugs in** — Anthropic Messages / OpenAI Responses / OpenAI Chat Completions are exposed side by side, so Claude Code, Codex, OpenClaw, Hermes Agent, Kimi Code, ZCode, Cherry Studio and the like connect without any changes
+- **Three outbound protocols, every subscription in one router** — 24 built-in provider presets (DeepSeek, Qwen, Kimi, MiMo, MiniMax, GLM, Claude, OpenAI, Gemini, …), plus any Anthropic / OpenAI / Gemini-compatible endpoint you bring yourself
+- **Pool every token you have** — sequential / round-robin / session-affinity dispatch with automatic switching and failover
+- **Usage receipts** — export your token usage as a "supermarket receipt" in one click, handy for sharing or keeping records
 - **Fully translated UI** — 简体中文 / English / 日本語, follows your system locale or pick manually in Settings
 - **Virtual model aliases** — each of fable / opus / sonnet / haiku accepts multiple names; for opus that's `model-opus` / `claude-opus-4-7` / `anthropic/model-opus` / `anthropic/claude-opus-4-7`, all routed to the same virtual model — pick whatever naming your tool prefers
 - **Local HTTPS** — generate a self-signed CA and server cert in one click so HTTPS-only clients can talk to cc-router too; see the [setup guide](https://ccrouter.app/docs/claude-desktop-integration/)
 - **Claude Desktop App support** — combine local HTTPS with the virtual-model aliases above and Anthropic's official desktop app can route through cc-router's aggregated subscriptions; see the [setup guide](https://ccrouter.app/docs/claude-desktop-integration/)
-- **Dual-protocol ingress** — `Anthropic /v1/messages` and `OpenAI /v1/responses` are exposed side by side, so clients across both ecosystems — Claude Code, Codex and the like — plug into the same router with a single config
 
 <table align="center">
   <tr>
@@ -81,70 +84,22 @@ Highlights:
 
 ## Integration Guide
 
-The AI Agent / Coding Agent tools listed below can all connect to cc-router and use every LLM plan you have.
+Every AI Agent / Coding Agent tool below can connect to cc-router and use all the LLM plans you own:
 
 <p>
 <a href="https://ccrouter.app/docs/getting-started/" target="_blank" rel="noopener">Claude Code cli</a> · 
 <a href="https://ccrouter.app/docs/claude-desktop-integration/" target="_blank" rel="noopener">Claude Desktop App</a> · 
 <a href="https://ccrouter.app/docs/codex-integration/" target="_blank" rel="noopener">OpenAI Codex cli</a> · 
-<a href="https://ccrouter.app/docs/codex-integration/" target="_blank" rel="noopener">OpenAI Codex Desktop App</a> · OpenCode · OpenClaw · Kimi code cli · pi coding agent and many more.
+<a href="https://ccrouter.app/docs/codex-integration/" target="_blank" rel="noopener">OpenAI Codex Desktop App</a> · OpenCode · OpenClaw · Kimi code cli · pi coding agent, and many more.
 </p>
-
-## Supported Coding Plans and APIs
-
-| id | Name | Token Plan | API | Status |
-|---|---|---|---|---|
-| `anthropic` | Anthropic official API (pay-as-you-go only, no subscription plan) | ❌ | ✅ | verified |
-| `openai_codex` | **OpenAI Codex (ChatGPT Plus/Pro subscription)** — account-suspension risk; not recommended | ✅ | ❌ | tested |
-| `kiro` | **Kiro IDE (AWS)** — free Claude subscription quota; account-suspension risk; not recommended | ✅ | ❌ | tested |
-| `google_ai_studio` | **Google AI Studio (Gemini)** pay-as-you-go + free quota | ❌ | ✅ | verified |
-| `google_gemini_interactions` | **Google Gemini (Interactions API)** new unified `/v1beta/interactions` endpoint (protocol translation) | ❌ | ✅ | partial |
-| `zhipu` | Zhipu GLM (pay-as-you-go / China subscription) | ✅ | ✅ | verified |
-| `deepseek` | DeepSeek (pay-as-you-go) | ❌ | ✅ | verified |
-| `moonshot` | Moonshot Kimi (pay-as-you-go / China subscription / global subscription) | ✅ | ✅ | untested |
-| `minimax` | MiniMax (pay-as-you-go / China subscription / global subscription) | ✅ | ✅ | verified |
-| `xiaomi` | Xiaomi MiMo (pay-as-you-go / China subscription / global subscription) | ✅ | ✅ | verified |
-| `alibaba` | Alibaba Cloud Bailian (team Token Plan + 2-region pay-as-you-go + discontinued Coding Plan) | ✅ | ✅ | verified |
-| `volcengine` | ByteDance Volcengine Ark (Coding Plan subscription + Agent Plan subscription + pay-as-you-go) | ✅ | ✅ | untested |
-| `openrouter` | OpenRouter aggregator (500+ models routed) | ❌ | ✅ | untested |
-| `tencent` | Tencent Cloud LLM (Token Plan subscription + TokenHub pay-as-you-go, mainland / overseas) | ✅ | ✅ | untested |
-| `aiberm` | Aiberm (pay-as-you-go API, models returned dynamically by token group) | ❌ | ✅ | untested |
-| `whatai` | Shenma relay API (pay-as-you-go, OpenAI/Anthropic dual-protocol relay, Anthropic path only) | ❌ | ✅ | untested |
-| `ollama` | Ollama local inference (localhost:11434 only, includes cloud tags like `glm-4.7:cloud`) | ❌ | ✅ | partial |
-| `fireworks` | Fireworks AI (pay-as-you-go / Fire Pass global subscription) | ✅ | ✅ | verified |
-| `stepfun` | Stepfun (pay-as-you-go / China subscription / global subscription) | ✅ | ✅ | untested |
-| `baidu` | Baidu Qianfan (pay-as-you-go / China subscription) | ✅ | ✅ | untested |
-| `modelscope` | ModelScope (pay-as-you-go) | ❌ | ✅ | partial |
-| `ucloud` | UCloud Modelverse (Coding Plan subscription + pay-as-you-go API in CN/global) | ✅ | ✅ | untested |
-| `openai` | **OpenAI official API** (pay-as-you-go; includes GPT-5 / o3 / 4.1 reasoning models; auto-translates Anthropic thinking ↔ OpenAI reasoning) | ❌ | ✅ | untested |
-| `xai` | xAI Grok (pay-as-you-go; includes Grok 4.5 / 4.3; official Anthropic-compatible endpoint) | ❌ | ✅ | untested |
-| `Custom` | Bring your own Anthropic-compatible endpoint | ✅ | ✅ | verified |
-| `Custom (Gemini compatible)` | Bring your own Gemini generateContent-compatible endpoint (relay, etc.); `messages_path` must contain the `{model}` placeholder | ❌ | ✅ | tested |
-| `Custom (Gemini Interactions compatible)` | Bring your own Gemini Interactions API `/v1beta/interactions`-compatible endpoint (Google's new unified API / compatible relay); auto protocol translation; unlike the legacy generateContent, the model goes in the request body, so no `{model}` placeholder is needed | ❌ | ✅ | partial |
-| `Custom (OpenAI Responses compatible)` | Bring your own OpenAI `/v1/responses`-compatible endpoint (one-api / new-api relays, etc.); auto protocol translation | ❌ | ✅ | tested |
-| `Custom (OpenAI Chat Completions compatible)` | Bring your own OpenAI `/v1/chat/completions`-compatible endpoint (DeepSeek, Together, Groq, Ollama, one-api / new-api relays, etc.); auto protocol translation; DeepSeek R1's `reasoning_content` is surfaced as Claude Code thinking blocks | ❌ | ✅ | tested |
-
-> The "Token Plan" column covers any subscription-style quota (Token Plan / Coding Plan / Agent Plan, etc.); "API" denotes pay-as-you-go Anthropic Messages-compatible endpoints.
-
-Community PRs welcome.
-
-## Tech Stack
-
-- Tauri 2
-- Tailwind 4
-- React 19
 
 ## Quick Start
 
-1. Download the installer from Releases and run it.
-2. Add your LLM subscriptions, bind them to virtual models, pick a dispatch mode.
-3. Point Claude Code at cc-router via the env snippet below.
-
-> **On macOS cc-router runs as a menu bar app** — there is no Dock icon. Closing the window only hides it; the proxy keeps running. Click the menu bar icon (or simply launch cc-router again from Spotlight) to bring the window back, and use the menu bar icon → "Quit cc-router" to exit for real.
+1. Download the installer for your platform from Releases and run it.
+2. Add subscriptions from your providers, bind real models to the virtual models, and pick a dispatch mode.
+3. Paste the generated config into Claude Code or any other tool and you're done.
 
 ## Using with Claude Code
-
-The **Settings** page renders the full env snippet dynamically — if the default port is taken, cc-router probes upward up to 100 times.
 
 ```json
 {
@@ -180,6 +135,124 @@ Virtual models and aliases:
 |  `model-haiku` |  `anthropic/model-haiku` `anthropic/claude-haiku*` `claude-haiku*`  `gpt-*-mini` `openai/gpt-*-mini` |
 
 > `claude-opus*` is a wildcard (prefix match): you can pass any model name that fits the pattern and it will be normalized to the `model-opus` virtual model — e.g. `claude-opus-4-8`, `claude-opus-4-7-20260101`, and `claude-opus-100` all work. `gpt-*-sol`-style aliases match by tier segment: `gpt-5.6-sol`, `gpt-6-sol`, and `gpt-5.6-sol-20261201` all hit the sol tier (same for terra/luna/mini).
+
+## Inbound & Outbound
+
+cc-router sits between your tools and the LLM providers: tools connect on the **inbound** side, requests leave through the **outbound** side. Each side speaks three mainstream LLM APIs, and any combination works — for example, Codex comes in through the OpenAI Responses inbound and is ultimately answered by DeepSeek's Anthropic endpoint.
+
+### Inbound: how your tools connect to cc-router
+
+All three inbound endpoints share the same subscriptions, virtual models, quotas and session affinity; the "Entry endpoint" column in the request log shows which one each request came through. Expand the section matching the protocol your tool speaks:
+
+<details>
+<summary><b>Anthropic Messages</b> <code>/v1/messages</code> — Claude Code, Claude Desktop, OpenCode, OpenClaw, pi, Kimi code cli, etc.</summary>
+
+| Setting | Value |
+|---|---|
+| Base URL | `http://127.0.0.1:23456` (no `/v1` — the tool appends `/v1/messages` itself) |
+| Auth | `x-api-key: <token>` or `Authorization: Bearer <token>`, i.e. Claude Code's `ANTHROPIC_API_KEY` / `ANTHROPIC_AUTH_TOKEN` |
+| Model name | `model-fable` / `model-opus` / `model-sonnet` / `model-haiku`, or any alias from the table above (including the `anthropic/` prefix) |
+
+- This is the primary inbound: requests are passed through verbatim with no protocol translation, so thinking, `output_config.effort`, `cache_control`, images and tool calls all keep their native Anthropic semantics.
+- The full Claude Code env example is in "Using with Claude Code" above; Claude Desktop needs local HTTPS, see the [setup guide](https://ccrouter.app/docs/claude-desktop-integration/).
+- Session affinity keys on the `x-claude-code-session-id` header first, then `metadata.user_id`.
+- With "Forward client headers" enabled in Settings, whitelisted headers such as `anthropic-beta` / `anthropic-version` are forwarded to the upstream as-is; off by default.
+
+</details>
+
+<details>
+<summary><b>OpenAI Responses</b> <code>/v1/responses</code> — Codex CLI, Codex Desktop App and other Responses clients</summary>
+
+| Setting | Value |
+|---|---|
+| Base URL | `http://127.0.0.1:23456/v1` |
+| API Key | the token from cc-router's Settings page; Codex reads it from `OPENAI_API_KEY` or `~/.codex/auth.json` |
+| Model name | `gpt-5.6` / `gpt-5.5` / `gpt-5.4` / `gpt-5.4-mini`, or the `openai/` prefix and `gpt-*-sol/terra/luna/mini` tier names, mapping to fable / opus / sonnet / haiku respectively; the `model-*` form is accepted too |
+
+`~/.codex/config.toml` snippet (the "Integrations" tab in Settings can write it for you and backs up the original file; then launch with `codex -p cc-router`):
+
+```toml
+[model_providers.cc-router]
+name = "cc-router"
+base_url = "http://127.0.0.1:23456/v1"
+wire_api = "responses"
+env_key = "OPENAI_API_KEY"
+
+[profiles.cc-router]
+model_provider = "cc-router"
+model = "model-sonnet"
+```
+
+- Requests are translated internally into Anthropic Messages: `instructions` and developer messages are merged into system, `reasoning.effort` maps to the thinking budget, `max_output_tokens` maps to `max_tokens` (default 4096, automatically raised to cover the thinking budget).
+- Reasoning is bidirectional: upstream thinking comes back as a signed reasoning item; send it back unchanged on the next turn to keep multi-turn reasoning context.
+- Image input is not supported, nor are OpenAI-only tools such as `file_search` / `web_search` / `computer_use`; `parallel_tool_calls` is ignored.
+- Session affinity keys on `prompt_cache_key`, then the `session_id` header; Codex sends both.
+- Step-by-step instructions are in the [setup guide](https://ccrouter.app/docs/codex-integration/).
+
+</details>
+
+<details>
+<summary><b>OpenAI Chat Completions</b> <code>/v1/chat/completions</code> — Open WebUI, Cherry Studio, Cline, LobeChat, etc.</summary>
+
+For tools that only speak OpenAI Chat Completions — Open WebUI, Cherry Studio, Cline, LobeChat and the like — point their "OpenAI-compatible" endpoint at cc-router:
+
+| Setting | Value |
+|---|---|
+| Base URL | `http://127.0.0.1:23456/v1` (some tools want it without `/v1`; follow the tool's hint) |
+| API Key | the token from cc-router's Settings page (any non-empty value when auth is disabled) |
+| Model name | `model-fable` / `model-opus` / `model-sonnet` / `model-haiku`, or aliases such as `gpt-5.6` / `gpt-5.5` / `gpt-5.4` / `gpt-5.4-mini`; `GET /v1/models` lists them |
+
+Behavior notes:
+
+- Requests are translated internally into Anthropic Messages and go through the same dispatch, so subscriptions, virtual models, quotas and session affinity all apply; the request log shows `/v1/chat/completions` in the "Entry endpoint" column.
+- Upstream thinking is returned in the `reasoning_content` field (the DeepSeek convention; mainstream clients render it collapsed). Any `reasoning_content` the client sends back in the history is dropped, without affecting the conversation.
+- Images work with both `data:` base64 and `http(s)` `image_url`; tool calls work in both directions; streaming responses always end with a `usage` frame.
+- The legacy `functions` / `function_call` fields are not supported and return 400; use `tools` / `tool_choice` instead.
+- `n>1`, `logprobs` and JSON-Schema enforcement via `response_format` are silently ignored.
+- Session affinity (sticky) keys on the `user` field first, then the `x-session-id` header, falling back to the first user message.
+- When the response contains tool calls, `finish_reason` is always `tool_calls`, so clients can rely on it to decide whether to run tools.
+
+</details>
+
+### Outbound: how cc-router connects to providers
+
+Outbound is grouped into three protocol families, plus a fourth group of OAuth-based subscription accounts. Built-in provider presets and custom endpoints take the same path — the presets just come with the address, auth scheme and model list pre-filled. The authoritative list of built-in providers is the "Add subscription" page in the app; the descriptor files live in [`src-tauri/providers/`](src-tauri/providers/), and PRs are welcome.
+
+<details>
+<summary><b>Anthropic Messages compatible</b> — primary path, requests passed through verbatim</summary>
+
+- Built-in: Anthropic official, DeepSeek, Zhipu GLM, Moonshot Kimi, MiniMax, Xiaomi MiMo, Alibaba Cloud Bailian, Volcengine Ark, Tencent Cloud, Baidu Qianfan, Stepfun, ModelScope, UCloud, Fireworks, OpenRouter, xAI Grok, Aiberm, Shenma relay, Ollama and more, covering each vendor's Token Plan / Coding Plan / Agent Plan subscriptions as well as pay-as-you-go APIs
+- Custom: any Anthropic Messages-compatible endpoint (relays, self-hosted gateways, …) — just a Base URL and a key
+- No protocol translation: thinking, `output_config.effort`, `cache_control`, images and tool calls all keep their native Anthropic semantics. **If a vendor offers a native Anthropic endpoint, prefer this path** — the translated paths always lose something
+
+</details>
+
+<details>
+<summary><b>OpenAI compatible</b> <code>/v1/responses</code> · <code>/v1/chat/completions</code> — protocol translation</summary>
+
+- Built-in: OpenAI official API (GPT-5 / o3 / 4.1 and other reasoning models)
+- Custom: any OpenAI Responses or Chat Completions-compatible endpoint, e.g. one-api / new-api relays, Groq, Together, local vLLM / llama.cpp
+- cc-router translates Anthropic Messages into the target protocol before sending: Anthropic thinking ↔ OpenAI reasoning are mapped in both directions with multi-turn reasoning context fed back automatically; `reasoning_content` from Chat Completions (DeepSeek R1, etc.) is handed to Claude Code as thinking blocks
+- Anything the translation layer cannot express (such as `cache_control`) is dropped, so vendors with a native Anthropic endpoint belong in the group above, not here
+
+</details>
+
+<details>
+<summary><b>Gemini compatible</b> <code>generateContent</code> · <code>/v1beta/interactions</code> — protocol translation</summary>
+
+- Built-in: Google AI Studio (generateContent, pay-as-you-go + free quota) and Google Gemini Interactions API (the new unified endpoint)
+- Custom: any Gemini generateContent-compatible endpoint (`messages_path` uses the `{model}` placeholder), or an Interactions-compatible endpoint (the model goes in the request body, no placeholder needed)
+- Thinking is mapped in both directions, and thought signatures are carried automatically across tool-call round trips
+
+</details>
+
+<details>
+<summary><b>Subscription-account outbound (OAuth)</b> — Codex (ChatGPT Plus/Pro), Kiro (AWS)</summary>
+
+- No API key: sign in via OAuth device code and use your ChatGPT subscription / Kiro's free Claude quota as an outbound
+- **Grey area with account-suspension risk; not recommended as your main path** — use it only as a fallback or on a secondary account. The author assumes no liability for any resulting throttling, bans or subscription cancellation
+
+</details>
 
 ## FAQ & Use Cases
 
@@ -235,6 +308,10 @@ Example: subscription A = GLM-5 / MiniMax-2.7 / DeepSeek-Flash; subscription B =
 
 ## Development
 
+- Tauri 2
+- Tailwind 4
+- React 19
+
 Prerequisites: Node.js ≥ 20 (pnpm recommended), Rust ≥ 1.88 (the latest stable via rustup is recommended), Xcode Command Line Tools (macOS).
 
 ```bash
@@ -245,12 +322,8 @@ pnpm tauri dev      # runs frontend + Rust backend + proxy in one process
 First launch opens the onboarding flow:
 
 1. Add a subscription (pick provider → endpoint → paste API key → auto-fetch the model list).
-2. Bind the subscription to all three virtual models in one click.
+2. Bind the subscription to all four virtual models in one click.
 3. Copy the generated env snippet into your `~/.claude/settings.json`.
-
-## Adding a new provider
-
-If you use **Claude Code**, this repo ships a `SKILL` named `new-provider`. Run it with the official docs URL or endpoint info of the target provider, and it will scaffold the YAML and wire up the related changes for you.
 
 ## Build
 
@@ -300,12 +373,14 @@ Get-NetTCPConnection -LocalPort 1420 -State Listen |
 
 </details>
 
-## Icons
+## Adding a new provider
 
-Provider brand logos come from [@lobehub/icons](https://github.com/lobehub/lobe-icons) (MIT). All trademarks belong to their respective owners.
+If you use **Claude Code**, this repo ships a `SKILL` named `new-provider`. Run it with the official docs URL or endpoint info of the target provider, and it will scaffold the YAML and wire up the related changes for you.
 
 ## License
 
 Released under the [MIT](LICENSE) license.
 
-The 9 fonts used by the receipt themes are all under the SIL Open Font License 1.1; attributions and the full license text are in [THIRD-PARTY-NOTICES.md](THIRD-PARTY-NOTICES.md).
+Fonts: the 9 fonts used by the receipt themes are all under the SIL Open Font License 1.1; attributions and the full license text are in [THIRD-PARTY-NOTICES.md](THIRD-PARTY-NOTICES.md).
+
+Icons: provider brand logos come from [@lobehub/icons](https://github.com/lobehub/lobe-icons) (MIT). All trademarks belong to their respective owners.
