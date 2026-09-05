@@ -5,11 +5,12 @@
 //! 2. `body.metadata.user_id` — used verbatim as an opaque key (both the legacy
 //!    `user_<hex>_account_<uuid>_session_<uuid>` and the 2.1.78+ JSON string form)
 //! 3. Responses entry only: `body.prompt_cache_key`, then `session_id` header (Codex CLI)
-//! 4. SHA-256 (first 32 hex) of the first `role=user` message text — NOT the system prompt,
+//! 4. ChatCompletions entry only: `body.user` → `x-session-id` header
+//! 5. SHA-256 (first 32 hex) of the first `role=user` message text — NOT the system prompt,
 //!    which is identical across all Claude Code sessions and would pin everything to one sub
 //!    (Messages entry only — Responses bodies carry `input`, not `messages`, so this level
 //!    never fires on `/v1/responses`)
-//! 5. None → the request is not pinned.
+//! 6. None → the request is not pinned.
 
 use axum::http::HeaderMap;
 use serde_json::Value;
@@ -33,6 +34,15 @@ pub fn extract(headers: &HeaderMap, body: &Value, entry_kind: RequestEntryKind) 
             return Some(truncate(format!("pck:{v}")));
         }
         if let Some(v) = header_str(headers, "session_id") {
+            return Some(truncate(format!("sid:{v}")));
+        }
+    }
+    if matches!(entry_kind, RequestEntryKind::ChatCompletions) {
+        // OpenAI 官方的 `user` 字段 (Open WebUI 等按用户填); 读翻译前的原始 body.
+        if let Some(v) = body.get("user").and_then(|u| u.as_str()).map(str::trim).filter(|s| !s.is_empty()) {
+            return Some(truncate(format!("user:{v}")));
+        }
+        if let Some(v) = header_str(headers, "x-session-id") {
             return Some(truncate(format!("sid:{v}")));
         }
     }
@@ -140,5 +150,32 @@ mod tests {
         let h = hm(&[("x-claude-code-session-id", &long)]);
         let k = extract(&h, &json!({}), RequestEntryKind::Messages).unwrap();
         assert!(k.len() <= MAX_KEY_BYTES);
+    }
+
+    #[test]
+    fn chat_completions_user_field_then_x_session_id_header() {
+        let body = json!({"user": "u-1", "messages": [{"role":"user","content":"hi"}]});
+        assert_eq!(
+            extract(&HeaderMap::new(), &body, RequestEntryKind::ChatCompletions).as_deref(),
+            Some("user:u-1")
+        );
+        let h = hm(&[("x-session-id", "owui-1")]);
+        let no_user = json!({"messages": [{"role":"user","content":"hi"}]});
+        assert_eq!(
+            extract(&h, &no_user, RequestEntryKind::ChatCompletions).as_deref(),
+            Some("sid:owui-1")
+        );
+        // user 优先于 x-session-id
+        assert_eq!(extract(&h, &body, RequestEntryKind::ChatCompletions).as_deref(), Some("user:u-1"));
+        // 其他入口不读 user / x-session-id, 落到首条 user 消息 hash
+        assert!(extract(&h, &body, RequestEntryKind::Messages).unwrap().starts_with("msg:"));
+        assert!(extract(&h, &body, RequestEntryKind::Responses).unwrap().starts_with("msg:"));
+    }
+
+    #[test]
+    fn chat_completions_falls_back_to_first_user_hash_and_ignores_blank_user() {
+        let body = json!({"user": "  ", "messages": [{"role":"user","content":"hello"}]});
+        let k = extract(&HeaderMap::new(), &body, RequestEntryKind::ChatCompletions).unwrap();
+        assert!(k.starts_with("msg:"));
     }
 }

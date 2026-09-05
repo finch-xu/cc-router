@@ -54,20 +54,24 @@ pub struct ClientInfo {
     pub version: Option<String>,
 }
 
-/// cc-router 对外暴露的两个入口端点. 用枚举不是字符串, 避免下游构造 entry 时拼写错.
+/// cc-router 对外暴露的三个入口端点. 用枚举不是字符串, 避免下游构造 entry 时拼写错.
 /// 默认 Messages: 99% 流量是 /v1/messages, ClientContext::default() 在测试/fallback 路径上有用.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub enum RequestEntryKind {
     #[default]
     Messages,
     Responses,
+    /// POST /v1/chat/completions (OpenAI Chat Completions 兼容入口, v4.9+).
+    ChatCompletions,
 }
 
 impl RequestEntryKind {
+    /// 落 DB `requests.entry_kind` 的字符串; 前端按 `/v1/{entry_kind}` 渲染, 因此 Chat 带斜杠.
     pub fn as_str(self) -> &'static str {
         match self {
             Self::Messages => "messages",
             Self::Responses => "responses",
+            Self::ChatCompletions => "chat/completions",
         }
     }
 }
@@ -79,7 +83,7 @@ impl RequestEntryKind {
 pub struct ClientContext {
     pub info: ClientInfo,
     pub ip: Option<String>,
-    /// 请求进入的入口: /v1/messages 或 /v1/responses.
+    /// 请求进入的入口: /v1/messages、/v1/responses 或 /v1/chat/completions.
     pub entry_kind: RequestEntryKind,
     /// 下游 (CC ↔ cc-router) 协商的 HTTP 协议版本字符串, 形如 "HTTP/1.1" / "HTTP/2.0".
     /// 由 [`super::extractors::format_http_version`] 生成, 落 DB requests.downstream_http_version.
@@ -429,5 +433,13 @@ mod tests {
         // 但可以反向校验 SUPPORTED_TOOLS 里每个值至少有一个 fixture 能命中——靠人工或独立 lint 工具.
         // 这里仅断言常量数量, 改动时 force review.
         assert_eq!(SUPPORTED_TOOLS.len(), 10);
+    }
+
+    #[test]
+    fn entry_kind_as_str_matches_url_suffix() {
+        assert_eq!(RequestEntryKind::Messages.as_str(), "messages");
+        assert_eq!(RequestEntryKind::Responses.as_str(), "responses");
+        // 前端详情弹窗渲染 `/v1/{entry_kind}`, 所以带斜杠
+        assert_eq!(RequestEntryKind::ChatCompletions.as_str(), "chat/completions");
     }
 }
