@@ -37,7 +37,6 @@ toml_edit = "0.22"
 tokio = { version = "1", features = ["full"] }
 axum = { version = "0.7", features = ["http2", "macros"] }
 tower = "0.5"
-tower-http = { version = "0.6", features = ["cors", "trace"] }
 hyper = { version = "1", features = ["full"] }
 bytes = "1"
 futures = "0.3"
@@ -75,9 +74,6 @@ crc32fast = "1.4"
 [dev-dependencies]
 wiremock = "0.6"
 tempfile = "3"
-# SAN e2e 用: 解析 leaf.pem 验证 SAN 列表. 已经被 rcgen feature 间接引入, 这里显式声明给 tests 用.
-x509-parser = "0.16"
-pem = "3"
 
 [profile.release]
 panic = "abort"
