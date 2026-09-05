@@ -24,7 +24,6 @@
 use std::collections::HashMap;
 
 use serde_json::{json, Value};
-#[allow(unused_imports)]
 use uuid::Uuid;
 
 use crate::error::{AppError, AppResult};
@@ -373,6 +372,132 @@ fn convert_tool_choice(tc: &Value) -> AppResult<Value> {
     Err(AppError::BadRequest("tool_choice 形状不合法".into()))
 }
 
+// ============================================================
+// 响应侧 JSON: Anthropic Message → Chat Completion
+// ============================================================
+
+/// Anthropic Message JSON → `chat.completion` (spec §4.1). `requested_model` 回显客户端请求名.
+pub fn response_to_chat_json(anthropic_msg: &Value, requested_model: &str) -> Value {
+    let id = chat_id_from(anthropic_msg.get("id").and_then(|v| v.as_str()));
+    let parts = collect_content(anthropic_msg.get("content"));
+    let mut message = json!({
+        "role": "assistant",
+        "content": parts.text.map(Value::String).unwrap_or(Value::Null),
+    });
+    if let Some(r) = parts.reasoning {
+        message["reasoning_content"] = Value::String(r);
+    }
+    if !parts.tool_calls.is_empty() {
+        message["tool_calls"] = Value::Array(parts.tool_calls);
+    }
+    let stop_reason = anthropic_msg.get("stop_reason").and_then(|v| v.as_str());
+    json!({
+        "id": id,
+        "object": "chat.completion",
+        "created": now_unix(),
+        "model": requested_model,
+        "choices": [{
+            "index": 0,
+            "message": message,
+            "finish_reason": map_finish_reason(stop_reason),
+        }],
+        "usage": usage_to_chat(anthropic_msg.get("usage")),
+    })
+}
+
+struct CollectedContent {
+    text: Option<String>,
+    reasoning: Option<String>,
+    tool_calls: Vec<Value>,
+}
+
+/// 遍历 Anthropic content blocks: text 拼接 / thinking 拼接 / tool_use → OpenAI tool_calls.
+fn collect_content(content: Option<&Value>) -> CollectedContent {
+    let mut text = String::new();
+    let mut reasoning = String::new();
+    let mut tool_calls = Vec::new();
+    if let Some(blocks) = content.and_then(|c| c.as_array()) {
+        for b in blocks {
+            match b.get("type").and_then(|t| t.as_str()).unwrap_or("") {
+                "text" => text.push_str(b.get("text").and_then(|t| t.as_str()).unwrap_or("")),
+                "thinking" => reasoning.push_str(b.get("thinking").and_then(|t| t.as_str()).unwrap_or("")),
+                "tool_use" => tool_calls.push(json!({
+                    "id": b.get("id").cloned().unwrap_or(Value::Null),
+                    "type": "function",
+                    "function": {
+                        "name": b.get("name").cloned().unwrap_or(Value::Null),
+                        "arguments": serde_json::to_string(b.get("input").unwrap_or(&json!({})))
+                            .unwrap_or_else(|_| "{}".to_string()),
+                    },
+                })),
+                _ => {}
+            }
+        }
+    }
+    CollectedContent {
+        text: (!text.is_empty()).then_some(text),
+        reasoning: (!reasoning.is_empty()).then_some(reasoning),
+        tool_calls,
+    }
+}
+
+/// `msg_abc` → `chatcmpl-abc`; 无 id → `chatcmpl-<uuid simple>`.
+pub fn chat_id_from(anthropic_id: Option<&str>) -> String {
+    match anthropic_id.filter(|s| !s.is_empty()) {
+        Some(id) => format!("chatcmpl-{}", id.strip_prefix("msg_").unwrap_or(id)),
+        None => format!("chatcmpl-{}", Uuid::new_v4().simple()),
+    }
+}
+
+pub fn now_unix() -> i64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs() as i64)
+        .unwrap_or(0)
+}
+
+/// Anthropic stop_reason → OpenAI finish_reason (spec §4.3).
+pub fn map_finish_reason(stop_reason: Option<&str>) -> &'static str {
+    match stop_reason {
+        Some("max_tokens") => "length",
+        Some("tool_use") => "tool_calls",
+        Some("refusal") => "content_filter",
+        _ => "stop",
+    }
+}
+
+/// Anthropic usage → OpenAI usage. prompt = input + cache_creation + cache_read;
+/// cache_read 另落 `prompt_tokens_details.cached_tokens`.
+pub fn usage_to_chat(usage: Option<&Value>) -> Value {
+    let get = |k: &str| usage.and_then(|u| u.get(k)).and_then(|v| v.as_i64()).unwrap_or(0);
+    let cache_read = get("cache_read_input_tokens");
+    let prompt = get("input_tokens") + get("cache_creation_input_tokens") + cache_read;
+    let completion = get("output_tokens");
+    json!({
+        "prompt_tokens": prompt,
+        "completion_tokens": completion,
+        "total_tokens": prompt + completion,
+        "prompt_tokens_details": { "cached_tokens": cache_read },
+    })
+}
+
+/// OpenAI 风格错误体 (spec §4.4). `type` 按表映射, `code` 保留 Anthropic 原始 error type 供排查.
+pub fn chat_error_body(anthropic_type: &str, message: &str) -> Value {
+    let openai_type = match anthropic_type {
+        "invalid_request_error" | "authentication_error" | "permission_error" => "invalid_request_error",
+        "rate_limit_error" | "overloaded_error" => "rate_limit_error",
+        _ => "server_error",
+    };
+    json!({
+        "error": {
+            "message": message,
+            "type": openai_type,
+            "code": anthropic_type,
+            "param": Value::Null,
+        }
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -603,5 +728,99 @@ mod tests {
     #[test]
     fn request_empty_user_text_is_400() {
         assert!(request_to_anthropic(&base(json!([{"role":"user","content":""}]))).is_err());
+    }
+
+    // ---- 响应侧 JSON ----
+
+    fn anthropic_msg(content: Value, stop_reason: &str) -> Value {
+        json!({
+            "id": "msg_abc",
+            "type": "message",
+            "role": "assistant",
+            "model": "model-opus",
+            "content": content,
+            "stop_reason": stop_reason,
+            "usage": {"input_tokens": 10, "output_tokens": 5, "cache_creation_input_tokens": 3, "cache_read_input_tokens": 7}
+        })
+    }
+
+    #[test]
+    fn response_text_with_usage_and_cache() {
+        let out = response_to_chat_json(&anthropic_msg(json!([{"type":"text","text":"Hi"}]), "end_turn"), "gpt-5.5");
+        assert_eq!(out["id"], "chatcmpl-abc");
+        assert_eq!(out["object"], "chat.completion");
+        assert!(out["created"].as_i64().unwrap() > 1_700_000_000);
+        assert_eq!(out["model"], "gpt-5.5", "回显客户端请求名, 不是虚拟名");
+        let choice = &out["choices"][0];
+        assert_eq!(choice["index"], 0);
+        assert_eq!(choice["message"]["role"], "assistant");
+        assert_eq!(choice["message"]["content"], "Hi");
+        assert!(choice["message"].get("tool_calls").is_none());
+        assert!(choice["message"].get("reasoning_content").is_none());
+        assert_eq!(choice["finish_reason"], "stop");
+        assert_eq!(out["usage"], json!({
+            "prompt_tokens": 20, "completion_tokens": 5, "total_tokens": 25,
+            "prompt_tokens_details": {"cached_tokens": 7}
+        }));
+    }
+
+    #[test]
+    fn response_tool_calls_and_thinking() {
+        let out = response_to_chat_json(&anthropic_msg(json!([
+            {"type":"thinking","thinking":"let me think","signature":"sig"},
+            {"type":"text","text":"A"},
+            {"type":"tool_use","id":"toolu_1","name":"get_weather","input":{"city":"SH"}},
+            {"type":"text","text":"B"}
+        ]), "tool_use"), "m");
+        let m = &out["choices"][0]["message"];
+        assert_eq!(m["content"], "AB");
+        assert_eq!(m["reasoning_content"], "let me think");
+        assert_eq!(m["tool_calls"], json!([{
+            "id":"toolu_1","type":"function","function":{"name":"get_weather","arguments":"{\"city\":\"SH\"}"}
+        }]));
+        assert_eq!(out["choices"][0]["finish_reason"], "tool_calls");
+    }
+
+    #[test]
+    fn response_empty_content_is_null_and_missing_id_gets_uuid() {
+        let mut msg = anthropic_msg(json!([]), "max_tokens");
+        msg.as_object_mut().unwrap().remove("id");
+        let out = response_to_chat_json(&msg, "m");
+        assert_eq!(out["choices"][0]["message"]["content"], Value::Null);
+        assert_eq!(out["choices"][0]["finish_reason"], "length");
+        assert!(out["id"].as_str().unwrap().starts_with("chatcmpl-"));
+        assert!(out["id"].as_str().unwrap().len() > "chatcmpl-".len());
+    }
+
+    #[test]
+    fn finish_reason_table() {
+        assert_eq!(map_finish_reason(Some("end_turn")), "stop");
+        assert_eq!(map_finish_reason(Some("stop_sequence")), "stop");
+        assert_eq!(map_finish_reason(None), "stop");
+        assert_eq!(map_finish_reason(Some("max_tokens")), "length");
+        assert_eq!(map_finish_reason(Some("tool_use")), "tool_calls");
+        assert_eq!(map_finish_reason(Some("refusal")), "content_filter");
+        assert_eq!(map_finish_reason(Some("something_new")), "stop");
+    }
+
+    #[test]
+    fn usage_missing_fields_default_zero() {
+        assert_eq!(usage_to_chat(None), json!({
+            "prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0,
+            "prompt_tokens_details": {"cached_tokens": 0}
+        }));
+        assert_eq!(usage_to_chat(Some(&json!({"input_tokens": 4})))["total_tokens"], 4);
+    }
+
+    #[test]
+    fn error_body_maps_type_and_keeps_code() {
+        let e = chat_error_body("overloaded_error", "busy");
+        assert_eq!(e, json!({"error":{"message":"busy","type":"rate_limit_error","code":"overloaded_error","param":null}}));
+        assert_eq!(chat_error_body("rate_limit_error", "x")["error"]["type"], "rate_limit_error");
+        assert_eq!(chat_error_body("invalid_request_error", "x")["error"]["type"], "invalid_request_error");
+        assert_eq!(chat_error_body("authentication_error", "x")["error"]["type"], "invalid_request_error");
+        assert_eq!(chat_error_body("permission_error", "x")["error"]["type"], "invalid_request_error");
+        assert_eq!(chat_error_body("api_error", "x")["error"]["type"], "server_error");
+        assert_eq!(chat_error_body("api_error", "x")["error"]["code"], "api_error");
     }
 }
