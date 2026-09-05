@@ -386,7 +386,8 @@ pub fn response_to_chat_json(anthropic_msg: &Value, requested_model: &str) -> Va
     if let Some(r) = parts.reasoning {
         message["reasoning_content"] = Value::String(r);
     }
-    if !parts.tool_calls.is_empty() {
+    let has_tool_calls = !parts.tool_calls.is_empty();
+    if has_tool_calls {
         message["tool_calls"] = Value::Array(parts.tool_calls);
     }
     let stop_reason = anthropic_msg.get("stop_reason").and_then(|v| v.as_str());
@@ -398,7 +399,7 @@ pub fn response_to_chat_json(anthropic_msg: &Value, requested_model: &str) -> Va
         "choices": [{
             "index": 0,
             "message": message,
-            "finish_reason": map_finish_reason(stop_reason),
+            "finish_reason": finish_reason_for(stop_reason, has_tool_calls),
         }],
         "usage": usage_to_chat(anthropic_msg.get("usage")),
     })
@@ -455,13 +456,29 @@ pub fn now_unix() -> i64 {
         .unwrap_or(0)
 }
 
-/// Anthropic stop_reason → OpenAI finish_reason (spec §4.3).
+/// Anthropic stop_reason → OpenAI finish_reason (spec §4.3). 纯查表, 不看内容里是否有 tool_use.
 pub fn map_finish_reason(stop_reason: Option<&str>) -> &'static str {
     match stop_reason {
         Some("max_tokens") => "length",
         Some("tool_use") => "tool_calls",
         Some("refusal") => "content_filter",
         _ => "stop",
+    }
+}
+
+/// finish_reason 判定入口 (spec §4.3 补充): 响应含至少一个 tool_use 块, 且 stop_reason 不是
+/// `max_tokens` / `refusal` 时一律报 `tool_calls` —— 兼容经翻译层/中转站回传 `end_turn` 等
+/// "错误" stop_reason 但实际带 tool_use 内容的上游 (OpenAI 客户端常按 finish_reason=="tool_calls"
+/// 门控工具执行, 报成 "stop" 会导致客户端不执行工具调用)。`max_tokens` / `refusal` 优先级更高,
+/// 仍走 [`map_finish_reason`] 的对应结果。
+pub fn finish_reason_for(stop_reason: Option<&str>, has_tool_calls: bool) -> &'static str {
+    if has_tool_calls {
+        match stop_reason {
+            Some("max_tokens") | Some("refusal") => map_finish_reason(stop_reason),
+            _ => "tool_calls",
+        }
+    } else {
+        map_finish_reason(stop_reason)
     }
 }
 
@@ -524,6 +541,8 @@ pub struct AnthropicToChatSseConverter {
     cache_read_tokens: i64,
     output_tokens: i64,
     stop_reason: Option<String>,
+    /// 是否见过至少一个 tool_use 块 (finish_reason 的 tool_calls 判定, spec §4.3 补充).
+    saw_tool_use: bool,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -552,6 +571,7 @@ impl AnthropicToChatSseConverter {
             cache_read_tokens: 0,
             output_tokens: 0,
             stop_reason: None,
+            saw_tool_use: false,
         }
     }
 
@@ -611,6 +631,7 @@ impl AnthropicToChatSseConverter {
                 Vec::new()
             }
             "tool_use" => {
+                self.saw_tool_use = true;
                 let tool_index = self.next_tool_index;
                 self.next_tool_index += 1;
                 self.blocks.insert(index, ChatBlock::ToolUse { tool_index });
@@ -695,7 +716,7 @@ impl AnthropicToChatSseConverter {
             return Vec::new();
         }
         self.finished = true;
-        let reason = map_finish_reason(self.stop_reason.as_deref());
+        let reason = finish_reason_for(self.stop_reason.as_deref(), self.saw_tool_use);
         vec![self.chunk(json!({}), Some(reason))]
     }
 
@@ -1049,6 +1070,30 @@ mod tests {
     }
 
     #[test]
+    fn finish_reason_for_table() {
+        assert_eq!(finish_reason_for(Some("end_turn"), true), "tool_calls");
+        assert_eq!(finish_reason_for(None, true), "tool_calls");
+        assert_eq!(finish_reason_for(Some("max_tokens"), true), "length");
+        assert_eq!(finish_reason_for(Some("refusal"), true), "content_filter");
+        assert_eq!(finish_reason_for(Some("end_turn"), false), "stop");
+        assert_eq!(finish_reason_for(Some("tool_use"), false), "tool_calls");
+    }
+
+    #[test]
+    fn response_tool_calls_with_end_turn_reports_tool_calls() {
+        let content = json!([
+            {"type":"tool_use","id":"toolu_1","name":"get_weather","input":{"city":"SH"}}
+        ]);
+        let out = response_to_chat_json(&anthropic_msg(content.clone(), "end_turn"), "m");
+        assert_eq!(
+            out["choices"][0]["finish_reason"], "tool_calls",
+            "翻译层上游把 tool_use 误报成 end_turn 时仍要报 tool_calls, 否则 OpenAI 客户端不执行工具"
+        );
+        let out2 = response_to_chat_json(&anthropic_msg(content, "max_tokens"), "m");
+        assert_eq!(out2["choices"][0]["finish_reason"], "length", "max_tokens 优先级高于 tool_use 判定");
+    }
+
+    #[test]
     fn usage_missing_fields_default_zero() {
         assert_eq!(usage_to_chat(None), json!({
             "prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0,
@@ -1160,6 +1205,25 @@ mod tests {
         assert_eq!(deltas[7], json!({}));
         let fin = frame_json(&frames[7]).unwrap();
         assert_eq!(fin["choices"][0]["finish_reason"], "tool_calls");
+    }
+
+    #[test]
+    fn sse_tool_use_with_end_turn_reports_tool_calls() {
+        let mut conv = AnthropicToChatSseConverter::new("m".into());
+        let frames = feed_all(&mut conv, &[
+            msg_start(),
+            ("content_block_start", json!({"type":"content_block_start","index":0,"content_block":{"type":"tool_use","id":"toolu_a","name":"get_weather","input":{}}})),
+            ("content_block_delta", json!({"type":"content_block_delta","index":0,"delta":{"type":"input_json_delta","partial_json":"{}"}})),
+            ("content_block_stop", json!({"type":"content_block_stop","index":0})),
+            ("message_delta", json!({"type":"message_delta","delta":{"stop_reason":"end_turn"},"usage":{"output_tokens":3}})),
+            ("message_stop", json!({"type":"message_stop"})),
+        ]);
+        let fin = frames.iter().find_map(|f| {
+            let j = frame_json(f)?;
+            let fr = j["choices"][0]["finish_reason"].clone();
+            (!fr.is_null()).then_some(fr)
+        });
+        assert_eq!(fin, Some(json!("tool_calls")), "上游把 tool_use 回成 end_turn 时 SSE 也要报 tool_calls");
     }
 
     #[test]
