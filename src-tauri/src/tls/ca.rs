@@ -6,7 +6,7 @@
 use std::path::{Path, PathBuf};
 
 use rcgen::{
-    BasicConstraints, Certificate, CertificateParams, DistinguishedName, DnType, IsCa, KeyPair,
+    BasicConstraints, CertificateParams, DistinguishedName, DnType, IsCa, Issuer, KeyPair,
     KeyUsagePurpose,
 };
 use time::{Duration, OffsetDateTime};
@@ -18,9 +18,9 @@ const CA_VALIDITY_YEARS: i64 = 10;
 const CA_COMMON_NAME: &str = "cc-router local CA";
 const CA_ORG: &str = "cc-router";
 
+/// rcgen 0.14 起签发方用 `Issuer` 表达 (CA params + 签名私钥合一), leaf 用 `signed_by(&issuer)`.
 pub struct CaMaterial {
-    pub cert: Certificate,
-    pub key_pair: KeyPair,
+    pub issuer: Issuer<'static, KeyPair>,
 }
 
 pub async fn ensure(tls_dir: &Path) -> AppResult<CaMaterial> {
@@ -39,15 +39,11 @@ pub async fn load(tls_dir: &Path) -> AppResult<CaMaterial> {
 
     let key_pair = KeyPair::from_pem(&key_pem)
         .map_err(|e| AppError::internal(format!("CA 私钥解析失败: {e}")))?;
-    // 用 x509-parser feature 提供的入口从 PEM 重建 params, 再 self_signed 还原 Certificate.
-    // 注意: self_signed 重签时间窗口与原证书可能略差(纳秒级), 但 SubjectPublicKeyInfo /
-    // 颁发者 DN 完全一致, 不影响下游 leaf 续签链路.
-    let params = CertificateParams::from_ca_cert_pem(&cert_pem)
+    // 用 x509-parser feature 提供的入口直接从 PEM 重建 Issuer (rcgen 0.14 把该构造器从
+    // CertificateParams 挪到了 Issuer, 不再需要 self_signed 重签一遍).
+    let issuer = Issuer::from_ca_cert_pem(&cert_pem, key_pair)
         .map_err(|e| AppError::internal(format!("CA 证书解析失败: {e}")))?;
-    let cert = params
-        .self_signed(&key_pair)
-        .map_err(|e| AppError::internal(format!("CA self-sign 重建: {e}")))?;
-    Ok(CaMaterial { cert, key_pair })
+    Ok(CaMaterial { issuer })
 }
 
 async fn generate_and_save(tls_dir: &Path) -> AppResult<CaMaterial> {
@@ -85,7 +81,9 @@ async fn generate_and_save(tls_dir: &Path) -> AppResult<CaMaterial> {
     store::write_cert_pem(&cert_path, &cert.pem()).await?;
     store::write_key_pem(&key_path, &key_pem).await?;
 
-    Ok(CaMaterial { cert, key_pair })
+    Ok(CaMaterial {
+        issuer: Issuer::new(params, key_pair),
+    })
 }
 
 fn paths(tls_dir: &Path) -> (PathBuf, PathBuf) {

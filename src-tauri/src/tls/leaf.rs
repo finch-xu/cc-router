@@ -111,7 +111,7 @@ async fn generate_and_save(
     let key_pair = KeyPair::generate()
         .map_err(|e| AppError::internal(format!("leaf keypair: {e}")))?;
     let cert = params
-        .signed_by(&key_pair, &ca.cert, &ca.key_pair)
+        .signed_by(&key_pair, &ca.issuer)
         .map_err(|e| AppError::internal(format!("leaf sign: {e}")))?;
     let cert_pem = cert.pem();
     let key_pem = key_pair.serialize_pem();

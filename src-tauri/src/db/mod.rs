@@ -201,7 +201,7 @@ pub async fn run_migrations(pool: &SqlitePool, _resource_dir: &Path) -> AppResul
         }
         info!(version = v, "applying migration");
         for stmt in split_sql_statements(sql) {
-            sqlx::query(&stmt).execute(&mut *conn).await?;
+            sqlx::query(sqlx::AssertSqlSafe(stmt.as_str())).execute(&mut *conn).await?;
         }
         sqlx::query("INSERT OR IGNORE INTO _schema_version (version, applied_at) VALUES (?, ?)")
             .bind(*v as i64)
@@ -340,7 +340,7 @@ mod tests {
     }
 
     async fn has_column(pool: &SqlitePool, table: &str, column: &str) -> bool {
-        let rows = sqlx::query(&format!("PRAGMA table_info({})", table))
+        let rows = sqlx::query(sqlx::AssertSqlSafe(format!("PRAGMA table_info({})", table)))
             .fetch_all(pool)
             .await
             .unwrap();
@@ -353,7 +353,7 @@ mod tests {
     async fn apply_migrations(pool: &SqlitePool, range: std::ops::Range<usize>) {
         for (v, sql) in &MIGRATIONS[range] {
             for stmt in split_sql_statements(sql) {
-                sqlx::query(&stmt).execute(pool).await.unwrap();
+                sqlx::query(sqlx::AssertSqlSafe(stmt.as_str())).execute(pool).await.unwrap();
             }
             sqlx::query("INSERT OR IGNORE INTO _schema_version (version, applied_at) VALUES (?, 0)")
                 .bind(*v as i64)
@@ -403,7 +403,7 @@ mod tests {
         let pool = in_memory_pool().await;
         // 模拟 v1 老 DB: 只跑 001, 不写 _schema_version
         for stmt in split_sql_statements(MIGRATIONS[0].1) {
-            sqlx::query(&stmt).execute(&pool).await.unwrap();
+            sqlx::query(sqlx::AssertSqlSafe(stmt.as_str())).execute(&pool).await.unwrap();
         }
         // 此时 subscriptions 存在, _schema_version 不存在
 
@@ -467,7 +467,7 @@ mod tests {
 
         for (v, sql) in &MIGRATIONS[..4] {
             for stmt in split_sql_statements(sql) {
-                sqlx::query(&stmt).execute(&pool).await.unwrap();
+                sqlx::query(sqlx::AssertSqlSafe(stmt.as_str())).execute(&pool).await.unwrap();
             }
             sqlx::query("INSERT INTO _schema_version (version, applied_at) VALUES (?, 0)")
                 .bind(*v as i64)
@@ -481,7 +481,7 @@ mod tests {
         // 拿 v5 SQL 的前 4 条 (PRAGMA off, CREATE _new, INSERT, DROP), 跳过 ALTER + PRAGMA on。
         let v5_stmts = split_sql_statements(MIGRATIONS[4].1);
         for stmt in &v5_stmts[..4] {
-            sqlx::query(stmt).execute(&pool).await.unwrap();
+            sqlx::query(sqlx::AssertSqlSafe(stmt.as_str())).execute(&pool).await.unwrap();
         }
         assert!(has_table(&pool, "subscriptions_new").await);
         assert!(!has_table(&pool, "subscriptions").await);
@@ -541,7 +541,7 @@ mod tests {
         // 应用 v1..=13, 手写版本记录 (照 v5 half-finished 测试的做法)
         for (v, sql) in &MIGRATIONS[..13] {
             for stmt in split_sql_statements(sql) {
-                sqlx::query(&stmt).execute(&pool).await.unwrap();
+                sqlx::query(sqlx::AssertSqlSafe(stmt.as_str())).execute(&pool).await.unwrap();
             }
             sqlx::query("INSERT INTO _schema_version (version, applied_at) VALUES (?, 0)")
                 .bind(*v as i64)
@@ -641,7 +641,7 @@ mod tests {
 
         for (v, sql) in &MIGRATIONS[..14] {
             for stmt in split_sql_statements(sql) {
-                sqlx::query(&stmt).execute(&pool).await.unwrap();
+                sqlx::query(sqlx::AssertSqlSafe(stmt.as_str())).execute(&pool).await.unwrap();
             }
             sqlx::query("INSERT INTO _schema_version (version, applied_at) VALUES (?, 0)")
                 .bind(*v as i64)

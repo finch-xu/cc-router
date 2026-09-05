@@ -67,6 +67,7 @@ pub async fn start(state: AppState) -> AppResult<()> {
                 std_listener,
                 axum_server::tls_rustls::RustlsConfig::from_config(cfg),
             )
+            .map_err(|e| AppError::internal(format!("axum-server from_tcp: {e}")))?
             .serve(r.into_make_service_with_connect_info::<SocketAddr>())
             .await
             .map_err(|e| AppError::internal(format!("axum-server tls: {e}")))

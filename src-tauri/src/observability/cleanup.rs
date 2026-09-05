@@ -120,7 +120,7 @@ mod tests {
     }
 
     async fn count(pool: &SqlitePool, table: &str) -> i64 {
-        sqlx::query(&format!("SELECT COUNT(*) AS c FROM {}", table))
+        sqlx::query(sqlx::AssertSqlSafe(format!("SELECT COUNT(*) AS c FROM {}", table)))
             .fetch_one(pool)
             .await
             .unwrap()

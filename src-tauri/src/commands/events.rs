@@ -70,7 +70,7 @@ pub async fn list_events(
 
     let count_sql = format!("SELECT COUNT(*) AS c FROM events{}", where_clause);
     let total: i64 = bind_filters(
-        sqlx::query(&count_sql),
+        sqlx::query(sqlx::AssertSqlSafe(count_sql.as_str())),
         kind_str.as_deref(),
         filters.subscription_id.as_deref(),
         severity_str.as_deref(),
@@ -87,7 +87,7 @@ pub async fn list_events(
         where_clause
     );
     let rows = bind_filters(
-        sqlx::query(&select_sql),
+        sqlx::query(sqlx::AssertSqlSafe(select_sql.as_str())),
         kind_str.as_deref(),
         filters.subscription_id.as_deref(),
         severity_str.as_deref(),
@@ -120,11 +120,11 @@ pub async fn list_events(
 }
 
 fn bind_filters<'q>(
-    mut q: sqlx::query::Query<'q, sqlx::Sqlite, sqlx::sqlite::SqliteArguments<'q>>,
+    mut q: sqlx::query::Query<'q, sqlx::Sqlite, sqlx::sqlite::SqliteArguments>,
     kind: Option<&'q str>,
     subscription_id: Option<&'q str>,
     severity: Option<&'q str>,
-) -> sqlx::query::Query<'q, sqlx::Sqlite, sqlx::sqlite::SqliteArguments<'q>> {
+) -> sqlx::query::Query<'q, sqlx::Sqlite, sqlx::sqlite::SqliteArguments> {
     if let Some(v) = kind {
         q = q.bind(v);
     }

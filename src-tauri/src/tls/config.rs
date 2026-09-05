@@ -3,6 +3,7 @@
 use std::path::Path;
 use std::sync::Arc;
 
+use rustls::pki_types::pem::PemObject;
 use rustls::pki_types::{CertificateDer, PrivateKeyDer, PrivatePkcs8KeyDer};
 use serde::Serialize;
 use sha2::{Digest, Sha256};
@@ -30,7 +31,7 @@ pub fn build_server_config(
     let _ = rustls::crypto::ring::default_provider().install_default();
 
     let cert_chain: Vec<CertificateDer<'static>> =
-        rustls_pemfile::certs(&mut leaf.cert_pem.as_bytes())
+        CertificateDer::pem_slice_iter(leaf.cert_pem.as_bytes())
             .collect::<Result<Vec<_>, _>>()
             .map_err(|e| AppError::internal(format!("解析 leaf cert PEM: {e}")))?;
     if cert_chain.is_empty() {
@@ -38,10 +39,8 @@ pub fn build_server_config(
     }
 
     let key_der: PrivatePkcs8KeyDer<'static> =
-        rustls_pemfile::pkcs8_private_keys(&mut leaf.key_pem.as_bytes())
-            .next()
-            .ok_or_else(|| AppError::internal("leaf key PEM 无 PKCS#8 私钥"))?
-            .map_err(|e| AppError::internal(format!("解析 leaf key PEM: {e}")))?;
+        PrivatePkcs8KeyDer::from_pem_slice(leaf.key_pem.as_bytes())
+            .map_err(|e| AppError::internal(format!("解析 leaf key PEM (需 PKCS#8): {e}")))?;
 
     let mut config = rustls::ServerConfig::builder()
         .with_no_client_auth()
@@ -75,7 +74,7 @@ pub async fn read_status(tls_dir: &Path) -> AppResult<TlsStatus> {
 }
 
 fn compute_cert_fingerprint(pem: &str) -> AppResult<String> {
-    let der_list: Vec<CertificateDer<'static>> = rustls_pemfile::certs(&mut pem.as_bytes())
+    let der_list: Vec<CertificateDer<'static>> = CertificateDer::pem_slice_iter(pem.as_bytes())
         .collect::<Result<Vec<_>, _>>()
         .map_err(|e| AppError::internal(format!("CA PEM 解析: {e}")))?;
     let first = der_list
@@ -83,7 +82,11 @@ fn compute_cert_fingerprint(pem: &str) -> AppResult<String> {
         .ok_or_else(|| AppError::internal("CA PEM 无证书"))?;
     let mut hasher = Sha256::new();
     hasher.update(first.as_ref());
-    Ok(format!("{:x}", hasher.finalize()))
+    Ok(hasher
+        .finalize()
+        .iter()
+        .map(|b| format!("{b:02x}"))
+        .collect())
 }
 
 #[cfg(test)]

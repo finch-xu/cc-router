@@ -129,7 +129,7 @@ pub async fn list_requests(
     let (where_clause, binds) = build_filter_clause(&filters);
 
     let count_sql = format!("SELECT COUNT(*) AS c FROM requests{}", where_clause);
-    let mut count_q = sqlx::query(&count_sql);
+    let mut count_q = sqlx::query(sqlx::AssertSqlSafe(count_sql.as_str()));
     for v in &binds {
         count_q = count_q.bind(v);
     }
@@ -150,7 +150,7 @@ pub async fn list_requests(
          LIMIT ? OFFSET ?",
         where_clause
     );
-    let mut select_q = sqlx::query(&select_sql);
+    let mut select_q = sqlx::query(sqlx::AssertSqlSafe(select_sql.as_str()));
     for v in &binds {
         select_q = select_q.bind(v);
     }
@@ -240,7 +240,7 @@ pub async fn export_requests_csv(
          ORDER BY timestamp ASC",
         where_clause
     );
-    let mut q = sqlx::query(&sql);
+    let mut q = sqlx::query(sqlx::AssertSqlSafe(sql.as_str()));
     for v in &binds {
         q = q.bind(v);
     }

@@ -191,8 +191,8 @@ pub async fn get_receipt_summary(
         ),
     };
     let rows = match range {
-        ReceiptRange::Last24Hours => sqlx::query(&sql).bind(since).fetch_all(&state.db).await?,
-        _ => sqlx::query(&sql).bind(range.since_day()).fetch_all(&state.db).await?,
+        ReceiptRange::Last24Hours => sqlx::query(sqlx::AssertSqlSafe(sql.as_str())).bind(since).fetch_all(&state.db).await?,
+        _ => sqlx::query(sqlx::AssertSqlSafe(sql.as_str())).bind(range.since_day()).fetch_all(&state.db).await?,
     };
 
     let mut buckets: std::collections::HashMap<String, Vec<ReceiptSubItemDto>> =

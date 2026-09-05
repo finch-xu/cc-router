@@ -3,7 +3,6 @@
 //! 用 extractor 而不是改 handler 接 Request<Body>, 是因为现有 handler 已经用
 //! `HeaderMap + Bytes` 风格提取, 加一个 extractor 参数比换 body 提取方式侵入小得多.
 
-use axum::async_trait;
 use axum::extract::FromRequestParts;
 use axum::http::request::Parts;
 
@@ -11,7 +10,6 @@ use axum::http::request::Parts;
 /// HTTPS+h2 协商成功时是 `HTTP/2.0`, 否则 `HTTP/1.1`.
 pub struct HttpVersion(pub axum::http::Version);
 
-#[async_trait]
 impl<S: Send + Sync> FromRequestParts<S> for HttpVersion {
     type Rejection = std::convert::Infallible;
 

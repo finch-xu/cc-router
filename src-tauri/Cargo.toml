@@ -32,43 +32,43 @@ serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 serde_yaml = "0.9"
 # 用于 Codex config.toml 编辑器: 保留注释 / 字段顺序 / 空行 (用户可能手写过 profile).
-toml_edit = "0.22"
+toml_edit = "0.25"
 
 tokio = { version = "1", features = ["full"] }
-axum = { version = "0.7", features = ["http2", "macros"] }
+axum = { version = "0.8", features = ["http2", "macros"] }
 tower = "0.5"
 hyper = { version = "1", features = ["full"] }
 bytes = "1"
 futures = "0.3"
 
-# TLS 信任取并集: rustls-tls(=webpki 内置根证书) + rustls-tls-native-roots(操作系统证书库).
-# 后者让企业内网私有 CA (系统已信任) 可用 (issue #34); 前者保证系统证书库缺失/为空时仍有兜底.
-# reqwest 0.12 两个 feature 并存时把两套根证书都加进 root store (tls_built_in_certs_webpki/native 默认均开).
-reqwest = { version = "0.12", default-features = false, features = ["stream", "json", "rustls-tls", "rustls-tls-native-roots"] }
+# TLS 信任: reqwest 0.13 起 rustls 后端默认走 rustls-platform-verifier (操作系统证书库 + 平台校验逻辑),
+# 企业内网私有 CA (系统已信任) 直接可用 (issue #34); 0.12 时代的 rustls-tls-native-roots /
+# webpki 内置根 feature 已被上游移除, 无需再并集. crypto provider 默认 aws-lc-rs.
+reqwest = { version = "0.13", default-features = false, features = ["stream", "json", "form", "rustls"] }
 
 # 本地 TLS 监听 (HTTPS 模式). rustls 与 reqwest/tokio-rustls 间接引入版本对齐, cargo tree 实测 rustls 0.23.39 + tokio-rustls 0.26.4.
-axum-server = { version = "0.7", features = ["tls-rustls"] }
+axum-server = { version = "0.8", features = ["tls-rustls"] }
 rustls = { version = "0.23", default-features = false, features = ["ring", "std"] }
-rustls-pemfile = "2"
-rcgen = { version = "0.13", features = ["x509-parser"] }
+# PEM 解析走 pki-types 自带的 pem 模块 (rustls-pemfile 已被上游 deprecated).
+rustls-pki-types = "1"
+rcgen = { version = "0.14", features = ["x509-parser"] }
 time = { version = "0.3", features = ["macros"] }
-sha2 = "0.10"
+sha2 = "0.11"
 
-sqlx = { version = "0.8", default-features = false, features = ["runtime-tokio", "sqlite", "macros", "chrono"] }
+sqlx = { version = "0.9", default-features = false, features = ["runtime-tokio", "sqlite", "macros", "chrono"] }
 
-jsonschema = { version = "0.18", default-features = false }
+jsonschema = { version = "0.53", default-features = false }
 
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt", "json"] }
 tracing-appender = "0.2"
 
-thiserror = "1"
+thiserror = "2"
 anyhow = "1"
 uuid = { version = "1", features = ["v4", "serde"] }
 chrono = { version = "0.4", features = ["serde"] }
 once_cell = "1"
-async-trait = "0.1"
-base64 = "0.22"
+base64 = "0.23"
 crc32fast = "1.4"
 
 [dev-dependencies]
