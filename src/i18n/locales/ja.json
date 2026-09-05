@@ -12,7 +12,6 @@
   "common.copied": "コピー済み",
   "common.copy": "コピー",
   "common.close": "閉じる",
-  "sidebar.brand.tag": "マルチサブスクリプションプロキシ",
   "sidebar.nav.guide": "セットアップガイド",
   "sidebar.nav.virtualModels": "仮想モデル",
   "sidebar.nav.subscriptions": "サブスクリプション",
@@ -760,5 +759,8 @@
   "updates.source": "更新元",
   "updates.sourceHint": "更新元は「設定」ページと同じ項目です。ここで切り替えると設定も変わり、常に一致します。",
   "updates.current": "現在 v{version}",
-  "updates.available": "更新あり"
+  "updates.available": "更新あり",
+  "window.minimize": "最小化",
+  "window.maximize": "最大化",
+  "window.close": "閉じる"
 }

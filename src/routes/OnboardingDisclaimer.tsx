@@ -1,3 +1,4 @@
+import { WindowControls } from "@/components/layout/WindowControls";
 import { useNavigate } from "react-router";
 import { TriangleAlert } from "lucide-react";
 import logoUrl from "@/assets/logo.png";
@@ -20,6 +21,10 @@ export function OnboardingDisclaimerPage() {
 
   return (
     <div className="onboarding-disclaimer-shell">
+      {/* 无侧栏无顶栏的全屏页: 铺一条透明拖窗带, Windows / Linux 上顺带放窗口三键 */}
+      <div className="window-chrome" data-tauri-drag-region>
+        <WindowControls />
+      </div>
       <div className="card onboarding-disclaimer">
         <div className="onboarding-disclaimer-mark">
           <img src={logoUrl} alt="cc-router" />

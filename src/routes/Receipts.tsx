@@ -1,3 +1,4 @@
+import { PageBar } from "@/components/layout/PageBar";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { CircleCheck, ExternalLink, X } from "lucide-react";
 import { open as openShell } from "@tauri-apps/plugin-shell";
@@ -149,115 +150,121 @@ export function ReceiptsPage() {
 
   return (
     <>
-      <div className="page-actions">
-        <div className="page-header" style={{ margin: 0 }}>
-          <h1>{t("receipts.title")}</h1>
-          <div className="subtitle">{t("receipts.subtitle")}</div>
-        </div>
-        {/* 时间范围决定整页数据, 属于页面级控制 —— 放标题行, 不跟小票的渲染选项混在一起 */}
-        <div className="range-tabs" style={{ marginBottom: 0, flexShrink: 0 }}>
-          {RECEIPT_RANGES.map((r) => (
-            <button
-              key={r.key}
-              type="button"
-              className={"range-tab" + (range === r.key ? " active" : "")}
-              onClick={() => setRange(r.key)}
+      <PageBar
+        title={t("receipts.title")}
+        actions={
+          <>
+            {/* 时间范围决定整页数据, 属于页面级控制 —— 放标题行, 不跟小票的渲染选项混在一起 */}
+            <div className="range-tabs" style={{ marginBottom: 0, flexShrink: 0 }}>
+              {RECEIPT_RANGES.map((r) => (
+                <button
+                  key={r.key}
+                  type="button"
+                  className={"range-tab" + (range === r.key ? " active" : "")}
+                  onClick={() => setRange(r.key)}
+                >
+                  {t(r.labelKey)}
+                </button>
+              ))}
+            </div>
+          </>
+        }
+      />
+      <div className="page-flow">
+        <div className="page-flow-pad">
+          <div className="page-intro">{t("receipts.subtitle")}</div>
+
+          <div className="receipt-layout">
+            {/* 左 — 小票 (固定 360px, 就是小票的物理宽度) */}
+            <div className="receipt-slip-col">
+              {filteredDto ? (
+                <ReceiptSlip ref={slipRef} dto={filteredDto} options={options} />
+              ) : (
+                <div className="receipt-empty">
+                  {receipt.isLoading ? t("common.loading") : t("receipts.empty")}
+                </div>
+              )}
+              {receipt.isError && (
+                <div className="alert err" style={{ maxWidth: 360 }}>
+                  {t("receipts.loadError")}
+                </div>
+              )}
+            </div>
+
+            {/* 右 — 控制台。根节点自带 .receipt-panel (flex:1), 直接吃满剩余宽度;
+                原先外面套一层 maxWidth:460 的 div, 右边会白留 200px 空档 */}
+            <ReceiptControls
+              options={options}
+              onOptionsChange={setOptions}
+              selectedSubscriptionIds={selectedSubs}
+              onSelectedSubscriptionsChange={setSelectedSubs}
+              selectedProviderIds={selectedProviders}
+              onSelectedProvidersChange={setSelectedProviders}
+              excludeDeleted={excludeDeleted}
+              onExcludeDeletedChange={setExcludeDeleted}
+              isFetching={receipt.isFetching}
+              onRefresh={() => receipt.refetch()}
+              onExport={runExport}
+              exportDisabled={exportDisabled}
+              exporting={exporting}
+            />
+          </div>
+
+          {flash && (
+            <div
+              role="status"
+              style={{
+                position: "fixed",
+                top: 20,
+                right: 20,
+                zIndex: 999,
+                display: "flex",
+                alignItems: "center",
+                gap: 10,
+                padding: "10px 12px 10px 14px",
+                background: "var(--ok)",
+                border: "1px solid var(--ok)",
+                borderRadius: 6,
+                boxShadow: "0 6px 20px rgba(0, 0, 0, 0.2)",
+                fontSize: 13,
+                maxWidth: 380,
+                color: "white",
+              }}
             >
-              {t(r.labelKey)}
-            </button>
-          ))}
-        </div>
-      </div>
-
-      <div className="receipt-layout">
-        {/* 左 — 小票 (固定 360px, 就是小票的物理宽度) */}
-        <div className="receipt-slip-col">
-          {filteredDto ? (
-            <ReceiptSlip ref={slipRef} dto={filteredDto} options={options} />
-          ) : (
-            <div className="receipt-empty">
-              {receipt.isLoading ? t("common.loading") : t("receipts.empty")}
+              <CircleCheck size={15} style={{ flexShrink: 0 }} />
+              <span style={{ fontWeight: 500 }}>{flash}</span>
+              <button
+                type="button"
+                className="btn"
+                onClick={() => void openDownloadsFolder()}
+                style={{
+                  background: "transparent",
+                  border: "1px solid rgba(255, 255, 255, 0.55)",
+                  color: "white",
+                }}
+              >
+                <ExternalLink size={12} /> {t("receipts.openDownloads")}
+              </button>
+              <button
+                type="button"
+                onClick={() => setFlash(null)}
+                aria-label={t("common.close")}
+                style={{
+                  background: "none",
+                  border: "none",
+                  cursor: "pointer",
+                  padding: 4,
+                  lineHeight: 0,
+                  color: "white",
+                  opacity: 0.85,
+                }}
+              >
+                <X size={14} />
+              </button>
             </div>
           )}
-          {receipt.isError && (
-            <div className="alert err" style={{ maxWidth: 360 }}>
-              {t("receipts.loadError")}
-            </div>
-          )}
         </div>
-
-        {/* 右 — 控制台。根节点自带 .receipt-panel (flex:1), 直接吃满剩余宽度;
-            原先外面套一层 maxWidth:460 的 div, 右边会白留 200px 空档 */}
-        <ReceiptControls
-          options={options}
-          onOptionsChange={setOptions}
-          selectedSubscriptionIds={selectedSubs}
-          onSelectedSubscriptionsChange={setSelectedSubs}
-          selectedProviderIds={selectedProviders}
-          onSelectedProvidersChange={setSelectedProviders}
-          excludeDeleted={excludeDeleted}
-          onExcludeDeletedChange={setExcludeDeleted}
-          isFetching={receipt.isFetching}
-          onRefresh={() => receipt.refetch()}
-          onExport={runExport}
-          exportDisabled={exportDisabled}
-          exporting={exporting}
-        />
       </div>
-
-      {flash && (
-        <div
-          role="status"
-          style={{
-            position: "fixed",
-            top: 20,
-            right: 20,
-            zIndex: 999,
-            display: "flex",
-            alignItems: "center",
-            gap: 10,
-            padding: "10px 12px 10px 14px",
-            background: "var(--ok)",
-            border: "1px solid var(--ok)",
-            borderRadius: 6,
-            boxShadow: "0 6px 20px rgba(0, 0, 0, 0.2)",
-            fontSize: 13,
-            maxWidth: 380,
-            color: "white",
-          }}
-        >
-          <CircleCheck size={15} style={{ flexShrink: 0 }} />
-          <span style={{ fontWeight: 500 }}>{flash}</span>
-          <button
-            type="button"
-            className="btn"
-            onClick={() => void openDownloadsFolder()}
-            style={{
-              background: "transparent",
-              border: "1px solid rgba(255, 255, 255, 0.55)",
-              color: "white",
-            }}
-          >
-            <ExternalLink size={12} /> {t("receipts.openDownloads")}
-          </button>
-          <button
-            type="button"
-            onClick={() => setFlash(null)}
-            aria-label={t("common.close")}
-            style={{
-              background: "none",
-              border: "none",
-              cursor: "pointer",
-              padding: 4,
-              lineHeight: 0,
-              color: "white",
-              opacity: 0.85,
-            }}
-          >
-            <X size={14} />
-          </button>
-        </div>
-      )}
     </>
   );
 }

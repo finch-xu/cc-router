@@ -1,3 +1,4 @@
+import { PageBar } from "@/components/layout/PageBar";
 import { useMemo, useState } from "react";
 import { RefreshCw } from "lucide-react";
 import { useIsFetching, useQueryClient } from "@tanstack/react-query";
@@ -55,54 +56,60 @@ export function StatisticsPage() {
 
   return (
     <>
-      <div className="page-actions">
-        <div className="page-header" style={{ margin: 0 }}>
-          <h1>{t("stats.title")}</h1>
-          <div className="subtitle">{t("stats.subtitle")}</div>
-        </div>
-        <button className="btn" onClick={refetchAll} disabled={isFetching} type="button">
-          <RefreshCw size={12} className={isFetching ? "spin" : undefined} />
-          {t("stats.refresh")}
-        </button>
-      </div>
-
-      <div className="stats-block-head">
-        <div>
-          <div className="stats-block-title">{t("stats.section.year")}</div>
-          <div className="stats-block-sub">{t("stats.section.yearSub")}</div>
-        </div>
-      </div>
-      <YearHeatmap days={heatmap.data ?? []} loading={heatmap.isFetching} errorText={err(heatmap.error)} />
-
-      <div className="stats-block-head">
-        <div>
-          <div className="stats-block-title">{t("stats.section.period")}</div>
-          <div className="stats-block-sub">{t("stats.section.periodSub")}</div>
-        </div>
-        <div className="range-tabs" role="tablist">
-          {RANGES.map((r) => (
-            <button
-              key={r.key}
-              type="button"
-              role="tab"
-              aria-selected={range === r.key}
-              className={"range-tab" + (range === r.key ? " active" : "")}
-              onClick={() => setRange(r.key)}
-            >
-              {t(r.labelKey)}
+      <PageBar
+        title={t("stats.title")}
+        actions={
+          <>
+            <button className="btn" onClick={refetchAll} disabled={isFetching} type="button">
+              <RefreshCw size={12} className={isFetching ? "spin" : undefined} />
+              {t("stats.refresh")}
             </button>
-          ))}
+          </>
+        }
+      />
+      <div className="page-flow">
+        <div className="page-flow-pad">
+          <div className="page-intro">{t("stats.subtitle")}</div>
+
+          <div className="stats-block-head">
+            <div>
+              <div className="stats-block-title">{t("stats.section.year")}</div>
+              <div className="stats-block-sub">{t("stats.section.yearSub")}</div>
+            </div>
+          </div>
+          <YearHeatmap days={heatmap.data ?? []} loading={heatmap.isFetching} errorText={err(heatmap.error)} />
+
+          <div className="stats-block-head">
+            <div>
+              <div className="stats-block-title">{t("stats.section.period")}</div>
+              <div className="stats-block-sub">{t("stats.section.periodSub")}</div>
+            </div>
+            <div className="range-tabs" role="tablist">
+              {RANGES.map((r) => (
+                <button
+                  key={r.key}
+                  type="button"
+                  role="tab"
+                  aria-selected={range === r.key}
+                  className={"range-tab" + (range === r.key ? " active" : "")}
+                  onClick={() => setRange(r.key)}
+                >
+                  {t(r.labelKey)}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          <KpiRow stats={overall.data} loading={overall.isFetching} />
+          <DailyRequestsChart buckets={buckets} hourly={hourly} loading={daily.isFetching} errorText={err(daily.error)} />
+          <DailyTokensChart buckets={buckets} hourly={hourly} loading={daily.isFetching} errorText={err(daily.error)} />
+          <div className="stats-grid-2">
+            <VmShareDonut items={byVm.data ?? []} loading={byVm.isFetching} errorText={err(byVm.error)} />
+            <DailyLatencyChart buckets={buckets} loading={daily.isFetching} errorText={err(daily.error)} />
+          </div>
+          <SubscriptionTable items={bySub.data ?? []} loading={bySub.isFetching} errorText={err(bySub.error)} />
         </div>
       </div>
-
-      <KpiRow stats={overall.data} loading={overall.isFetching} />
-      <DailyRequestsChart buckets={buckets} hourly={hourly} loading={daily.isFetching} errorText={err(daily.error)} />
-      <DailyTokensChart buckets={buckets} hourly={hourly} loading={daily.isFetching} errorText={err(daily.error)} />
-      <div className="stats-grid-2">
-        <VmShareDonut items={byVm.data ?? []} loading={byVm.isFetching} errorText={err(byVm.error)} />
-        <DailyLatencyChart buckets={buckets} loading={daily.isFetching} errorText={err(daily.error)} />
-      </div>
-      <SubscriptionTable items={bySub.data ?? []} loading={bySub.isFetching} errorText={err(bySub.error)} />
     </>
   );
 }

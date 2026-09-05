@@ -343,7 +343,7 @@ input, select, textarea { font: inherit; color: inherit; }
    * + 11 间隔 + 92 文字 + 11 间隔 + 18 badge ≈ 198), 留一点渲染余量。
    * ja 译文更长, 按 .nav-label 的规则折行, 不截断。 */
   grid-template-columns: 204px 1fr;
-  min-height: 100vh;
+  height: 100vh;
   width: 100%;
   max-width: 100%;
   margin: 0 auto;
@@ -354,7 +354,7 @@ input, select, textarea { font: inherit; color: inherit; }
 .sidebar {
   border-right: 1px solid var(--line);
   background: var(--surface-2);
-  padding: 22px 14px 18px;
+  padding: 0 14px 18px;
   display: flex;
   flex-direction: column;
   gap: 6px;
@@ -363,38 +363,34 @@ input, select, textarea { font: inherit; color: inherit; }
   height: 100vh;
   overflow-y: auto;
 }
-.brand {
+/* 侧栏顶条 = 窗口标题栏左段, 高度与 .page-bar 严格相等 (52px), 两条底线才能连成一条。
+ * 负 margin 抵掉侧栏的 14px 内距, 让底线通到侧栏两侧边缘。
+ * 整条是 data-tauri-drag-region; 文字禁选, 否则拖窗时会先选中品牌名。 */
+.sidebar-top {
+  height: 52px;
+  flex-shrink: 0;
+  margin: 0 -14px 12px;
+  padding: 0 0 0 18px;
   display: flex;
   align-items: center;
-  gap: 10px;
-  padding: 6px 10px 18px;
+  gap: 7px;
   border-bottom: 1px solid var(--line);
-  margin-bottom: 12px;
+  user-select: none;
+  -webkit-user-select: none;
 }
-.brand-mark {
-  width: 32px; height: 32px;
-  border-radius: 8px;
+/* macOS: 红绿灯由系统画在 (14, 20) 起的 52px 宽区域 (tauri.macos.conf.json 的
+ * trafficLightPosition), 品牌从 80px 开始避开。 */
+html[data-platform="macos"] .sidebar-top { padding-left: 80px; }
+.sidebar-brand-mark {
+  width: 20px; height: 20px;
+  border-radius: 5px;
   flex-shrink: 0;
-  overflow: hidden;
-  display: grid;
-  place-items: center;
-  background: transparent;
-}
-.brand-mark img {
-  width: 100%;
-  height: 100%;
-  object-fit: cover;
   display: block;
   /* 像素艺术风 logo: 用 nearest-neighbor 保持锐利,避免缩放发糊 */
   image-rendering: pixelated;
   image-rendering: crisp-edges;
 }
-.brand-text { line-height: 1.1; }
-.brand-name { font-weight: 700; font-size: 15px; letter-spacing: -0.01em; }
-/* 定位标语在 zh 下是一行, 日/英译文更长会折成两行 —— 给它一个像样的行高,
- * 比为了单行把文案砍到不通顺更好 */
-.brand-tag { font-size: 11px; color: var(--ink-3); margin-top: 3px; line-height: 1.4; }
-
+.sidebar-brand-name { font-size: 13px; font-weight: 700; letter-spacing: -0.01em; color: var(--ink); }
 .nav-item {
   display: flex;
   align-items: center;
@@ -448,36 +444,31 @@ input, select, textarea { font: inherit; color: inherit; }
   border-radius: 4px;
 }
 /* === Main === */
+/* 高度收死 + 自身不滚动: 顶栏 (.page-bar) 常驻, 滚动交给页面内的 .page-flow。
+ * 父级没有确定高度时 flex:1 只会撑开不会溢出, 所以必须是 100vh 而非 min-height。
+ * 页面内的 position:sticky 以 .page-flow 为参照物 (它才是真正的滚动容器)。 */
 .main {
-  padding: 22px 28px 36px;
+  height: 100vh;
   min-width: 0;
-  /* clip 而非 hidden: overflow-x:hidden 会把 overflow-y 隐式提成 auto, 让 .main
-   * 变成一个永不滚动的滚动容器 —— 内部所有 position:sticky 会认它做参照物而彻底失效
-   * (真正滚动的是 body)。clip 同样裁剪横向溢出, 但不创建滚动容器、不牵连 y 轴。
-   * 两行是渐进增强: 不认识 clip 的旧 WebKit (Safari <16) 用 hidden 兜底,
-   * 代价只是那些环境下小票控制台不跟随滚动。 */
-  overflow-x: hidden;
-  overflow-x: clip;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
 }
-.page-header { margin-bottom: 18px; }
-.page-header h1 {
-  font-size: var(--fs-h1);
-  font-weight: 700;
-  letter-spacing: -0.02em;
-  margin: 0 0 4px;
-  color: var(--ink);
-}
-.page-header .subtitle {
-  color: var(--ink-3);
-  font-size: 13px;
-  max-width: 720px;
-  line-height: 1.5;
-}
-.page-actions {
+/* 页面副标题: 原 .page-header .subtitle 降级到内容区顶部, 标题本身进了 .page-bar */
+.page-intro-row {
   display: flex;
   align-items: flex-start;
   justify-content: space-between;
   gap: 16px;
+  margin-bottom: 18px;
+}
+.page-intro-row .page-intro { margin-bottom: 0; }
+.page-intro {
+  color: var(--ink-3);
+  font-size: 13px;
+  max-width: 720px;
+  line-height: 1.5;
   margin-bottom: 18px;
 }
 
@@ -1630,16 +1621,6 @@ input, select, textarea { font: inherit; color: inherit; }
  * 特征 —— 页面自身不留白, 白留给区块; 区块之间只有 1px 分隔线,
  * 没有间隙、圆角、阴影。用于「一屏看完」优先的页面。
  * ============================================================ */
-.main.flush {
-  /* 高度必须收死, 否则 .page-flow 的 overflow-y 无处可滚 (父级没有确定高度时
-   * flex:1 只能撑开而不会溢出)。sidebar 已是 100vh, 这里对齐。 */
-  height: 100vh;
-  padding: 0;
-  display: flex;
-  flex-direction: column;
-  overflow: hidden;
-}
-
 /* 页面顶部状态条 (替代 .page-header) */
 .page-bar {
   display: flex;
@@ -1651,6 +1632,7 @@ input, select, textarea { font: inherit; color: inherit; }
   background: var(--surface);
   border-bottom: 1px solid var(--line);
 }
+.page-bar { user-select: none; -webkit-user-select: none; }
 .page-bar h1 {
   font-size: 16px;
   font-weight: 700;
@@ -1684,6 +1666,41 @@ input, select, textarea { font: inherit; color: inherit; }
   align-items: center;
   gap: 10px;
   flex-shrink: 0;
+  align-self: stretch;
+}
+/* Windows / Linux 自绘窗口三键 (macOS 不渲染)。按 Windows 11 标题栏惯例:
+ * 每键 46px 宽、吃满顶栏高度、无圆角; 负 margin 抵掉 .page-bar 的 24px 右内距贴到窗口边。
+ * 关闭键 hover 用 Windows 的固定红 (#c42b1c), 不走主题色 —— 用户肌肉记忆里它就是红的。 */
+.win-controls {
+  display: flex;
+  align-self: stretch;
+  margin-right: -24px;
+  margin-left: 4px;
+}
+.win-controls button {
+  width: 46px;
+  border: none;
+  border-radius: 0;
+  background: transparent;
+  color: var(--ink-2);
+  padding: 0;
+  display: grid;
+  place-items: center;
+  transition: background 0.12s, color 0.12s;
+}
+.win-controls button:hover { background: var(--surface-3); color: var(--ink); }
+.win-controls button.close:hover { background: #c42b1c; color: #fff; }
+/* 免责声明页没有侧栏与顶栏, 只铺一条透明拖窗带 + 三键, 否则 Windows 上无法拖动与关闭 */
+.window-chrome {
+  position: fixed;
+  top: 0; left: 0; right: 0;
+  height: 52px;
+  display: flex;
+  justify-content: flex-end;
+  padding-right: 24px;
+  z-index: 20;
+  user-select: none;
+  -webkit-user-select: none;
 }
 
 /* 居中内容列。顶栏 / 内容 / 底栏三处套同一个类 —— 栏内控件与卡片的左右边缘
@@ -1709,7 +1726,7 @@ input, select, textarea { font: inherit; color: inherit; }
 
 /* .page-flow 自身不留白 (通栏页面靠 .flush-section 自己的 padding);
  * 走卡片体系的页面套这一层拿到与顶栏一致的 24px 水平留白。 */
-.page-flow-pad { padding: 24px; }
+.page-flow-pad { padding: 22px 24px 36px; }
 
 /* 底部常驻操作区: 与 .page-bar 对称, 挂在 .page-flow 之后, 同样不随内容滚动。
  * 反馈 (保存 / 测试结果) 与按钮行合并在同一个容器里 —— 分隔线只画在外层,
@@ -2350,7 +2367,7 @@ input, select, textarea { font: inherit; color: inherit; }
   position: sticky;
   top: 22px;
   align-self: flex-start;
-  max-height: calc(100vh - 44px);
+  max-height: calc(100vh - 52px - 44px);
   overflow-y: auto;
 }
 /* .stats-section 自带 margin-bottom:16, 与外层 gap 叠加会变成 40px 的空档 */

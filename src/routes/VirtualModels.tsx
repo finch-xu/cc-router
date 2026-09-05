@@ -1,3 +1,4 @@
+import { PageBar } from "@/components/layout/PageBar";
 import { useMemo, useState } from "react";
 import { Plus } from "lucide-react";
 import {
@@ -37,24 +38,26 @@ export function VirtualModelsPage() {
 
   return (
     <>
-      <div className="page-header">
-        <h1>{t("virtualModels.title")}</h1>
-        <div className="subtitle">
-          {t("virtualModels.subtitle1")}
-          <span className="mono" style={{ color: "var(--ink-2)" }}> model-fallback</span>
-          {t("virtualModels.subtitle2")}
+      <PageBar title={t("virtualModels.title")} />
+      <div className="page-flow">
+        <div className="page-flow-pad">
+          <div className="page-intro">
+              {t("virtualModels.subtitle1")}
+              <span className="mono" style={{ color: "var(--ink-2)" }}> model-fallback</span>
+              {t("virtualModels.subtitle2")}
         </div>
-      </div>
 
-      <div className="slot-grid">
-        {orderedVms.map((vm) => (
-          <VirtualModelCard
-            key={vm.name}
-            vm={vm}
-            subsMap={subsMap}
-            allSubs={subs.data ?? []}
-          />
-        ))}
+          <div className="slot-grid">
+            {orderedVms.map((vm) => (
+              <VirtualModelCard
+                key={vm.name}
+                vm={vm}
+                subsMap={subsMap}
+                allSubs={subs.data ?? []}
+              />
+            ))}
+          </div>
+        </div>
       </div>
     </>
   );

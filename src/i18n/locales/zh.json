@@ -12,7 +12,6 @@
   "common.copied": "已复制",
   "common.copy": "复制",
   "common.close": "关闭",
-  "sidebar.brand.tag": "多订阅聚合代理",
   "sidebar.nav.guide": "接入指南",
   "sidebar.nav.virtualModels": "虚拟模型",
   "sidebar.nav.subscriptions": "订阅管理",
@@ -798,5 +797,8 @@
   "updates.source": "更新源",
   "updates.sourceHint": "更新源与「设置」页是同一项配置,在这里切换等于改设置,两边始终一致。",
   "updates.current": "当前 v{version}",
-  "updates.available": "可更新"
+  "updates.available": "可更新",
+  "window.minimize": "最小化",
+  "window.maximize": "最大化",
+  "window.close": "关闭"
 }

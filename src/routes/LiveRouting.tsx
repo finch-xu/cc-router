@@ -1,3 +1,4 @@
+import { PageBar } from "@/components/layout/PageBar";
 import { useMemo, useState } from "react";
 import { useNavigate } from "react-router";
 import { ArrowRight, Check, Copy, Lock } from "lucide-react";
@@ -34,12 +35,38 @@ const API_ROUTES: { method: string; path: string; descKey: string }[] = [
 ];
 
 export function LiveRoutingPage() {
+  const { t } = useT();
+  const proxy = useProxyStatus();
+  const running = proxy.data?.running ?? false;
+  const host = proxy.data?.listen_all ? "0.0.0.0" : "127.0.0.1";
+  const port = proxy.data?.http_port ?? proxy.data?.https_port ?? null;
   return (
-    <div className="page-flow">
-      <RouteFlowDiagram />
-      <AccessSection />
-      <MappingSection />
-    </div>
+    <>
+      <PageBar
+        title={t("sidebar.nav.liveRouting")}
+        status={
+          <>
+            <span className={running ? "live-dot" : "live-dot off"} />
+            <span>
+              {running ? t("sidebar.proxyRunning") : t("routeFlow.offline")}
+              {running && port !== null && (
+                <>
+                  {" · "}
+                  <strong>
+                    {host}:{port}
+                  </strong>
+                </>
+              )}
+            </span>
+          </>
+        }
+      />
+      <div className="page-flow">
+        <RouteFlowDiagram />
+        <AccessSection />
+        <MappingSection />
+      </div>
+    </>
   );
 }
 

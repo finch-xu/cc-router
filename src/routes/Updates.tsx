@@ -1,3 +1,4 @@
+import { PageBar } from "@/components/layout/PageBar";
 import {
   CircleAlert,
   CircleCheck,
@@ -40,9 +41,11 @@ export function UpdatesPage() {
   const checking = status === "checking";
 
   return (
-    // updates-flow: 让「有更新」时的日志区吃满剩余视口高度 (见 styles.css)。
-    // 其余状态下所有 section 都是 flex-shrink:0, 排版与改造前一致。
-    <div className="page-flow updates-flow">
+    <>
+      <PageBar title={t("sidebar.nav.updates")} />
+      {/* updates-flow: 让「有更新」时的日志区吃满剩余视口高度 (见 styles.css)。
+       * 其余状态下所有 section 都是 flex-shrink:0, 排版与改造前一致。 */}
+      <div className="page-flow updates-flow">
       <div className="flush-section">
         <div className="updates-head">
           <div className="updates-mark">
@@ -97,7 +100,8 @@ export function UpdatesPage() {
       </div>
 
       <UpdaterStatusSection />
-    </div>
+      </div>
+    </>
   );
 }
 

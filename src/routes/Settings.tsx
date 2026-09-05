@@ -1,3 +1,4 @@
+import { PageBar } from "@/components/layout/PageBar";
 import type React from "react";
 import { useState, useEffect, useRef } from "react";
 
@@ -244,577 +245,579 @@ export function SettingsPage() {
 
   return (
     <>
-      <div className="page-header">
-        <h1>{t("settings.title")}</h1>
-        <div className="subtitle">{t("settings.subtitle")}</div>
-      </div>
+      <PageBar title={t("settings.title")} />
+      <div className="page-flow">
+        <div className="page-flow-pad">
+          <div className="page-intro">{t("settings.subtitle")}</div>
 
-      {/* 语言 */}
-      <div className="card section">
-        <div className="card-head">
-          <div className="card-title">{t("settings.section.language")}</div>
-        </div>
-        <div className="card-body">
-          <div className="setting-row">
-            <div className="label-col">
-              {t("settings.language.label")}
-              <div className="desc">{t("settings.language.desc")}</div>
+          {/* 语言 */}
+          <div className="card section">
+            <div className="card-head">
+              <div className="card-title">{t("settings.section.language")}</div>
             </div>
-            <Select
-              value={preferredLanguage}
-              onValueChange={(v) => changeLanguage(v as LanguagePref)}
-            >
-              <SelectTrigger style={{ maxWidth: 200 }}>
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="system">{t("settings.language.system")}</SelectItem>
-                <SelectItem value="zh">中文</SelectItem>
-                <SelectItem value="en">English</SelectItem>
-                <SelectItem value="ja">日本語</SelectItem>
-              </SelectContent>
-            </Select>
-          </div>
-          <div className="setting-row">
-            <div className="label-col">{t("settings.proxy.autostart.label")}</div>
-            <Toggle
-              checked={autostart}
-              onChange={(v) => void changeAutostart(v)}
-              aria-label={t("settings.proxy.autostart.label")}
-            />
-          </div>
-          <div className="setting-row">
-            <div className="label-col">{t("settings.theme.label")}</div>
-            <Select value={theme} onValueChange={(v) => setTheme(v as Theme)}>
-              <SelectTrigger style={{ maxWidth: 200 }}>
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="system">{t("settings.theme.system")}</SelectItem>
-                <SelectItem value="light">{t("settings.theme.light")}</SelectItem>
-                <SelectItem value="dark">{t("settings.theme.dark")}</SelectItem>
-              </SelectContent>
-            </Select>
-          </div>
-          <div className="setting-row">
-            <div className="label-col">
-              {t("settings.update.source.label")}
-            </div>
-            <Select
-              value={settings.data?.update_source ?? "china"}
-              onValueChange={(v) => void changeUpdateSource(v as UpdateSource)}
-            >
-              <SelectTrigger style={{ maxWidth: 240 }}>
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="international">
-                  {t("settings.update.source.international")}
-                </SelectItem>
-                <SelectItem value="china">{t("settings.update.source.china")}</SelectItem>
-              </SelectContent>
-            </Select>
-          </div>
-        </div>
-      </div>
-
-      {/* 鉴权与跨域 */}
-      <div className="card section">
-        <div className="card-head">
-          <div className="card-title">{t("settings.section.auth")}</div>
-        </div>
-        <div className="card-body">
-          <div className="setting-row">
-            <div className="label-col">
-              {t("settings.auth.token.label")}
-              <div className="desc">{t("settings.auth.token.desc")}</div>
-            </div>
-            <div>
-              <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 10 }}>
-                <Toggle
-                  checked={authEnabled}
-                  onChange={(v) => void changeAuthEnabled(v)}
-                  aria-label={t("settings.auth.token.label")}
-                />
-                <span style={{ fontSize: 12, color: "var(--ink-2)" }}>
-                  {authEnabled
-                    ? t("settings.auth.token.enabled")
-                    : t("settings.auth.token.disabled")}
-                </span>
-              </div>
-              {authEnabled && settings.data && (
-                <div style={{ display: "flex", gap: 8 }}>
-                  <input
-                    className="input mono"
-                    value={settings.data.auth_token}
-                    readOnly
-                    style={{ fontSize: 11.5, color: "var(--ink-2)" }}
-                  />
-                  <button
-                    className="btn"
-                    onClick={regenerateToken}
-                    disabled={generateTokenMut.isPending}
-                    type="button"
-                  >
-                    {generateTokenMut.isPending ? (
-                      <Spinner />
-                    ) : tokenJustRegenerated ? (
-                      <Check size={12} style={{ color: "var(--ok)" }} />
-                    ) : (
-                      <RefreshCw size={12} />
-                    )}
-                    {tokenJustRegenerated
-                      ? t("settings.auth.token.regenerated")
-                      : t("settings.auth.token.regenerate")}
-                  </button>
+            <div className="card-body">
+              <div className="setting-row">
+                <div className="label-col">
+                  {t("settings.language.label")}
+                  <div className="desc">{t("settings.language.desc")}</div>
                 </div>
-              )}
-            </div>
-          </div>
-
-          <div className="setting-row">
-            <div className="label-col">
-              {t("settings.auth.cors.label")}
-              <div className="desc">
-                {corsEnabled
-                  ? t("settings.auth.cors.descEnabled")
-                  : t("settings.auth.cors.descDisabled")}
+                <Select
+                  value={preferredLanguage}
+                  onValueChange={(v) => changeLanguage(v as LanguagePref)}
+                >
+                  <SelectTrigger style={{ maxWidth: 200 }}>
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="system">{t("settings.language.system")}</SelectItem>
+                    <SelectItem value="zh">中文</SelectItem>
+                    <SelectItem value="en">English</SelectItem>
+                    <SelectItem value="ja">日本語</SelectItem>
+                  </SelectContent>
+                </Select>
               </div>
-            </div>
-            <div>
-              <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 10 }}>
+              <div className="setting-row">
+                <div className="label-col">{t("settings.proxy.autostart.label")}</div>
                 <Toggle
-                  checked={corsEnabled}
-                  onChange={(v) => void changeCorsEnabled(v)}
-                  aria-label={t("settings.auth.cors.label")}
+                  checked={autostart}
+                  onChange={(v) => void changeAutostart(v)}
+                  aria-label={t("settings.proxy.autostart.label")}
                 />
-                <span style={{ fontSize: 12, color: "var(--ink-2)" }}>
-                  {corsEnabled
-                    ? t("settings.auth.cors.statusEnabled")
-                    : t("settings.auth.cors.statusDisabled")}
-                </span>
               </div>
-              {corsEnabled && (
-                <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
-                  <input
-                    className="input mono"
-                    value={corsAllowOrigin}
-                    onChange={(e) => setCorsAllowOrigin(e.target.value)}
-                    onBlur={() => {
-                      if (
-                        settings.data &&
-                        corsAllowOrigin !== settings.data.cors_allow_origin
-                      ) {
-                        void changeCorsOrigin(corsAllowOrigin);
-                      }
-                    }}
-                    onKeyDown={(e) => {
-                      if (e.key === "Enter") (e.target as HTMLInputElement).blur();
-                    }}
-                    placeholder="*"
-                    style={{ maxWidth: 280 }}
-                  />
-                  <span
-                    className="mono"
-                    style={{ fontSize: 11.5, color: "var(--ink-4)" }}
-                  >
-                    Access-Control-Allow-Origin
-                  </span>
+              <div className="setting-row">
+                <div className="label-col">{t("settings.theme.label")}</div>
+                <Select value={theme} onValueChange={(v) => setTheme(v as Theme)}>
+                  <SelectTrigger style={{ maxWidth: 200 }}>
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="system">{t("settings.theme.system")}</SelectItem>
+                    <SelectItem value="light">{t("settings.theme.light")}</SelectItem>
+                    <SelectItem value="dark">{t("settings.theme.dark")}</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+              <div className="setting-row">
+                <div className="label-col">
+                  {t("settings.update.source.label")}
                 </div>
-              )}
-            </div>
-          </div>
-        </div>
-      </div>
-
-      {/* 代理服务 */}
-      <div className="card section">
-        <div className="card-head">
-          <div className="card-title">{t("settings.section.proxy")}</div>
-          <span className={"pill " + (proxy.data?.running ? "ok" : "")}>
-            <span className="dot" />
-            {proxy.data?.running
-              ? t("settings.proxy.statusRunning")
-              : t("settings.proxy.statusStopped")}
-          </span>
-        </div>
-        <div className="card-body">
-          {/* 协议模式三选一 */}
-          <div className="setting-row">
-            <div className="label-col">
-              {t("settings.proxy.mode.label")}
-              <div className="desc">{t("settings.proxy.mode.desc")}</div>
-            </div>
-            <div
-              className="radio-group"
-              role="radiogroup"
-              aria-label={t("settings.proxy.mode.label")}
-              style={{ display: "flex", maxWidth: 360 }}
-            >
-              <button
-                type="button"
-                className={proxyMode === "http" ? "on" : ""}
-                onClick={() => void changeProxyMode("http")}
-                role="radio"
-                aria-checked={proxyMode === "http"}
-                style={{ flex: 1 }}
-              >
-                {t("settings.proxy.mode.http")}
-              </button>
-              <button
-                type="button"
-                className={proxyMode === "https" ? "on" : ""}
-                onClick={() => void changeProxyMode("https")}
-                role="radio"
-                aria-checked={proxyMode === "https"}
-                style={{ flex: 1 }}
-              >
-                {t("settings.proxy.mode.https")}
-              </button>
-              <button
-                type="button"
-                className={proxyMode === "both" ? "on" : ""}
-                onClick={() => void changeProxyMode("both")}
-                role="radio"
-                aria-checked={proxyMode === "both"}
-                style={{ flex: 1 }}
-              >
-                {t("settings.proxy.mode.both")}
-              </button>
+                <Select
+                  value={settings.data?.update_source ?? "china"}
+                  onValueChange={(v) => void changeUpdateSource(v as UpdateSource)}
+                >
+                  <SelectTrigger style={{ maxWidth: 240 }}>
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="international">
+                      {t("settings.update.source.international")}
+                    </SelectItem>
+                    <SelectItem value="china">{t("settings.update.source.china")}</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
             </div>
           </div>
 
-          {/* HTTP 端口 (Http / Both 时可见) */}
-          {(proxyMode === "http" || proxyMode === "both") && (
-            <div className="setting-row">
-              <div className="label-col">
-                {t("settings.proxy.port.label")}
-                <div className="desc">{t("settings.proxy.port.desc")}</div>
-              </div>
-              <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
-                <input
-                  className="input mono"
-                  type="number"
-                  value={port}
-                  onChange={(e) => setPort(Number(e.target.value) || 23456)}
-                  onBlur={() => {
-                    if (settings.data && port !== settings.data.proxy_port) {
-                      void changeProxyPort(port);
-                    }
-                  }}
-                  onKeyDown={(e) => {
-                    if (e.key === "Enter") (e.target as HTMLInputElement).blur();
-                  }}
-                  style={{ width: 120 }}
-                />
-                <span style={{ fontSize: 12, color: "var(--ink-4)" }}>
-                  {t("settings.proxy.port.actual")}
-                  <span className="mono"> {proxy.data?.http_port ?? "-"}</span>
-                </span>
-              </div>
+          {/* 鉴权与跨域 */}
+          <div className="card section">
+            <div className="card-head">
+              <div className="card-title">{t("settings.section.auth")}</div>
             </div>
-          )}
+            <div className="card-body">
+              <div className="setting-row">
+                <div className="label-col">
+                  {t("settings.auth.token.label")}
+                  <div className="desc">{t("settings.auth.token.desc")}</div>
+                </div>
+                <div>
+                  <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 10 }}>
+                    <Toggle
+                      checked={authEnabled}
+                      onChange={(v) => void changeAuthEnabled(v)}
+                      aria-label={t("settings.auth.token.label")}
+                    />
+                    <span style={{ fontSize: 12, color: "var(--ink-2)" }}>
+                      {authEnabled
+                        ? t("settings.auth.token.enabled")
+                        : t("settings.auth.token.disabled")}
+                    </span>
+                  </div>
+                  {authEnabled && settings.data && (
+                    <div style={{ display: "flex", gap: 8 }}>
+                      <input
+                        className="input mono"
+                        value={settings.data.auth_token}
+                        readOnly
+                        style={{ fontSize: 11.5, color: "var(--ink-2)" }}
+                      />
+                      <button
+                        className="btn"
+                        onClick={regenerateToken}
+                        disabled={generateTokenMut.isPending}
+                        type="button"
+                      >
+                        {generateTokenMut.isPending ? (
+                          <Spinner />
+                        ) : tokenJustRegenerated ? (
+                          <Check size={12} style={{ color: "var(--ok)" }} />
+                        ) : (
+                          <RefreshCw size={12} />
+                        )}
+                        {tokenJustRegenerated
+                          ? t("settings.auth.token.regenerated")
+                          : t("settings.auth.token.regenerate")}
+                      </button>
+                    </div>
+                  )}
+                </div>
+              </div>
 
-          {/* HTTPS 端口 (Https / Both 时可见) */}
-          {httpsEnabled && (
-            <div className="setting-row">
-              <div className="label-col">
-                {t("settings.proxy.httpsPort.label")}
-                <div className="desc">{t("settings.proxy.httpsPort.desc")}</div>
-              </div>
-              <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
-                <input
-                  className="input mono"
-                  type="number"
-                  value={httpsPort}
-                  onChange={(e) => setHttpsPort(Number(e.target.value) || 23457)}
-                  onBlur={() => {
-                    if (settings.data && httpsPort !== settings.data.https_port) {
-                      void changeHttpsPort(httpsPort);
-                    }
-                  }}
-                  onKeyDown={(e) => {
-                    if (e.key === "Enter") (e.target as HTMLInputElement).blur();
-                  }}
-                  style={{ width: 120 }}
-                />
-                <span style={{ fontSize: 12, color: "var(--ink-4)" }}>
-                  {t("settings.proxy.port.actual")}
-                  <span className="mono"> {proxy.data?.https_port ?? "-"}</span>
-                </span>
+              <div className="setting-row">
+                <div className="label-col">
+                  {t("settings.auth.cors.label")}
+                  <div className="desc">
+                    {corsEnabled
+                      ? t("settings.auth.cors.descEnabled")
+                      : t("settings.auth.cors.descDisabled")}
+                  </div>
+                </div>
+                <div>
+                  <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 10 }}>
+                    <Toggle
+                      checked={corsEnabled}
+                      onChange={(v) => void changeCorsEnabled(v)}
+                      aria-label={t("settings.auth.cors.label")}
+                    />
+                    <span style={{ fontSize: 12, color: "var(--ink-2)" }}>
+                      {corsEnabled
+                        ? t("settings.auth.cors.statusEnabled")
+                        : t("settings.auth.cors.statusDisabled")}
+                    </span>
+                  </div>
+                  {corsEnabled && (
+                    <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+                      <input
+                        className="input mono"
+                        value={corsAllowOrigin}
+                        onChange={(e) => setCorsAllowOrigin(e.target.value)}
+                        onBlur={() => {
+                          if (
+                            settings.data &&
+                            corsAllowOrigin !== settings.data.cors_allow_origin
+                          ) {
+                            void changeCorsOrigin(corsAllowOrigin);
+                          }
+                        }}
+                        onKeyDown={(e) => {
+                          if (e.key === "Enter") (e.target as HTMLInputElement).blur();
+                        }}
+                        placeholder="*"
+                        style={{ maxWidth: 280 }}
+                      />
+                      <span
+                        className="mono"
+                        style={{ fontSize: 11.5, color: "var(--ink-4)" }}
+                      >
+                        Access-Control-Allow-Origin
+                      </span>
+                    </div>
+                  )}
+                </div>
               </div>
             </div>
-          )}
+          </div>
 
-          <div className="setting-row">
-            <div className="label-col">
-              {t("settings.proxy.bind.label")}
-              <div className="desc">{t("settings.proxy.bind.desc")}</div>
+          {/* 代理服务 */}
+          <div className="card section">
+            <div className="card-head">
+              <div className="card-title">{t("settings.section.proxy")}</div>
+              <span className={"pill " + (proxy.data?.running ? "ok" : "")}>
+                <span className="dot" />
+                {proxy.data?.running
+                  ? t("settings.proxy.statusRunning")
+                  : t("settings.proxy.statusStopped")}
+              </span>
             </div>
-            <div>
-              <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+            <div className="card-body">
+              {/* 协议模式三选一 */}
+              <div className="setting-row">
+                <div className="label-col">
+                  {t("settings.proxy.mode.label")}
+                  <div className="desc">{t("settings.proxy.mode.desc")}</div>
+                </div>
                 <div
                   className="radio-group"
                   role="radiogroup"
-                  aria-label={t("settings.proxy.bind.label")}
+                  aria-label={t("settings.proxy.mode.label")}
+                  style={{ display: "flex", maxWidth: 360 }}
                 >
                   <button
                     type="button"
-                    className={!listenAll ? "on" : ""}
-                    onClick={() => void changeListenAll(false)}
+                    className={proxyMode === "http" ? "on" : ""}
+                    onClick={() => void changeProxyMode("http")}
                     role="radio"
-                    aria-checked={!listenAll}
+                    aria-checked={proxyMode === "http"}
+                    style={{ flex: 1 }}
                   >
-                    {t("settings.proxy.bind.local")}
+                    {t("settings.proxy.mode.http")}
                   </button>
                   <button
                     type="button"
-                    className={listenAll ? "on" : ""}
-                    onClick={() => void changeListenAll(true)}
+                    className={proxyMode === "https" ? "on" : ""}
+                    onClick={() => void changeProxyMode("https")}
                     role="radio"
-                    aria-checked={listenAll}
+                    aria-checked={proxyMode === "https"}
+                    style={{ flex: 1 }}
                   >
-                    {t("settings.proxy.bind.lan")}
+                    {t("settings.proxy.mode.https")}
+                  </button>
+                  <button
+                    type="button"
+                    className={proxyMode === "both" ? "on" : ""}
+                    onClick={() => void changeProxyMode("both")}
+                    role="radio"
+                    aria-checked={proxyMode === "both"}
+                    style={{ flex: 1 }}
+                  >
+                    {t("settings.proxy.mode.both")}
                   </button>
                 </div>
-                <span
-                  className="mono"
-                  style={{
-                    fontSize: 12,
-                    color: listenAll ? "var(--ink-2)" : "var(--ink-4)",
-                  }}
-                >
-                  {listenAll ? "0.0.0.0:" : "127.0.0.1:"}
-                  {port}
-                </span>
               </div>
-              {listenAll && (
-                <div className="field-hint" style={{ color: "var(--err)" }}>
-                  {t("settings.proxy.bind.warning")}
+
+              {/* HTTP 端口 (Http / Both 时可见) */}
+              {(proxyMode === "http" || proxyMode === "both") && (
+                <div className="setting-row">
+                  <div className="label-col">
+                    {t("settings.proxy.port.label")}
+                    <div className="desc">{t("settings.proxy.port.desc")}</div>
+                  </div>
+                  <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+                    <input
+                      className="input mono"
+                      type="number"
+                      value={port}
+                      onChange={(e) => setPort(Number(e.target.value) || 23456)}
+                      onBlur={() => {
+                        if (settings.data && port !== settings.data.proxy_port) {
+                          void changeProxyPort(port);
+                        }
+                      }}
+                      onKeyDown={(e) => {
+                        if (e.key === "Enter") (e.target as HTMLInputElement).blur();
+                      }}
+                      style={{ width: 120 }}
+                    />
+                    <span style={{ fontSize: 12, color: "var(--ink-4)" }}>
+                      {t("settings.proxy.port.actual")}
+                      <span className="mono"> {proxy.data?.http_port ?? "-"}</span>
+                    </span>
+                  </div>
+                </div>
+              )}
+
+              {/* HTTPS 端口 (Https / Both 时可见) */}
+              {httpsEnabled && (
+                <div className="setting-row">
+                  <div className="label-col">
+                    {t("settings.proxy.httpsPort.label")}
+                    <div className="desc">{t("settings.proxy.httpsPort.desc")}</div>
+                  </div>
+                  <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+                    <input
+                      className="input mono"
+                      type="number"
+                      value={httpsPort}
+                      onChange={(e) => setHttpsPort(Number(e.target.value) || 23457)}
+                      onBlur={() => {
+                        if (settings.data && httpsPort !== settings.data.https_port) {
+                          void changeHttpsPort(httpsPort);
+                        }
+                      }}
+                      onKeyDown={(e) => {
+                        if (e.key === "Enter") (e.target as HTMLInputElement).blur();
+                      }}
+                      style={{ width: 120 }}
+                    />
+                    <span style={{ fontSize: 12, color: "var(--ink-4)" }}>
+                      {t("settings.proxy.port.actual")}
+                      <span className="mono"> {proxy.data?.https_port ?? "-"}</span>
+                    </span>
+                  </div>
+                </div>
+              )}
+
+              <div className="setting-row">
+                <div className="label-col">
+                  {t("settings.proxy.bind.label")}
+                  <div className="desc">{t("settings.proxy.bind.desc")}</div>
+                </div>
+                <div>
+                  <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                    <div
+                      className="radio-group"
+                      role="radiogroup"
+                      aria-label={t("settings.proxy.bind.label")}
+                    >
+                      <button
+                        type="button"
+                        className={!listenAll ? "on" : ""}
+                        onClick={() => void changeListenAll(false)}
+                        role="radio"
+                        aria-checked={!listenAll}
+                      >
+                        {t("settings.proxy.bind.local")}
+                      </button>
+                      <button
+                        type="button"
+                        className={listenAll ? "on" : ""}
+                        onClick={() => void changeListenAll(true)}
+                        role="radio"
+                        aria-checked={listenAll}
+                      >
+                        {t("settings.proxy.bind.lan")}
+                      </button>
+                    </div>
+                    <span
+                      className="mono"
+                      style={{
+                        fontSize: 12,
+                        color: listenAll ? "var(--ink-2)" : "var(--ink-4)",
+                      }}
+                    >
+                      {listenAll ? "0.0.0.0:" : "127.0.0.1:"}
+                      {port}
+                    </span>
+                  </div>
+                  {listenAll && (
+                    <div className="field-hint" style={{ color: "var(--err)" }}>
+                      {t("settings.proxy.bind.warning")}
+                    </div>
+                  )}
+                </div>
+              </div>
+
+              {/* 请求体上限: axum 默认 2 MiB 会让 Codex 多图请求 413 (issue #41) */}
+              <div className="setting-row">
+                <div className="label-col">
+                  {t("settings.proxy.bodyLimit.label")}
+                  <div className="desc">{t("settings.proxy.bodyLimit.desc")}</div>
+                </div>
+                <Select
+                  value={String(maxBodyMb)}
+                  onValueChange={(v) => void changeMaxBodyMb(Number(v))}
+                >
+                  <SelectTrigger style={{ maxWidth: 200 }}>
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="8">8 MB</SelectItem>
+                    <SelectItem value="16">16 MB</SelectItem>
+                    <SelectItem value="32">{t("settings.proxy.bodyLimit.default32")}</SelectItem>
+                    <SelectItem value="64">64 MB</SelectItem>
+                    <SelectItem value="128">128 MB</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+
+              {needsRestart && (
+                <div className="alert warn">
+                  <TriangleAlert size={14} />
+                  {t("settings.proxy.needsRestart")}
                 </div>
               )}
             </div>
           </div>
 
-          {/* 请求体上限: axum 默认 2 MiB 会让 Codex 多图请求 413 (issue #41) */}
-          <div className="setting-row">
-            <div className="label-col">
-              {t("settings.proxy.bodyLimit.label")}
-              <div className="desc">{t("settings.proxy.bodyLimit.desc")}</div>
+          {/* HTTPS 证书 (cc-router 自签 CA) — 仅 proxy_mode 包含 https 时显示 */}
+          {httpsEnabled && <HttpsCertSection />}
+
+          {/* 数据存储 */}
+          <div className="card section">
+            <div className="card-head">
+              <div className="card-title">{t("settings.section.storage")}</div>
             </div>
-            <Select
-              value={String(maxBodyMb)}
-              onValueChange={(v) => void changeMaxBodyMb(Number(v))}
-            >
-              <SelectTrigger style={{ maxWidth: 200 }}>
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="8">8 MB</SelectItem>
-                <SelectItem value="16">16 MB</SelectItem>
-                <SelectItem value="32">{t("settings.proxy.bodyLimit.default32")}</SelectItem>
-                <SelectItem value="64">64 MB</SelectItem>
-                <SelectItem value="128">128 MB</SelectItem>
-              </SelectContent>
-            </Select>
+            <div className="card-body">
+              <div className="setting-row">
+                <div className="label-col">{t("settings.storage.retention.label")}</div>
+                <Select
+                  value={String(retentionDays >= 36500 ? 0 : retentionDays)}
+                  onValueChange={(v) => void changeRetentionDays(Number(v))}
+                >
+                  <SelectTrigger style={{ maxWidth: 200 }}>
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="7">{t("settings.storage.retention.7d")}</SelectItem>
+                    <SelectItem value="30">{t("settings.storage.retention.30d")}</SelectItem>
+                    <SelectItem value="90">{t("settings.storage.retention.90d")}</SelectItem>
+                    <SelectItem value="0">{t("settings.storage.retention.forever")}</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+              <div className="setting-row">
+                <div className="label-col">{t("settings.storage.dbLimit.label")}</div>
+                <Select
+                  value={String(dbLimitMb)}
+                  onValueChange={(v) => void changeDbLimit(Number(v))}
+                >
+                  <SelectTrigger style={{ maxWidth: 200 }}>
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="100">100 MB</SelectItem>
+                    <SelectItem value="500">500 MB</SelectItem>
+                    <SelectItem value="1024">1 GB</SelectItem>
+                    <SelectItem value="10240">{t("settings.storage.dbLimit.unlimited")}</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+            </div>
           </div>
 
-          {needsRestart && (
-            <div className="alert warn">
-              <TriangleAlert size={14} />
-              {t("settings.proxy.needsRestart")}
+          {/* 调试 */}
+          <div className="card section">
+            <div className="card-head">
+              <div className="card-title">{t("settings.section.debug")}</div>
             </div>
-          )}
-        </div>
-      </div>
-
-      {/* HTTPS 证书 (cc-router 自签 CA) — 仅 proxy_mode 包含 https 时显示 */}
-      {httpsEnabled && <HttpsCertSection />}
-
-      {/* 数据存储 */}
-      <div className="card section">
-        <div className="card-head">
-          <div className="card-title">{t("settings.section.storage")}</div>
-        </div>
-        <div className="card-body">
-          <div className="setting-row">
-            <div className="label-col">{t("settings.storage.retention.label")}</div>
-            <Select
-              value={String(retentionDays >= 36500 ? 0 : retentionDays)}
-              onValueChange={(v) => void changeRetentionDays(Number(v))}
-            >
-              <SelectTrigger style={{ maxWidth: 200 }}>
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="7">{t("settings.storage.retention.7d")}</SelectItem>
-                <SelectItem value="30">{t("settings.storage.retention.30d")}</SelectItem>
-                <SelectItem value="90">{t("settings.storage.retention.90d")}</SelectItem>
-                <SelectItem value="0">{t("settings.storage.retention.forever")}</SelectItem>
-              </SelectContent>
-            </Select>
-          </div>
-          <div className="setting-row">
-            <div className="label-col">{t("settings.storage.dbLimit.label")}</div>
-            <Select
-              value={String(dbLimitMb)}
-              onValueChange={(v) => void changeDbLimit(Number(v))}
-            >
-              <SelectTrigger style={{ maxWidth: 200 }}>
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="100">100 MB</SelectItem>
-                <SelectItem value="500">500 MB</SelectItem>
-                <SelectItem value="1024">1 GB</SelectItem>
-                <SelectItem value="10240">{t("settings.storage.dbLimit.unlimited")}</SelectItem>
-              </SelectContent>
-            </Select>
-          </div>
-        </div>
-      </div>
-
-      {/* 调试 */}
-      <div className="card section">
-        <div className="card-head">
-          <div className="card-title">{t("settings.section.debug")}</div>
-        </div>
-        <div className="card-body">
-          <div className="setting-row">
-            <div className="label-col">
-              {t("settings.debug.mode.label")}
-              <div className="desc">{t("settings.debug.mode.desc")}</div>
+            <div className="card-body">
+              <div className="setting-row">
+                <div className="label-col">
+                  {t("settings.debug.mode.label")}
+                  <div className="desc">{t("settings.debug.mode.desc")}</div>
+                </div>
+                <Toggle
+                  checked={debugMode}
+                  onChange={(v) => void changeDebugMode(v)}
+                  aria-label={t("settings.debug.mode.label")}
+                />
+              </div>
+              <div className="setting-row">
+                <div className="label-col">
+                  {t("settings.debug.dumps.label")}
+                  <div className="desc">{t("settings.debug.dumps.desc")}</div>
+                </div>
+                <div style={{ display: "flex", gap: 8 }}>
+                  <button className="btn" type="button" onClick={openDumps}>
+                    {t("settings.debug.open.button")}
+                  </button>
+                  <button
+                    className="btn"
+                    type="button"
+                    onClick={() => setClearDumpsDialog(true)}
+                  >
+                    {t("settings.debug.clear.button")}
+                  </button>
+                </div>
+              </div>
             </div>
-            <Toggle
-              checked={debugMode}
-              onChange={(v) => void changeDebugMode(v)}
-              aria-label={t("settings.debug.mode.label")}
-            />
           </div>
-          <div className="setting-row">
-            <div className="label-col">
-              {t("settings.debug.dumps.label")}
-              <div className="desc">{t("settings.debug.dumps.desc")}</div>
-            </div>
-            <div style={{ display: "flex", gap: 8 }}>
-              <button className="btn" type="button" onClick={openDumps}>
-                {t("settings.debug.open.button")}
-              </button>
-              <button
-                className="btn"
-                type="button"
-                onClick={() => setClearDumpsDialog(true)}
+
+          {/* 危险区域 */}
+          <div className="danger-card section">
+            <div>
+              <div
+                style={{
+                  display: "flex",
+                  alignItems: "center",
+                  gap: 8,
+                  fontSize: 13,
+                  fontWeight: 600,
+                  color: "oklch(0.42 0.16 28)",
+                  marginBottom: 6,
+                }}
               >
-                {t("settings.debug.clear.button")}
-              </button>
+                <TriangleAlert size={14} /> {t("settings.section.danger")}
+              </div>
+              <div style={{ fontSize: 12, color: "var(--ink-3)", lineHeight: 1.6 }}>
+                {t("settings.danger.desc")}
+              </div>
             </div>
+            <button className="btn danger" type="button" onClick={() => setResetDialog(true)}>
+              {t("settings.danger.button")}
+            </button>
           </div>
-        </div>
-      </div>
 
-      {/* 危险区域 */}
-      <div className="danger-card section">
-        <div>
-          <div
-            style={{
-              display: "flex",
-              alignItems: "center",
-              gap: 8,
-              fontSize: 13,
-              fontWeight: 600,
-              color: "oklch(0.42 0.16 28)",
-              marginBottom: 6,
-            }}
+          {/* 清空 dump 确认弹窗 */}
+          <Dialog
+            open={clearDumpsDialog}
+            onOpenChange={(v) => !clearingDumps && setClearDumpsDialog(v)}
           >
-            <TriangleAlert size={14} /> {t("settings.section.danger")}
-          </div>
-          <div style={{ fontSize: 12, color: "var(--ink-3)", lineHeight: 1.6 }}>
-            {t("settings.danger.desc")}
-          </div>
+            <DialogContent className="cc-dialog">
+              <DialogHeader>
+                <DialogTitle>{t("settings.debug.clear.dialog.title")}</DialogTitle>
+                <DialogDescription>
+                  {t("settings.debug.clear.dialog.desc")}
+                </DialogDescription>
+              </DialogHeader>
+              <DialogFooter>
+                <button
+                  className="btn"
+                  onClick={() => setClearDumpsDialog(false)}
+                  disabled={clearingDumps}
+                  type="button"
+                >
+                  {t("common.cancel")}
+                </button>
+                <button
+                  className="btn danger"
+                  onClick={confirmClearDumps}
+                  disabled={clearingDumps}
+                  type="button"
+                >
+                  {clearingDumps && <Spinner />}
+                  {t("settings.debug.clear.dialog.confirm")}
+                </button>
+              </DialogFooter>
+            </DialogContent>
+          </Dialog>
+
+          {/* 恢复出厂确认弹窗 */}
+          <Dialog open={resetDialog} onOpenChange={(v) => !resetting && setResetDialog(v)}>
+            <DialogContent className="cc-dialog">
+              <DialogHeader>
+                <DialogTitle>
+                  <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                    <TriangleAlert size={16} style={{ color: "var(--err)" }} />
+                    {t("settings.danger.dialog.title")}
+                  </div>
+                </DialogTitle>
+                <DialogDescription asChild>
+                  <div>
+                    {t("settings.danger.dialog.intro")}
+                    <ul style={{ marginTop: 8, paddingLeft: 20, fontSize: 13, lineHeight: 1.7 }}>
+                      <li>{t("settings.danger.dialog.item.subscriptions")}</li>
+                      <li>{t("settings.danger.dialog.item.virtualModels")}</li>
+                      <li>{t("settings.danger.dialog.item.logs")}</li>
+                      <li>{t("settings.danger.dialog.item.settings")}</li>
+                    </ul>
+                    <p style={{ marginTop: 12 }}>{t("settings.danger.dialog.outro")}</p>
+                  </div>
+                </DialogDescription>
+              </DialogHeader>
+              <DialogFooter>
+                <button
+                  className="btn"
+                  onClick={() => setResetDialog(false)}
+                  disabled={resetting}
+                  type="button"
+                >
+                  {t("common.cancel")}
+                </button>
+                <button
+                  className="btn danger"
+                  onClick={confirmReset}
+                  disabled={resetting}
+                  type="button"
+                >
+                  {resetting && <Spinner />}
+                  {t("settings.danger.dialog.confirm")}
+                </button>
+              </DialogFooter>
+            </DialogContent>
+          </Dialog>
         </div>
-        <button className="btn danger" type="button" onClick={() => setResetDialog(true)}>
-          {t("settings.danger.button")}
-        </button>
       </div>
-
-      {/* 清空 dump 确认弹窗 */}
-      <Dialog
-        open={clearDumpsDialog}
-        onOpenChange={(v) => !clearingDumps && setClearDumpsDialog(v)}
-      >
-        <DialogContent className="cc-dialog">
-          <DialogHeader>
-            <DialogTitle>{t("settings.debug.clear.dialog.title")}</DialogTitle>
-            <DialogDescription>
-              {t("settings.debug.clear.dialog.desc")}
-            </DialogDescription>
-          </DialogHeader>
-          <DialogFooter>
-            <button
-              className="btn"
-              onClick={() => setClearDumpsDialog(false)}
-              disabled={clearingDumps}
-              type="button"
-            >
-              {t("common.cancel")}
-            </button>
-            <button
-              className="btn danger"
-              onClick={confirmClearDumps}
-              disabled={clearingDumps}
-              type="button"
-            >
-              {clearingDumps && <Spinner />}
-              {t("settings.debug.clear.dialog.confirm")}
-            </button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
-
-      {/* 恢复出厂确认弹窗 */}
-      <Dialog open={resetDialog} onOpenChange={(v) => !resetting && setResetDialog(v)}>
-        <DialogContent className="cc-dialog">
-          <DialogHeader>
-            <DialogTitle>
-              <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                <TriangleAlert size={16} style={{ color: "var(--err)" }} />
-                {t("settings.danger.dialog.title")}
-              </div>
-            </DialogTitle>
-            <DialogDescription asChild>
-              <div>
-                {t("settings.danger.dialog.intro")}
-                <ul style={{ marginTop: 8, paddingLeft: 20, fontSize: 13, lineHeight: 1.7 }}>
-                  <li>{t("settings.danger.dialog.item.subscriptions")}</li>
-                  <li>{t("settings.danger.dialog.item.virtualModels")}</li>
-                  <li>{t("settings.danger.dialog.item.logs")}</li>
-                  <li>{t("settings.danger.dialog.item.settings")}</li>
-                </ul>
-                <p style={{ marginTop: 12 }}>{t("settings.danger.dialog.outro")}</p>
-              </div>
-            </DialogDescription>
-          </DialogHeader>
-          <DialogFooter>
-            <button
-              className="btn"
-              onClick={() => setResetDialog(false)}
-              disabled={resetting}
-              type="button"
-            >
-              {t("common.cancel")}
-            </button>
-            <button
-              className="btn danger"
-              onClick={confirmReset}
-              disabled={resetting}
-              type="button"
-            >
-              {resetting && <Spinner />}
-              {t("settings.danger.dialog.confirm")}
-            </button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
     </>
   );
 }

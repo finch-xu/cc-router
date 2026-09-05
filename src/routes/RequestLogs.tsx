@@ -121,11 +121,9 @@ export function RequestLogsPage() {
 
   return (
     <>
-      <div className="page-actions">
-        <div className="page-header" style={{ margin: 0 }}>
-          <h1>{t("requestLogs.title")}</h1>
-          <div className="subtitle">{t("requestLogs.subtitle")}</div>
-        </div>
+      {/* 页面标题已在 Logs.tsx 的 PageBar 里, 这里只留副标题 + 操作行 */}
+      <div className="page-intro-row">
+        <div className="page-intro">{t("requestLogs.subtitle")}</div>
         <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
           {exportMsg && (
             <span className="field-hint" style={{ fontSize: 11 }}>

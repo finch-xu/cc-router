@@ -12,7 +12,6 @@
   "common.copied": "Copied",
   "common.copy": "Copy",
   "common.close": "Close",
-  "sidebar.brand.tag": "Multi-subscription proxy",
   "sidebar.nav.guide": "Setup guide",
   "sidebar.nav.virtualModels": "Virtual models",
   "sidebar.nav.subscriptions": "Subscriptions",
@@ -760,5 +759,8 @@
   "updates.source": "Update source",
   "updates.sourceHint": "This is the same setting as on the Settings page — switching here changes it there too, so the two always agree.",
   "updates.current": "Current v{version}",
-  "updates.available": "Update available"
+  "updates.available": "Update available",
+  "window.minimize": "Minimize",
+  "window.maximize": "Maximize",
+  "window.close": "Close"
 }

@@ -45,11 +45,9 @@ export function SubscriptionEventsList() {
 
   return (
     <>
-      <div className="page-actions">
-        <div className="page-header" style={{ margin: 0 }}>
-          <h1>{t("logs.tab.subscriptionEvents")}</h1>
-          <div className="subtitle">{t("logs.subscriptionEvents.subtitle")}</div>
-        </div>
+      {/* 标签名已在 Logs.tsx 的 tab 上, 这里只留副标题 + 操作行 */}
+      <div className="page-intro-row">
+        <div className="page-intro">{t("logs.subscriptionEvents.subtitle")}</div>
         <button className="btn" onClick={refetch} disabled={isFetching} type="button">
           <RefreshCw size={12} className={isFetching ? "spin" : undefined} />
           {t("requestLogs.refresh")}

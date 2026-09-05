@@ -1,3 +1,4 @@
+import { PageBar } from "@/components/layout/PageBar";
 import { useState, type ReactNode } from "react";
 import { Link } from "react-router";
 import { Bot, Boxes } from "lucide-react";
@@ -53,33 +54,35 @@ export function GuidePage() {
 
   return (
     <>
-      <div className="page-header">
-        <h1>{t("guide.title")}</h1>
-        <div className="subtitle">{t("guide.subtitle")}</div>
-      </div>
+      <PageBar title={t("guide.title")} />
+      <div className="page-flow">
+        <div className="page-flow-pad">
+          <div className="page-intro">{t("guide.subtitle")}</div>
 
-      <div className="tabs">
-        {TABS.map(({ id, label, icon, disabled }) => (
-          <button
-            key={id}
-            className={cn("tab", tab === id && "active")}
-            onClick={() => setTab(id)}
-            disabled={disabled}
-            type="button"
-          >
-            {icon}
-            {label}
-          </button>
-        ))}
-      </div>
+          <div className="tabs">
+            {TABS.map(({ id, label, icon, disabled }) => (
+              <button
+                key={id}
+                className={cn("tab", tab === id && "active")}
+                onClick={() => setTab(id)}
+                disabled={disabled}
+                type="button"
+              >
+                {icon}
+                {label}
+              </button>
+            ))}
+          </div>
 
-      {tab === "claude-code" && <ClaudeCodeTab />}
-      {tab === "codex" && <CodexTab />}
-      {tab === "cc-switch" && <CcSwitchTab />}
-      {tab === "openclaw" && <OpenClawTab />}
-      {tab === "hermes" && <HermesAgentTab />}
-      {tab === "opencode" && <OpenCodeTab />}
-      {tab === "others" && <OthersTab />}
+          {tab === "claude-code" && <ClaudeCodeTab />}
+          {tab === "codex" && <CodexTab />}
+          {tab === "cc-switch" && <CcSwitchTab />}
+          {tab === "openclaw" && <OpenClawTab />}
+          {tab === "hermes" && <HermesAgentTab />}
+          {tab === "opencode" && <OpenCodeTab />}
+          {tab === "others" && <OthersTab />}
+        </div>
+      </div>
     </>
   );
 }
