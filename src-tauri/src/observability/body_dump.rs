@@ -13,7 +13,8 @@
 //! ```
 //!
 //! 字典序 = 时间序; attempt_uuid 关联同一次 attempt 的三件套; kind 是
-//! `client_request` / `upstream_request` / `upstream_response`.
+//! `client_request` / `upstream_request` / `upstream_response` /
+//! `client_chat_completions_request`.
 //!
 //! 写盘失败只 `warn!` 不影响主流程, consumer 不停, 与现有 request_log 同哲学.
 
@@ -30,6 +31,9 @@ pub enum BodyDumpKind {
     Client,
     UpstreamRequest,
     UpstreamResponse,
+    /// `/v1/chat/completions` 入口收到的**翻译前**原始 Chat Completions 请求体.
+    /// attempt_id 是 handler 现造的随机 uuid, 与后续 attempt 三件套不关联 (翻译发生在 attempt 之前).
+    ClientChatCompletions,
 }
 
 impl BodyDumpKind {
@@ -38,6 +42,7 @@ impl BodyDumpKind {
             BodyDumpKind::Client => "client_request",
             BodyDumpKind::UpstreamRequest => "upstream_request",
             BodyDumpKind::UpstreamResponse => "upstream_response",
+            BodyDumpKind::ClientChatCompletions => "client_chat_completions_request",
         }
     }
 }
@@ -119,6 +124,7 @@ mod tests {
         assert_eq!(BodyDumpKind::Client.suffix(), "client_request");
         assert_eq!(BodyDumpKind::UpstreamRequest.suffix(), "upstream_request");
         assert_eq!(BodyDumpKind::UpstreamResponse.suffix(), "upstream_response");
+        assert_eq!(BodyDumpKind::ClientChatCompletions.suffix(), "client_chat_completions_request");
     }
 
     #[tokio::test]

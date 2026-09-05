@@ -9,11 +9,14 @@ use futures::StreamExt;
 use serde_json::{json, Value};
 use tokio::sync::mpsc;
 use tracing::{error, info, warn};
+use uuid::Uuid;
 
+use crate::observability::body_dump::{BodyDumpEntry, BodyDumpKind};
 use crate::proxy::client_fingerprint::{self, ClientContext, RequestEntryKind};
 use crate::proxy::extractors::{format_http_version, HttpVersion};
 use crate::proxy::pipeline;
 use crate::proxy::session_key;
+use crate::proxy::transform::chat_completions_inbound::{self as chat_inbound, AnthropicToChatSseConverter};
 use crate::proxy::transform::responses_inbound::{
     request_to_anthropic, response_to_responses_json, AnthropicToResponsesSseConverter,
 };
@@ -235,24 +238,54 @@ pub async fn responses(
     );
 
     if is_event_stream {
-        translate_sse_to_responses(status, axum_body)
+        translate_sse(status, axum_body, AnthropicToResponsesSseConverter::new(), "/v1/responses")
     } else {
         translate_json_to_responses(status, axum_body).await
     }
 }
 
-/// 把 pipeline 返回的 Anthropic SSE body 翻译成 OpenAI Responses SSE 流, 重新拼成 Response.
-/// 仿 [`crate::proxy::sse::stream_response`] 的 mpsc + spawn 模式, 但翻译方向是 Anthropic → OpenAI.
+/// 两个入站 converter (Responses / Chat Completions) 的公共接口, 让 SSE 中转代码只写一份.
+trait InboundSseConverter: Send + 'static {
+    fn feed(&mut self, event_name: &str, data: &Value) -> Vec<String>;
+    fn finalize_if_needed(&mut self) -> Vec<String>;
+}
+
+impl InboundSseConverter for AnthropicToResponsesSseConverter {
+    fn feed(&mut self, event_name: &str, data: &Value) -> Vec<String> {
+        AnthropicToResponsesSseConverter::feed(self, event_name, data)
+    }
+    fn finalize_if_needed(&mut self) -> Vec<String> {
+        AnthropicToResponsesSseConverter::finalize_if_needed(self)
+    }
+}
+
+impl InboundSseConverter for AnthropicToChatSseConverter {
+    fn feed(&mut self, event_name: &str, data: &Value) -> Vec<String> {
+        AnthropicToChatSseConverter::feed(self, event_name, data)
+    }
+    fn finalize_if_needed(&mut self) -> Vec<String> {
+        AnthropicToChatSseConverter::finalize_if_needed(self)
+    }
+}
+
+/// 把 pipeline 返回的 Anthropic SSE body 经 `converter` 翻译成客户端协议的 SSE 流, 重新拼成 Response.
+/// 仿 [`crate::proxy::sse::stream_response`] 的 mpsc + spawn 模式.
 ///
 /// 响应头策略: 与 sse::stream_response 对齐 — 只设 content-type=text/event-stream,
 /// **不设 cache-control / transfer-encoding** (让 axum 自动管 chunked encoding, 避免在
 /// HTTPS+rustls 路径上跟底层冲突触发 IncompleteMessage)。
-fn translate_sse_to_responses(status: StatusCode, body: Body) -> Response {
+///
+/// `label` 只用于日志 (如 "/v1/responses").
+fn translate_sse<C: InboundSseConverter>(
+    status: StatusCode,
+    body: Body,
+    mut converter: C,
+    label: &'static str,
+) -> Response {
     let (client_tx, client_rx) = mpsc::channel::<Result<Bytes, std::io::Error>>(64);
     let mut data_stream = body.into_data_stream();
 
     tokio::spawn(async move {
-        let mut converter = AnthropicToResponsesSseConverter::new();
         let mut buffer: Vec<u8> = Vec::with_capacity(8 * 1024);
         let mut frames_emitted: u64 = 0;
         let mut events_parsed: u64 = 0;
@@ -262,7 +295,7 @@ fn translate_sse_to_responses(status: StatusCode, body: Body) -> Response {
             let chunk = match chunk {
                 Ok(c) => c,
                 Err(e) => {
-                    warn!(?e, frames_emitted, events_parsed, "pipeline SSE 流错误 (responses)");
+                    warn!(?e, frames_emitted, events_parsed, label, "pipeline SSE 流错误");
                     early_break = true;
                     break;
                 }
@@ -274,23 +307,21 @@ fn translate_sse_to_responses(status: StatusCode, body: Body) -> Response {
             while let Some(pos) = find_double_newline(&buffer) {
                 let drain_end = pos + double_newline_len(&buffer, pos);
                 let event_bytes: Vec<u8> = buffer.drain(..drain_end).collect();
-                let frames = process_anthropic_sse_event(&event_bytes, &mut converter);
                 events_parsed += 1;
+                let frames = match parse_anthropic_sse_event(&event_bytes) {
+                    Some((name, json)) => converter.feed(&name, &json),
+                    None => Vec::new(),
+                };
                 for frame in frames {
                     frames_emitted += 1;
                     if client_tx.send(Ok(Bytes::from(frame))).await.is_err() {
-                        info!(
-                            frames_emitted,
-                            events_parsed,
-                            upstream_chunks,
-                            "客户端断开, SSE 翻译任务退出 (/v1/responses)"
-                        );
+                        info!(frames_emitted, events_parsed, upstream_chunks, label, "客户端断开, SSE 翻译任务退出");
                         return;
                     }
                 }
             }
         }
-        // 流结束兜底: 上游没发 message_stop 时, 至少补一个 response.completed 让客户端能收到流终结信号.
+        // 流结束兜底: 上游没发 message_stop 时, 至少补终结帧让客户端能收到流终结信号.
         let extra = converter.finalize_if_needed();
         let finalized = !extra.is_empty();
         for frame in extra {
@@ -304,9 +335,9 @@ fn translate_sse_to_responses(status: StatusCode, body: Body) -> Response {
             buffer_residue = buffer.len(),
             early_break,
             finalized,
-            "SSE 翻译任务结束 (/v1/responses)"
+            label,
+            "SSE 翻译任务结束"
         );
-        // OpenAI Responses SSE 末尾不发 [DONE], 客户端按 response.completed 终止.
     });
 
     let body_stream = stream_from_receiver(client_rx);
@@ -320,15 +351,10 @@ fn translate_sse_to_responses(status: StatusCode, body: Body) -> Response {
     response
 }
 
-/// 解析单个 Anthropic SSE 事件 (`event: <name>\ndata: <json>\n\n`), 喂转换器, 返回 OpenAI Responses 帧.
-fn process_anthropic_sse_event(
-    raw: &[u8],
-    converter: &mut AnthropicToResponsesSseConverter,
-) -> Vec<String> {
-    let text = match std::str::from_utf8(raw) {
-        Ok(s) => s,
-        Err(_) => return Vec::new(),
-    };
+/// 解析单个 Anthropic SSE 事件 (`event: <name>\ndata: <json>\n\n`) 为 (事件名, data JSON).
+/// 非 UTF-8 / 缺 event 或 data 行 / JSON 非法 → None (JSON 非法时 warn).
+fn parse_anthropic_sse_event(raw: &[u8]) -> Option<(String, Value)> {
+    let text = std::str::from_utf8(raw).ok()?;
     let mut event_name: Option<&str> = None;
     let mut data_str: Option<&str> = None;
     for line in text.lines() {
@@ -338,17 +364,39 @@ fn process_anthropic_sse_event(
             data_str = Some(rest.trim());
         }
     }
-    let (Some(name), Some(data)) = (event_name, data_str) else {
-        return Vec::new();
-    };
-    let json: Value = match serde_json::from_str(data) {
-        Ok(v) => v,
+    let (name, data) = (event_name?, data_str?);
+    match serde_json::from_str::<Value>(data) {
+        Ok(json) => Some((name.to_string(), json)),
         Err(e) => {
-            warn!(?e, %name, "Anthropic SSE data JSON 解析失败 (responses 入口)");
-            return Vec::new();
+            warn!(?e, %name, "Anthropic SSE data JSON 解析失败 (入站翻译)");
+            None
         }
-    };
-    converter.feed(name, &json)
+    }
+}
+
+/// 旧接口保留给 responses 入口的既有测试: 解析 + 喂 converter 一步到位.
+/// handler 本身已改走 `translate_sse` 泛型路径, 不再直接调用它.
+#[cfg(test)]
+fn process_anthropic_sse_event(
+    raw: &[u8],
+    converter: &mut AnthropicToResponsesSseConverter,
+) -> Vec<String> {
+    match parse_anthropic_sse_event(raw) {
+        Some((name, json)) => converter.feed(&name, &json),
+        None => Vec::new(),
+    }
+}
+
+/// 从 pipeline 返回的 Anthropic 错误体 `{"type":"error","error":{"type","message"}}` 取 (type, message);
+/// 缺失时分别缺省 "api_error" / "upstream error". 两个入站入口共用.
+fn upstream_error_parts(parsed: &Value) -> (String, String) {
+    match parsed.get("error") {
+        Some(e) => (
+            e.get("type").and_then(|v| v.as_str()).unwrap_or("api_error").to_string(),
+            e.get("message").and_then(|v| v.as_str()).unwrap_or("upstream error").to_string(),
+        ),
+        None => ("api_error".to_string(), "upstream error".to_string()),
+    }
 }
 
 /// 把 pipeline 返回的 Anthropic JSON body 翻译成 OpenAI Responses JSON.
@@ -378,23 +426,143 @@ async fn translate_json_to_responses(status: StatusCode, body: Body) -> Response
 
     // 错误响应翻译: pipeline 可能返回 Anthropic error 形式 `{"type":"error","error":{"type","message"}}`.
     if !status.is_success() {
-        let (etype, msg) = match parsed.get("error") {
-            Some(e) => {
-                let t = e.get("type").and_then(|v| v.as_str()).unwrap_or("api_error").to_string();
-                let m = e
-                    .get("message")
-                    .and_then(|v| v.as_str())
-                    .unwrap_or("upstream error")
-                    .to_string();
-                (t, m)
-            }
-            None => ("api_error".to_string(), "upstream error".to_string()),
-        };
+        let (etype, msg) = upstream_error_parts(&parsed);
         return responses_error_response(status, &etype, &msg);
     }
 
     let translated = response_to_responses_json(&parsed);
     (status, Json(translated)).into_response()
+}
+
+// ============================================================
+// POST /v1/chat/completions — OpenAI Chat Completions 兼容入口 (v4.9+)
+// ============================================================
+
+fn chat_error_response(status: StatusCode, anthropic_type: &str, message: &str) -> Response {
+    (status, Json(chat_inbound::chat_error_body(anthropic_type, message))).into_response()
+}
+
+/// POST /v1/chat/completions
+/// 入口翻译模式: 接收 Open WebUI / Cherry Studio 等工具的 Chat Completions 请求, 内部翻译成
+/// Anthropic Messages 走现有 pipeline, 再把响应翻译回 Chat Completions。pipeline 零改动。
+pub async fn chat_completions(
+    State(state): State<AppState>,
+    ConnectInfo(peer): ConnectInfo<SocketAddr>,
+    HttpVersion(version): HttpVersion,
+    headers: HeaderMap,
+    body: Bytes,
+) -> Response {
+    let parsed: Value = match serde_json::from_slice(&body) {
+        Ok(v) => v,
+        Err(e) => {
+            return chat_error_response(
+                StatusCode::BAD_REQUEST,
+                "invalid_request_error",
+                &format!("JSON 解析失败: {e}"),
+            );
+        }
+    };
+
+    let model = match parsed.get("model").and_then(|v| v.as_str()) {
+        Some(m) => m.to_string(),
+        None => {
+            return chat_error_response(StatusCode::BAD_REQUEST, "invalid_request_error", "缺少 model 字段");
+        }
+    };
+
+    let is_streaming = parsed.get("stream").and_then(|v| v.as_bool()).unwrap_or(false);
+    let body_size = body.len();
+
+    // 调试模式: 翻译前的原始 Chat 请求也留一份, 便于排查翻译层问题 (spec §6).
+    if state.settings.read().await.debug_mode {
+        let _ = state.body_dump_tx.try_send(BodyDumpEntry::new(
+            Uuid::new_v4(),
+            BodyDumpKind::ClientChatCompletions,
+            body.to_vec(),
+        ));
+    }
+
+    // OpenAI Chat Completions → Anthropic Messages
+    let anthropic_body = match chat_inbound::request_to_anthropic(&parsed) {
+        Ok(b) => b,
+        Err(e) => {
+            return chat_error_response(
+                StatusCode::BAD_REQUEST,
+                "invalid_request_error",
+                &format!("请求翻译失败: {e}"),
+            );
+        }
+    };
+
+    let ctx = ClientContext {
+        info: client_fingerprint::identify(&headers),
+        ip: Some(peer.ip().to_string()),
+        entry_kind: RequestEntryKind::ChatCompletions,
+        http_version: Some(format_http_version(version)),
+        // 用翻译前的原始 parsed: 会话键分支读原始 `user` 字段.
+        session_key: session_key::extract(&headers, &parsed, RequestEntryKind::ChatCompletions),
+    };
+
+    info!(
+        %model,
+        is_streaming,
+        body_size,
+        client_tool = ?ctx.info.tool,
+        client_ip = ?ctx.ip,
+        http_version = ?ctx.http_version,
+        session_key_source = ?ctx.session_key.as_deref().map(|k| &k[..k.find(':').unwrap_or(0)]),
+        "proxy received /v1/chat/completions request"
+    );
+
+    let upstream = match pipeline::dispatch(&state, &model, anthropic_body, headers, is_streaming, &ctx).await {
+        Ok(r) => r,
+        Err(e) => {
+            error!(?e, "pipeline dispatch failed (chat_completions)");
+            return chat_error_response(StatusCode::INTERNAL_SERVER_ERROR, "api_error", &e.to_string());
+        }
+    };
+
+    let (parts, axum_body) = upstream.into_parts();
+    let status = parts.status;
+    let is_event_stream = parts
+        .headers
+        .get(axum::http::header::CONTENT_TYPE)
+        .and_then(|v| v.to_str().ok())
+        .map(|s| s.contains("text/event-stream"))
+        .unwrap_or(false);
+
+    info!(upstream_status = %status, is_event_stream, "pipeline 返回, 准备翻译响应给客户端 (/v1/chat/completions)");
+
+    if is_event_stream {
+        translate_sse(status, axum_body, AnthropicToChatSseConverter::new(model), "/v1/chat/completions")
+    } else {
+        translate_json_to_chat(status, axum_body, &model).await
+    }
+}
+
+/// 把 pipeline 返回的 Anthropic JSON body 翻译成 chat.completion JSON; 非 2xx 翻译成 OpenAI 错误体.
+async fn translate_json_to_chat(status: StatusCode, body: Body, requested_model: &str) -> Response {
+    let bytes = match axum::body::to_bytes(body, 16 * 1024 * 1024).await {
+        Ok(b) => b,
+        Err(e) => {
+            error!(?e, "读取 pipeline JSON body 失败 (chat_completions)");
+            return chat_error_response(StatusCode::INTERNAL_SERVER_ERROR, "api_error", "读取上游响应失败");
+        }
+    };
+    let parsed: Value = match serde_json::from_slice(&bytes) {
+        Ok(v) => v,
+        Err(e) => {
+            error!(?e, "上游 JSON 解析失败 (chat_completions)");
+            return chat_error_response(StatusCode::INTERNAL_SERVER_ERROR, "api_error", "上游响应解析失败");
+        }
+    };
+
+    if !status.is_success() {
+        let (etype, msg) = upstream_error_parts(&parsed);
+        return chat_error_response(status, &etype, &msg);
+    }
+
+    (status, Json(chat_inbound::response_to_chat_json(&parsed, requested_model))).into_response()
 }
 
 fn find_double_newline(buf: &[u8]) -> Option<usize> {
@@ -502,6 +670,48 @@ mod tests {
         let frames =
             process_anthropic_sse_event(b"event: ping\ndata: not_json\n\n", &mut conv);
         assert!(frames.is_empty());
+    }
+
+    #[test]
+    fn parse_anthropic_sse_event_extracts_name_and_json() {
+        let (name, json) = parse_anthropic_sse_event(b"event: message_stop\ndata: {\"type\":\"message_stop\"}\n\n").unwrap();
+        assert_eq!(name, "message_stop");
+        assert_eq!(json["type"], "message_stop");
+        assert!(parse_anthropic_sse_event(b"data: {}\n\n").is_none(), "缺 event 行");
+        assert!(parse_anthropic_sse_event(b"event: ping\ndata: not_json\n\n").is_none());
+        assert!(parse_anthropic_sse_event(b"\xff\xfe").is_none(), "非 UTF-8");
+    }
+
+    #[test]
+    fn chat_converter_full_flow_through_sse_parser() {
+        use crate::proxy::transform::chat_completions_inbound::AnthropicToChatSseConverter;
+        let mut conv = AnthropicToChatSseConverter::new("gpt-5.5".into());
+        let events: &[&[u8]] = &[
+            b"event: message_start\ndata: {\"type\":\"message_start\",\"message\":{\"id\":\"msg_1\",\"model\":\"claude\",\"usage\":{\"input_tokens\":3}}}\n\n",
+            b"event: content_block_start\ndata: {\"type\":\"content_block_start\",\"index\":0,\"content_block\":{\"type\":\"text\",\"text\":\"\"}}\n\n",
+            b"event: content_block_delta\ndata: {\"type\":\"content_block_delta\",\"index\":0,\"delta\":{\"type\":\"text_delta\",\"text\":\"Hello\"}}\n\n",
+            b"event: content_block_stop\ndata: {\"type\":\"content_block_stop\",\"index\":0}\n\n",
+            b"event: message_delta\ndata: {\"type\":\"message_delta\",\"delta\":{\"stop_reason\":\"end_turn\"},\"usage\":{\"output_tokens\":1}}\n\n",
+            b"event: message_stop\ndata: {\"type\":\"message_stop\"}\n\n",
+        ];
+        let mut all_out: Vec<String> = Vec::new();
+        for raw in events {
+            if let Some((name, json)) = parse_anthropic_sse_event(raw) {
+                all_out.extend(conv.feed(&name, &json));
+            }
+        }
+        assert_eq!(all_out.len(), 5, "role + content + finish + usage + DONE");
+        assert!(all_out[1].contains("\"content\":\"Hello\""));
+        assert!(all_out[2].contains("\"finish_reason\":\"stop\""));
+        assert!(all_out[3].contains("\"total_tokens\":4"));
+        assert_eq!(all_out[4], "data: [DONE]\n\n");
+    }
+
+    #[test]
+    fn body_dump_kind_chat_suffix_distinct() {
+        use crate::observability::body_dump::BodyDumpKind;
+        // suffix 是私有的, 这里只确认 variant 存在且可比较; 文件名格式由 body_dump 自己的测试锁
+        assert_ne!(BodyDumpKind::ClientChatCompletions, BodyDumpKind::Client);
     }
 }
 

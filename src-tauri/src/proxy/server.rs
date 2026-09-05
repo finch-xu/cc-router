@@ -99,6 +99,7 @@ fn build_router(state: AppState, body_limit: usize) -> Router {
     Router::new()
         .route("/v1/messages", post(handler::messages))
         .route("/v1/responses", post(handler::responses))
+        .route("/v1/chat/completions", post(handler::chat_completions))
         .route("/v1/models", axum::routing::get(handler::models))
         .route("/health", axum::routing::get(handler::health))
         // axum 对 Bytes extractor 默认 2 MiB 上限, Codex 多图 base64 请求会 413
