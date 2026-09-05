@@ -27,7 +27,7 @@ use uuid::Uuid;
 
 use crate::error::{AppError, AppResult};
 
-use super::responses_common::effort_to_budget_tokens;
+use super::responses_common::{effort_to_budget_tokens, ensure_max_tokens_covers_thinking};
 
 /// Anthropic 要求 max_tokens 必填; 客户端没给时的缺省, 与 responses_inbound 一致.
 const DEFAULT_MAX_TOKENS: i64 = 4096;
@@ -37,12 +37,26 @@ const DEFAULT_MAX_TOKENS: i64 = 4096;
 // ============================================================
 
 /// OpenAI Chat Completions 请求体 → Anthropic Messages 请求体 (spec §3).
+///
+/// 两条与 `reasoning_effort` 相关的裁决规则 (2026-09-05 final-review):
+/// - **thinking 与 temperature/top_p 互斥**: 一旦写了 `thinking` 字段就不再透传
+///   `temperature` / `top_p` (Anthropic 要求开启 thinking 时 temperature 必须是 1,
+///   最简单的处理是两者都不传, 让上游用默认值)。
+/// - **强制 tool_choice 优先于 reasoning_effort**: 客户端传 `tool_choice: "required"` 或
+///   指定 function (解析为 Anthropic `type: "any"` / `type: "tool"`) 时保留该 tool_choice,
+///   同时整体丢弃 `thinking` —— 强制工具调用是硬性功能需求, effort 只是偏好, 两者冲突时
+///   功能需求优先。
+///
+/// 显式 JSON `null` 一律视为该字段缺省 (`functions` / `function_call` / `tool_choice` /
+/// `temperature` / `top_p`), 不因为客户端传了 `null` 而 400 或误写空值。
 pub fn request_to_anthropic(body: &Value) -> AppResult<Value> {
     let model = body
         .get("model")
         .and_then(|v| v.as_str())
         .ok_or_else(|| AppError::BadRequest("请求 body 缺少 model".into()))?;
-    if body.get("functions").is_some() || body.get("function_call").is_some() {
+    if body.get("functions").filter(|v| !v.is_null()).is_some()
+        || body.get("function_call").filter(|v| !v.is_null()).is_some()
+    {
         return Err(AppError::BadRequest(
             "不支持旧版 functions / function_call 字段, 请使用 tools / tool_choice".into(),
         ));
@@ -75,12 +89,6 @@ pub fn request_to_anthropic(body: &Value) -> AppResult<Value> {
         .unwrap_or(DEFAULT_MAX_TOKENS);
     out["max_tokens"] = json!(max_tokens);
 
-    for key in ["temperature", "top_p"] {
-        if let Some(v) = body.get(key) {
-            out[key] = v.clone();
-        }
-    }
-
     match body.get("stop") {
         Some(Value::String(s)) => out["stop_sequences"] = json!([s]),
         Some(Value::Array(arr)) => out["stop_sequences"] = Value::Array(arr.clone()),
@@ -89,15 +97,6 @@ pub fn request_to_anthropic(body: &Value) -> AppResult<Value> {
 
     if let Some(user) = body.get("user").and_then(|v| v.as_str()).filter(|s| !s.is_empty()) {
         out["metadata"] = json!({ "user_id": user });
-    }
-
-    if let Some(effort) = body.get("reasoning_effort").and_then(|v| v.as_str()) {
-        if effort != "none" {
-            out["thinking"] = json!({
-                "type": "enabled",
-                "budget_tokens": effort_to_budget_tokens(effort),
-            });
-        }
     }
 
     let mut has_tools = false;
@@ -113,9 +112,9 @@ pub fn request_to_anthropic(body: &Value) -> AppResult<Value> {
     }
 
     // parallel_tool_calls:false → Anthropic 的 disable_parallel_tool_use 挂在 tool_choice 上,
-    // 客户端没给 tool_choice 但有 tools 时以 auto 承载.
+    // 客户端没给 tool_choice 但有 tools 时以 auto 承载. tool_choice 显式 null 视为缺省.
     let disable_parallel = body.get("parallel_tool_calls").and_then(|v| v.as_bool()) == Some(false);
-    let mut tool_choice = match body.get("tool_choice") {
+    let mut tool_choice = match body.get("tool_choice").filter(|v| !v.is_null()) {
         Some(tc) => Some(convert_tool_choice(tc)?),
         None if has_tools && disable_parallel => Some(json!({"type": "auto"})),
         None => None,
@@ -125,9 +124,39 @@ pub fn request_to_anthropic(body: &Value) -> AppResult<Value> {
             tc["disable_parallel_tool_use"] = json!(true);
         }
     }
+    // 强制 tool_choice (any / tool) 优先于 reasoning_effort: 保留 tool_choice, 不写 thinking.
+    let forces_tool_choice = tool_choice
+        .as_ref()
+        .and_then(|tc| tc.get("type"))
+        .and_then(|v| v.as_str())
+        .map(|t| t == "any" || t == "tool")
+        .unwrap_or(false);
     if let Some(tc) = tool_choice {
         out["tool_choice"] = tc;
     }
+
+    if !forces_tool_choice {
+        if let Some(effort) = body.get("reasoning_effort").and_then(|v| v.as_str()) {
+            if effort != "none" {
+                out["thinking"] = json!({
+                    "type": "enabled",
+                    "budget_tokens": effort_to_budget_tokens(effort),
+                });
+            }
+        }
+    }
+
+    // thinking 与 temperature/top_p 互斥 (Anthropic 要求 thinking 开启时 temperature=1);
+    // 未写 thinking 时才透传, null 视为缺省.
+    if out.get("thinking").is_none() {
+        for key in ["temperature", "top_p"] {
+            if let Some(v) = body.get(key).filter(|v| !v.is_null()) {
+                out[key] = v.clone();
+            }
+        }
+    }
+
+    ensure_max_tokens_covers_thinking(&mut out);
 
     Ok(out)
 }
@@ -332,7 +361,8 @@ fn convert_tool(t: &Value) -> AppResult<Value> {
 }
 
 /// assistant.tool_calls[i] → Anthropic tool_use 块. arguments 是 JSON 字符串 (空串视为 {}),
-/// 部分客户端会直接给对象, 也接受; 非法 JSON → 400 并带 tool_call id.
+/// 部分客户端会直接给对象, 也接受; 非法 JSON → 400 并带 tool_call id; 缺失/空 `id` → 400
+/// (Anthropic tool_use 块要求非空 id, 客户端若缺失必须报错而不是静默写 "").
 fn convert_tool_call(call: &Value) -> AppResult<Value> {
     let id = call.get("id").and_then(|v| v.as_str()).unwrap_or("");
     let f = call
@@ -342,6 +372,9 @@ fn convert_tool_call(call: &Value) -> AppResult<Value> {
         .get("name")
         .and_then(|v| v.as_str())
         .ok_or_else(|| AppError::BadRequest(format!("tool_calls[{id}] 缺少 function.name")))?;
+    if id.is_empty() {
+        return Err(AppError::BadRequest(format!("tool_calls 缺少 id (function: {name})")));
+    }
     let input = match f.get("arguments") {
         None => json!({}),
         Some(Value::String(s)) if s.trim().is_empty() => json!({}),
@@ -835,6 +868,93 @@ mod tests {
         assert_eq!(out["thinking"], json!({"type":"enabled","budget_tokens":2048}));
         b["reasoning_effort"] = json!("none");
         assert!(request_to_anthropic(&b).unwrap().get("thinking").is_none());
+    }
+
+    #[test]
+    fn request_reasoning_effort_raises_max_tokens_when_too_small() {
+        let mut b = base(json!([{"role":"user","content":"hi"}]));
+        b["reasoning_effort"] = json!("medium"); // budget_tokens 8192
+        let out = request_to_anthropic(&b).unwrap();
+        assert_eq!(out["max_tokens"], 12288, "默认 4096 <= 8192, 抬到 8192+4096");
+
+        b["max_tokens"] = json!(20000);
+        let out = request_to_anthropic(&b).unwrap();
+        assert_eq!(out["max_tokens"], 20000, "已经够大, 不改动");
+    }
+
+    #[test]
+    fn request_thinking_drops_temperature_and_top_p() {
+        let mut b = base(json!([{"role":"user","content":"hi"}]));
+        b["reasoning_effort"] = json!("low");
+        b["temperature"] = json!(0.3);
+        b["top_p"] = json!(0.9);
+        let out = request_to_anthropic(&b).unwrap();
+        assert!(out.get("thinking").is_some());
+        assert!(out.get("temperature").is_none(), "thinking 开启时不透传 temperature");
+        assert!(out.get("top_p").is_none(), "thinking 开启时不透传 top_p");
+
+        // 没有 reasoning_effort 时按原行为透传
+        let mut b2 = base(json!([{"role":"user","content":"hi"}]));
+        b2["temperature"] = json!(0.3);
+        b2["top_p"] = json!(0.9);
+        let out2 = request_to_anthropic(&b2).unwrap();
+        assert_eq!(out2["temperature"], 0.3);
+        assert_eq!(out2["top_p"], 0.9);
+    }
+
+    #[test]
+    fn request_forced_tool_choice_wins_over_reasoning_effort() {
+        let mut b = base(json!([{"role":"user","content":"hi"}]));
+        b["reasoning_effort"] = json!("high");
+        b["tools"] = json!([{"type":"function","function":{"name":"f"}}]);
+        b["tool_choice"] = json!("required");
+        let out = request_to_anthropic(&b).unwrap();
+        assert_eq!(out["tool_choice"], json!({"type":"any"}));
+        assert!(out.get("thinking").is_none(), "required → any 时丢弃 thinking");
+
+        b["tool_choice"] = json!({"type":"function","function":{"name":"f"}});
+        let out = request_to_anthropic(&b).unwrap();
+        assert_eq!(out["tool_choice"], json!({"type":"tool","name":"f"}));
+        assert!(out.get("thinking").is_none(), "指定 function 时同样丢弃 thinking");
+
+        b["tool_choice"] = json!("auto");
+        let out = request_to_anthropic(&b).unwrap();
+        assert_eq!(out["tool_choice"], json!({"type":"auto"}));
+        assert!(out.get("thinking").is_some(), "auto 不强制, thinking 保留");
+    }
+
+    #[test]
+    fn request_treats_explicit_nulls_as_absent() {
+        let mut b = base(json!([{"role":"user","content":"hi"}]));
+        b["functions"] = Value::Null;
+        b["function_call"] = Value::Null;
+        b["tool_choice"] = Value::Null;
+        b["temperature"] = Value::Null;
+        b["top_p"] = Value::Null;
+        let out = request_to_anthropic(&b).unwrap();
+        assert!(out.get("tool_choice").is_none());
+        assert!(out.get("temperature").is_none());
+        assert!(out.get("top_p").is_none());
+    }
+
+    #[test]
+    fn request_tool_call_without_id_is_400() {
+        let err = request_to_anthropic(&base(json!([
+            {"role":"user","content":"x"},
+            {"role":"assistant","tool_calls":[{"type":"function","function":{"name":"get_weather","arguments":"{}"}}]}
+        ])))
+        .unwrap_err();
+        assert!(
+            matches!(err, AppError::BadRequest(ref m) if m.contains("id") && m.contains("get_weather")),
+            "{err:?}"
+        );
+
+        let err2 = request_to_anthropic(&base(json!([
+            {"role":"user","content":"x"},
+            {"role":"assistant","tool_calls":[{"id":"","type":"function","function":{"name":"f","arguments":"{}"}}]}
+        ])))
+        .unwrap_err();
+        assert!(matches!(err2, AppError::BadRequest(_)), "空字符串 id 同样 400");
     }
 
     #[test]

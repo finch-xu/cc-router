@@ -25,6 +25,7 @@ use uuid::Uuid;
 use crate::error::{AppError, AppResult};
 use crate::proxy::transform::responses_common::{
     decode_reasoning_signature, effort_to_budget_tokens, encode_reasoning_signature,
+    ensure_max_tokens_covers_thinking,
 };
 
 // ============================================================
@@ -123,6 +124,10 @@ pub fn request_to_anthropic(body: &Value) -> AppResult<Value> {
             });
         }
     }
+
+    // thinking 开启且 max_tokens 覆盖不了 budget_tokens 时抬高 max_tokens (F1, 2026-09-05
+    // final-review: Anthropic 及各兼容上游要求 max_tokens 严格大于 thinking.budget_tokens).
+    ensure_max_tokens_covers_thinking(&mut out);
 
     Ok(out)
 }
@@ -1143,6 +1148,26 @@ mod tests {
         });
         let out = request_to_anthropic(&body).unwrap();
         assert_eq!(out["thinking"]["budget_tokens"], 16384);
+    }
+
+    #[test]
+    fn request_reasoning_effort_raises_max_tokens_when_too_small() {
+        // 默认 max_tokens=4096 <= medium 的 budget_tokens=8192 → 抬到 8192+4096
+        let body = json!({
+            "model":"gpt-5.4","input":[],
+            "reasoning": {"effort": "medium"},
+        });
+        let out = request_to_anthropic(&body).unwrap();
+        assert_eq!(out["max_tokens"], 12288);
+
+        // max_output_tokens 已经够大时不改动
+        let body = json!({
+            "model":"gpt-5.4","input":[],
+            "reasoning": {"effort": "medium"},
+            "max_output_tokens": 20000,
+        });
+        let out = request_to_anthropic(&body).unwrap();
+        assert_eq!(out["max_tokens"], 20000);
     }
 
     #[test]

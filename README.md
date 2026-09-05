@@ -196,7 +196,8 @@ Open WebUI、Cherry Studio、Cline、LobeChat 等只支持 OpenAI Chat Completio
 - 请求在 cc-router 内部翻译成 Anthropic Messages 走同一套调度，订阅、虚拟模型、限额、会话亲和全部生效；请求日志里「入口接口」显示 `/v1/chat/completions`。
 - 上游的 thinking 以 `reasoning_content` 字段返回（DeepSeek 惯例，主流客户端都能折叠显示）；对话历史里客户端回传的 `reasoning_content` 会被丢弃，不影响后续对话。
 - 图片支持 `data:` base64 与 `http(s)` 两种 `image_url`；工具调用双向支持；流式响应末尾总会带一帧 `usage`。
-- 不支持旧版 `functions` / `function_call` 字段、`n>1`、`logprobs`；`response_format` 的 JSON Schema 强制会被忽略。
+- 不支持旧版 `functions` / `function_call` 字段，传了直接返回 400，请改用 `tools` / `tool_choice`。
+- `n>1`、`logprobs`、`response_format` 的 JSON Schema 强制均会被忽略（不报错）。
 - 会话亲和（sticky）优先按 `user` 字段、其次 `x-session-id` 请求头识别会话，两者都没有时按首条用户消息内容。
 - 响应里出现工具调用时 `finish_reason` 恒为 `tool_calls`，客户端可放心据此判断是否执行工具。
 

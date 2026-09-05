@@ -639,6 +639,21 @@ pub fn effort_to_budget_tokens(effort: &str) -> i64 {
     }
 }
 
+/// 两个入站入口共用: thinking 开启且 max_tokens <= budget_tokens 时, 把 max_tokens 抬到
+/// budget_tokens + 4096 (Anthropic 及各兼容上游要求 max_tokens 严格大于 budget_tokens).
+/// out 没有 thinking / budget_tokens / max_tokens 时不做任何事.
+pub fn ensure_max_tokens_covers_thinking(out: &mut Value) {
+    let Some(budget) = out.get("thinking").and_then(|t| t.get("budget_tokens")).and_then(|v| v.as_i64()) else {
+        return;
+    };
+    let Some(max_tokens) = out.get("max_tokens").and_then(|v| v.as_i64()) else {
+        return;
+    };
+    if max_tokens <= budget {
+        out["max_tokens"] = json!(budget + 4096);
+    }
+}
+
 /// 跨 transform 层的 signature 来源识别. 用于 Anthropic 协议透传分支 (xiaomi/deepseek/zhipu/
 /// anthropic/minimax/moonshot/alibaba 等) 在 dispatch 前剥离 cc-router 自家包装的 thinking
 /// block —— 这些 block 的 signature 是给 cc-router 内部翻译层用的, 上游 Anthropic 协议
@@ -2782,5 +2797,20 @@ mod tests {
         assert_eq!(effort_to_budget_tokens("xhigh"), 16384);
         assert_eq!(effort_to_budget_tokens("max"), 16384);
         assert_eq!(effort_to_budget_tokens("weird"), 8192);
+    }
+
+    #[test]
+    fn ensure_max_tokens_covers_thinking_raises_only_when_too_small() {
+        let mut out = json!({"thinking": {"type":"enabled","budget_tokens":8192}, "max_tokens": 4096});
+        ensure_max_tokens_covers_thinking(&mut out);
+        assert_eq!(out["max_tokens"], 12288);
+
+        let mut out = json!({"thinking": {"type":"enabled","budget_tokens":8192}, "max_tokens": 20000});
+        ensure_max_tokens_covers_thinking(&mut out);
+        assert_eq!(out["max_tokens"], 20000, "已经够大, 不改动");
+
+        let mut out = json!({"max_tokens": 4096});
+        ensure_max_tokens_covers_thinking(&mut out);
+        assert_eq!(out["max_tokens"], 4096, "没有 thinking 不做任何事");
     }
 }

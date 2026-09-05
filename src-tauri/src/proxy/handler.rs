@@ -11,6 +11,7 @@ use tokio::sync::mpsc;
 use tracing::{error, info, warn};
 use uuid::Uuid;
 
+use crate::error::AppError;
 use crate::observability::body_dump::{BodyDumpEntry, BodyDumpKind};
 use crate::proxy::client_fingerprint::{self, ClientContext, RequestEntryKind};
 use crate::proxy::extractors::{format_http_version, HttpVersion};
@@ -352,7 +353,10 @@ fn translate_sse<C: InboundSseConverter>(
 }
 
 /// 解析单个 Anthropic SSE 事件 (`event: <name>\ndata: <json>\n\n`) 为 (事件名, data JSON).
-/// 非 UTF-8 / 缺 event 或 data 行 / JSON 非法 → None (JSON 非法时 warn).
+/// **data-only 帧兜底 (F6, 2026-09-05 final-review)**: 没有 `event:` 行但 `data:` JSON 里带
+/// 字符串 `type` 字段时, 用它当事件名 (少数上游/中转站只发 data 帧, Anthropic 官方形状里
+/// `type` 字段与事件名同值)。两者都没有 → None。
+/// 非 UTF-8 / 缺 data 行 / JSON 非法 → None (JSON 非法时 warn).
 fn parse_anthropic_sse_event(raw: &[u8]) -> Option<(String, Value)> {
     let text = std::str::from_utf8(raw).ok()?;
     let mut event_name: Option<&str> = None;
@@ -364,14 +368,18 @@ fn parse_anthropic_sse_event(raw: &[u8]) -> Option<(String, Value)> {
             data_str = Some(rest.trim());
         }
     }
-    let (name, data) = (event_name?, data_str?);
-    match serde_json::from_str::<Value>(data) {
-        Ok(json) => Some((name.to_string(), json)),
+    let data = data_str?;
+    let json = match serde_json::from_str::<Value>(data) {
+        Ok(json) => json,
         Err(e) => {
-            warn!(?e, %name, "Anthropic SSE data JSON 解析失败 (入站翻译)");
-            None
+            warn!(?e, ?event_name, "Anthropic SSE data JSON 解析失败 (入站翻译)");
+            return None;
         }
-    }
+    };
+    let name = event_name
+        .map(str::to_string)
+        .or_else(|| json.get("type").and_then(|v| v.as_str()).map(str::to_string))?;
+    Some((name, json))
 }
 
 /// 旧接口保留给 responses 入口的既有测试: 解析 + 喂 converter 一步到位.
@@ -486,11 +494,13 @@ pub async fn chat_completions(
     let anthropic_body = match chat_inbound::request_to_anthropic(&parsed) {
         Ok(b) => b,
         Err(e) => {
-            return chat_error_response(
-                StatusCode::BAD_REQUEST,
-                "invalid_request_error",
-                &format!("请求翻译失败: {e}"),
-            );
+            // AppError::BadRequest 的 Display 已带 "请求内容错误: " 前缀, 直接拼 "{e}" 会双重前缀;
+            // 取内部消息自己拼一次 (F11, 2026-09-05 final-review).
+            let msg = match &e {
+                AppError::BadRequest(m) => format!("请求翻译失败: {m}"),
+                other => format!("请求翻译失败: {other}"),
+            };
+            return chat_error_response(StatusCode::BAD_REQUEST, "invalid_request_error", &msg);
         }
     };
 
@@ -677,9 +687,13 @@ mod tests {
         let (name, json) = parse_anthropic_sse_event(b"event: message_stop\ndata: {\"type\":\"message_stop\"}\n\n").unwrap();
         assert_eq!(name, "message_stop");
         assert_eq!(json["type"], "message_stop");
-        assert!(parse_anthropic_sse_event(b"data: {}\n\n").is_none(), "缺 event 行");
+        assert!(parse_anthropic_sse_event(b"data: {}\n\n").is_none(), "缺 event 行且 data 无 type");
         assert!(parse_anthropic_sse_event(b"event: ping\ndata: not_json\n\n").is_none());
         assert!(parse_anthropic_sse_event(b"\xff\xfe").is_none(), "非 UTF-8");
+
+        let (name, json) = parse_anthropic_sse_event(b"data: {\"type\":\"message_stop\"}\n\n").unwrap();
+        assert_eq!(name, "message_stop", "缺 event 行时以 data.type 兜底");
+        assert_eq!(json["type"], "message_stop");
     }
 
     #[test]
