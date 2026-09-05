@@ -24,7 +24,7 @@ use uuid::Uuid;
 
 use crate::error::{AppError, AppResult};
 use crate::proxy::transform::responses_common::{
-    decode_reasoning_signature, encode_reasoning_signature,
+    decode_reasoning_signature, effort_to_budget_tokens, encode_reasoning_signature,
 };
 
 // ============================================================
@@ -125,20 +125,6 @@ pub fn request_to_anthropic(body: &Value) -> AppResult<Value> {
     }
 
     Ok(out)
-}
-
-/// OpenAI reasoning_effort → Anthropic thinking.budget_tokens.
-///
-/// 映射依据: 与 [`responses_common`] 里的反向映射 (`resolve_reasoning_effort`) 阈值对称。
-/// minimal=1024 / low=2048 / medium=8192 / high=16384 / xhigh、max→high。
-fn effort_to_budget_tokens(effort: &str) -> i64 {
-    match effort {
-        "minimal" => 1024,
-        "low" => 2048,
-        "medium" => 8192,
-        "high" | "xhigh" | "max" => 16384,
-        _ => 8192,
-    }
 }
 
 /// OpenAI Responses 的 input items 数组 → (Anthropic messages 数组, 抽出的 system 文本).

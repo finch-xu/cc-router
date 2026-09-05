@@ -624,6 +624,21 @@ pub fn decode_reasoning_signature(signature: &str) -> Option<(String, String)> {
     }
 }
 
+/// OpenAI reasoning_effort → Anthropic thinking.budget_tokens.
+///
+/// 两个入站入口 (`/v1/responses` 与 `/v1/chat/completions`) 共用. 阈值与本模块的反向映射
+/// (`resolve_reasoning_effort` 的 budget → effort) 对称:
+/// minimal=1024 / low=2048 / medium=8192 / high、xhigh、max=16384 / 未知=8192。
+pub fn effort_to_budget_tokens(effort: &str) -> i64 {
+    match effort {
+        "minimal" => 1024,
+        "low" => 2048,
+        "medium" => 8192,
+        "high" | "xhigh" | "max" => 16384,
+        _ => 8192,
+    }
+}
+
 /// 跨 transform 层的 signature 来源识别. 用于 Anthropic 协议透传分支 (xiaomi/deepseek/zhipu/
 /// anthropic/minimax/moonshot/alibaba 等) 在 dispatch 前剥离 cc-router 自家包装的 thinking
 /// block —— 这些 block 的 signature 是给 cc-router 内部翻译层用的, 上游 Anthropic 协议
@@ -2756,5 +2771,16 @@ mod tests {
             &json!({"response": {"id": "resp_1", "model": "gpt-5.5", "reasoning": {"effort": "low"}}}),
         );
         assert_eq!(c.upstream_effort(), Some("low"));
+    }
+
+    #[test]
+    fn effort_to_budget_tokens_thresholds() {
+        assert_eq!(effort_to_budget_tokens("minimal"), 1024);
+        assert_eq!(effort_to_budget_tokens("low"), 2048);
+        assert_eq!(effort_to_budget_tokens("medium"), 8192);
+        assert_eq!(effort_to_budget_tokens("high"), 16384);
+        assert_eq!(effort_to_budget_tokens("xhigh"), 16384);
+        assert_eq!(effort_to_budget_tokens("max"), 16384);
+        assert_eq!(effort_to_budget_tokens("weird"), 8192);
     }
 }
