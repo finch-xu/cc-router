@@ -22,6 +22,9 @@
 //! - [`openai_chat_completions`] - Anthropic Messages ↔ OpenAI Chat Completions (`/v1/chat/completions`).
 //!   用于 `auth_type=OpenaiChatCompletionsApiKey`. 入口: `anthropic_to_openai_chat`,
 //!   `chat_json_to_anthropic`, `ChatCompletionsSseConverter`. 覆盖 DeepSeek/Together/Groq/Ollama/各类 one-api 中转.
+//! - [`chat_completions_inbound`] - 反向: OpenAI Chat Completions → Anthropic Messages. 用于 cc-router 对外的
+//!   `POST /v1/chat/completions` 兼容入口 (handler::chat_completions), 让 Open WebUI / Cherry Studio 等
+//!   只支持 Chat Completions 的工具接入。与 [`openai_chat_completions`] (出站) 方向相反, 代码不共享。
 
 pub mod responses_common;
 pub mod responses_inbound;
@@ -32,3 +35,4 @@ pub mod kiro_codewhisperer;
 pub mod gemini;
 pub mod gemini_interactions;
 pub mod openai_chat_completions;
+pub mod chat_completions_inbound;
