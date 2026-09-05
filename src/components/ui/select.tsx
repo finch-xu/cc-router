@@ -14,7 +14,7 @@ export const SelectLabel = React.forwardRef<
   <SelectPrimitive.Label
     ref={ref}
     className={cn(
-      "px-2 py-1.5 text-xs font-medium text-[var(--ink-4)]",
+      "px-2 py-1.5 text-xs font-medium text-(--ink-4)",
       className,
     )}
     {...props}
@@ -30,7 +30,7 @@ export const SelectTrigger = React.forwardRef<
     ref={ref}
     className={cn(
       // 与全局 .select / .input 同视觉 (styles.css:472-488), 颜色走项目自有 token 以跟随 .dark
-      "flex w-full items-center justify-between gap-2 whitespace-nowrap rounded-[var(--r-sm)] border border-[var(--line-2)] bg-[var(--surface)] px-3 py-2 text-left text-[13px] text-[var(--ink)] transition-[border-color,box-shadow] duration-150 focus:outline-none focus:border-[var(--ink-2)] focus:shadow-[0_0_0_3px_rgba(0,0,0,0.04)] dark:focus:shadow-[0_0_0_3px_rgba(255,255,255,0.10)] disabled:cursor-not-allowed disabled:bg-[var(--surface-2)] disabled:text-[var(--ink-4)] [&>span]:line-clamp-1",
+      "flex w-full items-center justify-between gap-2 whitespace-nowrap rounded-(--r-sm) border border-(--line-2) bg-(--surface) px-3 py-2 text-left text-[13px] text-(--ink) transition-[border-color,box-shadow] duration-150 focus:outline-hidden focus:border-(--ink-2) focus:shadow-[0_0_0_3px_rgba(0,0,0,0.04)] dark:focus:shadow-[0_0_0_3px_rgba(255,255,255,0.10)] disabled:cursor-not-allowed disabled:bg-(--surface-2) disabled:text-(--ink-4) [&>span]:line-clamp-1",
       className,
     )}
     {...props}
@@ -54,7 +54,7 @@ export const SelectContent = React.forwardRef<
     <SelectPrimitive.Content
       ref={ref}
       className={cn(
-        "relative z-50 max-h-96 min-w-[8rem] overflow-hidden rounded-[var(--r-sm)] border border-[var(--line-2)] bg-[var(--surface)] text-[var(--ink)] shadow-md data-[state=open]:animate-in data-[state=closed]:animate-out",
+        "relative z-50 max-h-96 min-w-32 overflow-hidden rounded-(--r-sm) border border-(--line-2) bg-(--surface) text-(--ink) shadow-md data-[state=open]:animate-in data-[state=closed]:animate-out",
         position === "popper" &&
           "data-[side=bottom]:translate-y-1 data-[side=left]:-translate-x-1 data-[side=right]:translate-x-1 data-[side=top]:-translate-y-1",
         className,
@@ -63,13 +63,13 @@ export const SelectContent = React.forwardRef<
       {...props}
     >
       {header != null && (
-        <div className="border-b border-[var(--line)] p-1">{header}</div>
+        <div className="border-b border-(--line) p-1">{header}</div>
       )}
       <SelectPrimitive.Viewport
         className={cn(
           "p-1 max-h-[384px] overflow-y-auto",
           position === "popper" &&
-            "h-[var(--radix-select-trigger-height)] w-full min-w-[var(--radix-select-trigger-width)]",
+            "h-(--radix-select-trigger-height) w-full min-w-(--radix-select-trigger-width)",
         )}
       >
         {children}
@@ -89,7 +89,7 @@ export const SelectItem = React.forwardRef<
   <SelectPrimitive.Item
     ref={ref}
     className={cn(
-      "relative flex w-full cursor-default select-none items-start rounded-sm py-1.5 pl-2 pr-8 text-[13px] outline-none focus:bg-[var(--surface-3)] data-[disabled]:pointer-events-none data-[disabled]:opacity-50",
+      "relative flex w-full cursor-default select-none items-start rounded-sm py-1.5 pl-2 pr-8 text-[13px] outline-hidden focus:bg-(--surface-3) data-disabled:pointer-events-none data-disabled:opacity-50",
       className,
     )}
     {...props}
@@ -102,7 +102,7 @@ export const SelectItem = React.forwardRef<
     <div className="flex flex-col min-w-0 flex-1">
       <SelectPrimitive.ItemText>{children}</SelectPrimitive.ItemText>
       {subtitle != null && (
-        <span className="mt-0.5 truncate text-[10px] font-mono text-[var(--ink-4)]">
+        <span className="mt-0.5 truncate text-[10px] font-mono text-(--ink-4)">
           {subtitle}
         </span>
       )}
