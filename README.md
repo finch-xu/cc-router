@@ -95,9 +95,23 @@
 
 ## 安装使用
 
-1. 在 Release 页下载对应平台的安装包并安装。
+1. 从下表下载对应平台的安装包并安装。
 2. 添加各家厂商的订阅，给虚拟模型绑定真实模型并选好调度模式。
 3. 把生成的配置粘到 Claude Code 等工具里即可使用。
+
+| 系统 | 架构 | 安装包 | 下载 |
+|---|---|---|---|
+| macOS | Apple Silicon | `cc-router_macOS-arm64.dmg` | [全球下载](https://github.com/finch-xu/cc-router/releases/latest/download/cc-router_macOS-arm64.dmg) · [中国下载](https://d.cc-router.catonthe.top/latest/cc-router_macOS-arm64.dmg) |
+| macOS | Intel | `cc-router_macOS-x64.dmg` | [全球下载](https://github.com/finch-xu/cc-router/releases/latest/download/cc-router_macOS-x64.dmg) · [中国下载](https://d.cc-router.catonthe.top/latest/cc-router_macOS-x64.dmg) |
+| Windows | x64 | `cc-router_windows-x64-setup.exe` | [全球下载](https://github.com/finch-xu/cc-router/releases/latest/download/cc-router_windows-x64-setup.exe) · [中国下载](https://d.cc-router.catonthe.top/latest/cc-router_windows-x64-setup.exe) |
+| Windows | x64 (MSI) | `cc-router_windows-x64.msi` | [全球下载](https://github.com/finch-xu/cc-router/releases/latest/download/cc-router_windows-x64.msi) · [中国下载](https://d.cc-router.catonthe.top/latest/cc-router_windows-x64.msi) |
+| Windows | arm64 | `cc-router_windows-arm64-setup.exe` | [全球下载](https://github.com/finch-xu/cc-router/releases/latest/download/cc-router_windows-arm64-setup.exe) · [中国下载](https://d.cc-router.catonthe.top/latest/cc-router_windows-arm64-setup.exe) |
+| Linux | x64 | `cc-router_linux-x64.AppImage` | [全球下载](https://github.com/finch-xu/cc-router/releases/latest/download/cc-router_linux-x64.AppImage) · [中国下载](https://d.cc-router.catonthe.top/latest/cc-router_linux-x64.AppImage) |
+| Linux | x64 | `cc-router_linux-x64.deb` | [全球下载](https://github.com/finch-xu/cc-router/releases/latest/download/cc-router_linux-x64.deb) · [中国下载](https://d.cc-router.catonthe.top/latest/cc-router_linux-x64.deb) |
+| Linux | arm64 | `cc-router_linux-arm64.AppImage` | [全球下载](https://github.com/finch-xu/cc-router/releases/latest/download/cc-router_linux-arm64.AppImage) · [中国下载](https://d.cc-router.catonthe.top/latest/cc-router_linux-arm64.AppImage) |
+| Linux | arm64 | `cc-router_linux-arm64.deb` | [全球下载](https://github.com/finch-xu/cc-router/releases/latest/download/cc-router_linux-arm64.deb) · [中国下载](https://d.cc-router.catonthe.top/latest/cc-router_linux-arm64.deb) |
+
+> 两个地址内容完全相同，中国大陆用户选「中国下载」更快。链接始终指向最新版本，历史版本见 [Releases](https://github.com/finch-xu/cc-router/releases)。Linux 推荐 AppImage，支持应用内自动更新；deb 需手动重新下载升级。
 
 ## 在 Claude Code 中使用
 

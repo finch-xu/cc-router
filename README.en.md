@@ -95,9 +95,23 @@ Every AI Agent / Coding Agent tool below can connect to cc-router and use all th
 
 ## Quick Start
 
-1. Download the installer for your platform from Releases and run it.
+1. Download the installer for your platform from the table below and run it.
 2. Add subscriptions from your providers, bind real models to the virtual models, and pick a dispatch mode.
 3. Paste the generated config into Claude Code or any other tool and you're done.
+
+| OS | Arch | Package | Download |
+|---|---|---|---|
+| macOS | Apple Silicon | `cc-router_macOS-arm64.dmg` | [Global](https://github.com/finch-xu/cc-router/releases/latest/download/cc-router_macOS-arm64.dmg) · [China mirror](https://d.cc-router.catonthe.top/latest/cc-router_macOS-arm64.dmg) |
+| macOS | Intel | `cc-router_macOS-x64.dmg` | [Global](https://github.com/finch-xu/cc-router/releases/latest/download/cc-router_macOS-x64.dmg) · [China mirror](https://d.cc-router.catonthe.top/latest/cc-router_macOS-x64.dmg) |
+| Windows | x64 | `cc-router_windows-x64-setup.exe` | [Global](https://github.com/finch-xu/cc-router/releases/latest/download/cc-router_windows-x64-setup.exe) · [China mirror](https://d.cc-router.catonthe.top/latest/cc-router_windows-x64-setup.exe) |
+| Windows | x64 (MSI) | `cc-router_windows-x64.msi` | [Global](https://github.com/finch-xu/cc-router/releases/latest/download/cc-router_windows-x64.msi) · [China mirror](https://d.cc-router.catonthe.top/latest/cc-router_windows-x64.msi) |
+| Windows | arm64 | `cc-router_windows-arm64-setup.exe` | [Global](https://github.com/finch-xu/cc-router/releases/latest/download/cc-router_windows-arm64-setup.exe) · [China mirror](https://d.cc-router.catonthe.top/latest/cc-router_windows-arm64-setup.exe) |
+| Linux | x64 | `cc-router_linux-x64.AppImage` | [Global](https://github.com/finch-xu/cc-router/releases/latest/download/cc-router_linux-x64.AppImage) · [China mirror](https://d.cc-router.catonthe.top/latest/cc-router_linux-x64.AppImage) |
+| Linux | x64 | `cc-router_linux-x64.deb` | [Global](https://github.com/finch-xu/cc-router/releases/latest/download/cc-router_linux-x64.deb) · [China mirror](https://d.cc-router.catonthe.top/latest/cc-router_linux-x64.deb) |
+| Linux | arm64 | `cc-router_linux-arm64.AppImage` | [Global](https://github.com/finch-xu/cc-router/releases/latest/download/cc-router_linux-arm64.AppImage) · [China mirror](https://d.cc-router.catonthe.top/latest/cc-router_linux-arm64.AppImage) |
+| Linux | arm64 | `cc-router_linux-arm64.deb` | [Global](https://github.com/finch-xu/cc-router/releases/latest/download/cc-router_linux-arm64.deb) · [China mirror](https://d.cc-router.catonthe.top/latest/cc-router_linux-arm64.deb) |
+
+> Both links serve identical files; users in mainland China will find the China mirror faster. Links always point to the latest version; older versions are on the [Releases](https://github.com/finch-xu/cc-router/releases) page. On Linux, AppImage is recommended because it supports in-app auto-update; deb has to be re-downloaded manually.
 
 ## Using with Claude Code
 

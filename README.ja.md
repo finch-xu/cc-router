@@ -95,9 +95,23 @@
 
 ## クイックスタート
 
-1. Releases からお使いのプラットフォーム向けインストーラをダウンロードして実行します。
+1. 下表からお使いのプラットフォーム向けインストーラをダウンロードして実行します。
 2. 各プロバイダのサブスクリプションを追加し、仮想モデルに実モデルを紐付けてディスパッチモードを選択します。
 3. 生成された設定を Claude Code などのツールに貼り付ければ完了です。
+
+| OS | アーキテクチャ | パッケージ | ダウンロード |
+|---|---|---|---|
+| macOS | Apple Silicon | `cc-router_macOS-arm64.dmg` | [グローバル](https://github.com/finch-xu/cc-router/releases/latest/download/cc-router_macOS-arm64.dmg) · [中国ミラー](https://d.cc-router.catonthe.top/latest/cc-router_macOS-arm64.dmg) |
+| macOS | Intel | `cc-router_macOS-x64.dmg` | [グローバル](https://github.com/finch-xu/cc-router/releases/latest/download/cc-router_macOS-x64.dmg) · [中国ミラー](https://d.cc-router.catonthe.top/latest/cc-router_macOS-x64.dmg) |
+| Windows | x64 | `cc-router_windows-x64-setup.exe` | [グローバル](https://github.com/finch-xu/cc-router/releases/latest/download/cc-router_windows-x64-setup.exe) · [中国ミラー](https://d.cc-router.catonthe.top/latest/cc-router_windows-x64-setup.exe) |
+| Windows | x64 (MSI) | `cc-router_windows-x64.msi` | [グローバル](https://github.com/finch-xu/cc-router/releases/latest/download/cc-router_windows-x64.msi) · [中国ミラー](https://d.cc-router.catonthe.top/latest/cc-router_windows-x64.msi) |
+| Windows | arm64 | `cc-router_windows-arm64-setup.exe` | [グローバル](https://github.com/finch-xu/cc-router/releases/latest/download/cc-router_windows-arm64-setup.exe) · [中国ミラー](https://d.cc-router.catonthe.top/latest/cc-router_windows-arm64-setup.exe) |
+| Linux | x64 | `cc-router_linux-x64.AppImage` | [グローバル](https://github.com/finch-xu/cc-router/releases/latest/download/cc-router_linux-x64.AppImage) · [中国ミラー](https://d.cc-router.catonthe.top/latest/cc-router_linux-x64.AppImage) |
+| Linux | x64 | `cc-router_linux-x64.deb` | [グローバル](https://github.com/finch-xu/cc-router/releases/latest/download/cc-router_linux-x64.deb) · [中国ミラー](https://d.cc-router.catonthe.top/latest/cc-router_linux-x64.deb) |
+| Linux | arm64 | `cc-router_linux-arm64.AppImage` | [グローバル](https://github.com/finch-xu/cc-router/releases/latest/download/cc-router_linux-arm64.AppImage) · [中国ミラー](https://d.cc-router.catonthe.top/latest/cc-router_linux-arm64.AppImage) |
+| Linux | arm64 | `cc-router_linux-arm64.deb` | [グローバル](https://github.com/finch-xu/cc-router/releases/latest/download/cc-router_linux-arm64.deb) · [中国ミラー](https://d.cc-router.catonthe.top/latest/cc-router_linux-arm64.deb) |
+
+> 2 つのリンクは同一ファイルです。中国本土のユーザーは中国ミラーの方が高速です。リンクは常に最新版を指し、過去のバージョンは [Releases](https://github.com/finch-xu/cc-router/releases) ページにあります。Linux では AppImage を推奨します（アプリ内自動更新に対応）。deb は手動で再ダウンロードして更新してください。
 
 ## Claude Code での利用
 
