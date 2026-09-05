@@ -138,7 +138,10 @@ pub fn request_to_anthropic(body: &Value) -> AppResult<Value> {
 ///
 /// 规则 (spec §3.2): system/developer 抽到顶层; assistant 的 tool_calls → tool_use 块,
 /// reasoning_content 丢弃; **连续多条 tool 消息合并进同一条 user 消息** (Anthropic 要求
-/// 同一轮的 tool_result 全在一条 user 消息里); 同 role 相邻消息不主动合并.
+/// 同一轮的 tool_result 全在一条 user 消息里)。**转换完成后再做一趟相邻同 role 合并**
+/// (`merge_adjacent_same_role`): tool_result 消息与紧随其后的普通 user 文本消息都是
+/// `role:"user"`, 不合并会产生两条相邻 user 消息——Anthropic 官方能容忍, 但 cc-router
+/// 还会分发给严格程度不一的第三方 Anthropic 兼容端点/翻译层, 合并后的形状在所有下游都合法。
 fn convert_messages(messages: &[Value]) -> AppResult<(Vec<Value>, String)> {
     let mut out: Vec<Value> = Vec::new();
     let mut system = String::new();
@@ -203,7 +206,29 @@ fn convert_messages(messages: &[Value]) -> AppResult<(Vec<Value>, String)> {
         }
     }
     flush_tool_results(&mut out, &mut pending_tool_results);
-    Ok((out, system))
+    Ok((merge_adjacent_same_role(out), system))
+}
+
+/// 合并相邻的同 role 消息, 把后一条的 content 数组接到前一条后面.
+///
+/// 覆盖 user+user (含 "tool_result 块后接一条 user 文本" 这种常见 agentic 形状) 与
+/// assistant+assistant。两条消息的 `content` 都保证是数组 (本模块构造的消息全部如此)。
+fn merge_adjacent_same_role(messages: Vec<Value>) -> Vec<Value> {
+    let mut merged: Vec<Value> = Vec::with_capacity(messages.len());
+    for mut msg in messages {
+        if let Some(last) = merged.last_mut() {
+            if last["role"] == msg["role"] {
+                if let (Some(last_content), Some(cur_content)) =
+                    (last["content"].as_array_mut(), msg["content"].as_array_mut())
+                {
+                    last_content.append(cur_content);
+                    continue;
+                }
+            }
+        }
+        merged.push(msg);
+    }
+    merged
 }
 
 /// content 为 string 直接返回; 为数组时拼接其中 `type:text` 的 text (以 "\n" 连接); 其他 → 空串.
@@ -477,18 +502,47 @@ mod tests {
         ])))
         .unwrap();
         let msgs = out["messages"].as_array().unwrap();
-        assert_eq!(msgs.len(), 4);
+        assert_eq!(msgs.len(), 3, "tool_result 消息与后续 user 文本消息合并为一条");
+        for pair in msgs.windows(2) {
+            assert_ne!(pair[0]["role"], pair[1]["role"], "相邻消息不应同 role");
+        }
         let asst = &msgs[1]["content"];
         assert_eq!(asst.as_array().unwrap().len(), 2, "空 content 不产生 text 块, reasoning_content 丢弃");
         assert_eq!(asst[0], json!({"type":"tool_use","id":"call_1","name":"get_weather","input":{"city":"SH"}}));
         assert_eq!(asst[1]["input"], json!({}), "空 arguments 视为 {{}}");
-        // 两条 tool 合并进同一条 user 消息
+        // 两条 tool 结果 + 之后的 user 文本合并进同一条 user 消息
         assert_eq!(msgs[2]["role"], "user");
         assert_eq!(msgs[2]["content"], json!([
             {"type":"tool_result","tool_use_id":"call_1","content":"sunny"},
-            {"type":"tool_result","tool_use_id":"call_2","content":"12:00"}
+            {"type":"tool_result","tool_use_id":"call_2","content":"12:00"},
+            {"type":"text","text":"thanks"}
         ]));
-        assert_eq!(msgs[3]["content"][0]["text"], "thanks");
+    }
+
+    #[test]
+    fn request_merges_adjacent_same_role_messages() {
+        let out = request_to_anthropic(&base(json!([
+            {"role":"user","content":"a"},
+            {"role":"user","content":"b"},
+            {"role":"assistant","content":"x"},
+            {"role":"assistant","content":"y"},
+            {"role":"user","content":"c"}
+        ])))
+        .unwrap();
+        let msgs = out["messages"].as_array().unwrap();
+        assert_eq!(msgs.len(), 3);
+        assert_eq!(msgs[0]["role"], "user");
+        assert_eq!(msgs[0]["content"], json!([
+            {"type":"text","text":"a"},
+            {"type":"text","text":"b"}
+        ]));
+        assert_eq!(msgs[1]["role"], "assistant");
+        assert_eq!(msgs[1]["content"], json!([
+            {"type":"text","text":"x"},
+            {"type":"text","text":"y"}
+        ]));
+        assert_eq!(msgs[2]["role"], "user");
+        assert_eq!(msgs[2]["content"], json!([{"type":"text","text":"c"}]));
     }
 
     #[test]
