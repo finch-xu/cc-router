@@ -313,6 +313,13 @@ async fn bootstrap(
         session_affinity: Arc::new(std::sync::Mutex::new(
             virtual_model::affinity::AffinityTable::default(),
         )),
+        web_sessions: Arc::new(std::sync::Mutex::new(
+            proxy::web::auth::SessionStore::new_default(),
+        )),
+        web_login_guard: Arc::new(std::sync::Mutex::new(
+            proxy::web::auth::LoginGuard::new_default(),
+        )),
+        ui_events: tokio::sync::broadcast::channel(proxy::web::events::UI_EVENT_CAPACITY).0,
     };
 
     // 8. 启动代理

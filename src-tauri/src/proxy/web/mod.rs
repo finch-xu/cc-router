@@ -5,3 +5,5 @@
 //! 绝不能配通配 CORS. 详见 docs/superpowers/specs/2026-09-06-web-ui-runtime-bridge-design.md
 
 pub mod auth;
+pub mod events;
+pub mod gate;

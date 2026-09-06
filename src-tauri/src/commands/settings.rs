@@ -69,5 +69,9 @@ pub async fn generate_new_token(state: State<'_, AppState>) -> AppResult<Setting
     guard.auth_token = generate_token();
     let app_data_dir = paths::app_data_dir(&state.app_handle)?;
     save(&app_data_dir, &guard).await?;
+    // 网页会话凭旧 token 登录, 换 token 后全部作废
+    if let Ok(mut sessions) = state.web_sessions.lock() {
+        sessions.clear();
+    }
     Ok(guard.clone())
 }

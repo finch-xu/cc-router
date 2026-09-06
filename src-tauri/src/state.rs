@@ -11,6 +11,8 @@ use crate::observability::body_dump::BodyDumpEntry;
 use crate::observability::events::EventEntry;
 use crate::observability::request_log::RequestLogEntry;
 use crate::provider::model::Provider;
+use crate::proxy::web::auth::{LoginGuard, SessionStore};
+use crate::proxy::web::events::UiEvent;
 use crate::settings::model::Settings;
 use crate::subscription::model::SubscriptionRuntime;
 use crate::virtual_model::affinity::AffinityTable;
@@ -46,6 +48,12 @@ pub struct AppState {
     pub app_handle: AppHandle,
     /// sticky 模式的会话 → 订阅亲和表. 内存, 不持久化.
     pub session_affinity: Arc<std::sync::Mutex<AffinityTable>>,
+    /// 网页界面会话表 (内存, 不持久化). generate_new_token 时清空.
+    pub web_sessions: Arc<std::sync::Mutex<SessionStore>>,
+    /// 网页登录按 IP 限流表.
+    pub web_login_guard: Arc<std::sync::Mutex<LoginGuard>>,
+    /// Tauri emit 事件的广播副本, 供 /ui/api/events SSE 订阅. 无订阅者时 send 返回 Err, 忽略即可.
+    pub ui_events: tokio::sync::broadcast::Sender<UiEvent>,
 }
 
 impl AppState {

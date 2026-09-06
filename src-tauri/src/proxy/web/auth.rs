@@ -2,10 +2,21 @@
 //! `require_session` 与 `require_csrf_header` 两个中间件.
 
 use std::collections::HashMap;
-use std::net::IpAddr;
+use std::net::{IpAddr, SocketAddr};
 use std::time::{Duration, Instant};
 
-use axum::http::HeaderMap;
+use axum::body::Body;
+use axum::extract::{ConnectInfo, Request, State};
+use axum::http::{header, HeaderMap, Method, StatusCode};
+use axum::middleware::Next;
+use axum::response::{IntoResponse, Response};
+use axum::Json;
+use serde::{Deserialize, Serialize};
+use tracing::{info, warn};
+
+use crate::proxy::handler;
+use crate::settings::model::ProxyMode;
+use crate::state::AppState;
 
 pub const SESSION_COOKIE: &str = "ccr_ui_session";
 pub const CSRF_HEADER: &str = "x-ccr-ui";
@@ -190,6 +201,189 @@ pub fn constant_time_eq(a: &[u8], b: &[u8]) -> bool {
     a.iter().zip(b).fold(0u8, |acc, (x, y)| acc | (x ^ y)) == 0
 }
 
+/// `require_session` 的纯决策: path 是相对 /ui/api 的子路径 (nest 剥前缀后).
+#[derive(Debug, PartialEq, Eq, Clone, Copy)]
+pub enum AuthDecision {
+    Allow,
+    Reject,
+}
+
+pub fn decide(auth_enabled: bool, has_valid_session: bool, path: &str) -> AuthDecision {
+    if !auth_enabled {
+        return AuthDecision::Allow;
+    }
+    if path == "/login" || path == "/session" {
+        return AuthDecision::Allow;
+    }
+    if has_valid_session {
+        AuthDecision::Allow
+    } else {
+        AuthDecision::Reject
+    }
+}
+
+/// CSRF 头只约束会改状态的 POST; SSE / session 是只读 GET.
+pub fn csrf_required(method: &Method, _path: &str) -> bool {
+    *method == Method::POST
+}
+
+fn unauthorized() -> Response {
+    handler::error_response(
+        StatusCode::UNAUTHORIZED,
+        "authentication_error",
+        "web ui session required. sign in at /ui/",
+    )
+}
+
+/// 中间件: 校验 cookie 会话 (web_ui_auth_enabled=false 时整层直通).
+pub async fn require_session(
+    State(state): State<AppState>,
+    req: Request<Body>,
+    next: Next,
+) -> Response {
+    let auth_enabled = state.settings.read().await.web_ui_auth_enabled;
+    let has_session = if auth_enabled {
+        match cookie_value(req.headers(), SESSION_COOKIE) {
+            Some(id) => state
+                .web_sessions
+                .lock()
+                .map(|mut s| s.touch(&id, Instant::now()))
+                .unwrap_or(false),
+            None => false,
+        }
+    } else {
+        false
+    };
+    match decide(auth_enabled, has_session, req.uri().path()) {
+        AuthDecision::Allow => next.run(req).await,
+        AuthDecision::Reject => unauthorized(),
+    }
+}
+
+/// 中间件: POST 必须带 `x-ccr-ui` 头. 自定义头触发跨站预检, /ui 子树不回 CORS 头, 预检必然失败.
+/// 免登录模式下这是唯一的跨站防线, 所以不看 web_ui_auth_enabled.
+pub async fn require_csrf_header(req: Request<Body>, next: Next) -> Response {
+    if csrf_required(req.method(), req.uri().path()) && req.headers().get(CSRF_HEADER).is_none() {
+        return handler::error_response(
+            StatusCode::FORBIDDEN,
+            "permission_error",
+            "missing x-ccr-ui header",
+        );
+    }
+    next.run(req).await
+}
+
+#[derive(Debug, Deserialize)]
+pub struct LoginBody {
+    pub token: String,
+}
+
+#[derive(Debug, Serialize)]
+pub struct SessionInfo {
+    pub authenticated: bool,
+    pub auth_enabled: bool,
+}
+
+/// POST /ui/api/login. 比对代理 auth_token, 成功签发 cookie 会话.
+pub async fn login(
+    State(state): State<AppState>,
+    ConnectInfo(addr): ConnectInfo<SocketAddr>,
+    Json(body): Json<LoginBody>,
+) -> Response {
+    let (auth_enabled, token, secure) = {
+        let s = state.settings.read().await;
+        (
+            s.web_ui_auth_enabled,
+            s.auth_token.clone(),
+            s.proxy_mode == ProxyMode::Https,
+        )
+    };
+    if !auth_enabled {
+        // 免登录模式: 204 但不签发 cookie
+        return StatusCode::NO_CONTENT.into_response();
+    }
+    let ip = addr.ip();
+    let now = Instant::now();
+    if let Ok(mut g) = state.web_login_guard.lock() {
+        if let Err(remaining) = g.check(ip, now) {
+            warn!(%ip, remaining_secs = remaining.as_secs(), "web ui login locked");
+            return handler::error_response(
+                StatusCode::TOO_MANY_REQUESTS,
+                "rate_limit_error",
+                &format!("too many failed attempts, retry in {}s", remaining.as_secs().max(1)),
+            );
+        }
+    }
+    if !constant_time_eq(body.token.as_bytes(), token.as_bytes()) {
+        if let Ok(mut g) = state.web_login_guard.lock() {
+            g.record_failure(ip, now);
+        }
+        warn!(%ip, "web ui login failed");
+        return handler::error_response(
+            StatusCode::UNAUTHORIZED,
+            "authentication_error",
+            "invalid token",
+        );
+    }
+    if let Ok(mut g) = state.web_login_guard.lock() {
+        g.record_success(ip);
+    }
+    let id = match state.web_sessions.lock() {
+        Ok(mut s) => s.create(now),
+        Err(_) => {
+            return handler::error_response(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "api_error",
+                "session store poisoned",
+            )
+        }
+    };
+    info!(%ip, "web ui login ok");
+    let mut resp = StatusCode::NO_CONTENT.into_response();
+    if let Ok(v) = set_cookie_header(&id, secure).parse() {
+        resp.headers_mut().insert(header::SET_COOKIE, v);
+    }
+    resp
+}
+
+/// POST /ui/api/logout. 删会话 + 清 cookie. 免登录模式空操作.
+pub async fn logout(State(state): State<AppState>, headers: HeaderMap) -> Response {
+    if let Some(id) = cookie_value(&headers, SESSION_COOKIE) {
+        if let Ok(mut s) = state.web_sessions.lock() {
+            s.remove(&id);
+        }
+    }
+    let mut resp = StatusCode::NO_CONTENT.into_response();
+    if let Ok(v) = clear_cookie_header().parse() {
+        resp.headers_mut().insert(header::SET_COOKIE, v);
+    }
+    resp
+}
+
+/// GET /ui/api/session. 前端启动时用它决定显示登录页还是主界面.
+pub async fn session(State(state): State<AppState>, headers: HeaderMap) -> Json<SessionInfo> {
+    let auth_enabled = state.settings.read().await.web_ui_auth_enabled;
+    if !auth_enabled {
+        return Json(SessionInfo {
+            authenticated: true,
+            auth_enabled: false,
+        });
+    }
+    let authenticated = cookie_value(&headers, SESSION_COOKIE)
+        .and_then(|id| {
+            state
+                .web_sessions
+                .lock()
+                .ok()
+                .map(|mut s| s.touch(&id, Instant::now()))
+        })
+        .unwrap_or(false);
+    Json(SessionInfo {
+        authenticated,
+        auth_enabled: true,
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -306,5 +500,36 @@ mod tests {
         assert!(!constant_time_eq(b"abc", b"abd"));
         assert!(!constant_time_eq(b"abc", b"ab"));
         assert!(constant_time_eq(b"", b""));
+    }
+
+    #[test]
+    fn decide_table() {
+        use AuthDecision::*;
+        // (auth_enabled, has_valid_session, path) → decision
+        let cases = [
+            (false, false, "/cmd/list_providers", Allow),
+            (false, false, "/events", Allow),
+            (true, true, "/cmd/list_providers", Allow),
+            (true, false, "/cmd/list_providers", Reject),
+            (true, false, "/events", Reject),
+            (true, false, "/login", Allow),
+            (true, false, "/session", Allow),
+            (true, false, "/logout", Reject),
+        ];
+        for (auth_enabled, has_session, path, want) in cases {
+            assert_eq!(
+                decide(auth_enabled, has_session, path),
+                want,
+                "auth_enabled={auth_enabled} session={has_session} path={path}"
+            );
+        }
+    }
+
+    #[test]
+    fn csrf_only_guards_post() {
+        assert!(csrf_required(&axum::http::Method::POST, "/cmd/x"));
+        assert!(csrf_required(&axum::http::Method::POST, "/login"));
+        assert!(!csrf_required(&axum::http::Method::GET, "/events"));
+        assert!(!csrf_required(&axum::http::Method::GET, "/session"));
     }
 }
