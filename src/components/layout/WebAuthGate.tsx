@@ -11,7 +11,9 @@ type Phase = "checking" | "login" | "ready";
  * 否则显示登录页; 任何 API 返回 401 时 web runtime 派发 AUTH_REQUIRED_EVENT, 这里切回登录页.
  */
 export function WebAuthGate({ children }: { children: ReactNode }) {
-  const [phase, setPhase] = useState<Phase>("checking");
+  const [phase, setPhase] = useState<Phase>(() =>
+    runtime.kind === "web" ? "checking" : "ready",
+  );
   const queryClient = useQueryClient();
 
   useEffect(() => {
@@ -20,9 +22,13 @@ export function WebAuthGate({ children }: { children: ReactNode }) {
       return;
     }
     let cancelled = false;
-    void webSession().then((s) => {
-      if (!cancelled) setPhase(s.authenticated ? "ready" : "login");
-    });
+    void webSession()
+      .then((s) => {
+        if (!cancelled) setPhase(s.authenticated ? "ready" : "login");
+      })
+      .catch(() => {
+        if (!cancelled) setPhase("login");
+      });
     const onAuthRequired = () => {
       queryClient.clear();
       setPhase("login");
@@ -55,7 +61,12 @@ function LoginPage({ onSuccess }: { onSuccess: () => void }) {
     if (!token.trim() || busy) return;
     setBusy(true);
     setError(null);
-    const res = await webLogin(token.trim());
+    let res: Awaited<ReturnType<typeof webLogin>>;
+    try {
+      res = await webLogin(token.trim());
+    } catch {
+      res = { ok: false };
+    }
     setBusy(false);
     if (res.ok) {
       onSuccess();
