@@ -19,3 +19,4 @@ pub mod sse;
 pub mod sse_framing;
 pub mod transform;
 pub mod upstream;
+pub mod web;
