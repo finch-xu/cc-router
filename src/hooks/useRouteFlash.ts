@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useSyncExternalStore } from "react";
-import { listen } from "@tauri-apps/api/event";
+import { runtime } from "@/runtime";
 import type {
   RouteAttemptFinishedEvent,
   RouteAttemptStartedEvent,
@@ -50,10 +50,10 @@ async function installListener() {
   if (listenerInstalled) return;
   listenerInstalled = true;
   try {
-    await listen<RouteAttemptStartedEvent>("route_attempt_started", (e) => {
+    await runtime.listen<RouteAttemptStartedEvent>("route_attempt_started", (e) => {
       setFlash(flashKey(e.payload.virtual_model, e.payload.subscription_id), "attempt");
     });
-    await listen<RouteAttemptFinishedEvent>("route_attempt_finished", (e) => {
+    await runtime.listen<RouteAttemptFinishedEvent>("route_attempt_finished", (e) => {
       setFlash(
         flashKey(e.payload.virtual_model, e.payload.subscription_id),
         e.payload.success ? "success" : "error",

@@ -1,7 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { CircleCheck, ExternalLink, X } from "lucide-react";
-import { open as openShell } from "@tauri-apps/plugin-shell";
-import { downloadDir } from "@tauri-apps/api/path";
+import { runtime } from "@/runtime";
 import { useT } from "@/i18n";
 import { ReceiptSlip, type ReceiptDisplayOptions } from "@/components/receipts/ReceiptSlip";
 import { ReceiptControls, RECEIPT_RANGES } from "@/components/receipts/ReceiptControls";
@@ -108,8 +107,7 @@ export function ReceiptsPage() {
 
   const openDownloadsFolder = async () => {
     try {
-      const dir = await downloadDir();
-      await openShell(dir);
+      await runtime.openDownloadsDir();
     } catch (err) {
       console.warn("open downloads folder failed", err);
     }
@@ -228,18 +226,20 @@ export function ReceiptsPage() {
         >
           <CircleCheck size={15} style={{ flexShrink: 0 }} />
           <span style={{ fontWeight: 500 }}>{flash}</span>
-          <button
-            type="button"
-            className="btn"
-            onClick={() => void openDownloadsFolder()}
-            style={{
-              background: "transparent",
-              border: "1px solid rgba(255, 255, 255, 0.55)",
-              color: "white",
-            }}
-          >
-            <ExternalLink size={12} /> {t("receipts.openDownloads")}
-          </button>
+          {runtime.kind === "desktop" && (
+            <button
+              type="button"
+              className="btn"
+              onClick={() => void openDownloadsFolder()}
+              style={{
+                background: "transparent",
+                border: "1px solid rgba(255, 255, 255, 0.55)",
+                color: "white",
+              }}
+            >
+              <ExternalLink size={12} /> {t("receipts.openDownloads")}
+            </button>
+          )}
           <button
             type="button"
             onClick={() => setFlash(null)}

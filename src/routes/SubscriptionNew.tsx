@@ -1,8 +1,7 @@
 import { useState, useMemo, useRef } from "react";
 import { Link, useNavigate, useSearchParams } from "react-router";
 import { ArrowLeft, ArrowRight, ExternalLink, Check } from "lucide-react";
-import { invoke } from "@tauri-apps/api/core";
-import { open as openShell } from "@tauri-apps/plugin-shell";
+import { runtime } from "@/runtime";
 import { useQueryClient } from "@tanstack/react-query";
 import { ProviderBadge } from "@/components/ProviderBadge";
 import { ProviderLogo } from "@/components/ProviderLogo";
@@ -307,7 +306,7 @@ export function SubscriptionNewPage() {
       await queryClient.invalidateQueries({ queryKey: ["subscriptions"] });
 
       try {
-        const result: RefreshModelListResult = await invoke("refresh_model_list", {
+        const result: RefreshModelListResult = await runtime.invoke("refresh_model_list", {
           id: created.id,
         });
         if (result.kind === "auto") {
@@ -347,7 +346,7 @@ export function SubscriptionNewPage() {
     setSubmitting(true);
     setSubmitError(null);
     try {
-      await invoke("update_subscription", {
+      await runtime.invoke("update_subscription", {
         id: createdId,
         patch: { model_slots: slots, slot_efforts: slotEfforts },
       });
@@ -407,7 +406,7 @@ export function SubscriptionNewPage() {
     setSubmitting(true);
     setSubmitError(null);
     try {
-      await invoke("update_subscription", {
+      await runtime.invoke("update_subscription", {
         id: createdId,
         patch: { model_slots: slots, slot_efforts: slotEfforts },
       });
@@ -446,7 +445,7 @@ export function SubscriptionNewPage() {
       };
       const created = await createMut.mutateAsync(input);
       try {
-        const result: RefreshModelListResult = await invoke("refresh_model_list", {
+        const result: RefreshModelListResult = await runtime.invoke("refresh_model_list", {
           id: created.id,
         });
         if (result.kind === "auto") {
@@ -478,7 +477,7 @@ export function SubscriptionNewPage() {
     setFetchingModels(true);
     setModelFetchError(null);
     try {
-      const result: RefreshModelListResult = await invoke("refresh_model_list", {
+      const result: RefreshModelListResult = await runtime.invoke("refresh_model_list", {
         id: createdId,
       });
       if (result.kind === "auto") {
@@ -527,7 +526,7 @@ export function SubscriptionNewPage() {
   // 内置路径 step2: 保存 slot
   async function save() {
     if (!createdId || !provider || !endpoint) return;
-    await invoke("update_subscription", {
+    await runtime.invoke("update_subscription", {
       id: createdId,
       patch: { model_slots: slots, slot_efforts: slotEfforts },
     });
@@ -786,7 +785,7 @@ export function SubscriptionNewPage() {
                         {provider.api_key_url && (
                           <button
                             type="button"
-                            onClick={() => openShell(provider.api_key_url!).catch(() => {})}
+                            onClick={() => runtime.openExternal(provider.api_key_url!).catch(() => {})}
                             style={{
                               marginTop: 6,
                               background: "transparent",

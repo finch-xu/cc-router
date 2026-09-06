@@ -5,7 +5,7 @@ import {
   type QueryClient,
 } from "@tanstack/react-query";
 import { useEffect } from "react";
-import { listen } from "@tauri-apps/api/event";
+import { runtime } from "@/runtime";
 import { api } from "@/api/tauri";
 import type {
   CreateSubscriptionInput,
@@ -26,7 +26,7 @@ function invalidateSubscriptions(qc: QueryClient) {
 export function useSubscriptionEventBridge() {
   const queryClient = useQueryClient();
   useEffect(() => {
-    const promise = listen("subscription_state_changed", () => {
+    const promise = runtime.listen("subscription_state_changed", () => {
       invalidateSubscriptions(queryClient);
     });
     return () => {
@@ -35,7 +35,7 @@ export function useSubscriptionEventBridge() {
   }, [queryClient]);
 
   useEffect(() => {
-    const promise = listen("subscription_quota_reached", () => {
+    const promise = runtime.listen("subscription_quota_reached", () => {
       invalidateSubscriptions(queryClient);
     });
     return () => {

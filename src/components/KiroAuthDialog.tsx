@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { ExternalLink, LoaderCircle, Copy, Check, X, RefreshCw } from "lucide-react";
-import { open as openShell } from "@tauri-apps/plugin-shell";
+import { runtime } from "@/runtime";
 import { Spinner } from "@/components/Spinner";
 import { useT } from "@/i18n";
 import { api } from "@/api/tauri";
@@ -173,7 +173,7 @@ export function KiroAuthDialog({ open, onClose, onSuccess }: Props) {
       setAuthMethod("idc"); // device flow 总是 idc
       setPhase("device_waiting");
       const launchUrl = start.verification_uri_complete ?? start.verification_uri;
-      openShell(launchUrl).catch(() => {});
+      runtime.openExternal(launchUrl).catch(() => {});
     } catch (e) {
       setErrorMsg(String(e));
       setPhase("error");
@@ -333,7 +333,7 @@ export function KiroAuthDialog({ open, onClose, onSuccess }: Props) {
               type="button"
               className="btn"
               style={{ width: "100%", marginBottom: 12 }}
-              onClick={() => openShell(verifyUrlComplete || verifyUrl).catch(() => {})}
+              onClick={() => runtime.openExternal(verifyUrlComplete || verifyUrl).catch(() => {})}
             >
               <ExternalLink size={12} /> {t("oauth.kiro.openBrowser")}
             </button>

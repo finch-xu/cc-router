@@ -1,6 +1,6 @@
 import { useMemo, useState, type ReactNode } from "react";
 import { Copy, Check } from "lucide-react";
-import { writeText } from "@tauri-apps/plugin-clipboard-manager";
+import { runtime } from "@/runtime";
 import { cn } from "@/lib/utils";
 import { useT } from "@/i18n";
 
@@ -21,13 +21,9 @@ export function CopyableBlock({ text, className, highlight = false }: Props) {
 
   async function copy() {
     try {
-      await writeText(text);
+      await runtime.copyText(text);
     } catch {
-      try {
-        await navigator.clipboard.writeText(text);
-      } catch {
-        /* ignore */
-      }
+      /* ignore */
     }
     setCopied(true);
     setTimeout(() => setCopied(false), 1500);

@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { ExternalLink, LoaderCircle, Copy, Check, X } from "lucide-react";
-import { open as openShell } from "@tauri-apps/plugin-shell";
+import { runtime } from "@/runtime";
 import { Spinner } from "@/components/Spinner";
 import { useT } from "@/i18n";
 import { api } from "@/api/tauri";
@@ -50,7 +50,7 @@ export function ChatGptOAuthDialog({ open, onClose, onSuccess }: Props) {
         setVerifyUrl(res.verification_uri);
         setPhase("waiting");
         // 启动后立即开浏览器
-        openShell(res.verification_uri).catch(() => {});
+        runtime.openExternal(res.verification_uri).catch(() => {});
       })
       .catch((e) => {
         setErrorMsg(String(e));
@@ -199,7 +199,7 @@ export function ChatGptOAuthDialog({ open, onClose, onSuccess }: Props) {
               type="button"
               className="btn"
               style={{ width: "100%", marginBottom: 12 }}
-              onClick={() => openShell(verifyUrl).catch(() => {})}
+              onClick={() => runtime.openExternal(verifyUrl).catch(() => {})}
             >
               <ExternalLink size={12} /> {t("oauth.chatgpt.openBrowser")}
             </button>

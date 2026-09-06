@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router";
 import { ArrowLeft, TriangleAlert, LoaderCircle } from "lucide-react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { invoke } from "@tauri-apps/api/core";
+import { runtime } from "@/runtime";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -151,7 +151,7 @@ export function SubscriptionEditPage() {
     setFetchingModels(true);
     setModelError(null);
     try {
-      const result: RefreshModelListResult = await invoke("refresh_model_list", { id });
+      const result: RefreshModelListResult = await runtime.invoke("refresh_model_list", { id });
       if (result.kind === "auto") {
         setModels(result.models);
       } else {

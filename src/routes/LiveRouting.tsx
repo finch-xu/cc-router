@@ -1,7 +1,7 @@
 import { useMemo, useState } from "react";
 import { useNavigate } from "react-router";
 import { ArrowRight, Check, Copy, Lock } from "lucide-react";
-import { writeText } from "@tauri-apps/plugin-clipboard-manager";
+import { runtime } from "@/runtime";
 import { RouteFlowDiagram } from "@/components/RouteFlowDiagram";
 import { ProviderLogo } from "@/components/ProviderLogo";
 import { useProxyStatus, useSettings } from "@/hooks/useSettings";
@@ -155,13 +155,9 @@ function CopyField({
 
   async function copy() {
     try {
-      await writeText(value);
+      await runtime.copyText(value);
     } catch {
-      try {
-        await navigator.clipboard.writeText(value);
-      } catch {
-        /* ignore */
-      }
+      /* ignore */
     }
     setCopied(true);
     setTimeout(() => setCopied(false), 1500);

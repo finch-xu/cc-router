@@ -1,5 +1,4 @@
-import { invoke } from "@tauri-apps/api/core";
-import { open as openShell } from "@tauri-apps/plugin-shell";
+import { runtime } from "@/runtime";
 import type { UpdateSource } from "@/types";
 
 // 与 Rust 侧 src-tauri/src/updater_source.rs 的两个常量保持文本一致。
@@ -21,19 +20,19 @@ export function manifestUrlForSource(source: UpdateSource | null): string {
 
 export async function isAppImageRuntime(): Promise<boolean> {
   try {
-    return await invoke<boolean>("is_appimage_runtime");
+    return await runtime.invoke<boolean>("is_appimage_runtime");
   } catch {
     return false;
   }
 }
 
 export async function relaunchApp(): Promise<void> {
-  await invoke("relaunch_app");
+  await runtime.invoke("relaunch_app");
 }
 
 export async function openReleasePage(source: UpdateSource | null): Promise<void> {
   const url = source === "china" ? CHINA_RELEASE_PAGE : INTERNATIONAL_RELEASE_PAGE;
-  await openShell(url).catch(() => {});
+  await runtime.openExternal(url).catch(() => {});
 }
 
 export function isLinuxPlatform(): boolean {

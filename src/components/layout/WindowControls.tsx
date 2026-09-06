@@ -1,4 +1,4 @@
-import { getCurrentWindow } from "@tauri-apps/api/window";
+import { runtime } from "@/runtime";
 import { useT } from "@/i18n";
 import { currentPlatform } from "@/lib/platform";
 
@@ -10,11 +10,12 @@ import { currentPlatform } from "@/lib/platform";
  */
 export function WindowControls() {
   const { t } = useT();
+  if (runtime.kind === "web") return null;
   if (currentPlatform() === "macos") return null;
 
   const run = (action: "minimize" | "toggleMaximize" | "close") => {
     try {
-      void getCurrentWindow()[action]();
+      runtime.windowAction(action);
     } catch {
       // 纯浏览器预览没有 Tauri 运行时, 按钮只占位
     }

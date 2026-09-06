@@ -1,6 +1,6 @@
 import { ExternalLink, Globe, TriangleAlert } from "lucide-react";
 import Github from "@lobehub/icons/es/Github";
-import { open as openShell } from "@tauri-apps/plugin-shell";
+import { runtime } from "@/runtime";
 import { version as VERSION } from "../../package.json";
 import logoUrl from "@/assets/logo.png";
 import { useT } from "@/i18n";
@@ -30,21 +30,21 @@ export function AboutPage() {
           <button
             className="btn"
             type="button"
-            onClick={() => openShell(REPO_URL).catch(() => {})}
+            onClick={() => runtime.openExternal(REPO_URL).catch(() => {})}
           >
             <Github size={13} /> {t("about.repo")}
           </button>
           <button
             className="btn"
             type="button"
-            onClick={() => openShell(DOCS_URL).catch(() => {})}
+            onClick={() => runtime.openExternal(DOCS_URL).catch(() => {})}
           >
             <ExternalLink size={12} /> {t("about.docs")}
           </button>
           <button
             className="btn"
             type="button"
-            onClick={() => openShell(SITE_URL).catch(() => {})}
+            onClick={() => runtime.openExternal(SITE_URL).catch(() => {})}
           >
             <Globe size={13} /> {t("about.site")}
           </button>

@@ -8,7 +8,7 @@ import {
   useState,
   type ReactNode,
 } from "react";
-import { listen, type UnlistenFn } from "@tauri-apps/api/event";
+import { runtime } from "@/runtime";
 import {
   isAppImageRuntime,
   isLinuxPlatform,
@@ -82,10 +82,10 @@ export function UpdaterProvider({ children }: { children: ReactNode }) {
 
   // 监听 Rust 推送的下载进度
   useEffect(() => {
-    let unlisten: UnlistenFn | null = null;
+    let unlisten: (() => void) | null = null;
     let cancelled = false;
     void (async () => {
-      const fn = await listen<UpdaterProgressEvent>(PROGRESS_EVENT, (e) => {
+      const fn = await runtime.listen<UpdaterProgressEvent>(PROGRESS_EVENT, (e) => {
         const payload = e.payload;
         if (payload.phase === "started") {
           totalRef.current = payload.content_length ?? null;
