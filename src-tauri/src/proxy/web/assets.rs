@@ -16,7 +16,9 @@ use crate::state::AppState;
 
 /// 与 tauri.conf.json 的 CSP 同源, 去掉 ipc / asset 协议项 (浏览器里没有这些).
 /// script-src 单独拼 (含内联脚本 hash).
-const CSP_BASE: &str = "default-src 'self'; connect-src 'self'; img-src 'self' data: blob:; \
+const CSP_BASE: &str = "default-src 'self'; \
+connect-src 'self' data: https://github.com https://*.githubusercontent.com https://d.cc-router.catonthe.top; \
+img-src 'self' data: blob:; \
 style-src 'self' 'unsafe-inline'; font-src 'self' data: https://cdn.jsdelivr.net https://registry.npmmirror.com; \
 object-src 'none'; base-uri 'self'; frame-ancestors 'none'";
 
@@ -156,7 +158,8 @@ mod tests {
     fn csp_contains_self_and_hash_and_no_ipc() {
         let csp = csp_for_html("<script>x()</script>");
         assert!(csp.contains("default-src 'self'"));
-        assert!(csp.contains("connect-src 'self'"));
+        assert!(csp.contains("connect-src 'self' data:"));
+        assert!(csp.contains("https://d.cc-router.catonthe.top"));
         assert!(csp.contains("script-src 'self' 'sha256-"));
         assert!(!csp.contains("ipc:"));
         assert!(!csp.contains("asset:"));

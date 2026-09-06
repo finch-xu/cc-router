@@ -102,6 +102,10 @@ fn build_router(state: AppState, body_limit: usize) -> Router {
         .route("/v1/chat/completions", post(handler::chat_completions))
         .route("/v1/models", axum::routing::get(handler::models))
         .route("/health", axum::routing::get(handler::health))
+        // 显式兜底 404: 不加这行, 下面 merge 网页路由时 axum 会用网页子路由的
+        // (缺省) fallback 覆盖主路由的缺省 fallback, 未注册的代理路径就绕开了
+        // cors_layer —— 未知路径的 OPTIONS 预检会收到裸 404 而不是带 CORS 头的 204.
+        .fallback(|| async { axum::http::StatusCode::NOT_FOUND })
         // axum 对 Bytes extractor 默认 2 MiB 上限, Codex 多图 base64 请求会 413
         // (issue #41); 上限来自 settings.max_request_body_mb, 改动需重启生效
         .layer(axum::extract::DefaultBodyLimit::max(body_limit))
@@ -114,7 +118,9 @@ fn build_router(state: AppState, body_limit: usize) -> Router {
             cc_middleware::cors_layer,
         ))
         // 网页界面必须在三个 layer 之后 merge: axum 的 layer 只作用于它之前注册的路由,
-        // /ui 子树由此绕开代理 token 校验与通配 CORS (安全前提, 见 proxy/web/mod.rs)
+        // /ui 子树由此绕开代理 token 校验与通配 CORS (安全前提, 见 proxy/web/mod.rs)。
+        // merge 时若两边都设了 fallback 会 panic, 若只有一边设了则以那边为准 —— 这里主路由
+        // 已在上面显式设置 (且已过三个 layer), 因此合并后仍是主路由的兜底, 继续经过 CORS。
         .merge(crate::proxy::web::router(state.clone()))
         .with_state(state)
 }

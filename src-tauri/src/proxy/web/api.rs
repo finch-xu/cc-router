@@ -237,6 +237,43 @@ pub async fn dispatch_handler(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::collections::BTreeSet;
+
+    /// 扫描 lib.rs 的 `generate_handler![...]` 登记表, 取每个 path 的最后一段
+    /// (函数名), 与 web_commands! 生成的 REGISTERED 做集合对比。两边任何一边
+    /// 漏登记都会在这里炸——网页 API 是否完整覆盖桌面 command 集合, 靠这个锁住。
+    #[test]
+    fn registered_matches_generate_handler() {
+        let lib_rs = include_str!("../../lib.rs");
+        let start_marker = "generate_handler![";
+        let start = lib_rs
+            .find(start_marker)
+            .expect("lib.rs 里找不到 generate_handler![")
+            + start_marker.len();
+        let rel_end = lib_rs[start..]
+            .find(']')
+            .expect("找不到 generate_handler! 的收尾 ]");
+        let block = &lib_rs[start..start + rel_end];
+
+        let from_lib_rs: BTreeSet<&str> = block
+            .split(',')
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
+            .map(|path| path.split("::").last().unwrap().trim())
+            .collect();
+
+        let from_registered: BTreeSet<&str> = REGISTERED.iter().copied().collect();
+
+        let missing_in_registered: Vec<_> =
+            from_lib_rs.difference(&from_registered).collect();
+        let missing_in_lib_rs: Vec<_> = from_registered.difference(&from_lib_rs).collect();
+
+        assert!(
+            missing_in_registered.is_empty() && missing_in_lib_rs.is_empty(),
+            "generate_handler! 与 web_commands! REGISTERED 不一致: \
+             只在 lib.rs 里的 = {missing_in_registered:?}, 只在 REGISTERED 里的 = {missing_in_lib_rs:?}"
+        );
+    }
 
     #[test]
     fn registered_has_no_duplicates_and_covers_known_names() {
