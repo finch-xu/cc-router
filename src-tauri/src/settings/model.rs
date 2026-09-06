@@ -92,6 +92,15 @@ pub struct Settings {
     /// 改动需要重启 app 才生效 (router 构建时读取, 同端口/监听地址)。
     #[serde(default = "default_max_request_body_mb")]
     pub max_request_body_mb: u32,
+    /// 是否在代理端口上提供网页管理界面 (/ui). 默认关闭.
+    /// 中间件每请求读取, 开关不需要重启.
+    #[serde(default)]
+    pub web_ui_enabled: bool,
+    /// 网页界面是否要求登录 (凭代理 auth_token). 默认开.
+    /// 与代理的 `auth_enabled` 互相独立. 关闭后 /ui/api/* 跳过会话校验, 登录页不再出现.
+    /// 仅在 web_ui_enabled=true 时有意义.
+    #[serde(default = "default_web_ui_auth_enabled")]
+    pub web_ui_auth_enabled: bool,
 }
 
 fn default_port() -> u16 {
@@ -126,6 +135,9 @@ fn default_https_enable_h2() -> bool {
 fn default_max_request_body_mb() -> u32 {
     32
 }
+fn default_web_ui_auth_enabled() -> bool {
+    true
+}
 
 impl Default for Settings {
     fn default() -> Self {
@@ -147,6 +159,8 @@ impl Default for Settings {
             update_source: None,
             debug_mode: false,
             max_request_body_mb: default_max_request_body_mb(),
+            web_ui_enabled: false,
+            web_ui_auth_enabled: default_web_ui_auth_enabled(),
         }
     }
 }
@@ -169,6 +183,8 @@ pub struct SettingsPatch {
     pub update_source: Option<String>,
     pub debug_mode: Option<bool>,
     pub max_request_body_mb: Option<u32>,
+    pub web_ui_enabled: Option<bool>,
+    pub web_ui_auth_enabled: Option<bool>,
 }
 
 impl Settings {
@@ -220,6 +236,12 @@ impl Settings {
         }
         if let Some(p) = patch.max_request_body_mb {
             self.max_request_body_mb = p;
+        }
+        if let Some(p) = patch.web_ui_enabled {
+            self.web_ui_enabled = p;
+        }
+        if let Some(p) = patch.web_ui_auth_enabled {
+            self.web_ui_auth_enabled = p;
         }
     }
 
@@ -459,5 +481,32 @@ mod tests {
         // 未传时不重置
         s.apply_patch(SettingsPatch::default());
         assert!(!s.https_enable_h2);
+    }
+
+    #[test]
+    fn web_ui_defaults_off_and_auth_on() {
+        let s = Settings::default();
+        assert!(!s.web_ui_enabled, "网页界面默认关闭");
+        assert!(s.web_ui_auth_enabled, "网页登录鉴权默认开启");
+    }
+
+    #[test]
+    fn legacy_settings_json_without_web_ui_fields_uses_defaults() {
+        let raw = r#"{"proxy_port": 23456}"#;
+        let s: Settings = serde_json::from_str(raw).unwrap();
+        assert!(!s.web_ui_enabled);
+        assert!(s.web_ui_auth_enabled);
+    }
+
+    #[test]
+    fn patch_applies_web_ui_fields() {
+        let mut s = Settings::default();
+        s.apply_patch(SettingsPatch {
+            web_ui_enabled: Some(true),
+            web_ui_auth_enabled: Some(false),
+            ..Default::default()
+        });
+        assert!(s.web_ui_enabled);
+        assert!(!s.web_ui_auth_enabled);
     }
 }

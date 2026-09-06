@@ -443,6 +443,10 @@ export interface Settings {
   debug_mode: boolean;
   /** 入站请求体上限 (MiB), 默认 32。修改需重启 app 才生效 (router 构建时读取)。 */
   max_request_body_mb: number;
+  /** 是否在代理端口上提供网页管理界面 (/ui)。默认 false，改动即时生效 */
+  web_ui_enabled: boolean;
+  /** 网页界面是否要求登录（凭代理 auth_token）。默认 true，与 auth_enabled 互相独立 */
+  web_ui_auth_enabled: boolean;
 }
 
 export type UpdateSource = "international" | "china";
@@ -464,6 +468,8 @@ export interface SettingsPatch {
   update_source?: UpdateSource;
   debug_mode?: boolean;
   max_request_body_mb?: number;
+  web_ui_enabled?: boolean;
+  web_ui_auth_enabled?: boolean;
   // 注意: auth_token 不在 patch 里,必须通过 generateNewToken() 改
 }
 
