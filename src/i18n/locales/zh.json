@@ -801,5 +801,14 @@
   "updates.available": "可更新",
   "window.minimize": "最小化",
   "window.maximize": "最大化",
-  "window.close": "关闭"
+  "window.close": "关闭",
+  "webAuth.title": "登录 cc-router 网页界面",
+  "webAuth.desc": "请输入代理访问令牌（桌面端「设置 → 鉴权与跨域」可查看）。",
+  "webAuth.tokenPlaceholder": "代理访问令牌",
+  "webAuth.submit": "登录",
+  "webAuth.submitting": "登录中…",
+  "webAuth.failed": "令牌不正确",
+  "webAuth.locked": "失败次数过多，请稍后再试",
+  "webAuth.checking": "正在检查登录状态…",
+  "sidebar.logout": "退出登录"
 }

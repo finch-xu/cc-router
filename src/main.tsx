@@ -4,6 +4,7 @@ import { BrowserRouter, HashRouter } from "react-router";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import App from "./App";
 import { I18nProvider } from "@/i18n";
+import { WebAuthGate } from "@/components/layout/WebAuthGate";
 import { ThemeProvider } from "@/hooks/useTheme";
 import { applyPlatformAttr } from "@/lib/platform";
 import { runtime } from "@/runtime";
@@ -31,9 +32,11 @@ ReactDOM.createRoot(document.getElementById("root")!).render(
     <QueryClientProvider client={queryClient}>
       <ThemeProvider>
         <I18nProvider>
-          <Router>
-            <App />
-          </Router>
+          <WebAuthGate>
+            <Router>
+              <App />
+            </Router>
+          </WebAuthGate>
         </I18nProvider>
       </ThemeProvider>
     </QueryClientProvider>

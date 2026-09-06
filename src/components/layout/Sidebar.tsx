@@ -1,4 +1,5 @@
 import { NavLink } from "react-router";
+import { useEffect, useState } from "react";
 import {
   Layers,
   Key,
@@ -10,6 +11,7 @@ import {
   BookOpen,
   Activity,
   RefreshCw,
+  LogOut,
   type LucideIcon,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
@@ -18,6 +20,7 @@ import { useVirtualModels } from "@/hooks/useVirtualModels";
 import { useProxyStatus } from "@/hooks/useSettings";
 import { useUpdater } from "@/hooks/useUpdater";
 import { useT } from "@/i18n";
+import { runtime, webLogout, webSession } from "@/runtime";
 import logoUrl from "@/assets/logo.png";
 
 interface NavItem {
@@ -74,6 +77,12 @@ export function Sidebar() {
     { to: "/about", label: t("sidebar.nav.about"), icon: Info },
   ];
 
+  const [showLogout, setShowLogout] = useState(false);
+  useEffect(() => {
+    if (runtime.kind !== "web") return;
+    void webSession().then((s) => setShowLogout(s.auth_enabled));
+  }, []);
+
   return (
     <aside className="sidebar">
       <div className="brand">
@@ -111,6 +120,20 @@ export function Sidebar() {
           </NavLink>
         );
       })}
+      {showLogout && (
+        <button
+          type="button"
+          className="nav-item nav-logout"
+          onClick={() => {
+            void webLogout().then(() => window.location.reload());
+          }}
+        >
+          <span className="nav-icon">
+            <LogOut size={16} strokeWidth={1.6} />
+          </span>
+          <span className="nav-label">{t("sidebar.logout")}</span>
+        </button>
+      )}
     </aside>
   );
 }

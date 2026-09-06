@@ -2648,4 +2648,30 @@ html:not([data-platform="macos"]) .main.flush { padding-top: 0; }
 .dark .rf-hub img {
   box-shadow: 0 8px 24px -10px rgba(0,0,0,0.70);
 }
+
+/* 网页界面登录页 (仅 web 模式) */
+.web-login-shell {
+  min-height: 100vh;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--bg);
+  color: var(--ink-2);
+  font-size: 13px;
+}
+.web-login-card {
+  width: 360px;
+  padding: 28px 26px 24px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: var(--surface);
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+.web-login-logo { width: 40px; height: 40px; }
+.web-login-card h1 { font-size: 16px; margin: 0; color: var(--ink); }
+.web-login-card .desc { margin: 0; font-size: 12px; color: var(--ink-3); line-height: 1.5; }
+.web-login-error { font-size: 12px; color: var(--err); }
+.nav-logout { margin-top: auto; background: none; border: 0; width: 100%; text-align: left; cursor: pointer; }
 /* .btn-dark: 暗色下 --ink 是浅色, 深底白字自动变成浅底深字, 语义仍成立 */
