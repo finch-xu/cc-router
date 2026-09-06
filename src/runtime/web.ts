@@ -81,8 +81,9 @@ export const webRuntime: Runtime = {
       handlers.set(name, set);
     }
     set.add(handler as Handler);
+    const existed = source !== null;
     const es = ensureSource();
-    if (isNew) attach(es, name);
+    if (existed && isNew) attach(es, name);
     return () => {
       handlers.get(name)?.delete(handler as Handler);
     };
