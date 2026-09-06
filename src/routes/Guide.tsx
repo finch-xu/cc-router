@@ -133,7 +133,7 @@ function ClaudeCodeTab() {
           <div className="field-hint">
             {t("guide.proxy.intro1")}
             <Link
-              to="/settings"
+              to="/settings?tab=proxy"
               style={{
                 color: "var(--accent-ink)",
                 textDecoration: "none",
@@ -188,7 +188,7 @@ function ClaudeCodeTab() {
             <span className="mono">ANTHROPIC_AUTH_TOKEN</span>
             {t("guide.method1.note1")}
             <Link
-              to="/settings"
+              to="/settings?tab=access"
               style={{
                 color: "var(--accent-ink)",
                 textDecoration: "none",
