@@ -1,4 +1,6 @@
-import { invoke } from "@tauri-apps/api/core";
+import { runtime } from "@/runtime";
+
+const invoke = runtime.invoke;
 import type {
   BreakdownBy,
   BreakdownDto,
