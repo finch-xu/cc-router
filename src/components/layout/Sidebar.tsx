@@ -76,13 +76,17 @@ export function Sidebar() {
 
   return (
     <aside className="sidebar">
-      {/* 顶条 = 窗口标题栏的左段: macOS 红绿灯叠在这里 (CSS 按 data-platform 留 80px),
-       * 整条可拖窗。品牌只留 logo + 名字一行; 代理地址 / 版本号不在侧栏展示 ——
-       * 地址在「实时路由」页可复制, 版本号在「关于」/「检查更新」页。 */}
-      <div className="sidebar-top" data-tauri-drag-region>
-        <img className="sidebar-brand-mark" src={logoUrl} alt="" data-tauri-drag-region />
-        <span className="sidebar-brand-name" data-tauri-drag-region>cc-router</span>
+      <div className="brand">
+        <div className="brand-mark">
+          <img src={logoUrl} alt="cc-router" />
+        </div>
+        <div className="brand-text">
+          <div className="brand-name">cc-router</div>
+          <div className="brand-tag">{t("sidebar.brand.tag")}</div>
+        </div>
       </div>
+      {/* 代理地址/端口与版本号不在这里展示: 地址在「实时路由」页可复制,
+       * 版本号在「关于」/「检查更新」页 —— 侧边栏只留导航。 */}
       {items.map((it) => {
         const Ico = it.icon;
         const badge = typeof it.badge === "function" ? it.badge() : it.badge;

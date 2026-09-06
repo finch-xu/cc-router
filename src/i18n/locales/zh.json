@@ -12,6 +12,7 @@
   "common.copied": "已复制",
   "common.copy": "复制",
   "common.close": "关闭",
+  "sidebar.brand.tag": "多订阅聚合代理",
   "sidebar.nav.guide": "接入指南",
   "sidebar.nav.virtualModels": "虚拟模型",
   "sidebar.nav.subscriptions": "订阅管理",

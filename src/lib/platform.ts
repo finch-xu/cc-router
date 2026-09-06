@@ -1,9 +1,9 @@
 import { platform } from "@tauri-apps/plugin-os";
 
 /**
- * 窗口外观按三档平台分流 (见 CLAUDE.md「标题栏融入内容区」):
- * - macos: 原生红绿灯叠在 webview 上 (titleBarStyle=Overlay), 侧栏顶条给它留 80px
- * - windows / linux: decorations=false, 由 PageBar 自绘最小化 / 最大化 / 关闭
+ * 窗口外观按三档平台分流 (见 CLAUDE.md「标题栏内嵌」):
+ * - macos: 原生红绿灯叠在 webview 上 (titleBarStyle=Overlay), 拖窗带 28px, 侧栏为它让出这段高度
+ * - windows / linux: decorations=false, 拖窗带 32px, 由 WindowChrome 里的 WindowControls 自绘三键
  * 其余平台 (ios/android 不会跑到这里) 一律按 linux 处理。
  */
 export type AppPlatform = "macos" | "windows" | "linux";

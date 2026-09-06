@@ -1,4 +1,3 @@
-import { PageBar } from "@/components/layout/PageBar";
 import { useState, useMemo, useRef } from "react";
 import { Link, useNavigate, useSearchParams } from "react-router";
 import { ArrowLeft, ArrowRight, ExternalLink, Check } from "lucide-react";
@@ -601,588 +600,583 @@ export function SubscriptionNewPage() {
 
   return (
     <>
-      <PageBar
-        title={isOnboarding ? t("subscriptionNew.welcomeTitle") : t("subscriptionNew.title")}
-        lead={
-          !isOnboarding && (
-            <Link
-              to={returnTo ?? "/subscriptions"}
-              className="btn bare sm"
-              style={{ textDecoration: "none" }}
-            >
-              <ArrowLeft size={12} /> {returnTo ? t("subscriptionNew.back") : t("subscriptionNew.backToList")}
-            </Link>
-          )
-        }
-      />
-      <div className="page-flow">
-        <div className="page-flow-pad">
-          <div className="page-intro">
-              {isOnboarding ? t("subscriptionNew.welcomeSubtitle") : t("subscriptionNew.subtitle")}
+      {!isOnboarding && (
+        <Link
+          to={returnTo ?? "/subscriptions"}
+          className="btn bare sm"
+          style={{ marginBottom: 18, textDecoration: "none" }}
+        >
+          <ArrowLeft size={12} /> {returnTo ? t("subscriptionNew.back") : t("subscriptionNew.backToList")}
+        </Link>
+      )}
+
+      <div className="page-header">
+        <h1>{isOnboarding ? t("subscriptionNew.welcomeTitle") : t("subscriptionNew.title")}</h1>
+        <div className="subtitle">
+          {isOnboarding ? t("subscriptionNew.welcomeSubtitle") : t("subscriptionNew.subtitle")}
+        </div>
+      </div>
+
+      <div className="wizard">
+        {/* 自定义路径不分步, 隐藏步骤指示器 */}
+        {!isCustom && (
+          <div className="steps">
+            <div className={`step ${step >= 1 ? "active" : ""} ${step > 1 ? "done" : ""}`}>
+              <span className="num">{step > 1 ? <Check size={11} /> : 1}</span>
+              <span>{t("subscriptionNew.step1")}</span>
+            </div>
+            <div className="step-bar" />
+            <div className={`step ${step === 2 ? "active" : ""} ${step > 2 ? "done" : ""}`}>
+              <span className="num">2</span>
+              <span>{t("subscriptionNew.step2")}</span>
+            </div>
           </div>
+        )}
 
-          <div className="wizard">
-            {/* 自定义路径不分步, 隐藏步骤指示器 */}
-            {!isCustom && (
-              <div className="steps">
-                <div className={`step ${step >= 1 ? "active" : ""} ${step > 1 ? "done" : ""}`}>
-                  <span className="num">{step > 1 ? <Check size={11} /> : 1}</span>
-                  <span>{t("subscriptionNew.step1")}</span>
-                </div>
-                <div className="step-bar" />
-                <div className={`step ${step === 2 ? "active" : ""} ${step > 2 ? "done" : ""}`}>
-                  <span className="num">2</span>
-                  <span>{t("subscriptionNew.step2")}</span>
-                </div>
-              </div>
-            )}
-
-            <div className="card">
-              <div className="card-body" style={{ paddingTop: 24 }}>
-                {/* 步骤 1 (内置) 或 单页表单 (自定义) 共用厂商 dropdown */}
-                {step === 1 && (
-                  <>
-                    <div style={{ marginBottom: 20 }}>
-                      <label className="field-label">{t("subscriptionNew.field.provider")}</label>
-                      <Select value={providerId} onValueChange={handleProviderChange}>
-                        <SelectTrigger>
-                          {renderProviderTriggerLabel()}
-                        </SelectTrigger>
-                        <SelectContent>
-                          {(() => {
-                            const firstParty =
-                              providers.data?.filter(
-                                (p) => (p.category ?? "first_party") === "first_party",
-                              ) ?? [];
-                            const secondParty =
-                              providers.data?.filter((p) => p.category === "second_party") ?? [];
-                            const aggregators =
-                              providers.data?.filter((p) => p.category === "aggregator") ?? [];
-                            return (
-                              <>
-                                <SelectGroup>
-                                  <SelectLabel>{t("subscriptionNew.group.firstParty")}</SelectLabel>
-                                  {firstParty.map((p) => (
-                                    <SelectItem key={p.id} value={p.id}>
-                                      <span style={{ display: "inline-flex", alignItems: "center", gap: 8 }}>
-                                        <ProviderLogo iconId={p.icon} size={20} />
-                                        {p.display_name}
-                                      </span>
-                                    </SelectItem>
-                                  ))}
-                                </SelectGroup>
-                                {secondParty.length > 0 && (
-                                  <SelectGroup>
-                                    <SelectLabel>{t("subscriptionNew.group.secondParty")}</SelectLabel>
-                                    {secondParty.map((p) => (
-                                      <SelectItem key={p.id} value={p.id}>
-                                        <span style={{ display: "inline-flex", alignItems: "center", gap: 8 }}>
-                                          <ProviderLogo iconId={p.icon} size={20} />
-                                          {p.display_name}
-                                        </span>
-                                      </SelectItem>
-                                    ))}
-                                  </SelectGroup>
-                                )}
-                                {aggregators.length > 0 && (
-                                  <SelectGroup>
-                                    <SelectLabel>{t("subscriptionNew.group.aggregator")}</SelectLabel>
-                                    {aggregators.map((p) => (
-                                      <SelectItem key={p.id} value={p.id}>
-                                        <span style={{ display: "inline-flex", alignItems: "center", gap: 8 }}>
-                                          <ProviderLogo iconId={p.icon} size={20} />
-                                          {p.display_name}
-                                        </span>
-                                      </SelectItem>
-                                    ))}
-                                  </SelectGroup>
-                                )}
-                                <SelectGroup>
-                                  <SelectLabel>{t("subscriptionNew.group.custom")}</SelectLabel>
-                                  <SelectItem value={CUSTOM_VALUE}>
+        <div className="card">
+          <div className="card-body" style={{ paddingTop: 24 }}>
+            {/* 步骤 1 (内置) 或 单页表单 (自定义) 共用厂商 dropdown */}
+            {step === 1 && (
+              <>
+                <div style={{ marginBottom: 20 }}>
+                  <label className="field-label">{t("subscriptionNew.field.provider")}</label>
+                  <Select value={providerId} onValueChange={handleProviderChange}>
+                    <SelectTrigger>
+                      {renderProviderTriggerLabel()}
+                    </SelectTrigger>
+                    <SelectContent>
+                      {(() => {
+                        const firstParty =
+                          providers.data?.filter(
+                            (p) => (p.category ?? "first_party") === "first_party",
+                          ) ?? [];
+                        const secondParty =
+                          providers.data?.filter((p) => p.category === "second_party") ?? [];
+                        const aggregators =
+                          providers.data?.filter((p) => p.category === "aggregator") ?? [];
+                        return (
+                          <>
+                            <SelectGroup>
+                              <SelectLabel>{t("subscriptionNew.group.firstParty")}</SelectLabel>
+                              {firstParty.map((p) => (
+                                <SelectItem key={p.id} value={p.id}>
+                                  <span style={{ display: "inline-flex", alignItems: "center", gap: 8 }}>
+                                    <ProviderLogo iconId={p.icon} size={20} />
+                                    {p.display_name}
+                                  </span>
+                                </SelectItem>
+                              ))}
+                            </SelectGroup>
+                            {secondParty.length > 0 && (
+                              <SelectGroup>
+                                <SelectLabel>{t("subscriptionNew.group.secondParty")}</SelectLabel>
+                                {secondParty.map((p) => (
+                                  <SelectItem key={p.id} value={p.id}>
                                     <span style={{ display: "inline-flex", alignItems: "center", gap: 8 }}>
-                                      <ProviderLogo iconId="claude" size={20} />
-                                      {t("subscriptionNew.customProvider")}
+                                      <ProviderLogo iconId={p.icon} size={20} />
+                                      {p.display_name}
                                     </span>
-                                  </SelectItem>
-                                  <SelectItem value={CUSTOM_GEMINI_VALUE}>
-                                    <span style={{ display: "inline-flex", alignItems: "center", gap: 8 }}>
-                                      <ProviderLogo iconId="google" size={20} />
-                                      {t("subscriptionNew.customGeminiProvider")}
-                                    </span>
-                                  </SelectItem>
-                                  <SelectItem value={CUSTOM_GEMINI_INTERACTIONS_VALUE}>
-                                    <span style={{ display: "inline-flex", alignItems: "center", gap: 8 }}>
-                                      <ProviderLogo iconId="google" size={20} />
-                                      {t("subscriptionNew.customGeminiInteractionsProvider")}
-                                    </span>
-                                  </SelectItem>
-                                  <SelectItem value={CUSTOM_OPENAI_VALUE}>
-                                    <span style={{ display: "inline-flex", alignItems: "center", gap: 8 }}>
-                                      <ProviderLogo iconId="openai" size={20} />
-                                      {t("subscriptionNew.customOpenaiProvider")}
-                                    </span>
-                                  </SelectItem>
-                                  <SelectItem value={CUSTOM_OPENAI_CHAT_VALUE}>
-                                    <span style={{ display: "inline-flex", alignItems: "center", gap: 8 }}>
-                                      <ProviderLogo iconId="openai" size={20} />
-                                      {t("subscriptionNew.customOpenaiChatProvider")}
-                                    </span>
-                                  </SelectItem>
-                                </SelectGroup>
-                              </>
-                            );
-                          })()}
-                        </SelectContent>
-                      </Select>
-                      {provider && !isCustom && (
-                        <div
-                          style={{
-                            marginTop: 8,
-                            display: "flex",
-                            alignItems: "center",
-                            gap: 10,
-                            fontSize: 12,
-                            color: "var(--ink-3)",
-                          }}
-                        >
-                          <ProviderBadge compatibility={provider.compatibility} />
-                          {provider.compatibility_notes && (
-                            <span>{provider.compatibility_notes}</span>
-                          )}
-                        </div>
-                      )}
-                      {isCustomAnthropic && (
-                        <div className="field-hint" style={{ marginTop: 6 }}>
-                          {t("subscriptionNew.customHint")}
-                        </div>
-                      )}
-                      {lockedPreset && (
-                        <div className="field-hint" style={{ marginTop: 6 }}>
-                          {t(lockedPreset.hintKey)}
-                        </div>
-                      )}
-                    </div>
-
-                    {/* 内置路径: endpoint dropdown */}
-                    {provider && !isCustom && (
-                      <div style={{ marginBottom: 20 }}>
-                        <label className="field-label">{t("subscriptionNew.field.endpoint")}</label>
-                        <Select value={endpointId} onValueChange={setEndpointId}>
-                          <SelectTrigger>
-                            <SelectValue placeholder={t("subscriptionNew.endpointSelect")} />
-                          </SelectTrigger>
-                          <SelectContent>
-                            {provider.endpoints.map((e) => (
-                              <SelectItem key={e.id} value={e.id} subtitle={e.base_url}>
-                                {e.label}
-                              </SelectItem>
-                            ))}
-                          </SelectContent>
-                        </Select>
-                        {endpoint && (
-                          <div className="field-hint">
-                            {endpoint.description && <div>{endpoint.description}</div>}
-                            <div className="mono" style={{ color: "var(--ink-3)", marginTop: 4 }}>
-                              {endpoint.base_url}
-                              {endpoint.messages_path}
-                            </div>
-                            {provider.api_key_url && (
-                              <button
-                                type="button"
-                                onClick={() => openShell(provider.api_key_url!).catch(() => {})}
-                                style={{
-                                  marginTop: 6,
-                                  background: "transparent",
-                                  border: "none",
-                                  color: "var(--accent-ink)",
-                                  padding: 0,
-                                  fontSize: 11.5,
-                                  display: "inline-flex",
-                                  alignItems: "center",
-                                  gap: 4,
-                                  cursor: "pointer",
-                                }}
-                              >
-                                <ExternalLink size={11} /> {t("subscriptionNew.openApiKey")}
-                              </button>
-                            )}
-                          </div>
-                        )}
-                      </div>
-                    )}
-
-                    {/* 自定义路径: 厂商显示名 / base_url / messages_path / 鉴权方式 */}
-                    {isCustom && (
-                      <>
-                        <div style={{ marginBottom: 20 }}>
-                          <label className="field-label">{t("subscriptionNew.field.providerName")}</label>
-                          <input
-                            className="input"
-                            value={customProviderName}
-                            onChange={(e) => handleCustomProviderNameChange(e.target.value)}
-                            placeholder={t("subscriptionNew.providerNamePh")}
-                          />
-                          <div className="field-hint">{t("subscriptionNew.providerNameHint")}</div>
-                        </div>
-
-                        <div style={{ marginBottom: 20 }}>
-                          <label className="field-label">Base URL</label>
-                          <input
-                            className="input mono"
-                            value={customBaseUrl}
-                            onChange={(e) => setCustomBaseUrl(e.target.value)}
-                            placeholder={lockedPreset?.baseUrl ?? "https://api.example.com"}
-                          />
-                          <div className="field-hint">
-                            {t(lockedPreset?.baseUrlHintKey ?? "subscriptionNew.baseUrlHint")}
-                          </div>
-                        </div>
-
-                        <div style={{ marginBottom: 20 }}>
-                          <label className="field-label">Messages Path</label>
-                          <input
-                            className="input mono"
-                            value={customMessagesPath}
-                            onChange={(e) => setCustomMessagesPath(e.target.value)}
-                            placeholder={lockedPreset?.messagesPath ?? "/v1/messages"}
-                          />
-                          <div className="field-hint">
-                            {t(lockedPreset?.messagesPathHintKey ?? "subscriptionNew.messagesPathHint")}
-                          </div>
-                        </div>
-
-                        {lockedPreset ? (
-                          <div style={{ marginBottom: 20 }}>
-                            <label className="field-label">{t("subscriptionNew.authMethod")}</label>
-                            <div className="mono field-hint" style={{ marginTop: 4 }}>
-                              {lockedPreset.authLockedDisplay}
-                            </div>
-                            <div className="field-hint" style={{ marginTop: 6 }}>
-                              {t(lockedPreset.authLockedHintKey)}
-                            </div>
-                          </div>
-                        ) : (
-                          <div style={{ marginBottom: 20 }}>
-                            <label className="field-label">{t("subscriptionNew.authMethod")}</label>
-                            <Select
-                              value={customAuthPreset}
-                              onValueChange={(v) => setCustomAuthPreset(v as AuthPreset)}
-                            >
-                              <SelectTrigger>
-                                <SelectValue />
-                              </SelectTrigger>
-                              <SelectContent>
-                                {Object.entries(AUTH_PRESETS).map(([k, v]) => (
-                                  <SelectItem key={k} value={k}>
-                                    {v.label}
                                   </SelectItem>
                                 ))}
-                              </SelectContent>
-                            </Select>
-                          </div>
-                        )}
-                      </>
-                    )}
+                              </SelectGroup>
+                            )}
+                            {aggregators.length > 0 && (
+                              <SelectGroup>
+                                <SelectLabel>{t("subscriptionNew.group.aggregator")}</SelectLabel>
+                                {aggregators.map((p) => (
+                                  <SelectItem key={p.id} value={p.id}>
+                                    <span style={{ display: "inline-flex", alignItems: "center", gap: 8 }}>
+                                      <ProviderLogo iconId={p.icon} size={20} />
+                                      {p.display_name}
+                                    </span>
+                                  </SelectItem>
+                                ))}
+                              </SelectGroup>
+                            )}
+                            <SelectGroup>
+                              <SelectLabel>{t("subscriptionNew.group.custom")}</SelectLabel>
+                              <SelectItem value={CUSTOM_VALUE}>
+                                <span style={{ display: "inline-flex", alignItems: "center", gap: 8 }}>
+                                  <ProviderLogo iconId="claude" size={20} />
+                                  {t("subscriptionNew.customProvider")}
+                                </span>
+                              </SelectItem>
+                              <SelectItem value={CUSTOM_GEMINI_VALUE}>
+                                <span style={{ display: "inline-flex", alignItems: "center", gap: 8 }}>
+                                  <ProviderLogo iconId="google" size={20} />
+                                  {t("subscriptionNew.customGeminiProvider")}
+                                </span>
+                              </SelectItem>
+                              <SelectItem value={CUSTOM_GEMINI_INTERACTIONS_VALUE}>
+                                <span style={{ display: "inline-flex", alignItems: "center", gap: 8 }}>
+                                  <ProviderLogo iconId="google" size={20} />
+                                  {t("subscriptionNew.customGeminiInteractionsProvider")}
+                                </span>
+                              </SelectItem>
+                              <SelectItem value={CUSTOM_OPENAI_VALUE}>
+                                <span style={{ display: "inline-flex", alignItems: "center", gap: 8 }}>
+                                  <ProviderLogo iconId="openai" size={20} />
+                                  {t("subscriptionNew.customOpenaiProvider")}
+                                </span>
+                              </SelectItem>
+                              <SelectItem value={CUSTOM_OPENAI_CHAT_VALUE}>
+                                <span style={{ display: "inline-flex", alignItems: "center", gap: 8 }}>
+                                  <ProviderLogo iconId="openai" size={20} />
+                                  {t("subscriptionNew.customOpenaiChatProvider")}
+                                </span>
+                              </SelectItem>
+                            </SelectGroup>
+                          </>
+                        );
+                      })()}
+                    </SelectContent>
+                  </Select>
+                  {provider && !isCustom && (
+                    <div
+                      style={{
+                        marginTop: 8,
+                        display: "flex",
+                        alignItems: "center",
+                        gap: 10,
+                        fontSize: 12,
+                        color: "var(--ink-3)",
+                      }}
+                    >
+                      <ProviderBadge compatibility={provider.compatibility} />
+                      {provider.compatibility_notes && (
+                        <span>{provider.compatibility_notes}</span>
+                      )}
+                    </div>
+                  )}
+                  {isCustomAnthropic && (
+                    <div className="field-hint" style={{ marginTop: 6 }}>
+                      {t("subscriptionNew.customHint")}
+                    </div>
+                  )}
+                  {lockedPreset && (
+                    <div className="field-hint" style={{ marginTop: 6 }}>
+                      {t(lockedPreset.hintKey)}
+                    </div>
+                  )}
+                </div>
 
-                    {/* ChatGPT OAuth 路径: 用「连接账号」按钮替代 API Key 输入框 */}
-                    {isChatGptOAuth ? (
-                      <div style={{ marginBottom: 20 }}>
-                        <label className="field-label">{t("subscriptionNew.field.chatgptAccount")}</label>
-                        {oauthResult ? (
-                          <div
-                            style={{
-                              display: "flex",
-                              alignItems: "center",
-                              justifyContent: "space-between",
-                              padding: 12,
-                              border: "1px solid var(--line)",
-                              borderRadius: 6,
-                              background: "var(--surface-2)",
-                            }}
-                          >
-                            <div>
-                              <div style={{ fontSize: 13, fontWeight: 500 }}>
-                                {oauthResult.account.email ?? t("oauth.chatgpt.noEmail")}
-                              </div>
-                              <div className="mono" style={{ fontSize: 11, color: "var(--ink-3)" }}>
-                                {oauthResult.account.account_id}
-                              </div>
-                            </div>
-                            <button
-                              type="button"
-                              className="btn bare sm"
-                              onClick={() => {
-                                setOauthResult(null);
-                                setOauthDialogOpen(true);
-                              }}
-                            >
-                              {t("oauth.chatgpt.reconnect")}
-                            </button>
-                          </div>
-                        ) : (
-                          <button
-                            type="button"
-                            className="btn primary"
-                            style={{ width: "100%" }}
-                            onClick={() => setOauthDialogOpen(true)}
-                          >
-                            {t("oauth.chatgpt.connectButton")}
-                          </button>
-                        )}
-                        <div className="field-hint" style={{ marginTop: 8 }}>
-                          {t("oauth.chatgpt.connectHint")}
+                {/* 内置路径: endpoint dropdown */}
+                {provider && !isCustom && (
+                  <div style={{ marginBottom: 20 }}>
+                    <label className="field-label">{t("subscriptionNew.field.endpoint")}</label>
+                    <Select value={endpointId} onValueChange={setEndpointId}>
+                      <SelectTrigger>
+                        <SelectValue placeholder={t("subscriptionNew.endpointSelect")} />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {provider.endpoints.map((e) => (
+                          <SelectItem key={e.id} value={e.id} subtitle={e.base_url}>
+                            {e.label}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                    {endpoint && (
+                      <div className="field-hint">
+                        {endpoint.description && <div>{endpoint.description}</div>}
+                        <div className="mono" style={{ color: "var(--ink-3)", marginTop: 4 }}>
+                          {endpoint.base_url}
+                          {endpoint.messages_path}
                         </div>
-                      </div>
-                    ) : isKiroOAuth ? (
-                      <div style={{ marginBottom: 20 }}>
-                        <label className="field-label">{t("subscriptionNew.field.kiroCredential")}</label>
-                        {kiroPayload ? (
-                          <div
-                            style={{
-                              display: "flex",
-                              alignItems: "center",
-                              justifyContent: "space-between",
-                              padding: 12,
-                              border: "1px solid var(--line)",
-                              borderRadius: 6,
-                              background: "var(--surface-2)",
-                            }}
-                          >
-                            <div style={{ fontSize: 12.5 }}>
-                              <div>
-                                <strong>{t("oauth.kiro.connected")}</strong> · {kiroPayload.authMethod} · {kiroPayload.region}
-                              </div>
-                              <div style={{ fontSize: 11, color: "var(--ink-3)", marginTop: 4 }}>
-                                {kiroPayload.sessionId
-                                  ? t("oauth.kiro.sourceFromJson")
-                                  : t("oauth.kiro.sourceFromDeviceFlow")}
-                              </div>
-                            </div>
-                            <button
-                              type="button"
-                              className="btn bare sm"
-                              onClick={() => {
-                                setKiroPayload(null);
-                                setKiroDialogOpen(true);
-                              }}
-                            >
-                              {t("oauth.kiro.reconnect")}
-                            </button>
-                          </div>
-                        ) : (
+                        {provider.api_key_url && (
                           <button
                             type="button"
-                            className="btn primary"
-                            style={{ width: "100%" }}
-                            onClick={() => setKiroDialogOpen(true)}
+                            onClick={() => openShell(provider.api_key_url!).catch(() => {})}
+                            style={{
+                              marginTop: 6,
+                              background: "transparent",
+                              border: "none",
+                              color: "var(--accent-ink)",
+                              padding: 0,
+                              fontSize: 11.5,
+                              display: "inline-flex",
+                              alignItems: "center",
+                              gap: 4,
+                              cursor: "pointer",
+                            }}
                           >
-                            {t("oauth.kiro.connectButton")}
+                            <ExternalLink size={11} /> {t("subscriptionNew.openApiKey")}
                           </button>
                         )}
-                        <div className="field-hint" style={{ marginTop: 8 }}>
-                          {t("oauth.kiro.connectHint")}
+                      </div>
+                    )}
+                  </div>
+                )}
+
+                {/* 自定义路径: 厂商显示名 / base_url / messages_path / 鉴权方式 */}
+                {isCustom && (
+                  <>
+                    <div style={{ marginBottom: 20 }}>
+                      <label className="field-label">{t("subscriptionNew.field.providerName")}</label>
+                      <input
+                        className="input"
+                        value={customProviderName}
+                        onChange={(e) => handleCustomProviderNameChange(e.target.value)}
+                        placeholder={t("subscriptionNew.providerNamePh")}
+                      />
+                      <div className="field-hint">{t("subscriptionNew.providerNameHint")}</div>
+                    </div>
+
+                    <div style={{ marginBottom: 20 }}>
+                      <label className="field-label">Base URL</label>
+                      <input
+                        className="input mono"
+                        value={customBaseUrl}
+                        onChange={(e) => setCustomBaseUrl(e.target.value)}
+                        placeholder={lockedPreset?.baseUrl ?? "https://api.example.com"}
+                      />
+                      <div className="field-hint">
+                        {t(lockedPreset?.baseUrlHintKey ?? "subscriptionNew.baseUrlHint")}
+                      </div>
+                    </div>
+
+                    <div style={{ marginBottom: 20 }}>
+                      <label className="field-label">Messages Path</label>
+                      <input
+                        className="input mono"
+                        value={customMessagesPath}
+                        onChange={(e) => setCustomMessagesPath(e.target.value)}
+                        placeholder={lockedPreset?.messagesPath ?? "/v1/messages"}
+                      />
+                      <div className="field-hint">
+                        {t(lockedPreset?.messagesPathHintKey ?? "subscriptionNew.messagesPathHint")}
+                      </div>
+                    </div>
+
+                    {lockedPreset ? (
+                      <div style={{ marginBottom: 20 }}>
+                        <label className="field-label">{t("subscriptionNew.authMethod")}</label>
+                        <div className="mono field-hint" style={{ marginTop: 4 }}>
+                          {lockedPreset.authLockedDisplay}
+                        </div>
+                        <div className="field-hint" style={{ marginTop: 6 }}>
+                          {t(lockedPreset.authLockedHintKey)}
                         </div>
                       </div>
                     ) : (
                       <div style={{ marginBottom: 20 }}>
-                        <label className="field-label">API Key</label>
-                        <input
-                          className="input mono"
-                          type="password"
-                          value={apiKey}
-                          onChange={(e) => setApiKey(e.target.value)}
-                          placeholder="sk-..."
-                        />
+                        <label className="field-label">{t("subscriptionNew.authMethod")}</label>
+                        <Select
+                          value={customAuthPreset}
+                          onValueChange={(v) => setCustomAuthPreset(v as AuthPreset)}
+                        >
+                          <SelectTrigger>
+                            <SelectValue />
+                          </SelectTrigger>
+                          <SelectContent>
+                            {Object.entries(AUTH_PRESETS).map(([k, v]) => (
+                              <SelectItem key={k} value={k}>
+                                {v.label}
+                              </SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
                       </div>
                     )}
-
-                    <div style={{ marginBottom: 24 }}>
-                      <label className="field-label">{t("subscriptionNew.field.note")}</label>
-                      <input
-                        className="input"
-                        value={displayName}
-                        onChange={(e) => setDisplayName(e.target.value)}
-                        placeholder={t("subscriptionNew.notePh")}
-                      />
-                      <div className="field-hint">{t("subscriptionNew.noteHint")}</div>
-                    </div>
-
-                    {/* 自定义路径: 单页直接显示各 slot 输入 */}
-                    {isCustom && (
-                      <div style={{ marginBottom: 24 }}>
-                        <label className="field-label">{t("subscriptionNew.slotsLabel")}</label>
-                        <div className="field-hint" style={{ marginBottom: 8 }}>
-                          {t("subscriptionNew.slotsHint")}
-                        </div>
-                        {MODEL_SLOT_KEYS.map((key) => (
-                          <SlotInput
-                            key={key}
-                            label={`model-${key} →`}
-                            value={slots[key]}
-                            onChange={(v) => setSlots({ ...slots, [key]: v })}
-                          />
-                        ))}
-                        {/* 兜底槽 (可选): 留空 = fallback 透传未知 model */}
-                        <SlotInput
-                          label="model-fallback →"
-                          value={slots.fallback ?? ""}
-                          onChange={(v) => setSlots({ ...slots, fallback: v })}
-                          placeholder={t("modelSlot.fallback.none")}
-                        />
-                      </div>
-                    )}
-
-                    {(modelFetchError || submitError) && (
-                      <div className="alert err" style={{ marginBottom: 16 }}>
-                        {submitError ?? modelFetchError}
-                      </div>
-                    )}
-
-                    <div
-                      style={{
-                        display: "flex",
-                        justifyContent: "flex-end",
-                        gap: 8,
-                        paddingTop: 12,
-                        borderTop: "1px solid var(--line)",
-                      }}
-                    >
-                      {!isOnboarding && (
-                        <Link className="btn" to={returnTo ?? "/subscriptions"}>
-                          {t("common.cancel")}
-                        </Link>
-                      )}
-                      {isCustom ? (
-                        <button
-                          className="btn primary"
-                          onClick={saveCustom}
-                          disabled={submitting}
-                          type="button"
-                        >
-                          {submitting && <Spinner />}
-                          {t("common.save")}
-                        </button>
-                      ) : isChatGptOAuth ? (
-                        <button
-                          className="btn primary"
-                          onClick={goToStep2OAuth}
-                          disabled={!provider || !endpoint || !oauthResult || !displayName}
-                          type="button"
-                        >
-                          {t("common.next")} <ArrowRight size={12} />
-                        </button>
-                      ) : isKiroOAuth ? (
-                        <button
-                          className="btn primary"
-                          onClick={goToStep2Kiro}
-                          disabled={!provider || !endpoint || !kiroPayload || !displayName || fetchingModels}
-                          type="button"
-                        >
-                          {fetchingModels && <Spinner />}
-                          {t("common.next")} <ArrowRight size={12} />
-                        </button>
-                      ) : (
-                        <button
-                          className="btn primary"
-                          onClick={goToStep2}
-                          disabled={!provider || !endpoint || !apiKey || !displayName || fetchingModels}
-                          type="button"
-                        >
-                          {fetchingModels && <Spinner />}
-                          {t("common.next")} <ArrowRight size={12} />
-                        </button>
-                      )}
-                    </div>
                   </>
                 )}
 
-                {step === 2 && provider && (
-                  <>
-                    <ModelSlotPicker
-                      value={slots}
-                      onChange={setSlots}
-                      efforts={slotEfforts}
-                      onEffortsChange={setSlotEfforts}
-                      effortDisabled={isKiroOAuth}
-                      effortDisabledReason={t("slotEffort.unsupportedKiro")}
-                      models={models}
-                      loading={fetchingModels}
-                      error={modelFetchError}
-                      onRefresh={refreshModels}
-                      exampleModels={provider.model_discovery.example_models}
-                    />
-
-                    {submitError && (
-                      <div className="alert err" style={{ marginTop: 12 }}>
-                        {submitError}
-                      </div>
-                    )}
-
-                    <div
-                      style={{
-                        display: "flex",
-                        justifyContent: "space-between",
-                        paddingTop: 16,
-                        marginTop: 16,
-                        borderTop: "1px solid var(--line)",
-                      }}
-                    >
-                      <button className="btn bare" onClick={() => setStep(1)} type="button">
-                        <ArrowLeft size={12} /> {t("common.prev")}
-                      </button>
-                      <button
-                        className="btn primary"
-                        onClick={isChatGptOAuth ? saveOAuth : isKiroOAuth ? saveKiro : save}
-                        disabled={
-                          !allSlotsFilled(slots) || submitting
-                        }
-                        type="button"
+                {/* ChatGPT OAuth 路径: 用「连接账号」按钮替代 API Key 输入框 */}
+                {isChatGptOAuth ? (
+                  <div style={{ marginBottom: 20 }}>
+                    <label className="field-label">{t("subscriptionNew.field.chatgptAccount")}</label>
+                    {oauthResult ? (
+                      <div
+                        style={{
+                          display: "flex",
+                          alignItems: "center",
+                          justifyContent: "space-between",
+                          padding: 12,
+                          border: "1px solid var(--line)",
+                          borderRadius: 6,
+                          background: "var(--surface-2)",
+                        }}
                       >
-                        {submitting && <Spinner />}
-                        {t("common.save")}
+                        <div>
+                          <div style={{ fontSize: 13, fontWeight: 500 }}>
+                            {oauthResult.account.email ?? t("oauth.chatgpt.noEmail")}
+                          </div>
+                          <div className="mono" style={{ fontSize: 11, color: "var(--ink-3)" }}>
+                            {oauthResult.account.account_id}
+                          </div>
+                        </div>
+                        <button
+                          type="button"
+                          className="btn bare sm"
+                          onClick={() => {
+                            setOauthResult(null);
+                            setOauthDialogOpen(true);
+                          }}
+                        >
+                          {t("oauth.chatgpt.reconnect")}
+                        </button>
+                      </div>
+                    ) : (
+                      <button
+                        type="button"
+                        className="btn primary"
+                        style={{ width: "100%" }}
+                        onClick={() => setOauthDialogOpen(true)}
+                      >
+                        {t("oauth.chatgpt.connectButton")}
                       </button>
+                    )}
+                    <div className="field-hint" style={{ marginTop: 8 }}>
+                      {t("oauth.chatgpt.connectHint")}
                     </div>
-                  </>
+                  </div>
+                ) : isKiroOAuth ? (
+                  <div style={{ marginBottom: 20 }}>
+                    <label className="field-label">{t("subscriptionNew.field.kiroCredential")}</label>
+                    {kiroPayload ? (
+                      <div
+                        style={{
+                          display: "flex",
+                          alignItems: "center",
+                          justifyContent: "space-between",
+                          padding: 12,
+                          border: "1px solid var(--line)",
+                          borderRadius: 6,
+                          background: "var(--surface-2)",
+                        }}
+                      >
+                        <div style={{ fontSize: 12.5 }}>
+                          <div>
+                            <strong>{t("oauth.kiro.connected")}</strong> · {kiroPayload.authMethod} · {kiroPayload.region}
+                          </div>
+                          <div style={{ fontSize: 11, color: "var(--ink-3)", marginTop: 4 }}>
+                            {kiroPayload.sessionId
+                              ? t("oauth.kiro.sourceFromJson")
+                              : t("oauth.kiro.sourceFromDeviceFlow")}
+                          </div>
+                        </div>
+                        <button
+                          type="button"
+                          className="btn bare sm"
+                          onClick={() => {
+                            setKiroPayload(null);
+                            setKiroDialogOpen(true);
+                          }}
+                        >
+                          {t("oauth.kiro.reconnect")}
+                        </button>
+                      </div>
+                    ) : (
+                      <button
+                        type="button"
+                        className="btn primary"
+                        style={{ width: "100%" }}
+                        onClick={() => setKiroDialogOpen(true)}
+                      >
+                        {t("oauth.kiro.connectButton")}
+                      </button>
+                    )}
+                    <div className="field-hint" style={{ marginTop: 8 }}>
+                      {t("oauth.kiro.connectHint")}
+                    </div>
+                  </div>
+                ) : (
+                  <div style={{ marginBottom: 20 }}>
+                    <label className="field-label">API Key</label>
+                    <input
+                      className="input mono"
+                      type="password"
+                      value={apiKey}
+                      onChange={(e) => setApiKey(e.target.value)}
+                      placeholder="sk-..."
+                    />
+                  </div>
                 )}
-              </div>
-            </div>
+
+                <div style={{ marginBottom: 24 }}>
+                  <label className="field-label">{t("subscriptionNew.field.note")}</label>
+                  <input
+                    className="input"
+                    value={displayName}
+                    onChange={(e) => setDisplayName(e.target.value)}
+                    placeholder={t("subscriptionNew.notePh")}
+                  />
+                  <div className="field-hint">{t("subscriptionNew.noteHint")}</div>
+                </div>
+
+                {/* 自定义路径: 单页直接显示各 slot 输入 */}
+                {isCustom && (
+                  <div style={{ marginBottom: 24 }}>
+                    <label className="field-label">{t("subscriptionNew.slotsLabel")}</label>
+                    <div className="field-hint" style={{ marginBottom: 8 }}>
+                      {t("subscriptionNew.slotsHint")}
+                    </div>
+                    {MODEL_SLOT_KEYS.map((key) => (
+                      <SlotInput
+                        key={key}
+                        label={`model-${key} →`}
+                        value={slots[key]}
+                        onChange={(v) => setSlots({ ...slots, [key]: v })}
+                      />
+                    ))}
+                    {/* 兜底槽 (可选): 留空 = fallback 透传未知 model */}
+                    <SlotInput
+                      label="model-fallback →"
+                      value={slots.fallback ?? ""}
+                      onChange={(v) => setSlots({ ...slots, fallback: v })}
+                      placeholder={t("modelSlot.fallback.none")}
+                    />
+                  </div>
+                )}
+
+                {(modelFetchError || submitError) && (
+                  <div className="alert err" style={{ marginBottom: 16 }}>
+                    {submitError ?? modelFetchError}
+                  </div>
+                )}
+
+                <div
+                  style={{
+                    display: "flex",
+                    justifyContent: "flex-end",
+                    gap: 8,
+                    paddingTop: 12,
+                    borderTop: "1px solid var(--line)",
+                  }}
+                >
+                  {!isOnboarding && (
+                    <Link className="btn" to={returnTo ?? "/subscriptions"}>
+                      {t("common.cancel")}
+                    </Link>
+                  )}
+                  {isCustom ? (
+                    <button
+                      className="btn primary"
+                      onClick={saveCustom}
+                      disabled={submitting}
+                      type="button"
+                    >
+                      {submitting && <Spinner />}
+                      {t("common.save")}
+                    </button>
+                  ) : isChatGptOAuth ? (
+                    <button
+                      className="btn primary"
+                      onClick={goToStep2OAuth}
+                      disabled={!provider || !endpoint || !oauthResult || !displayName}
+                      type="button"
+                    >
+                      {t("common.next")} <ArrowRight size={12} />
+                    </button>
+                  ) : isKiroOAuth ? (
+                    <button
+                      className="btn primary"
+                      onClick={goToStep2Kiro}
+                      disabled={!provider || !endpoint || !kiroPayload || !displayName || fetchingModels}
+                      type="button"
+                    >
+                      {fetchingModels && <Spinner />}
+                      {t("common.next")} <ArrowRight size={12} />
+                    </button>
+                  ) : (
+                    <button
+                      className="btn primary"
+                      onClick={goToStep2}
+                      disabled={!provider || !endpoint || !apiKey || !displayName || fetchingModels}
+                      type="button"
+                    >
+                      {fetchingModels && <Spinner />}
+                      {t("common.next")} <ArrowRight size={12} />
+                    </button>
+                  )}
+                </div>
+              </>
+            )}
+
+            {step === 2 && provider && (
+              <>
+                <ModelSlotPicker
+                  value={slots}
+                  onChange={setSlots}
+                  efforts={slotEfforts}
+                  onEffortsChange={setSlotEfforts}
+                  effortDisabled={isKiroOAuth}
+                  effortDisabledReason={t("slotEffort.unsupportedKiro")}
+                  models={models}
+                  loading={fetchingModels}
+                  error={modelFetchError}
+                  onRefresh={refreshModels}
+                  exampleModels={provider.model_discovery.example_models}
+                />
+
+                {submitError && (
+                  <div className="alert err" style={{ marginTop: 12 }}>
+                    {submitError}
+                  </div>
+                )}
+
+                <div
+                  style={{
+                    display: "flex",
+                    justifyContent: "space-between",
+                    paddingTop: 16,
+                    marginTop: 16,
+                    borderTop: "1px solid var(--line)",
+                  }}
+                >
+                  <button className="btn bare" onClick={() => setStep(1)} type="button">
+                    <ArrowLeft size={12} /> {t("common.prev")}
+                  </button>
+                  <button
+                    className="btn primary"
+                    onClick={isChatGptOAuth ? saveOAuth : isKiroOAuth ? saveKiro : save}
+                    disabled={
+                      !allSlotsFilled(slots) || submitting
+                    }
+                    type="button"
+                  >
+                    {submitting && <Spinner />}
+                    {t("common.save")}
+                  </button>
+                </div>
+              </>
+            )}
           </div>
-
-          <ChatGptOAuthDialog
-            open={oauthDialogOpen}
-            onClose={() => setOauthDialogOpen(false)}
-            onSuccess={(deviceCode, account) => {
-              setOauthResult({ deviceCode, account });
-              if (!displayName) {
-                const suffix = Math.random().toString(36).slice(2, 8);
-                const generated = account.email
-                  ? `Codex · ${account.email} ${suffix}`
-                  : `Codex · ${suffix}`;
-                setDisplayName(generated);
-                autoGenNameRef.current = generated;
-              }
-              // 让 dialog 短暂展示「已连接」状态再关
-              setTimeout(() => setOauthDialogOpen(false), 500);
-            }}
-          />
-
-          <KiroAuthDialog
-            open={kiroDialogOpen}
-            onClose={() => setKiroDialogOpen(false)}
-            onSuccess={(payload) => {
-              setKiroPayload(payload);
-              if (!displayName || displayName === autoGenNameRef.current) {
-                const suffix = Math.random().toString(36).slice(2, 8);
-                const generated = `Kiro · ${payload.region} ${suffix}`;
-                setDisplayName(generated);
-                autoGenNameRef.current = generated;
-              }
-              setKiroDialogOpen(false);
-            }}
-          />
         </div>
       </div>
+
+      <ChatGptOAuthDialog
+        open={oauthDialogOpen}
+        onClose={() => setOauthDialogOpen(false)}
+        onSuccess={(deviceCode, account) => {
+          setOauthResult({ deviceCode, account });
+          if (!displayName) {
+            const suffix = Math.random().toString(36).slice(2, 8);
+            const generated = account.email
+              ? `Codex · ${account.email} ${suffix}`
+              : `Codex · ${suffix}`;
+            setDisplayName(generated);
+            autoGenNameRef.current = generated;
+          }
+          // 让 dialog 短暂展示「已连接」状态再关
+          setTimeout(() => setOauthDialogOpen(false), 500);
+        }}
+      />
+
+      <KiroAuthDialog
+        open={kiroDialogOpen}
+        onClose={() => setKiroDialogOpen(false)}
+        onSuccess={(payload) => {
+          setKiroPayload(payload);
+          if (!displayName || displayName === autoGenNameRef.current) {
+            const suffix = Math.random().toString(36).slice(2, 8);
+            const generated = `Kiro · ${payload.region} ${suffix}`;
+            setDisplayName(generated);
+            autoGenNameRef.current = generated;
+          }
+          setKiroDialogOpen(false);
+        }}
+      />
     </>
   );
 }

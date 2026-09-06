@@ -8,7 +8,7 @@ import { ThemeProvider } from "@/hooks/useTheme";
 import { applyPlatformAttr } from "@/lib/platform";
 import "./styles.css";
 
-// 首帧前打平台标记: 侧栏顶条 / 窗口三键的排版靠 <html data-platform> 分流
+// 首帧前打平台标记: 拖窗带高度 / 窗口三键的排版靠 <html data-platform> 分流
 applyPlatformAttr();
 
 const queryClient = new QueryClient({

@@ -1,4 +1,3 @@
-import { PageBar } from "@/components/layout/PageBar";
 import { useEffect, useMemo, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router";
 import { ArrowLeft, TriangleAlert, LoaderCircle } from "lucide-react";
@@ -261,10 +260,8 @@ export function SubscriptionEditPage() {
 
   return (
     <>
-      <PageBar
-        col
-        title={sub.display_name}
-        lead={
+      <div className="page-bar">
+        <div className="page-col page-bar-lead">
           <Button
             variant="ghost"
             size="icon"
@@ -277,18 +274,15 @@ export function SubscriptionEditPage() {
               <ArrowLeft className="h-4 w-4" />
             </Link>
           </Button>
-        }
-        badges={
-          <>
-            <StatusBadge state={sub.state} className="shrink-0" />
-            {isCustom && (
-              <span className="shrink-0 text-xs px-2 py-0.5 rounded bg-muted text-muted-foreground">
-                🔧 {t("subscriptions.custom")}
-              </span>
-            )}
-          </>
-        }
-      />
+          <h1 title={sub.display_name}>{sub.display_name}</h1>
+          <StatusBadge state={sub.state} className="shrink-0" />
+          {isCustom && (
+            <span className="shrink-0 text-xs px-2 py-0.5 rounded bg-muted text-muted-foreground">
+              🔧 {t("subscriptions.custom")}
+            </span>
+          )}
+        </div>
+      </div>
 
       <div className="page-flow">
         <div className="page-flow-pad">

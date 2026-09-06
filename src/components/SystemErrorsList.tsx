@@ -33,9 +33,11 @@ export function SystemErrorsList() {
 
   return (
     <>
-      {/* 标签名已在 Logs.tsx 的 tab 上, 这里只留副标题 + 操作行 */}
-      <div className="page-intro-row">
-        <div className="page-intro">{t("logs.systemErrors.subtitle")}</div>
+      <div className="page-actions">
+        <div className="page-header" style={{ margin: 0 }}>
+          <h1>{t("logs.tab.systemErrors")}</h1>
+          <div className="subtitle">{t("logs.systemErrors.subtitle")}</div>
+        </div>
         <button
           className="btn"
           onClick={() => query.refetch()}

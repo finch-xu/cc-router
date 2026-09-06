@@ -1,4 +1,3 @@
-import { PageBar } from "@/components/layout/PageBar";
 import { useState } from "react";
 import { useT } from "@/i18n";
 import { RequestLogsPage } from "@/routes/RequestLogs";
@@ -13,39 +12,34 @@ export function LogsPage() {
 
   return (
     <>
-      <PageBar title={t("sidebar.nav.requestLogs")} />
-      <div className="page-flow">
-        <div className="page-flow-pad">
-          <div
-            style={{
-              display: "flex",
-              gap: 4,
-              borderBottom: "1px solid var(--line)",
-              marginBottom: 16,
-            }}
-          >
-            <TabButton active={tab === "requests"} onClick={() => setTab("requests")}>
-              {t("logs.tab.requests")}
-            </TabButton>
-            <TabButton
-              active={tab === "subscriptionEvents"}
-              onClick={() => setTab("subscriptionEvents")}
-            >
-              {t("logs.tab.subscriptionEvents")}
-            </TabButton>
-            <TabButton
-              active={tab === "systemErrors"}
-              onClick={() => setTab("systemErrors")}
-            >
-              {t("logs.tab.systemErrors")}
-            </TabButton>
-          </div>
-
-          {tab === "requests" && <RequestLogsPage />}
-          {tab === "subscriptionEvents" && <SubscriptionEventsList />}
-          {tab === "systemErrors" && <SystemErrorsList />}
-        </div>
+      <div
+        style={{
+          display: "flex",
+          gap: 4,
+          borderBottom: "1px solid var(--line)",
+          marginBottom: 16,
+        }}
+      >
+        <TabButton active={tab === "requests"} onClick={() => setTab("requests")}>
+          {t("logs.tab.requests")}
+        </TabButton>
+        <TabButton
+          active={tab === "subscriptionEvents"}
+          onClick={() => setTab("subscriptionEvents")}
+        >
+          {t("logs.tab.subscriptionEvents")}
+        </TabButton>
+        <TabButton
+          active={tab === "systemErrors"}
+          onClick={() => setTab("systemErrors")}
+        >
+          {t("logs.tab.systemErrors")}
+        </TabButton>
       </div>
+
+      {tab === "requests" && <RequestLogsPage />}
+      {tab === "subscriptionEvents" && <SubscriptionEventsList />}
+      {tab === "systemErrors" && <SystemErrorsList />}
     </>
   );
 }
