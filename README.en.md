@@ -268,6 +268,10 @@ Outbound is grouped into three protocol families, plus a fourth group of OAuth-b
 
 </details>
 
+### Web UI (optional, off by default)
+
+Settings → Web UI → once enabled, open `http://127.0.0.1:23456/ui/` in a browser to get exactly the same management UI as the desktop app. For other devices on your LAN, switch the proxy listen address to `0.0.0.0`; the settings page lists the reachable URLs. Sign in with the proxy access token; the “Login required” switch can be turned off (then any device on the same network can change your configuration without signing in — use with care).
+
 ## FAQ & Use Cases
 
 <details>
