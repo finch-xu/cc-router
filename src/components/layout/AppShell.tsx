@@ -1,6 +1,7 @@
 import { Outlet, matchPath, useLocation } from "react-router";
 import { Sidebar } from "./Sidebar";
 import { WindowChrome } from "./WindowChrome";
+import { runtime } from "@/runtime";
 
 /**
  * 走「通栏布局」的页面: main 不留 padding, 自身收成 flex column + overflow hidden,
@@ -23,7 +24,7 @@ export function AppShell() {
     FLUSH_ROUTES.some((pattern) => matchPath(pattern, pathname) !== null);
   return (
     <div className="app">
-      <WindowChrome />
+      {runtime.kind === "desktop" && <WindowChrome />}
       <Sidebar />
       <main className={flush ? "main flush" : "main"}>
         <Outlet />

@@ -343,6 +343,7 @@ input, select, textarea { font: inherit; color: inherit; }
  * Windows / Linux 的卡片页让出, 否则右上角三键会盖住 .page-actions 里的按钮, 误点即关窗。 */
 :root { --titlebar-inset: 32px; }
 html[data-platform="macos"] { --titlebar-inset: 28px; }
+html[data-platform="web"] { --titlebar-inset: 0px; }
 .window-chrome {
   position: fixed;
   top: 0; left: 0; right: 0;

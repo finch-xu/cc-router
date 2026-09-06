@@ -3,6 +3,7 @@ import { useNavigate } from "react-router";
 import { TriangleAlert } from "lucide-react";
 import logoUrl from "@/assets/logo.png";
 import { useT } from "@/i18n";
+import { runtime } from "@/runtime";
 
 const DISCLAIMER_FLAG_KEY = "cc-router.disclaimer-accepted";
 
@@ -22,7 +23,7 @@ export function OnboardingDisclaimerPage() {
   return (
     <div className="onboarding-disclaimer-shell">
       {/* 无壳的全屏页: 同样铺拖窗带, 否则 Windows / Linux 上无法拖动与关闭 */}
-      <WindowChrome />
+      {runtime.kind === "desktop" && <WindowChrome />}
       <div className="card onboarding-disclaimer">
         <div className="onboarding-disclaimer-mark">
           <img src={logoUrl} alt="cc-router" />
