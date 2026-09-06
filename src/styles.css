@@ -1379,9 +1379,12 @@ html:not([data-platform="macos"]) .main.flush { padding-top: 0; }
   color: var(--ink);
 }
 .setting-row .label-col .desc { font-size: 11.5px; color: var(--ink-4); font-weight: 400; margin-top: 3px; line-height: 1.5; }
+/* CopyableBlock 默认(block)变体: 与 .copyline / .update-notes 同一套主题变量, 明暗自动跟随.
+ * 曾经是「永远深底的终端风格」, 2026-09-06 按用户要求改为跟随主题, 不再需要 .dark 强制覆盖. */
 .codeblock {
-  background: var(--ink);
-  color: oklch(0.92 0.02 80);
+  background: var(--surface-3);
+  color: var(--ink-2);
+  border: 1px solid var(--line);
   border-radius: var(--r-sm);
   padding: 16px 18px;
   font-family: var(--font-mono);
@@ -1391,14 +1394,15 @@ html:not([data-platform="macos"]) .main.flush { padding-top: 0; }
   overflow: auto;
   white-space: pre;
 }
-.codeblock .k { color: oklch(0.78 0.12 60); }
-.codeblock .v { color: oklch(0.85 0.05 200); }
+.codeblock .k { color: var(--accent-ink); }
+.codeblock .v { color: oklch(0.45 0.10 230); }
+.dark .codeblock .v { color: oklch(0.80 0.08 220); }
 .codeblock .copy {
   position: absolute;
-  top: 12px; right: 12px;
-  background: rgba(255,255,255,0.08);
-  border: 1px solid rgba(255,255,255,0.12);
-  color: rgba(255,255,255,0.8);
+  top: 10px; right: 10px;
+  background: var(--surface);
+  border: 1px solid var(--line-2);
+  color: var(--ink-3);
   font-size: 11px;
   padding: 4px 9px;
   border-radius: 4px;
@@ -1406,8 +1410,9 @@ html:not([data-platform="macos"]) .main.flush { padding-top: 0; }
   align-items: center;
   gap: 5px;
   cursor: pointer;
+  transition: background 0.12s, color 0.12s;
 }
-.codeblock .copy:hover { background: rgba(255,255,255,0.14); color: #fff; }
+.codeblock .copy:hover { background: var(--surface-2); color: var(--ink); }
 
 /* CopyableBlock 的 inline 变体: 单行浅底, 全部走主题变量, 明暗自动跟随 */
 .copyline {
@@ -1494,6 +1499,21 @@ html:not([data-platform="macos"]) .main.flush { padding-top: 0; }
 }
 .guide-notes li { margin-bottom: 4px; }
 .guide-notes li:last-child { margin-bottom: 0; }
+
+/* 引导页「通用接入方式」的虚拟模型名列表: 左列虚拟模型名, 右列别名 (精确 + 模糊模式带示例) */
+.vm-alias {
+  display: grid;
+  grid-template-columns: 120px 1fr;
+  gap: 12px;
+  align-items: baseline;
+  padding: 5px 0;
+  border-bottom: 1px dashed var(--line);
+  font-size: 12px;
+}
+.vm-alias:last-of-type { border-bottom: none; }
+.vm-alias .strong { color: var(--ink); font-weight: 600; }
+.vm-alias-list { display: flex; flex-wrap: wrap; gap: 4px 14px; color: var(--ink-2); }
+.vm-alias-eg { color: var(--ink-4); margin-left: 4px; }
 
 /* === Onboarding disclaimer (full-screen gate) === */
 .onboarding-disclaimer-shell {
@@ -2591,12 +2611,6 @@ html:not([data-platform="macos"]) .main.flush { padding-top: 0; }
 .dark .cm-editor .cm-selectionBackground,
 .dark .cm-editor.cm-focused .cm-selectionBackground {
   background: oklch(0.35 0.06 260) !important;
-}
-
-/* === Dark mode: codeblock 强制深底（不随 --ink 反转） === */
-.dark .codeblock {
-  background: #0f0f13;
-  color: oklch(0.92 0.02 80);
 }
 
 /* === Dark mode: 聚焦环(暗色下黑色阴影不可见) === */

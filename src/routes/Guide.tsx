@@ -1,6 +1,7 @@
 import { useState, type ReactNode } from "react";
 import { Link } from "react-router";
-import { Bot, Boxes, Plug } from "lucide-react";
+// Boxes 图标随「其他 AI Agent」tab 一起暂时下线, 恢复时加回 import
+import { Bot, Plug } from "lucide-react";
 import ClaudeCode from "@lobehub/icons/es/ClaudeCode";
 import Cline from "@lobehub/icons/es/Cline";
 import Codex from "@lobehub/icons/es/Codex";
@@ -13,7 +14,8 @@ import RooCode from "@lobehub/icons/es/RooCode";
 import { ClaudeCodeSettingsEditor } from "@/components/ClaudeCodeSettingsEditor";
 import { CodexSettingsEditor } from "@/components/CodexSettingsEditor";
 import { CopyableBlock } from "@/components/CopyableBlock";
-import { useEnvSnippet, useProxyEndpoint } from "@/hooks/useSettings";
+import { useEnvSnippet, useProxyEndpoint, useSettings } from "@/hooks/useSettings";
+import { buildRecommendedCodexAuth, buildRecommendedCodexConfig } from "@/lib/recommendedCodexConfig";
 import { buildRecommendedEnv } from "@/lib/recommendedClaudeCodeEnv";
 import { useT } from "@/i18n";
 import { cn } from "@/lib/utils";
@@ -40,17 +42,19 @@ const COMING_SOON: { name: string; icon: ReactNode }[] = [
 
 export function GuidePage() {
   const { t } = useT();
-  const [tab, setTab] = useState<Tab>("claude-code");
+  const [tab, setTab] = useState<Tab>("generic");
 
   const TABS: { id: Tab; label: string; icon: ReactNode; disabled?: boolean }[] = [
+    { id: "generic", label: t("guide.tab.generic"), icon: <Plug size={ICON_SIZE} /> },
     { id: "claude-code", label: "Claude Code", icon: <ClaudeCode.Color size={ICON_SIZE} /> },
     { id: "codex", label: "Codex", icon: <Codex size={ICON_SIZE} />, disabled: true },
     { id: "cc-switch", label: "cc-switch", icon: <Bot size={ICON_SIZE} /> },
     { id: "openclaw", label: "OpenClaw", icon: <OpenClaw.Color size={ICON_SIZE} /> },
     { id: "hermes", label: "Hermes Agent", icon: <HermesAgent size={ICON_SIZE} /> },
     { id: "opencode", label: "OpenCode", icon: <OpenCode size={ICON_SIZE} /> },
-    { id: "generic", label: t("guide.tab.generic"), icon: <Plug size={ICON_SIZE} /> },
-    { id: "others", label: t("guide.tab.others"), icon: <Boxes size={ICON_SIZE} /> },
+    // 「其他 AI Agent」暂时隐藏 (2026-09-06): 内容只有 coming-soon 网格, 等有实质接入说明再放回.
+    // OthersTab / COMING_SOON / Boxes 图标都保留, 恢复时把这一行加回来即可.
+    // { id: "others", label: t("guide.tab.others"), icon: <Boxes size={ICON_SIZE} /> },
   ];
 
   return (
@@ -106,21 +110,80 @@ const GENERIC_ENTRIES: GenericEntry[] = [
   { id: "chat", path: "/v1/chat/completions", suffix: "/v1", noteCount: 7 },
 ];
 
+/**
+ * 虚拟模型名与别名, 照抄 src-tauri/src/virtual_model/model.rs::parse —— 唯一事实来源.
+ * exact: 精确匹配; fuzzy: 模糊模式 + 一个示例 (claude-* 前缀匹配, gpt-*-<tier> 按 '-' 分段匹配档位).
+ */
+const VM_ALIASES: { vm: string; exact: string[]; fuzzy: { pattern: string; example: string }[] }[] = [
+  {
+    vm: "model-fable",
+    exact: ["gpt-5.6"],
+    fuzzy: [
+      { pattern: "claude-fable*", example: "claude-fable-5" },
+      { pattern: "gpt-*-sol", example: "gpt-5.6-sol" },
+    ],
+  },
+  {
+    vm: "model-opus",
+    exact: ["gpt-5.5"],
+    fuzzy: [
+      { pattern: "claude-opus*", example: "claude-opus-4-7" },
+      { pattern: "gpt-*-terra", example: "gpt-5.6-terra" },
+    ],
+  },
+  {
+    vm: "model-sonnet",
+    exact: ["gpt-5.4"],
+    fuzzy: [
+      { pattern: "claude-sonnet*", example: "claude-sonnet-4-6" },
+      { pattern: "gpt-*-luna", example: "gpt-5.6-luna" },
+    ],
+  },
+  {
+    vm: "model-haiku",
+    exact: [],
+    fuzzy: [
+      { pattern: "claude-haiku*", example: "claude-haiku-4-5" },
+      { pattern: "gpt-*-mini", example: "gpt-5.4-mini" },
+    ],
+  },
+];
+
+function VirtualModelNames() {
+  const { t } = useT();
+  return (
+    <div>
+      {VM_ALIASES.map((a) => (
+        <div className="vm-alias" key={a.vm}>
+          <span className="mono strong">{a.vm}</span>
+          <span className="vm-alias-list">
+            {a.exact.map((x) => (
+              <span className="mono" key={x}>{x}</span>
+            ))}
+            {a.fuzzy.map((f) => (
+              <span key={f.pattern}>
+                <span className="mono">{f.pattern}</span>
+                <span className="vm-alias-eg">{t("guide.generic.vm.eg", { example: f.example })}</span>
+              </span>
+            ))}
+          </span>
+        </div>
+      ))}
+      <div className="field-hint" style={{ marginTop: 6 }}>{t("guide.generic.vm.prefixNote")}</div>
+    </div>
+  );
+}
+
 function GenericTab() {
   const { t } = useT();
-  const { baseUrl, port } = useProxyEndpoint();
+  const { baseUrl, port, token } = useProxyEndpoint();
+  const settings = useSettings();
+  const authEnabled = settings.data?.auth_enabled ?? true;
   const origin = baseUrl ?? `http://127.0.0.1:${port}`;
-  const codexToml = [
-    "[model_providers.cc-router]",
-    'name = "cc-router"',
-    `base_url = "${origin}/v1"`,
-    'wire_api = "responses"',
-    'env_key = "OPENAI_API_KEY"',
-    "",
-    "[profiles.cc-router]",
-    'model_provider = "cc-router"',
-    'model = "model-sonnet"',
-  ].join("\n");
+  // 与 CodexSettingsEditor「插入推荐配置」写出的文件逐字一致 (含真实 token), 复制即用.
+  const codexSnap = { baseUrl: origin, token };
+  const codexToml = buildRecommendedCodexConfig(codexSnap).trimEnd();
+  const codexAuth = buildRecommendedCodexAuth(codexSnap).trimEnd();
 
   return (
     <>
@@ -142,7 +205,7 @@ function GenericTab() {
             <table className="table" style={{ fontSize: 12, tableLayout: "fixed", marginBottom: 14 }}>
               <tbody>
                 <tr>
-                  <td style={{ width: 90, color: "var(--ink-3)" }}>{t("guide.generic.row.baseUrl")}</td>
+                  <td style={{ width: 104, color: "var(--ink-3)" }}>{t("guide.generic.row.baseUrl")}</td>
                   <td>
                     <CopyableBlock text={`${origin}${e.suffix}`} variant="inline" />
                     <div className="field-hint" style={{ marginTop: 6 }}>
@@ -151,12 +214,25 @@ function GenericTab() {
                   </td>
                 </tr>
                 <tr>
-                  <td style={{ color: "var(--ink-3)" }}>{t("guide.generic.row.auth")}</td>
-                  <td>{t(`guide.generic.${e.id}.auth`)}</td>
+                  <td style={{ color: "var(--ink-3)" }}>{t("guide.generic.row.token")}</td>
+                  <td>
+                    {authEnabled ? (
+                      <CopyableBlock text={token} variant="inline" />
+                    ) : (
+                      <span style={{ color: "var(--ink-3)" }}>{t("guide.generic.tokenOff")}</span>
+                    )}
+                    <div className="field-hint" style={{ marginTop: 6 }}>
+                      {t(`guide.generic.${e.id}.auth`)}
+                    </div>
+                  </td>
                 </tr>
                 <tr>
-                  <td style={{ color: "var(--ink-3)" }}>{t("guide.generic.row.model")}</td>
-                  <td>{t(`guide.generic.${e.id}.model`)}</td>
+                  <td style={{ color: "var(--ink-3)", verticalAlign: "top", paddingTop: 12 }}>
+                    {t("guide.generic.row.model")}
+                  </td>
+                  <td>
+                    <VirtualModelNames />
+                  </td>
                 </tr>
               </tbody>
             </table>
@@ -166,6 +242,10 @@ function GenericTab() {
                   {t("guide.generic.responses.snippetHint")}
                 </div>
                 <CopyableBlock text={codexToml} className="mb-3" />
+                <div className="field-hint" style={{ marginBottom: 8 }}>
+                  {t("guide.generic.responses.authSnippetHint")}
+                </div>
+                <CopyableBlock text={codexAuth} className="mb-3" />
               </>
             )}
             <div style={{ fontSize: 12, fontWeight: 600, marginBottom: 6 }}>
@@ -179,6 +259,46 @@ function GenericTab() {
           </div>
         </div>
       ))}
+
+      {/* GET /v1/models: 免鉴权, 同时兼容 OpenAI / Anthropic 两种列表格式 (handler.rs::models) */}
+      <div className="card section">
+        <div className="card-head">
+          <div className="card-title" style={{ display: "flex", alignItems: "baseline", gap: 10 }}>
+            {t("guide.generic.models.title")}
+            <span className="mono" style={{ fontSize: 12, color: "var(--ink-3)", fontWeight: 400 }}>
+              GET /v1/models
+            </span>
+          </div>
+          <span className="card-sub">{t("guide.generic.models.clients")}</span>
+        </div>
+        <div className="card-body">
+          <table className="table" style={{ fontSize: 12, tableLayout: "fixed", marginBottom: 14 }}>
+            <tbody>
+              <tr>
+                <td style={{ width: 104, color: "var(--ink-3)" }}>{t("guide.generic.models.row.url")}</td>
+                <td>
+                  <CopyableBlock text={`${origin}/v1/models`} variant="inline" />
+                </td>
+              </tr>
+              <tr>
+                <td style={{ color: "var(--ink-3)" }}>{t("guide.generic.row.token")}</td>
+                <td>{t("guide.generic.models.authNone")}</td>
+              </tr>
+              <tr>
+                <td style={{ color: "var(--ink-3)" }}>{t("guide.generic.models.row.format")}</td>
+                <td>{t("guide.generic.models.format")}</td>
+              </tr>
+            </tbody>
+          </table>
+          <div className="field-hint" style={{ marginBottom: 8 }}>{t("guide.generic.models.curlHint")}</div>
+          <CopyableBlock text={`curl ${origin}/v1/models`} className="mb-3" />
+          <div style={{ fontSize: 12, fontWeight: 600, marginBottom: 6 }}>{t("guide.generic.notesTitle")}</div>
+          <ul className="guide-notes">
+            <li>{t("guide.generic.models.note1")}</li>
+            <li>{t("guide.generic.models.note2")}</li>
+          </ul>
+        </div>
+      </div>
     </>
   );
 }
