@@ -113,6 +113,9 @@ fn build_router(state: AppState, body_limit: usize) -> Router {
             state.clone(),
             cc_middleware::cors_layer,
         ))
+        // 网页界面必须在三个 layer 之后 merge: axum 的 layer 只作用于它之前注册的路由,
+        // /ui 子树由此绕开代理 token 校验与通配 CORS (安全前提, 见 proxy/web/mod.rs)
+        .merge(crate::proxy::web::router(state.clone()))
         .with_state(state)
 }
 

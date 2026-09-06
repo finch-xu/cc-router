@@ -25,6 +25,7 @@ pub enum DispatchError {
     BadArgs(String),
     Serialize(String),
     Command(AppError),
+    NotReady,
 }
 
 pub fn status_for(e: &AppError) -> StatusCode {
@@ -77,7 +78,10 @@ macro_rules! web_commands {
                         let $args: Args = serde_json::from_value(raw)
                             .map_err(|e| DispatchError::BadArgs(e.to_string()))?;
                         let handle = state.app_handle.clone();
-                        let $st: tauri::State<'_, AppState> = handle.state::<AppState>();
+                        let $st: tauri::State<'_, AppState> = match handle.try_state::<AppState>() {
+                            Some(s) => s,
+                            None => return Err(DispatchError::NotReady),
+                        };
                         let $app: tauri::AppHandle = state.app_handle.clone();
                         let out = $body;
                         match out {
@@ -222,6 +226,11 @@ pub async fn dispatch_handler(
         )
             .into_response(),
         Err(DispatchError::Command(e)) => (status_for(&e), Json(e)).into_response(),
+        Err(DispatchError::NotReady) => (
+            StatusCode::SERVICE_UNAVAILABLE,
+            Json(json!({"code": "not_ready", "message": "app state not initialized"})),
+        )
+            .into_response(),
     }
 }
 
