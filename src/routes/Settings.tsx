@@ -35,7 +35,6 @@ import { useTheme, type Theme } from "@/hooks/useTheme";
 import type { ProxyMode, TlsStatus, UpdateSource } from "@/types";
 import { runtime } from "@/runtime";
 import { CopyableBlock } from "@/components/CopyableBlock";
-import { save } from "@tauri-apps/plugin-dialog";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 
 export function SettingsPage() {
@@ -762,9 +761,13 @@ export function SettingsPage() {
               <div className="desc">{t("settings.debug.dumps.desc")}</div>
             </div>
             <div style={{ display: "flex", gap: 8 }}>
-              <button className="btn" type="button" onClick={openDumps}>
-                {t("settings.debug.open.button")}
-              </button>
+              {runtime.kind === "desktop" ? (
+                <button className="btn" type="button" onClick={openDumps}>
+                  {t("settings.debug.open.button")}
+                </button>
+              ) : (
+                <span className="desc">{t("settings.debug.open.webHint")}</span>
+              )}
               <button
                 className="btn"
                 type="button"
@@ -916,8 +919,14 @@ function HttpsCertSection() {
 
   async function onExportCa() {
     try {
-      const dest = await save({
-        defaultPath: "cc-router-ca.crt",
+      if (runtime.kind === "web") {
+        const pem = await api.tlsGetCaPemText();
+        runtime.downloadText("cc-router-ca.pem", pem, "application/x-pem-file");
+        alert(t("settings.https.cert.exportOk"));
+        return;
+      }
+      const dest = await runtime.pickSavePath({
+        defaultName: "cc-router-ca.crt",
         filters: [{ name: "Certificate", extensions: ["crt", "pem"] }],
       });
       if (!dest) return;

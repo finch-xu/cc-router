@@ -118,6 +118,9 @@ export const api = {
   /** 按当前筛选导出 CSV 到 path (来自 save dialog), 返回导出行数 */
   exportRequestsCsv: (path: string, filters?: RequestLogFilters) =>
     invoke<number>("export_requests_csv", { path, filters }),
+  /** 网页端导出: 返回 CSV 文本 (含 BOM), 由浏览器下载 */
+  exportRequestsCsvText: (filters?: RequestLogFilters) =>
+    invoke<string>("export_requests_csv_text", { filters }),
 
   // statistics (聚合表查询, 跨范围全局)
   getOverallStats: (range: StatsRange) =>
@@ -169,6 +172,8 @@ export const api = {
   tlsGetStatus: () => invoke<TlsStatus>("tls_get_status"),
   tlsGetCaPemPath: () => invoke<string>("tls_get_ca_pem_path"),
   tlsExportCaPem: (dest: string) => invoke<void>("tls_export_ca_pem", { dest }),
+  /** 网页端导出: 返回 CA PEM 文本 */
+  tlsGetCaPemText: () => invoke<string>("tls_get_ca_pem_text"),
   tlsRegenerateLeaf: () => invoke<TlsStatus>("tls_regenerate_leaf"),
 
   // Claude Code 集成 (~/.claude/settings.json)

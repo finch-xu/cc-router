@@ -125,6 +125,7 @@
   "settings.debug.dumps.desc": "文件持续累积,请定期手动清理。",
   "settings.debug.open.button": "打开 dump 目录",
   "settings.debug.open.alertFailed": "打开目录失败",
+  "settings.debug.open.webHint": "网页端无法打开主机目录，路径在 app 数据目录下的 debug-dumps。",
   "settings.debug.clear.button": "清空 dump",
   "settings.debug.clear.alertFailed": "清空失败",
   "settings.debug.clear.dialog.title": "确认清空 debug-dumps?",

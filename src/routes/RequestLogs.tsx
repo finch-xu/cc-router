@@ -1,8 +1,8 @@
 import { useEffect, useMemo, useState } from "react";
 import { useSearchParams } from "react-router";
 import { Download, RefreshCw, ScrollText, X } from "lucide-react";
-import { save } from "@tauri-apps/plugin-dialog";
 import { api } from "@/api/tauri";
+import { runtime } from "@/runtime";
 import { ClientToolBadge } from "@/components/ClientToolBadge";
 import { EmptyState } from "@/components/EmptyState";
 import { Pagination } from "@/components/Pagination";
@@ -102,14 +102,23 @@ export function RequestLogsPage() {
   async function exportCsv() {
     try {
       const date = new Date().toISOString().slice(0, 10).replace(/-/g, "");
-      const path = await save({
-        defaultPath: `cc-router-requests-${date}.csv`,
-        filters: [{ name: "CSV", extensions: ["csv"] }],
-      });
-      if (!path) return; // 用户取消
+      const filename = `cc-router-requests-${date}.csv`;
       setExporting(true);
-      const count = await api.exportRequestsCsv(path, filters);
-      setExportMsg(t("requestLogs.export.success", { count }));
+      if (runtime.kind === "web") {
+        const text = await api.exportRequestsCsvText(filters);
+        runtime.downloadText(filename, text, "text/csv;charset=utf-8");
+        // 行数 = 换行数 - 1 (表头); 文本以 BOM 开头不影响计数
+        const count = Math.max(0, text.split("\n").filter(Boolean).length - 1);
+        setExportMsg(t("requestLogs.export.success", { count }));
+      } else {
+        const path = await runtime.pickSavePath({
+          defaultName: filename,
+          filters: [{ name: "CSV", extensions: ["csv"] }],
+        });
+        if (!path) return; // 用户取消
+        const count = await api.exportRequestsCsv(path, filters);
+        setExportMsg(t("requestLogs.export.success", { count }));
+      }
     } catch (err) {
       console.warn("export csv failed", err);
       setExportMsg(t("requestLogs.export.failed"));
