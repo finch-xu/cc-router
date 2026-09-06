@@ -41,6 +41,15 @@ export function useProxyStatus() {
   });
 }
 
+export function useLanAddresses(enabled: boolean) {
+  return useQuery({
+    queryKey: ["lan-addresses"],
+    queryFn: () => api.listLanAddresses(),
+    enabled,
+    staleTime: 60_000,
+  });
+}
+
 export function useEnvSnippet() {
   return useQuery({
     queryKey: ["env-snippet"],

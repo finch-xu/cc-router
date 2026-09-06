@@ -28,10 +28,13 @@ import {
   useSettings,
   useUpdateSettings,
   useGenerateNewToken,
+  useLanAddresses,
 } from "@/hooks/useSettings";
 import { useT, type LanguagePref } from "@/i18n";
 import { useTheme, type Theme } from "@/hooks/useTheme";
 import type { ProxyMode, TlsStatus, UpdateSource } from "@/types";
+import { runtime } from "@/runtime";
+import { CopyableBlock } from "@/components/CopyableBlock";
 import { save } from "@tauri-apps/plugin-dialog";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 
@@ -55,6 +58,8 @@ export function SettingsPage() {
   const [corsAllowOrigin, setCorsAllowOrigin] = useState("*");
   const [preferredLanguage, setPreferredLanguage] = useState<LanguagePref>("system");
   const [debugMode, setDebugMode] = useState(false);
+  const [webUiEnabled, setWebUiEnabled] = useState(false);
+  const [webUiAuthEnabled, setWebUiAuthEnabled] = useState(true);
   const [clearDumpsDialog, setClearDumpsDialog] = useState(false);
   const [clearingDumps, setClearingDumps] = useState(false);
   const [resetDialog, setResetDialog] = useState(false);
@@ -109,6 +114,8 @@ export function SettingsPage() {
     setCorsAllowOrigin(settings.data.cors_allow_origin);
     setPreferredLanguage(settings.data.preferred_language ?? "system");
     setDebugMode(settings.data.debug_mode ?? false);
+    setWebUiEnabled(settings.data.web_ui_enabled);
+    setWebUiAuthEnabled(settings.data.web_ui_auth_enabled);
     initializedRef.current = true;
   }, [settings.data]);
 
@@ -187,6 +194,19 @@ export function SettingsPage() {
   async function changeAuthEnabled(next: boolean) {
     setAuthEnabled(next);
     await patch({ auth_enabled: next });
+  }
+
+  async function changeWebUiEnabled(next: boolean) {
+    if (!next && runtime.kind === "web" && !confirm(t("settings.webUi.selfDisable.confirm"))) return;
+    setWebUiEnabled(next);
+    await patch({ web_ui_enabled: next });
+  }
+
+  async function changeWebUiAuthEnabled(next: boolean) {
+    if (!next && !confirm(t("settings.webUi.auth.confirmOff"))) return;
+    if (next && runtime.kind === "web") alert(t("settings.webUi.auth.relogin"));
+    setWebUiAuthEnabled(next);
+    await patch({ web_ui_auth_enabled: next });
   }
   async function changeCorsEnabled(next: boolean) {
     setCorsEnabled(next);
@@ -424,6 +444,51 @@ export function SettingsPage() {
               )}
             </div>
           </div>
+        </div>
+      </div>
+
+      {/* 网页界面 */}
+      <div className="card section">
+        <div className="card-head">
+          <div className="card-title">{t("settings.section.webUi")}</div>
+        </div>
+        <div className="card-body">
+          <div className="setting-row">
+            <div className="label-col">
+              {t("settings.webUi.enabled.label")}
+              <div className="desc">{t("settings.webUi.enabled.desc")}</div>
+            </div>
+            <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+              <Toggle
+                checked={webUiEnabled}
+                onChange={(v) => void changeWebUiEnabled(v)}
+                aria-label={t("settings.webUi.enabled.label")}
+              />
+              <span style={{ fontSize: 12, color: "var(--ink-2)" }}>
+                {webUiEnabled ? t("settings.webUi.enabled.on") : t("settings.webUi.enabled.off")}
+              </span>
+            </div>
+          </div>
+          <div className="setting-row">
+            <div className="label-col">
+              {t("settings.webUi.auth.label")}
+              <div className="desc">{t("settings.webUi.auth.desc")}</div>
+            </div>
+            <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+              <Toggle
+                checked={webUiAuthEnabled}
+                disabled={!webUiEnabled}
+                onChange={(v) => void changeWebUiAuthEnabled(v)}
+                aria-label={t("settings.webUi.auth.label")}
+              />
+              <span style={{ fontSize: 12, color: "var(--ink-2)" }}>
+                {webUiAuthEnabled ? t("settings.webUi.auth.on") : t("settings.webUi.auth.off")}
+              </span>
+            </div>
+          </div>
+          {webUiEnabled && (
+            <WebUiAddresses listenAll={listenAll} authEnabled={webUiAuthEnabled} />
+          )}
         </div>
       </div>
 
@@ -962,6 +1027,36 @@ function HttpsCertSection() {
             </div>
           </div>
         </div>
+      </div>
+    </div>
+  );
+}
+
+function WebUiAddresses({ listenAll, authEnabled }: { listenAll: boolean; authEnabled: boolean }) {
+  const { t } = useT();
+  const proxy = useProxyStatus();
+  const lan = useLanAddresses(listenAll);
+  const scheme = proxy.data?.http_port ? "http" : "https";
+  const port = proxy.data?.http_port ?? proxy.data?.https_port ?? 23456;
+  const urls = [`${scheme}://127.0.0.1:${port}/ui/`];
+  if (listenAll) {
+    for (const ip of lan.data ?? []) urls.push(`${scheme}://${ip}:${port}/ui/`);
+  }
+  return (
+    <div className="setting-row">
+      <div className="label-col">
+        {t("settings.webUi.addresses.label")}
+        {!listenAll && <div className="desc">{t("settings.webUi.addresses.localOnly")}</div>}
+      </div>
+      <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+        {urls.map((u) => (
+          <CopyableBlock key={u} text={u} />
+        ))}
+        {listenAll && (
+          <div className={authEnabled ? "alert warn" : "alert err"} style={{ marginTop: 6 }}>
+            {authEnabled ? t("settings.webUi.warn.lanWithAuth") : t("settings.webUi.warn.lanNoAuth")}
+          </div>
+        )}
       </div>
     </div>
   );

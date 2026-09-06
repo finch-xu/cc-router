@@ -147,6 +147,8 @@ export const api = {
   generateNewToken: () => invoke<Settings>("generate_new_token"),
   proxyStatus: () => invoke<ProxyStatus>("proxy_status"),
   envSnippet: () => invoke<string>("env_snippet"),
+  /** 局域网 IPv4 列表 (非回环), 设置页拼网页访问地址用 */
+  listLanAddresses: () => invoke<string[]>("list_lan_addresses"),
 
   // onboarding
   getOnboardingState: () => invoke<OnboardingState>("get_onboarding_state"),
