@@ -1,6 +1,6 @@
 import { useState, type ReactNode } from "react";
 import { Link } from "react-router";
-import { Bot, Boxes } from "lucide-react";
+import { Bot, Boxes, Plug } from "lucide-react";
 import ClaudeCode from "@lobehub/icons/es/ClaudeCode";
 import Cline from "@lobehub/icons/es/Cline";
 import Codex from "@lobehub/icons/es/Codex";
@@ -25,6 +25,7 @@ type Tab =
   | "openclaw"
   | "hermes"
   | "opencode"
+  | "generic"
   | "others";
 
 const ICON_SIZE = 14;
@@ -48,6 +49,7 @@ export function GuidePage() {
     { id: "openclaw", label: "OpenClaw", icon: <OpenClaw.Color size={ICON_SIZE} /> },
     { id: "hermes", label: "Hermes Agent", icon: <HermesAgent size={ICON_SIZE} /> },
     { id: "opencode", label: "OpenCode", icon: <OpenCode size={ICON_SIZE} /> },
+    { id: "generic", label: t("guide.tab.generic"), icon: <Plug size={ICON_SIZE} /> },
     { id: "others", label: t("guide.tab.others"), icon: <Boxes size={ICON_SIZE} /> },
   ];
 
@@ -79,7 +81,104 @@ export function GuidePage() {
       {tab === "openclaw" && <OpenClawTab />}
       {tab === "hermes" && <HermesAgentTab />}
       {tab === "opencode" && <OpenCodeTab />}
+      {tab === "generic" && <GenericTab />}
       {tab === "others" && <OthersTab />}
+    </>
+  );
+}
+
+/* ============================================================
+ * 通用接入方式: 三个入口协议各一张卡, 内容对应 README「入口」章节.
+ * Base URL 用真实端口拼, 不写死 23456.
+ * ============================================================ */
+
+type GenericEntry = {
+  id: "messages" | "responses" | "chat";
+  path: string;
+  /** 相对 origin 的 base URL 后缀: messages 不带 /v1, 另外两个带 */
+  suffix: "" | "/v1";
+  noteCount: number;
+};
+
+const GENERIC_ENTRIES: GenericEntry[] = [
+  { id: "messages", path: "/v1/messages", suffix: "", noteCount: 4 },
+  { id: "responses", path: "/v1/responses", suffix: "/v1", noteCount: 5 },
+  { id: "chat", path: "/v1/chat/completions", suffix: "/v1", noteCount: 7 },
+];
+
+function GenericTab() {
+  const { t } = useT();
+  const { baseUrl, port } = useProxyEndpoint();
+  const origin = baseUrl ?? `http://127.0.0.1:${port}`;
+  const codexToml = [
+    "[model_providers.cc-router]",
+    'name = "cc-router"',
+    `base_url = "${origin}/v1"`,
+    'wire_api = "responses"',
+    'env_key = "OPENAI_API_KEY"',
+    "",
+    "[profiles.cc-router]",
+    'model_provider = "cc-router"',
+    'model = "model-sonnet"',
+  ].join("\n");
+
+  return (
+    <>
+      <div className="field-hint" style={{ marginBottom: 16 }}>
+        {t("guide.generic.intro")}
+      </div>
+      {GENERIC_ENTRIES.map((e) => (
+        <div className="card section" key={e.id}>
+          <div className="card-head">
+            <div className="card-title" style={{ display: "flex", alignItems: "baseline", gap: 10 }}>
+              {t(`guide.generic.${e.id}.title`)}
+              <span className="mono" style={{ fontSize: 12, color: "var(--ink-3)", fontWeight: 400 }}>
+                {e.path}
+              </span>
+            </div>
+            <span className="card-sub">{t(`guide.generic.${e.id}.clients`)}</span>
+          </div>
+          <div className="card-body">
+            <table className="table" style={{ fontSize: 12, tableLayout: "fixed", marginBottom: 14 }}>
+              <tbody>
+                <tr>
+                  <td style={{ width: 90, color: "var(--ink-3)" }}>{t("guide.generic.row.baseUrl")}</td>
+                  <td>
+                    <CopyableBlock text={`${origin}${e.suffix}`} variant="inline" />
+                    <div className="field-hint" style={{ marginTop: 6 }}>
+                      {t(`guide.generic.${e.id}.baseUrlHint`)}
+                    </div>
+                  </td>
+                </tr>
+                <tr>
+                  <td style={{ color: "var(--ink-3)" }}>{t("guide.generic.row.auth")}</td>
+                  <td>{t(`guide.generic.${e.id}.auth`)}</td>
+                </tr>
+                <tr>
+                  <td style={{ color: "var(--ink-3)" }}>{t("guide.generic.row.model")}</td>
+                  <td>{t(`guide.generic.${e.id}.model`)}</td>
+                </tr>
+              </tbody>
+            </table>
+            {e.id === "responses" && (
+              <>
+                <div className="field-hint" style={{ marginBottom: 8 }}>
+                  {t("guide.generic.responses.snippetHint")}
+                </div>
+                <CopyableBlock text={codexToml} className="mb-3" />
+              </>
+            )}
+            <div style={{ fontSize: 12, fontWeight: 600, marginBottom: 6 }}>
+              {t("guide.generic.notesTitle")}
+            </div>
+            <ul className="guide-notes">
+              {Array.from({ length: e.noteCount }, (_, i) => (
+                <li key={i}>{t(`guide.generic.${e.id}.note${i + 1}`)}</li>
+              ))}
+            </ul>
+          </div>
+        </div>
+      ))}
     </>
   );
 }

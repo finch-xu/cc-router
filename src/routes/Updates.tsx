@@ -15,6 +15,7 @@ import { openReleasePage } from "@/lib/updater";
 import { fmtBytes } from "@/lib/format";
 import type { UpdateSource } from "@/types";
 
+/** 检查更新页: 与设置页同一套「页头 + 卡片 + setting-row」排版. */
 export function UpdatesPage() {
   const { t } = useT();
   const { status, check } = useUpdater();
@@ -40,30 +41,37 @@ export function UpdatesPage() {
   const checking = status === "checking";
 
   return (
-    // updates-flow: 让「有更新」时的日志区吃满剩余视口高度 (见 styles.css)。
-    // 其余状态下所有 section 都是 flex-shrink:0, 排版与改造前一致。
-    <div className="page-flow updates-flow">
-      <div className="flush-section">
-        <div className="updates-head">
-          <div className="updates-mark">
-            <img src={logoUrl} alt="cc-router" />
-          </div>
-          <div>
-            <div style={{ fontSize: 15, fontWeight: 700, letterSpacing: "-0.01em" }}>
-              cc-router
-            </div>
-            <div className="mono" style={{ fontSize: 11.5, color: "var(--ink-3)", marginTop: 2 }}>
-              {t("updates.current", { version: VERSION })}
-            </div>
-          </div>
+    <>
+      <div className="page-header">
+        <h1>{t("updates.title")}</h1>
+        <div className="subtitle">{t("updates.subtitle")}</div>
+      </div>
 
-          <div
-            style={{ marginLeft: "auto", display: "flex", alignItems: "center", gap: 10 }}
-          >
-            <span style={{ fontSize: 11.5, color: "var(--ink-3)" }}>
+      {/* 版本与更新源 */}
+      <div className="card section">
+        <div className="card-head">
+          <div className="card-title">{t("updates.section.version")}</div>
+        </div>
+        <div className="card-body">
+          <div className="setting-row">
+            <div className="label-col">{t("updates.row.current")}</div>
+            <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+              <div className="app-mark small">
+                <img src={logoUrl} alt="cc-router" />
+              </div>
+              <span className="mono" style={{ fontSize: 12.5, color: "var(--ink-2)" }}>
+                cc-router v{VERSION}
+              </span>
+            </div>
+          </div>
+          <div className="setting-row">
+            <div className="label-col">
               {t("updates.source")}
-            </span>
-            <div className="radio-group">
+              <div className="desc">{t("updates.sourceHint")}</div>
+            </div>
+            {/* 套一层 div: setting-row 的网格会把直接子元素拉满整列 */}
+            <div>
+              <div className="radio-group" style={{ display: "inline-flex" }}>
               {/* 文案复用设置页的 key: 同一份配置在两页显示同样的字, 避免看成两个开关 */}
               <button
                 className={source === "international" ? "on" : ""}
@@ -79,29 +87,83 @@ export function UpdatesPage() {
               >
                 {t("settings.update.source.china")}
               </button>
+              </div>
             </div>
-            <button
-              className="btn"
-              type="button"
-              disabled={checking}
-              onClick={() => void check()}
-            >
-              <RefreshCw size={12} className={checking ? "spin" : undefined} />
-              {status === "up_to_date" ? t("about.updater.recheck") : t("about.updater.check")}
-            </button>
           </div>
-        </div>
-        <div style={{ marginTop: 10, fontSize: 11, color: "var(--ink-4)" }}>
-          {t("updates.sourceHint")}
+          <div className="setting-row">
+            <div className="label-col">{t("updates.row.check")}</div>
+            <div>
+              <button
+                className="btn"
+                type="button"
+                disabled={checking}
+                onClick={() => void check()}
+              >
+                <RefreshCw size={12} className={checking ? "spin" : undefined} />
+                {status === "up_to_date" ? t("about.updater.recheck") : t("about.updater.check")}
+              </button>
+            </div>
+          </div>
         </div>
       </div>
 
-      <UpdaterStatusSection />
-    </div>
+      {/* 更新状态 */}
+      <div className="card section">
+        <div className="card-head">
+          <div className="card-title">{t("updates.section.status")}</div>
+          <StatusPill />
+        </div>
+        <div className="card-body">
+          <UpdaterStatusSection />
+        </div>
+      </div>
+    </>
   );
 }
 
-/** 状态机排版层。逻辑与原 About.tsx::UpdaterBlock 一致, 只换成通栏排版。 */
+/** card-head 右侧的状态胶囊, 五种状态各一种颜色. */
+function StatusPill() {
+  const { t } = useT();
+  const { status } = useUpdater();
+  switch (status) {
+    case "checking":
+      return (
+        <span className="pill">
+          <RefreshCw size={11} className="spin" /> {t("about.updater.checking")}
+        </span>
+      );
+    case "up_to_date":
+      return (
+        <span className="pill ok">
+          <CircleCheck size={11} /> {t("about.updater.upToDate")}
+        </span>
+      );
+    case "available":
+    case "downloading":
+    case "ready":
+      return (
+        <span className="pill warn">
+          <span className="dot" />
+          {status === "ready" ? t("about.updater.ready.title") : t("updates.available")}
+        </span>
+      );
+    case "error":
+      return (
+        <span className="pill err">
+          <span className="dot" />
+          {t("about.updater.error")}
+        </span>
+      );
+    default:
+      return (
+        <span className="pill">
+          <CircleAlert size={11} /> {t("about.updater.idle")}
+        </span>
+      );
+  }
+}
+
+/** 状态机排版层. 状态本身已由 card-head 的 StatusPill 表达, 这里只放各状态的正文与动作. */
 function UpdaterStatusSection() {
   const { t } = useT();
   const { status, detected, progress, errorMessage, check, install, restart } = useUpdater();
@@ -110,26 +172,19 @@ function UpdaterStatusSection() {
   if (status === "available" && detected) {
     const isManual = detected.kind === "manual";
     return (
-      // updates-notes-section 是唯一允许纵向 grow 的 section: 它内部再开一层
-      // flex column, 把剩余高度整块让给 .update-notes。
-      <div className="flush-section updates-notes-section">
+      <>
         <div
-          className="updates-notes-head"
           style={{
             display: "flex",
             alignItems: "center",
             gap: 10,
-            marginBottom: 10,
+            marginBottom: 12,
             flexWrap: "wrap",
           }}
         >
           <span style={{ fontSize: 13, fontWeight: 600 }}>
             {t("about.updater.foundNewPrefix")}
             {detected.version}
-          </span>
-          <span className="pill warn">
-            <span className="dot" />
-            {t("updates.available")}
           </span>
           {isManual && (
             <span className="mono" style={{ fontSize: 11.5, color: "var(--ink-3)" }}>
@@ -153,7 +208,7 @@ function UpdaterStatusSection() {
           </div>
         </div>
         {detected.body && <div className="update-notes">{detected.body}</div>}
-      </div>
+      </>
     );
   }
 
@@ -162,92 +217,66 @@ function UpdaterStatusSection() {
     const downloaded = progress?.downloaded ?? 0;
     const percent = total ? Math.min(100, Math.round((downloaded / total) * 100)) : null;
     return (
-      <div className="flush-section">
-        <div
-          className="mono"
-          style={{ fontSize: 11.5, color: "var(--ink-2)", marginBottom: 8 }}
-        >
+      <>
+        <div className="mono" style={{ fontSize: 11.5, color: "var(--ink-2)", marginBottom: 8 }}>
           {t("about.updater.downloadingPrefix")}
           {detected.version}
-          {percent !== null ? ` · ${percent}%` : ""} ·{" "}
-          {fmtBytes(downloaded)}
+          {percent !== null ? ` · ${percent}%` : ""} · {fmtBytes(downloaded)}
           {total ? ` / ${fmtBytes(total)}` : ""}
         </div>
         <div className="update-progress">
           <i style={{ width: percent !== null ? `${percent}%` : "30%" }} />
         </div>
-      </div>
+      </>
     );
   }
 
   if (status === "ready") {
     return (
-      <div className="flush-section">
-        <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
-          <span className="pill warn">
-            <span className="dot" />
-            {t("about.updater.ready.title")}
-          </span>
-          <span style={{ fontSize: 12, color: "var(--ink-3)", flex: 1, minWidth: 240 }}>
-            {t("about.updater.ready.desc")}
-          </span>
-          <button className="btn primary" type="button" onClick={() => void restart()}>
-            <RotateCw size={12} /> {t("about.updater.restart")}
-          </button>
-        </div>
+      <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
+        <span style={{ fontSize: 12, color: "var(--ink-3)", flex: 1, minWidth: 240 }}>
+          {t("about.updater.ready.desc")}
+        </span>
+        <button className="btn primary" type="button" onClick={() => void restart()}>
+          <RotateCw size={12} /> {t("about.updater.restart")}
+        </button>
       </div>
     );
   }
 
   if (status === "error") {
     return (
-      <div className="flush-section">
-        <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
-          <span className="pill err">
-            <span className="dot" />
-            {t("about.updater.error")}
-          </span>
-          {errorMessage && (
-            <span
-              className="mono"
-              style={{
-                fontSize: 11,
-                color: "var(--ink-3)",
-                flex: 1,
-                minWidth: 200,
-                overflow: "hidden",
-                textOverflow: "ellipsis",
-                whiteSpace: "nowrap",
-              }}
-              title={errorMessage}
-            >
-              {errorMessage}
-            </span>
-          )}
-          <button className="btn" type="button" onClick={() => void check()}>
-            <RefreshCw size={12} /> {t("about.updater.retry")}
-          </button>
-        </div>
+      <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
+        <span
+          className="mono"
+          style={{
+            fontSize: 11,
+            color: "var(--ink-3)",
+            flex: 1,
+            minWidth: 200,
+            overflow: "hidden",
+            textOverflow: "ellipsis",
+            whiteSpace: "nowrap",
+          }}
+          title={errorMessage ?? undefined}
+        >
+          {errorMessage ?? t("about.updater.error")}
+        </span>
+        <button className="btn" type="button" onClick={() => void check()}>
+          <RefreshCw size={12} /> {t("about.updater.retry")}
+        </button>
       </div>
     );
   }
 
-  // idle / checking / up_to_date
+  // idle / checking / up_to_date: 状态已在 pill 里, 正文给一句说明即可
   return (
-    <div className="flush-section">
-      {status === "checking" ? (
-        <span className="pill">
-          <RefreshCw size={11} className="spin" /> {t("about.updater.checking")}
-        </span>
-      ) : status === "up_to_date" ? (
-        <span className="pill ok">
-          <CircleCheck size={11} /> {t("about.updater.upToDate")} v{VERSION}
-        </span>
-      ) : (
-        <span className="pill">
-          <CircleAlert size={11} /> {t("about.updater.idle")}
-        </span>
-      )}
+    <div style={{ fontSize: 12, color: "var(--ink-3)" }}>
+      {status === "up_to_date"
+        ? t("updates.status.upToDateDesc", { version: VERSION })
+        : status === "checking"
+          ? t("about.updater.checking")
+          : t("updates.status.idleDesc")}
     </div>
   );
 }

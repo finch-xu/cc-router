@@ -9,7 +9,7 @@ import { runtime } from "@/runtime";
  * 放在这里而不是让页面自己声明, 是因为 padding 挂在 main 上 —— 子组件够不着。
  * 写成 react-router 的路径模式 (matchPath), 动态段用 :id, 静态路径照写。
  */
-const FLUSH_ROUTES = ["/live-routing", "/updates", "/subscriptions/:id"];
+const FLUSH_ROUTES = ["/live-routing", "/subscriptions/:id"];
 
 /**
  * 与某条 FLUSH_ROUTES 模式同形、但刻意保留默认 padding 的路由。优先级高于 FLUSH_ROUTES。

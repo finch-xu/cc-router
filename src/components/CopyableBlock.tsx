@@ -9,9 +9,14 @@ interface Props {
   className?: string;
   /** 是否对 env 片段做轻量语法着色,只对 shell env 行有意义 */
   highlight?: boolean;
+  /**
+   * block (默认): 终端风格深底多行代码块, 明暗主题下都保持深底.
+   * inline: 单行浅底, 用主题变量, 随明暗主题反转. 用于设置页里的 URL / 地址这类一行内容.
+   */
+  variant?: "block" | "inline";
 }
 
-export function CopyableBlock({ text, className, highlight = false }: Props) {
+export function CopyableBlock({ text, className, highlight = false, variant = "block" }: Props) {
   const { t } = useT();
   const [copied, setCopied] = useState(false);
   const content = useMemo(
@@ -27,6 +32,18 @@ export function CopyableBlock({ text, className, highlight = false }: Props) {
     }
     setCopied(true);
     setTimeout(() => setCopied(false), 1500);
+  }
+
+  if (variant === "inline") {
+    return (
+      <div className={cn("copyline", className)}>
+        <span className="copyline-text">{text}</span>
+        <button className="copyline-copy" onClick={copy} type="button">
+          {copied ? <Check size={11} /> : <Copy size={11} />}
+          {copied ? t("copyable.copied") : t("copyable.copy")}
+        </button>
+      </div>
+    );
   }
 
   return (

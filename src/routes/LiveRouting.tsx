@@ -29,6 +29,7 @@ const CLIENT_ALIASES: Record<VirtualModelName, string[]> = {
 const API_ROUTES: { method: string; path: string; descKey: string }[] = [
   { method: "POST", path: "/v1/messages", descKey: "liveRouting.api.messages" },
   { method: "POST", path: "/v1/responses", descKey: "liveRouting.api.responses" },
+  { method: "POST", path: "/v1/chat/completions", descKey: "liveRouting.api.chatCompletions" },
   { method: "GET", path: "/v1/models", descKey: "liveRouting.api.models" },
   { method: "GET", path: "/health", descKey: "liveRouting.api.health" },
 ];
@@ -130,7 +131,7 @@ function AccessSection() {
         <div className="readonly-note">
           <Lock size={14} />
           <span style={{ flex: 1 }}>{t("liveRouting.readonly.notice")}</span>
-          <button className="btn-dark" type="button" onClick={() => navigate("/settings")}>
+          <button className="btn-dark" type="button" onClick={() => navigate("/settings?tab=proxy")}>
             {t("liveRouting.readonly.goSettings")} <ArrowRight size={12} />
           </button>
         </div>

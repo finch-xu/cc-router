@@ -231,7 +231,7 @@ function WebUiAddresses({ listenAll, authEnabled }: { listenAll: boolean; authEn
       </div>
       <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
         {urls.map((u) => (
-          <CopyableBlock key={u} text={u} />
+          <CopyableBlock key={u} text={u} variant="inline" />
         ))}
         {listenAll && (
           <div className={authEnabled ? "alert warn" : "alert err"} style={{ marginTop: 6 }}>
