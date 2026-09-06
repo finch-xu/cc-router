@@ -63,3 +63,21 @@ pub async fn env_snippet(state: State<'_, AppState>) -> AppResult<String> {
          export CLAUDE_CODE_EFFORT_LEVEL=max"
     ))
 }
+
+/// 网页界面设置页展示局域网访问地址用. 只列非回环 IPv4.
+#[tauri::command]
+pub async fn list_lan_addresses() -> AppResult<Vec<String>> {
+    let ifaces = if_addrs::get_if_addrs()
+        .map_err(|e| crate::error::AppError::internal(format!("枚举网卡失败: {e}")))?;
+    let mut out: Vec<String> = ifaces
+        .into_iter()
+        .filter(|i| !i.is_loopback())
+        .filter_map(|i| match i.ip() {
+            std::net::IpAddr::V4(v4) => Some(v4.to_string()),
+            std::net::IpAddr::V6(_) => None,
+        })
+        .collect();
+    out.sort();
+    out.dedup();
+    Ok(out)
+}

@@ -5,7 +5,7 @@ use std::path::PathBuf;
 use tauri::State;
 
 use crate::db::paths;
-use crate::error::AppResult;
+use crate::error::{AppError, AppResult};
 use crate::state::AppState;
 use crate::tls;
 use crate::tls::TlsStatus;
@@ -32,6 +32,16 @@ pub async fn tls_export_ca_pem(
     // HTTP-only 模式下用户提前导出 CA, 这里按需生成 (跳过 leaf + ServerConfig 构建).
     tls::ensure_ca(&app_data_dir).await?;
     tls::export_ca_pem(&app_data_dir, &dest_path).await
+}
+
+/// 网页端导出: 返回 CA PEM 文本, 由浏览器下载. HTTP-only 模式下按需生成 CA.
+#[tauri::command]
+pub async fn tls_get_ca_pem_text(state: State<'_, AppState>) -> AppResult<String> {
+    let app_data_dir = paths::app_data_dir(&state.app_handle)?;
+    tls::ensure_ca(&app_data_dir).await?;
+    tokio::fs::read_to_string(tls::ca_pem_path(&app_data_dir))
+        .await
+        .map_err(AppError::Io)
 }
 
 #[tauri::command]

@@ -4,6 +4,7 @@
 //! 绕开代理 token 校验与 `Access-Control-Allow-Origin: *`——带凭据的管理 API
 //! 绝不能配通配 CORS. 详见 docs/superpowers/specs/2026-09-06-web-ui-runtime-bridge-design.md
 
+pub mod api;
 pub mod assets;
 pub mod auth;
 pub mod events;

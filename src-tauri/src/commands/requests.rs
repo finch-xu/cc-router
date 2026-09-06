@@ -214,16 +214,13 @@ total_latency_ms,input_tokens,output_tokens,cache_creation_tokens,cache_read_tok
 error_message,client_tool,client_user_agent,client_version,client_ip,entry_kind,\
 downstream_http_version,client_effort,effective_effort,effort_source,upstream_effort";
 
-/// 按当前筛选条件把请求日志导出为 CSV 文件 (路径由前端 save dialog 提供)。
-/// 流式逐行写 BufWriter, 不整表载入内存; 返回导出的行数。
-/// 文件头带 UTF-8 BOM, Excel 直接打开中文不乱码。
-#[tauri::command]
-pub async fn export_requests_csv(
-    state: State<'_, AppState>,
-    path: String,
-    filters: Option<RequestLogFilters>,
+/// 把当前筛选下的请求逐行写成 CSV (带 UTF-8 BOM + 表头), 返回行数.
+/// 桌面导出写文件, 网页导出写 Vec<u8>, 共享同一份 SQL 与格式化.
+pub async fn write_csv<W: Write>(
+    state: &AppState,
+    filters: RequestLogFilters,
+    mut w: W,
 ) -> AppResult<u64> {
-    let filters = filters.unwrap_or_default();
     let (where_clause, binds) = build_filter_clause(&filters);
 
     // 导出按时间正序, 符合表格阅读习惯 (页面展示是倒序)
@@ -245,9 +242,6 @@ pub async fn export_requests_csv(
         q = q.bind(v);
     }
 
-    let file = std::fs::File::create(&path)
-        .map_err(|e| crate::error::AppError::Internal(format!("创建导出文件失败: {e}")))?;
-    let mut w = std::io::BufWriter::new(file);
     let io_err = |e: std::io::Error| crate::error::AppError::Internal(format!("写入 CSV 失败: {e}"));
 
     w.write_all("\u{FEFF}".as_bytes()).map_err(io_err)?;
@@ -299,6 +293,32 @@ pub async fn export_requests_csv(
     }
     w.flush().map_err(io_err)?;
     Ok(count)
+}
+
+/// 按当前筛选条件把请求日志导出为 CSV 文件 (路径由前端 save dialog 提供)。
+/// 流式逐行写 BufWriter, 不整表载入内存; 返回导出的行数。
+/// 文件头带 UTF-8 BOM, Excel 直接打开中文不乱码。
+#[tauri::command]
+pub async fn export_requests_csv(
+    state: State<'_, AppState>,
+    path: String,
+    filters: Option<RequestLogFilters>,
+) -> AppResult<u64> {
+    let file = std::fs::File::create(&path)
+        .map_err(|e| crate::error::AppError::Internal(format!("创建导出文件失败: {e}")))?;
+    let w = std::io::BufWriter::new(file);
+    write_csv(&state, filters.unwrap_or_default(), w).await
+}
+
+/// 网页端导出: 返回 CSV 文本 (含 BOM), 由浏览器下载. Task 13 与 export_requests_csv 合并实现.
+#[tauri::command]
+pub async fn export_requests_csv_text(
+    state: State<'_, AppState>,
+    filters: Option<RequestLogFilters>,
+) -> AppResult<String> {
+    let mut buf: Vec<u8> = Vec::new();
+    write_csv(&state, filters.unwrap_or_default(), &mut buf).await?;
+    String::from_utf8(buf).map_err(|e| crate::error::AppError::Internal(format!("CSV 非 UTF-8: {e}")))
 }
 
 /// 返回前端可在筛选器里展示的「已支持识别的 client tool」白名单。
