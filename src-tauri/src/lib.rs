@@ -325,6 +325,9 @@ async fn bootstrap(
         ui_events: tokio::sync::broadcast::channel(proxy::web::events::UI_EVENT_CAPACITY).0,
     };
 
+    // 7b. 网页界面事件桥: Tauri emit → broadcast (SSE 订阅方在 proxy/web/events.rs)
+    proxy::web::events::install_bridge(&handle, state.ui_events.clone());
+
     // 8. 启动代理
     let proxy_state = state.clone();
     tauri::async_runtime::spawn(async move {

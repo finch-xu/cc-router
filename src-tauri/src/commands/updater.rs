@@ -32,7 +32,7 @@ pub enum UpdaterProgress {
     Finished,
 }
 
-const PROGRESS_EVENT: &str = "updater://progress";
+pub const PROGRESS_EVENT: &str = "updater://progress";
 
 /// 根据当前 settings 构造一次性 Updater 实例。每次 check/install 都现造一次。
 async fn build_updater(
