@@ -1,6 +1,6 @@
 import { useEffect, useState, type FormEvent, type ReactNode } from "react";
 import { useQueryClient } from "@tanstack/react-query";
-import { AUTH_REQUIRED_EVENT, runtime, webLogin, webSession } from "@/runtime";
+import { AUTH_REQUIRED_EVENT, resetWebEventSource, runtime, webLogin, webSession } from "@/runtime";
 import { useT } from "@/i18n";
 import logoUrl from "@/assets/logo.png";
 
@@ -30,7 +30,10 @@ export function WebAuthGate({ children }: { children: ReactNode }) {
         if (!cancelled) setPhase("login");
       });
     const onAuthRequired = () => {
-      queryClient.clear();
+      // clear() 会把 I18nProvider 挂在 gate 之上的 settings observer 一并孤立;
+      // cancelQueries() 只中止在途请求, 登录成功后靠 resetQueries() 重新拉取并重新绑定.
+      void queryClient.cancelQueries();
+      resetWebEventSource();
       setPhase("login");
     };
     window.addEventListener(AUTH_REQUIRED_EVENT, onAuthRequired);
@@ -42,7 +45,14 @@ export function WebAuthGate({ children }: { children: ReactNode }) {
 
   if (phase === "ready") return <>{children}</>;
   if (phase === "checking") return <CenteredNote />;
-  return <LoginPage onSuccess={() => setPhase("ready")} />;
+  return (
+    <LoginPage
+      onSuccess={() => {
+        void queryClient.resetQueries();
+        setPhase("ready");
+      }}
+    />
+  );
 }
 
 function CenteredNote() {

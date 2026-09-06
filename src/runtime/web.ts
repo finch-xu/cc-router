@@ -18,10 +18,11 @@ type Handler = (event: { payload: unknown }) => void;
 
 /** 单例 EventSource, 按事件名分发; 首个 listen 时才建连 */
 let source: EventSource | null = null;
+// 空 Set 刻意不清理: listen() 以 `isNew` 判断是否需要 attach, 清掉会让同名事件重复 attach 双触发 (见 fix c5ea606)
 const handlers = new Map<string, Set<Handler>>();
 
 function ensureSource(): EventSource {
-  if (source) return source;
+  if (source && source.readyState !== EventSource.CLOSED) return source;
   source = new EventSource(`${API_PREFIX}/events`);
   for (const name of handlers.keys()) attach(source, name);
   return source;
@@ -81,7 +82,10 @@ export const webRuntime: Runtime = {
       handlers.set(name, set);
     }
     set.add(handler as Handler);
-    const existed = source !== null;
+    // 与 ensureSource() 的存活判断保持一致: 若旧 source 已 CLOSED, ensureSource
+    // 会重建并把所有已登记事件名 (含刚 add 的这个) 批量 attach 一遍, existed 若仍
+    // 判 true 会导致下面再手动 attach 一次, 双触发.
+    const existed = source !== null && source.readyState !== EventSource.CLOSED;
     const es = ensureSource();
     if (existed && isNew) attach(es, name);
     return () => {
