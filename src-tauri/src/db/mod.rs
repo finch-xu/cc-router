@@ -89,6 +89,10 @@ const MIGRATIONS: &[(u32, &str)] = &[
         20,
         include_str!("../../migrations/020_add_forward_client_headers.sql"),
     ),
+    (
+        21,
+        include_str!("../../migrations/021_drop_request_events_and_latency_index.sql"),
+    ),
 ];
 
 pub async fn init_pool(db_path: &Path) -> AppResult<SqlitePool> {
@@ -381,7 +385,7 @@ mod tests {
         run_migrations(&pool, &dir).await.expect("migrate fresh");
 
         let versions = applied_versions(&pool).await;
-        assert_eq!(versions, vec![1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20]);
+        assert_eq!(versions, vec![1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21]);
         assert!(!has_column(&pool, "subscriptions", "supports_thinking_blocks").await);
         assert!(!has_column(&pool, "subscriptions", "thinking_block_field_name").await);
         assert!(has_column(&pool, "requests", "upstream_response_body").await);
@@ -411,7 +415,7 @@ mod tests {
         run_migrations(&pool, &dir).await.expect("migrate legacy");
 
         let versions = applied_versions(&pool).await;
-        assert_eq!(versions, vec![1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20]); // baseline v=1, 然后跑增量
+        assert_eq!(versions, vec![1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21]); // baseline v=1, 然后跑增量
         assert!(!has_column(&pool, "subscriptions", "supports_thinking_blocks").await);
         assert!(!has_column(&pool, "subscriptions", "thinking_block_field_name").await);
         assert!(has_column(&pool, "requests", "upstream_response_body").await);
@@ -428,7 +432,7 @@ mod tests {
         run_migrations(&pool, &dir).await.expect("third run");
 
         let versions = applied_versions(&pool).await;
-        assert_eq!(versions, vec![1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20]); // 没有重复写
+        assert_eq!(versions, vec![1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21]); // 没有重复写
     }
 
     /// 在 v4 schema 状态下插一条订阅 (含已 v7 移除的 supports_thinking_blocks 列)。
@@ -494,7 +498,7 @@ mod tests {
         assert!(!has_table(&pool, "subscriptions_new").await);
         assert_eq!(
             applied_versions(&pool).await,
-            vec![1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20]
+            vec![1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21]
         );
 
         let count: (i64,) =
@@ -863,6 +867,37 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(n, 1);
+    }
+
+    /// v21: 历史 request 事件被清空, 其他 kind 保留; latency 索引存在。
+    #[tokio::test]
+    async fn v21_drops_legacy_request_events_and_adds_latency_index() {
+        let pool = in_memory_pool().await;
+        sqlx::query(
+            "CREATE TABLE _schema_version (version INTEGER PRIMARY KEY, applied_at INTEGER NOT NULL)",
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+
+        // 先跑到 v20
+        apply_migrations(&pool, 0..20).await;
+        let now = 1_700_000_000_000i64;
+        for (kind, sev) in [("request", "info"), ("request", "error"), ("system_error", "error"), ("quota_reached", "warn")] {
+            sqlx::query("INSERT INTO events (id, timestamp, kind, severity, summary) VALUES (?, ?, ?, ?, 'x')")
+                .bind(Uuid::new_v4().to_string()).bind(now).bind(kind).bind(sev)
+                .execute(&pool).await.unwrap();
+        }
+        apply_migrations(&pool, 20..21).await;
+
+        let remaining: Vec<String> = sqlx::query_scalar("SELECT kind FROM events ORDER BY kind")
+            .fetch_all(&pool).await.unwrap();
+        assert_eq!(remaining, vec!["quota_reached".to_string(), "system_error".to_string()]);
+
+        let has_idx: i64 = sqlx::query_scalar(
+            "SELECT COUNT(*) FROM sqlite_master WHERE type='index' AND name='idx_requests_latency'")
+            .fetch_one(&pool).await.unwrap();
+        assert_eq!(has_idx, 1);
     }
 }
 
