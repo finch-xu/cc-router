@@ -9,7 +9,11 @@ static GUARD: OnceLock<WorkerGuard> = OnceLock::new();
 pub fn init(app_data_dir: &Path) -> anyhow::Result<()> {
     let log_dir = app_data_dir.join("logs");
     std::fs::create_dir_all(&log_dir)?;
-    let file_appender = tracing_appender::rolling::daily(&log_dir, "app.log");
+    let file_appender = tracing_appender::rolling::RollingFileAppender::builder()
+        .rotation(tracing_appender::rolling::Rotation::DAILY)
+        .filename_prefix("app.log")
+        .max_log_files(14)
+        .build(&log_dir)?;
     let (nb, guard) = tracing_appender::non_blocking(file_appender);
     let _ = GUARD.set(guard);
 
