@@ -85,10 +85,15 @@ async fn delete_oldest_batch(pool: &SqlitePool, table: &str) -> Result<u64, sqlx
 
 /// 体积安全网: 占用超过 `limit_mb` 时, 从最老开始按批删 requests / events, 直到 ≤ 90% 上限。
 /// 只删两张明细表; 两表都删 0 行 (只剩聚合表) 或达轮数上限即停。
+/// limit_mb = 0 表示「安全网关闭」, 直接返回全 0 (类比 log_retention_days = 0 = 永久保留);
+/// 否则 limit_bytes = 0 会让任何非空 DB 都判定超限, target = 0 则把两张明细表删空。
 pub(crate) async fn enforce_size_limit(
     pool: &SqlitePool,
     limit_mb: u32,
 ) -> Result<DeletedRows, sqlx::Error> {
+    if limit_mb == 0 {
+        return Ok(DeletedRows::default());
+    }
     let limit_bytes = limit_mb as u64 * 1024 * 1024;
     let mut deleted = DeletedRows::default();
     if occupied_bytes(pool).await? <= limit_bytes {
@@ -123,13 +128,32 @@ pub(crate) async fn maybe_vacuum(pool: &SqlitePool, deleted_total: u64) -> bool 
     if !should {
         return false;
     }
+    let bytes_before = occupied_bytes(pool).await.unwrap_or(0);
+    let started = std::time::Instant::now();
     match sqlx::query("VACUUM").execute(pool).await {
         Ok(_) => {
-            info!(deleted_total, "VACUUM completed");
+            let elapsed = started.elapsed();
+            let bytes_after = occupied_bytes(pool).await.unwrap_or(0);
+            let page_count = pragma_u64(pool, "page_count").await.unwrap_or(0);
+            let freelist = pragma_u64(pool, "freelist_count").await.unwrap_or(0);
+            let freelist_ratio = if page_count > 0 {
+                freelist as f64 / page_count as f64
+            } else {
+                0.0
+            };
+            info!(
+                deleted_total,
+                elapsed_ms = elapsed.as_millis() as u64,
+                bytes_before,
+                bytes_after,
+                freelist_ratio,
+                "VACUUM completed"
+            );
             true
         }
         Err(e) => {
-            warn!(?e, "VACUUM failed, will retry on next startup");
+            let elapsed_ms = started.elapsed().as_millis() as u64;
+            warn!(?e, elapsed_ms, "VACUUM failed, will retry on next startup");
             false
         }
     }
@@ -401,14 +425,33 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn size_guard_stops_when_only_aggregates_remain() {
-        // 只有聚合行 (requests 被全删), 上限设成 0 MB 也不能死循环
+    async fn size_guard_noop_when_only_aggregates_remain() {
+        // 只有聚合行 (requests 被全删), 占用远低于 1 MB 上限 → 提前 return, 不进循环。
+        // 循环内 "两表都删 0 行即停" 的死循环防护由 size_guard_deletes_oldest_rows_until_under_target
+        // 最后一轮 (r==0 && e==0 触发 break) 覆盖, 这里只锁「聚合表单独存在时安全网不动它」。
         let pool = fresh_pool().await;
         flush_batch(&pool, vec![entry_at(now_ms())], vec![]).await.unwrap();
         sqlx::query("DELETE FROM requests").execute(&pool).await.unwrap();
-        let deleted = enforce_size_limit(&pool, 0).await.unwrap();
+        let deleted = enforce_size_limit(&pool, 1).await.unwrap();
         assert_eq!(deleted, DeletedRows::default());
         assert_eq!(count(&pool, "request_stats_daily").await, 1);
+    }
+
+    #[tokio::test]
+    async fn size_guard_disabled_when_limit_zero() {
+        // limit_mb=0 表示安全网关闭, 不能把 0 当成 "目标体积 0 字节" 而删空明细表
+        let pool = fresh_pool().await;
+        let now = now_ms();
+        let batch: Vec<_> = (0..5).map(|i| entry_at(now - i * 1000)).collect();
+        flush_batch(&pool, batch, vec![]).await.unwrap();
+        insert_event(&pool, now).await;
+        insert_event(&pool, now - 1000).await;
+
+        let deleted = enforce_size_limit(&pool, 0).await.unwrap();
+
+        assert_eq!(deleted, DeletedRows::default());
+        assert_eq!(count(&pool, "requests").await, 5);
+        assert_eq!(count(&pool, "events").await, 2);
     }
 
     #[tokio::test]
