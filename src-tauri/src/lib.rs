@@ -230,7 +230,7 @@ async fn bootstrap(
 
     let subscriptions_arc = Arc::new(RwLock::new(subscription_map));
 
-    // 6a. 事件流 channel (kind=request/subscription_state_change/system_error/quota_reached)
+    // 6a. 事件流 channel (kind=subscription_state_change/system_error/quota_reached)
     // 需先于请求日志 channel 建好: request_log consumer 复用同一个 event_tx 发 quota_reached 事件。
     let (event_tx, event_rx) = mpsc::channel(1024);
     let event_pool = pool.clone();
