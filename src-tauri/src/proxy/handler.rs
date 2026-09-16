@@ -17,6 +17,7 @@ use crate::proxy::client_fingerprint::{self, ClientContext, RequestEntryKind};
 use crate::proxy::extractors::{format_http_version, HttpVersion};
 use crate::proxy::pipeline;
 use crate::proxy::session_key;
+use crate::proxy::tool_log;
 use crate::proxy::transform::chat_completions_inbound::{self as chat_inbound, AnthropicToChatSseConverter};
 use crate::proxy::transform::responses_inbound::{
     request_to_anthropic, response_to_responses_json, AnthropicToResponsesSseConverter,
@@ -71,6 +72,7 @@ pub async fn messages(
         entry_kind: RequestEntryKind::Messages,
         http_version: Some(format_http_version(version)),
         session_key: session_key::extract(&headers, &parsed, RequestEntryKind::Messages),
+        tools: tool_log::request_tool_shape(&parsed),
     };
 
     info!(
@@ -181,6 +183,7 @@ pub async fn responses(
         http_version: Some(format_http_version(version)),
         // 用翻译前的原始 parsed: request_to_anthropic 会丢 prompt_cache_key.
         session_key: session_key::extract(&headers, &parsed, RequestEntryKind::Responses),
+        tools: tool_log::request_tool_shape(&anthropic_body),
     };
 
     info!(
@@ -511,6 +514,7 @@ pub async fn chat_completions(
         http_version: Some(format_http_version(version)),
         // 用翻译前的原始 parsed: 会话键分支读原始 `user` 字段.
         session_key: session_key::extract(&headers, &parsed, RequestEntryKind::ChatCompletions),
+        tools: tool_log::request_tool_shape(&anthropic_body),
     };
 
     info!(

@@ -15,6 +15,7 @@ use tracing::{debug, warn};
 use uuid::Uuid;
 
 use crate::observability::events::{EventEntry, EventKind, Severity};
+use crate::proxy::tool_log::ToolLogFields;
 use crate::subscription::model::SubscriptionRuntime;
 use crate::subscription::quota::QuotaPeriod;
 use crate::subscription::store::{save_quota_usage_rows, usage_to_rows, QuotaUsageRow};
@@ -154,6 +155,9 @@ pub struct RequestLogEntry {
     pub effort_source: Option<&'static str>,
     /// 上游响应回显的档位。仅 OpenAI Responses 系能拿到, 其余 provider 恒 None。
     pub upstream_effort: Option<String>,
+    /// 工具调用观测五格 (stop_reason / 声明数 / 回传数 / 调用数 / 调用名), 见 [`crate::proxy::tool_log`]。
+    /// 刻意用无 `Default` 的子结构: 任何构造点漏写都编译失败。
+    pub tool_calls: ToolLogFields,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -390,9 +394,10 @@ pub(crate) async fn flush_batch(
                 retry_count, error_message, upstream_response_body,
                 client_tool, client_user_agent, client_version, client_ip,
                 entry_kind, downstream_http_version,
-                client_effort, effective_effort, effort_source, upstream_effort)
+                client_effort, effective_effort, effort_source, upstream_effort,
+                stop_reason, tools_offered_count, tool_result_count, tool_use_count, tool_use_names)
              VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
-                     ?, ?, ?, ?)",
+                     ?, ?, ?, ?, ?, ?, ?, ?, ?)",
         )
         .bind(entry.id.to_string())
         .bind(entry.timestamp_ms)
@@ -424,6 +429,11 @@ pub(crate) async fn flush_batch(
         .bind(entry.effective_effort)
         .bind(entry.effort_source)
         .bind(entry.upstream_effort)
+        .bind(entry.tool_calls.stop_reason)
+        .bind(entry.tool_calls.tools_offered_count.map(|v| v as i64))
+        .bind(entry.tool_calls.tool_result_count.map(|v| v as i64))
+        .bind(entry.tool_calls.tool_use_count.map(|v| v as i64))
+        .bind(entry.tool_calls.tool_use_names)
         .execute(&mut *tx)
         .await;
         if let Err(e) = result {
@@ -585,7 +595,57 @@ mod tests {
             effective_effort: None,
             effort_source: None,
             upstream_effort: None,
+            tool_calls: crate::proxy::tool_log::ToolLogFields::empty(),
         }
+    }
+
+    /// 工具调用 5 列: 有值能读回; request_only 的 entry 响应侧三列为 NULL。
+    #[tokio::test]
+    async fn flush_persists_tool_call_columns() {
+        use crate::proxy::tool_log::{RequestToolShape, ToolLogFields, ToolUseTally};
+        let pool = fresh_pool().await;
+        let sub = Uuid::new_v4();
+        let day_start = 1_704_067_200_000;
+
+        let mut full = make_entry(day_start, VirtualModelName::Sonnet, sub, "anthropic",
+            RequestStatus::Success, Some(100), Some(1), Some(2));
+        let mut tally = ToolUseTally::default();
+        tally.observe_name("Read");
+        tally.observe_name("Bash");
+        tally.observe_stop_reason(Some("tool_use"));
+        full.tool_calls = tally.fields(&RequestToolShape {
+            tools_offered_count: Some(12),
+            tool_result_count: Some(3),
+        });
+        let full_id = full.id.to_string();
+
+        let mut bare = make_entry(day_start + 1000, VirtualModelName::Sonnet, sub, "anthropic",
+            RequestStatus::Error, Some(100), None, None);
+        bare.tool_calls = ToolLogFields::request_only(&RequestToolShape {
+            tools_offered_count: Some(12),
+            tool_result_count: Some(0),
+        });
+        let bare_id = bare.id.to_string();
+
+        flush_batch(&pool, vec![full, bare], vec![]).await.expect("flush");
+
+        let r = sqlx::query(
+            "SELECT stop_reason, tools_offered_count, tool_result_count, tool_use_count, tool_use_names
+             FROM requests WHERE id = ?")
+            .bind(&full_id).fetch_one(&pool).await.unwrap();
+        assert_eq!(r.try_get::<Option<String>, _>("stop_reason").unwrap().as_deref(), Some("tool_use"));
+        assert_eq!(r.try_get::<Option<i64>, _>("tools_offered_count").unwrap(), Some(12));
+        assert_eq!(r.try_get::<Option<i64>, _>("tool_result_count").unwrap(), Some(3));
+        assert_eq!(r.try_get::<Option<i64>, _>("tool_use_count").unwrap(), Some(2));
+        assert_eq!(r.try_get::<Option<String>, _>("tool_use_names").unwrap().as_deref(), Some(r#"["Read","Bash"]"#));
+
+        let r = sqlx::query(
+            "SELECT stop_reason, tools_offered_count, tool_use_count, tool_use_names FROM requests WHERE id = ?")
+            .bind(&bare_id).fetch_one(&pool).await.unwrap();
+        assert_eq!(r.try_get::<Option<String>, _>("stop_reason").unwrap(), None);
+        assert_eq!(r.try_get::<Option<i64>, _>("tools_offered_count").unwrap(), Some(12));
+        assert_eq!(r.try_get::<Option<i64>, _>("tool_use_count").unwrap(), None);
+        assert_eq!(r.try_get::<Option<String>, _>("tool_use_names").unwrap(), None);
     }
 
     /// 思考强度四列: 有值能读回, 老式全 None 的 entry 也照常落库 (NULL)。

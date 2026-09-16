@@ -280,6 +280,7 @@ mod tests {
             effective_effort: None,
             effort_source: None,
             upstream_effort: None,
+            tool_calls: crate::proxy::tool_log::ToolLogFields::empty(),
         }
     }
 

@@ -90,6 +90,8 @@ pub struct ClientContext {
     pub http_version: Option<String>,
     /// 会话亲和键 (见 proxy::session_key). None = 本请求不参与 sticky.
     pub session_key: Option<String>,
+    /// 请求侧工具形状 (声明工具数 / 回传 tool_result 数), 对 Anthropic 形态 body 算一次。
+    pub tools: crate::proxy::tool_log::RequestToolShape,
 }
 
 /// 入口: 按规则识别 headers, 返回 ClientInfo.

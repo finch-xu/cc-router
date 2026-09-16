@@ -34,6 +34,7 @@ use crate::observability::body_dump::{BodyDumpEntry, BodyDumpKind};
 use crate::observability::events::EventEntry;
 use crate::observability::request_log::{RequestLogEntry, RequestStatus};
 use crate::proxy::client_fingerprint::ClientContext;
+use crate::proxy::tool_log::ToolLogFields;
 use crate::proxy::effort_log::EffortLog;
 use crate::proxy::oauth_dispatch::{OAuthDispatchError, OAuthDispatchOk};
 use crate::proxy::sse_framing::find_sse_frame_boundary;
@@ -436,6 +437,7 @@ fn finalize_streaming(
             effective_effort: effort_log.effective.clone(),
             effort_source: effort_log.source,
             upstream_effort: None,
+            tool_calls: ToolLogFields::request_only(&ctx.tools),
         };
         let _ = log_tx.try_send(entry);
     });
@@ -574,6 +576,7 @@ async fn collect_to_json_response(
         effective_effort: effort_log.effective.clone(),
         effort_source: effort_log.source,
         upstream_effort: None,
+        tool_calls: ToolLogFields::request_only(&ctx.tools),
     };
     let _ = log_tx.try_send(entry);
 
