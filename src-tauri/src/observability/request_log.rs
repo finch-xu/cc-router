@@ -15,13 +15,17 @@ use tracing::{debug, warn};
 use uuid::Uuid;
 
 use crate::observability::events::{EventEntry, EventKind, Severity};
-use crate::proxy::tool_log::ToolLogFields;
+use crate::proxy::tool_log::{ToolLogFields, TRUNCATED_MARKER};
 use crate::subscription::model::SubscriptionRuntime;
 use crate::subscription::quota::QuotaPeriod;
 use crate::subscription::store::{save_quota_usage_rows, usage_to_rows, QuotaUsageRow};
 use crate::virtual_model::VirtualModelName;
 
 pub(crate) const DAY_MS: i64 = 86_400_000;
+
+/// `tool_stats_daily.client_tool` 的「未识别」哨兵, 与 `commands/requests.rs::UNKNOWN_SENTINEL`
+/// 及前端 `CLIENT_TOOL_UNKNOWN_SENTINEL` 同值 (单测锁住)。
+pub const TOOL_STATS_UNKNOWN_CLIENT: &str = "__unknown__";
 
 #[derive(Default)]
 struct StatsCounters {
@@ -38,6 +42,9 @@ struct StatsCounters {
     ttft_ms_sum: i64,
     ttft_ms_count: i64,
     retry_count_sum: i64,
+    tool_use_count: i64,
+    tool_use_request_count: i64,
+    tool_result_count: i64,
 }
 
 /// 小票专用聚合计数 (receipt_stats_daily), 只有小票需要的 5 列。
@@ -344,6 +351,8 @@ pub(crate) async fn flush_batch(
     // 小票聚合: key 多 real_model_name 一维 (receipt_stats_daily)。
     let mut receipt_acc: HashMap<(String, String, String, String), (String, ReceiptCounters)> =
         HashMap::new();
+    // 工具榜: key → 调用次数。同一行内重复名累加多次 (语义是「调用次数」)。
+    let mut tool_acc: HashMap<(String, String, String), i64> = HashMap::new();
 
     for entry in batch {
         let key = (
@@ -351,6 +360,7 @@ pub(crate) async fn flush_batch(
             entry.virtual_model_name.as_str().to_string(),
             entry.subscription_id.to_string(),
         );
+        let day_for_tools = key.0.clone();
 
         let (_, racc) = receipt_acc
             .entry((key.0.clone(), key.1.clone(), key.2.clone(), entry.real_model_name.clone()))
@@ -383,6 +393,29 @@ pub(crate) async fn flush_batch(
             acc.ttft_ms_count += 1;
         }
         acc.retry_count_sum += entry.retry_count as i64;
+
+        let tool_uses = entry.tool_calls.tool_use_count.unwrap_or(0) as i64;
+        acc.tool_use_count += tool_uses;
+        if tool_uses > 0 {
+            acc.tool_use_request_count += 1;
+        }
+        acc.tool_result_count += entry.tool_calls.tool_result_count.unwrap_or(0) as i64;
+        if let Some(names_json) = entry.tool_calls.tool_use_names.as_deref() {
+            let client_key = entry
+                .client_tool
+                .unwrap_or(TOOL_STATS_UNKNOWN_CLIENT)
+                .to_string();
+            if let Ok(names) = serde_json::from_str::<Vec<String>>(names_json) {
+                for name in names {
+                    if name == TRUNCATED_MARKER {
+                        continue;
+                    }
+                    *tool_acc
+                        .entry((day_for_tools.clone(), client_key.clone(), name))
+                        .or_insert(0) += 1;
+                }
+            }
+        }
 
         let result = sqlx::query(
             "INSERT INTO requests (id, timestamp, virtual_model_name, subscription_id,
@@ -450,8 +483,9 @@ pub(crate) async fn flush_batch(
                 request_count, success_count, error_count, timeout_count,
                 input_tokens, output_tokens, cache_creation_tokens, cache_read_tokens,
                 total_duration_ms_sum, total_duration_ms_count, ttft_ms_sum, ttft_ms_count,
-                retry_count_sum
-             ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                retry_count_sum,
+                tool_use_count, tool_use_request_count, tool_result_count
+             ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
              ON CONFLICT (day, virtual_model_name, subscription_id) DO UPDATE SET
                 request_count = request_count + excluded.request_count,
                 success_count = success_count + excluded.success_count,
@@ -465,7 +499,10 @@ pub(crate) async fn flush_batch(
                 total_duration_ms_count = total_duration_ms_count + excluded.total_duration_ms_count,
                 ttft_ms_sum = ttft_ms_sum + excluded.ttft_ms_sum,
                 ttft_ms_count = ttft_ms_count + excluded.ttft_ms_count,
-                retry_count_sum = retry_count_sum + excluded.retry_count_sum",
+                retry_count_sum = retry_count_sum + excluded.retry_count_sum,
+                tool_use_count = tool_use_count + excluded.tool_use_count,
+                tool_use_request_count = tool_use_request_count + excluded.tool_use_request_count,
+                tool_result_count = tool_result_count + excluded.tool_result_count",
         )
         .bind(day)
         .bind(vm)
@@ -484,6 +521,9 @@ pub(crate) async fn flush_batch(
         .bind(acc.ttft_ms_sum)
         .bind(acc.ttft_ms_count)
         .bind(acc.retry_count_sum)
+        .bind(acc.tool_use_count)
+        .bind(acc.tool_use_request_count)
+        .bind(acc.tool_result_count)
         .execute(&mut *tx)
         .await;
         if let Err(e) = result {
@@ -519,6 +559,24 @@ pub(crate) async fn flush_batch(
         .await;
         if let Err(e) = result {
             warn!(?e, "UPSERT 小票聚合失败");
+        }
+    }
+
+    for ((day, client_tool, tool_name), count) in tool_acc {
+        let result = sqlx::query(
+            "INSERT INTO tool_stats_daily (day, client_tool, tool_name, call_count)
+             VALUES (?, ?, ?, ?)
+             ON CONFLICT (day, client_tool, tool_name) DO UPDATE SET
+                call_count = call_count + excluded.call_count",
+        )
+        .bind(day)
+        .bind(client_tool)
+        .bind(tool_name)
+        .bind(count)
+        .execute(&mut *tx)
+        .await;
+        if let Err(e) = result {
+            warn!(?e, "UPSERT 工具榜聚合失败");
         }
     }
 
@@ -998,5 +1056,100 @@ mod tests {
         assert_eq!(row.try_get::<i64, _>("request_count").unwrap(), 3);
         assert_eq!(row.try_get::<i64, _>("input_tokens").unwrap(), 18);
         assert_eq!(row.try_get::<i64, _>("output_tokens").unwrap(), 29);
+    }
+
+    #[tokio::test]
+    async fn flush_aggregates_tool_counts_into_stats_and_tool_stats_daily() {
+        use crate::proxy::tool_log::{RequestToolShape, ToolUseTally};
+        let pool = fresh_pool().await;
+        let sub = Uuid::new_v4();
+        let day_start = 1_704_067_200_000;
+        let day_key = local_day_key(day_start);
+
+        // e1: CC, 调 Read×2 + Bash×1, 回传 2
+        let mut e1 = make_entry(day_start, VirtualModelName::Sonnet, sub, "anthropic",
+            RequestStatus::Success, Some(100), Some(1), Some(2));
+        e1.client_tool = Some("claude_code");
+        let mut t1 = ToolUseTally::default();
+        t1.observe_name("Read"); t1.observe_name("Bash"); t1.observe_name("Read");
+        e1.tool_calls = t1.fields(&RequestToolShape { tools_offered_count: Some(9), tool_result_count: Some(2) });
+
+        // e2: 未识别客户端, 调 Read×1, 回传 0
+        let mut e2 = make_entry(day_start + 1, VirtualModelName::Sonnet, sub, "anthropic",
+            RequestStatus::Success, Some(100), Some(1), Some(2));
+        e2.client_tool = None;
+        let mut t2 = ToolUseTally::default();
+        t2.observe_name("Read");
+        e2.tool_calls = t2.fields(&RequestToolShape { tools_offered_count: Some(9), tool_result_count: Some(0) });
+
+        // e3: 成功但 0 次工具调用 → 不计入 tool_use_request_count
+        let mut e3 = make_entry(day_start + 2, VirtualModelName::Sonnet, sub, "anthropic",
+            RequestStatus::Success, Some(100), Some(1), Some(2));
+        e3.client_tool = Some("claude_code");
+        e3.tool_calls = ToolUseTally::default().fields(&RequestToolShape { tools_offered_count: Some(9), tool_result_count: Some(1) });
+
+        flush_batch(&pool, vec![e1, e2, e3], vec![]).await.expect("flush");
+
+        let r = sqlx::query(
+            "SELECT tool_use_count, tool_use_request_count, tool_result_count
+             FROM request_stats_daily WHERE day = ? AND subscription_id = ?")
+            .bind(&day_key).bind(sub.to_string()).fetch_one(&pool).await.unwrap();
+        assert_eq!(r.try_get::<i64, _>("tool_use_count").unwrap(), 4);
+        assert_eq!(r.try_get::<i64, _>("tool_use_request_count").unwrap(), 2);
+        assert_eq!(r.try_get::<i64, _>("tool_result_count").unwrap(), 3);
+
+        let rows = sqlx::query(
+            "SELECT client_tool, tool_name, call_count FROM tool_stats_daily WHERE day = ?
+             ORDER BY client_tool, tool_name")
+            .bind(&day_key).fetch_all(&pool).await.unwrap();
+        let got: Vec<(String, String, i64)> = rows.iter().map(|r| (
+            r.try_get("client_tool").unwrap(),
+            r.try_get("tool_name").unwrap(),
+            r.try_get("call_count").unwrap(),
+        )).collect();
+        assert_eq!(got, vec![
+            (TOOL_STATS_UNKNOWN_CLIENT.to_string(), "Read".to_string(), 1),
+            ("claude_code".to_string(), "Bash".to_string(), 1),
+            ("claude_code".to_string(), "Read".to_string(), 2),
+        ]);
+
+        // 第二批同 key 再来一次 Read → 累加成 3, 不新建行
+        let mut e4 = make_entry(day_start + 3, VirtualModelName::Sonnet, sub, "anthropic",
+            RequestStatus::Success, Some(100), Some(1), Some(2));
+        e4.client_tool = Some("claude_code");
+        let mut t4 = ToolUseTally::default();
+        t4.observe_name("Read");
+        e4.tool_calls = t4.fields(&RequestToolShape::default());
+        flush_batch(&pool, vec![e4], vec![]).await.expect("flush2");
+        let n: i64 = sqlx::query_scalar(
+            "SELECT call_count FROM tool_stats_daily WHERE day = ? AND client_tool = 'claude_code' AND tool_name = 'Read'")
+            .bind(&day_key).fetch_one(&pool).await.unwrap();
+        assert_eq!(n, 3);
+    }
+
+    /// 截断标记不能变成一个「工具名」进聚合表。
+    #[tokio::test]
+    async fn flush_skips_truncation_marker_in_tool_stats() {
+        use crate::proxy::tool_log::{RequestToolShape, ToolUseTally, TRUNCATED_MARKER};
+        let pool = fresh_pool().await;
+        let sub = Uuid::new_v4();
+        let day_start = 1_704_067_200_000;
+        let mut e = make_entry(day_start, VirtualModelName::Sonnet, sub, "anthropic",
+            RequestStatus::Success, Some(100), Some(1), Some(2));
+        let mut t = ToolUseTally::default();
+        let long = "y".repeat(300);
+        for _ in 0..30 { t.observe_name(&long); }
+        e.tool_calls = t.fields(&RequestToolShape::default());
+        flush_batch(&pool, vec![e], vec![]).await.unwrap();
+        let marker_rows: i64 = sqlx::query_scalar(
+            "SELECT COUNT(*) FROM tool_stats_daily WHERE tool_name = ?")
+            .bind(TRUNCATED_MARKER).fetch_one(&pool).await.unwrap();
+        assert_eq!(marker_rows, 0);
+    }
+
+    /// 与 commands/requests.rs 的筛选哨兵同值, 否则「未识别」在工具榜上会与筛选口径不一致。
+    #[test]
+    fn tool_stats_unknown_client_matches_requests_filter_sentinel() {
+        assert_eq!(TOOL_STATS_UNKNOWN_CLIENT, "__unknown__");
     }
 }
