@@ -44,7 +44,7 @@ use crate::oauth::kiro::{
 use crate::observability::events::EventEntry;
 use crate::observability::request_log::{RequestLogEntry, RequestStatus};
 use crate::proxy::client_fingerprint::ClientContext;
-use crate::proxy::tool_log::ToolLogFields;
+use crate::proxy::tool_log::{ToolLogFields, ToolUseTally};
 use crate::proxy::effort_log::EffortLog;
 use crate::proxy::handler::error_body;
 use crate::proxy::sse_framing::find_sse_frame_boundary;
@@ -363,6 +363,7 @@ fn finalize_streaming(
         let mut input_tokens: Option<u32> = None;
         let mut output_tokens: Option<u32> = None;
         let mut upstream_error: Option<String> = None;
+        let mut tool_tally = ToolUseTally::default();
 
         let mut stream = upstream_stream;
         'recv: while let Some(chunk) = stream.next().await {
@@ -395,6 +396,7 @@ fn finalize_streaming(
 
                 let anth_events = converter.feed(&event_name, &data);
                 for evt in anth_events {
+                    tool_tally.observe_responses_event(&evt);
                     let frame = evt.to_sse_frame();
                     if client_tx.send(Ok(Bytes::from(frame))).await.is_err() {
                         return;
@@ -412,6 +414,7 @@ fn finalize_streaming(
 
         // 兜底 message_stop
         for evt in converter.finalize_if_needed() {
+            tool_tally.observe_responses_event(&evt);
             let _ = client_tx.send(Ok(Bytes::from(evt.to_sse_frame()))).await;
         }
 
@@ -497,7 +500,7 @@ fn finalize_streaming(
             effective_effort: effort_log.effective.clone(),
             effort_source: effort_log.source,
             upstream_effort: upstream_effort_echo,
-            tool_calls: ToolLogFields::request_only(&ctx.tools),
+            tool_calls: tool_tally.fields(&ctx.tools),
         };
         let _ = log_tx.try_send(entry);
     });
@@ -655,6 +658,12 @@ async fn collect_to_json_response(
     )
     .await;
 
+    let tool_calls = {
+        let mut tally = ToolUseTally::default();
+        tally.observe_message(&final_msg);
+        tally.fields(&ctx.tools)
+    };
+
     let entry = RequestLogEntry {
         id: attempt_id,
         timestamp_ms: Utc::now().timestamp_millis(),
@@ -689,7 +698,7 @@ async fn collect_to_json_response(
         effective_effort: effort_log.effective.clone(),
         effort_source: effort_log.source,
         upstream_effort: upstream_effort_echo.clone(),
-        tool_calls: ToolLogFields::request_only(&ctx.tools),
+        tool_calls,
     };
     let _ = log_tx.try_send(entry);
 

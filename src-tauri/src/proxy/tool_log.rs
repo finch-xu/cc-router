@@ -108,6 +108,22 @@ impl ToolUseTally {
         }
     }
 
+    /// 喂 Responses / Chat Completions 翻译层产出的 [`AnthropicEvent`] 枚举
+    /// (codex / openai / openai-chat 三条路径共用这个事件类型)。
+    pub fn observe_responses_event(
+        &mut self,
+        evt: &crate::proxy::transform::responses_common::AnthropicEvent,
+    ) {
+        use crate::proxy::transform::responses_common::AnthropicEvent as E;
+        match evt {
+            E::ContentBlockStart { content_block, .. } => self.observe_block(content_block),
+            E::MessageDelta { delta, .. } => {
+                self.observe_stop_reason(delta.get("stop_reason").and_then(Value::as_str))
+            }
+            _ => {}
+        }
+    }
+
     /// 喂一个完整的非流式 Anthropic message JSON (`content[]` + `stop_reason`)。
     pub fn observe_message(&mut self, message: &Value) {
         if let Some(blocks) = message.get("content").and_then(Value::as_array) {
@@ -330,6 +346,29 @@ mod tests {
         assert!(parsed.len() < 30);
         // 计数记的是真实次数, 不因截断而变
         assert_eq!(f.tool_use_count, Some(30));
+    }
+
+    #[test]
+    fn tally_observe_responses_event_enum() {
+        use crate::proxy::transform::responses_common::AnthropicEvent;
+        let mut t = ToolUseTally::default();
+        t.observe_responses_event(&AnthropicEvent::ContentBlockStart {
+            index: 0,
+            content_block: json!({"type": "tool_use", "id": "call_1", "name": "get_weather", "input": {}}),
+        });
+        t.observe_responses_event(&AnthropicEvent::ContentBlockStart {
+            index: 1,
+            content_block: json!({"type": "text", "text": ""}),
+        });
+        t.observe_responses_event(&AnthropicEvent::MessageDelta {
+            delta: json!({"stop_reason": "tool_use", "stop_sequence": null}),
+            usage: json!({"input_tokens": 1, "output_tokens": 1}),
+        });
+        t.observe_responses_event(&AnthropicEvent::MessageStop);
+        let f = t.fields(&RequestToolShape::default());
+        assert_eq!(f.tool_use_count, Some(1));
+        assert_eq!(f.tool_use_names.as_deref(), Some(r#"["get_weather"]"#));
+        assert_eq!(f.stop_reason.as_deref(), Some("tool_use"));
     }
 
     #[test]
