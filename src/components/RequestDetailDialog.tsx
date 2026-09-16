@@ -44,6 +44,39 @@ function effortSummary(
   return text;
 }
 
+/** tool_use_names JSON → [名称, 次数][] 保序去重; 末尾 "…" 标记单独返回 */
+function parseToolNames(raw?: string | null): { chips: [string, number][]; truncated: boolean } {
+  if (!raw) return { chips: [], truncated: false };
+  let names: unknown;
+  try {
+    names = JSON.parse(raw);
+  } catch {
+    return { chips: [], truncated: false };
+  }
+  if (!Array.isArray(names)) return { chips: [], truncated: false };
+  const counts = new Map<string, number>();
+  let truncated = false;
+  for (const n of names) {
+    if (n === "…") {
+      truncated = true;
+      continue;
+    }
+    const key = typeof n === "string" && n ? n : "(unnamed)";
+    counts.set(key, (counts.get(key) ?? 0) + 1);
+  }
+  return { chips: [...counts.entries()], truncated };
+}
+
+function hasToolInfo(r: RequestLogDto): boolean {
+  return (
+    r.stop_reason != null ||
+    r.tools_offered_count != null ||
+    r.tool_result_count != null ||
+    r.tool_use_count != null ||
+    r.tool_use_names != null
+  );
+}
+
 export function RequestDetailDialog({ request, onClose }: Props) {
   const { t } = useT();
   const [copied, setCopied] = useState(false);
@@ -76,6 +109,9 @@ export function RequestDetailDialog({ request, onClose }: Props) {
       `effort: ${effortSummary(request, t) ?? "—"}`,
       `status: ${request.status}`,
       `http_status: ${request.http_status ?? "—"}`,
+      `stop_reason: ${request.stop_reason ?? "—"}`,
+      `tools_offered: ${request.tools_offered_count ?? "—"} · tool_results: ${request.tool_result_count ?? "—"} · tool_uses: ${request.tool_use_count ?? "—"}`,
+      `tool_use_names: ${request.tool_use_names ?? "—"}`,
       `error_message: ${request.error_message ?? ""}`,
       "",
       "upstream_response_body:",
@@ -219,7 +255,50 @@ export function RequestDetailDialog({ request, onClose }: Props) {
                   )
                 }
               />
+              <KV
+                k={t("requestLogs.detail.stopReason")}
+                v={
+                  request.stop_reason ? (
+                    <span className="mono">{request.stop_reason}</span>
+                  ) : (
+                    <span className="muted">—</span>
+                  )
+                }
+              />
             </div>
+
+            {hasToolInfo(request) && (() => {
+              const { chips, truncated } = parseToolNames(request.tool_use_names);
+              const dash = <span className="muted">—</span>;
+              const num = (v?: number | null) => (v != null ? <span className="mono tnum">{v}</span> : dash);
+              return (
+                <div>
+                  <div style={{ color: "var(--ink-3)", fontSize: 12.5, marginBottom: 6 }}>
+                    {t("requestLogs.detail.tools.title")}
+                  </div>
+                  <div style={{ display: "flex", gap: 18, fontSize: 12.5, marginBottom: 8 }}>
+                    <span>{t("requestLogs.detail.tools.offered")} {num(request.tools_offered_count)}</span>
+                    <span>{t("requestLogs.detail.tools.results")} {num(request.tool_result_count)}</span>
+                    <span>{t("requestLogs.detail.tools.used")} {num(request.tool_use_count)}</span>
+                  </div>
+                  {chips.length > 0 ? (
+                    <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
+                      {chips.map(([name, count]) => (
+                        <span key={name} className="pill tag mono" title={name}>
+                          {name}
+                          {count > 1 && <span className="muted"> ×{count}</span>}
+                        </span>
+                      ))}
+                      {truncated && <span className="field-hint">{t("requestLogs.detail.tools.truncated")}</span>}
+                    </div>
+                  ) : (
+                    request.tool_use_count === 0 && (
+                      <div className="field-hint">{t("requestLogs.detail.tools.none")}</div>
+                    )
+                  )}
+                </div>
+              );
+            })()}
 
             {isError && request.error_message && (
               <div>

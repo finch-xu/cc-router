@@ -337,6 +337,14 @@ export function RequestLogsPage() {
                             SSE
                           </span>
                         )}
+                        {row.tool_use_count != null && row.tool_use_count > 0 && (
+                          <span
+                            className="pill tag mono"
+                            title={t("requestLogs.col.toolsHint", { count: row.tool_use_count })}
+                          >
+                            🔧 {row.tool_use_count}
+                          </span>
+                        )}
                       </div>
                     </td>
                     <td>
