@@ -37,6 +37,7 @@ import type {
   Settings,
   SettingsPatch,
   StatsRange,
+  StorageStatsDto,
   SubscriptionDto,
   SubscriptionPatch,
   TestConnectionResult,
@@ -159,6 +160,7 @@ export const api = {
 
   // app
   factoryReset: () => invoke<void>("factory_reset"),
+  getStorageStats: () => invoke<StorageStatsDto>("get_storage_stats"),
 
   // 调试模式 dump 目录管理
   openDebugDumpDir: () => invoke<void>("open_debug_dump_dir"),

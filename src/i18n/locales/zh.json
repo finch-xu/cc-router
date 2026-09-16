@@ -114,6 +114,8 @@
   "settings.storage.retention.forever": "永久",
   "settings.storage.dbLimit.label": "数据库大小上限",
   "settings.storage.dbLimit.unlimited": "10 GB (近似无限)",
+  "settings.storage.usage": "当前数据库 {size} · 请求日志 {requests} 条 · 事件 {events} 条。超过上限时从最旧的记录开始清理, 统计与小票的聚合数据不受影响。",
+  "settings.storage.usageLoading": "正在读取存储占用…",
   "settings.section.language": "语言",
   "settings.language.label": "界面语言",
   "settings.language.desc": "选择 cc-router 界面显示语言。「跟随系统」会读取系统语言:中文 → 中文,日语 → 日本語,其他 → English。",

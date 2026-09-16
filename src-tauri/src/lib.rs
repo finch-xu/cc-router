@@ -143,6 +143,7 @@ pub fn run() {
             commands::app::factory_reset,
             commands::app::is_appimage_runtime,
             commands::app::relaunch_app,
+            commands::app::get_storage_stats,
             commands::updater::check_for_update,
             commands::updater::download_install_update,
             commands::debug::open_debug_dump_dir,

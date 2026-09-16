@@ -56,3 +56,33 @@ pub fn relaunch_app(app: AppHandle) {
     info!("relaunch requested by user (post-update)");
     app.restart();
 }
+
+#[derive(Debug, serde::Serialize)]
+pub struct StorageStatsDto {
+    /// 实际占用字节 (page_count - freelist_count) * page_size, 与体积安全网同口径
+    pub db_bytes: i64,
+    pub requests_rows: i64,
+    pub events_rows: i64,
+    /// request_stats_daily 行数 (聚合表, 永久保留)
+    pub stats_rows: i64,
+}
+
+#[tauri::command]
+pub async fn get_storage_stats(state: State<'_, AppState>) -> AppResult<StorageStatsDto> {
+    let db_bytes = crate::observability::cleanup::occupied_bytes(&state.db).await? as i64;
+    let requests_rows: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM requests")
+        .fetch_one(&state.db)
+        .await?;
+    let events_rows: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM events")
+        .fetch_one(&state.db)
+        .await?;
+    let stats_rows: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM request_stats_daily")
+        .fetch_one(&state.db)
+        .await?;
+    Ok(StorageStatsDto {
+        db_bytes,
+        requests_rows,
+        events_rows,
+        stats_rows,
+    })
+}

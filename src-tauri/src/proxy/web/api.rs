@@ -168,6 +168,7 @@ web_commands! {
     factory_reset() => commands::app::factory_reset(st, app).await,
     is_appimage_runtime() => Ok::<bool, AppError>(commands::app::is_appimage_runtime()),
     relaunch_app() => { commands::app::relaunch_app(app); Ok::<(), AppError>(()) },
+    get_storage_stats() => commands::app::get_storage_stats(st).await,
     // debug
     open_debug_dump_dir() => commands::debug::open_debug_dump_dir(app).await,
     clear_debug_dumps() => commands::debug::clear_debug_dumps(app).await,

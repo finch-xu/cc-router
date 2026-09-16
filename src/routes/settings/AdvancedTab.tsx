@@ -20,11 +20,14 @@ import {
 import { api } from "@/api/tauri";
 import { useT } from "@/i18n";
 import { runtime } from "@/runtime";
+import { useStorageStats } from "@/hooks/useStorageStats";
+import { fmtBytes, fmtNum } from "@/lib/format";
 import type { SettingsForm } from "./useSettingsForm";
 
 /** 高级: 数据存储 / 调试 / 危险区域 (恢复出厂). 危险区固定放最底部, 保持不容易顺手点到. */
 export function AdvancedTab({ form }: { form: SettingsForm }) {
   const { t } = useT();
+  const storage = useStorageStats();
   const [clearDumpsDialog, setClearDumpsDialog] = useState(false);
   const [clearingDumps, setClearingDumps] = useState(false);
   const [resetDialog, setResetDialog] = useState(false);
@@ -103,6 +106,15 @@ export function AdvancedTab({ form }: { form: SettingsForm }) {
                 <SelectItem value="10240">{t("settings.storage.dbLimit.unlimited")}</SelectItem>
               </SelectContent>
             </Select>
+          </div>
+          <div className="field-hint" style={{ marginTop: 4 }}>
+            {storage.data
+              ? t("settings.storage.usage", {
+                  size: fmtBytes(storage.data.db_bytes),
+                  requests: fmtNum(storage.data.requests_rows),
+                  events: fmtNum(storage.data.events_rows),
+                })
+              : t("settings.storage.usageLoading")}
           </div>
         </div>
       </div>

@@ -473,6 +473,14 @@ export interface SettingsPatch {
   // 注意: auth_token 不在 patch 里,必须通过 generateNewToken() 改
 }
 
+/** Rust 侧 commands::app::StorageStatsDto */
+export interface StorageStatsDto {
+  db_bytes: number;
+  requests_rows: number;
+  events_rows: number;
+  stats_rows: number;
+}
+
 /** Rust 侧 commands::updater::UpdateInfo */
 export interface UpdateInfo {
   version: string;
