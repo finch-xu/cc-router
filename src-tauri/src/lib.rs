@@ -344,8 +344,9 @@ async fn bootstrap(
 
     let cleanup_pool = state.db.clone();
     let cleanup_settings = state.settings.clone();
+    let cleanup_event_tx = state.event_log_tx.clone();
     tauri::async_runtime::spawn(async move {
-        observability::cleanup::run(cleanup_pool, cleanup_settings).await;
+        observability::cleanup::run(cleanup_pool, cleanup_settings, cleanup_event_tx).await;
     });
 
     Ok(state)
