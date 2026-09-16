@@ -1,5 +1,4 @@
 //! 统一事件流。`events` 表承载三类事件:
-//! - `request`                    每条请求结束的摘要(详情仍读 requests 表)
 //! - `subscription_state_change`  订阅健康状态机转换
 //! - `system_error`               系统级故障(DB / yaml / 端口监听 等)
 //! - `quota_reached`              订阅 token 用量首次达到用户设的限额
@@ -21,7 +20,6 @@ use uuid::Uuid;
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, serde::Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum EventKind {
-    Request,
     SubscriptionStateChange,
     SystemError,
     QuotaReached,
@@ -30,7 +28,6 @@ pub enum EventKind {
 impl EventKind {
     pub fn as_str(self) -> &'static str {
         match self {
-            Self::Request => "request",
             Self::SubscriptionStateChange => "subscription_state_change",
             Self::SystemError => "system_error",
             Self::QuotaReached => "quota_reached",
@@ -159,28 +156,6 @@ pub fn record(tx: &mpsc::Sender<EventEntry>, entry: EventEntry) {
     }
 }
 
-pub fn record_request(
-    tx: &mpsc::Sender<EventEntry>,
-    request_id: Uuid,
-    subscription_id: Uuid,
-    severity: Severity,
-    summary: impl Into<String>,
-) {
-    record(
-        tx,
-        EventEntry {
-            id: Uuid::new_v4(),
-            timestamp_ms: Utc::now().timestamp_millis(),
-            kind: EventKind::Request,
-            severity,
-            subscription_id: Some(subscription_id),
-            request_id: Some(request_id),
-            summary: summary.into(),
-            payload: None,
-        },
-    );
-}
-
 pub fn record_state_change(
     tx: &mpsc::Sender<EventEntry>,
     subscription_id: Uuid,
@@ -228,9 +203,21 @@ mod tests {
 
     #[test]
     fn event_kind_serializes_snake_case() {
-        assert_eq!(EventKind::Request.as_str(), "request");
         assert_eq!(EventKind::SubscriptionStateChange.as_str(), "subscription_state_change");
         assert_eq!(EventKind::SystemError.as_str(), "system_error");
+    }
+
+    /// request 事件已下线 (2026-09-16): 每 attempt 一条、无 UI 消费者、与 requests 表重复。
+    /// 这条测试只是把 variant 数量锁住, 防止有人把它加回来。
+    #[test]
+    fn event_kind_has_exactly_three_variants() {
+        let all = [
+            EventKind::SubscriptionStateChange,
+            EventKind::SystemError,
+            EventKind::QuotaReached,
+        ];
+        let names: Vec<&str> = all.iter().map(|k| k.as_str()).collect();
+        assert_eq!(names, ["subscription_state_change", "system_error", "quota_reached"]);
     }
 
     #[test]
@@ -245,25 +232,16 @@ mod tests {
         // 不依赖 AppHandle / DB, 只验证 helper 构造 EventEntry 的字段
         let (tx, mut rx) = mpsc::channel::<EventEntry>(8);
         record_system_error(&tx, "test", Some(serde_json::json!({"a": 1})));
-        record_request(
-            &tx,
-            Uuid::new_v4(),
-            Uuid::new_v4(),
-            Severity::Error,
-            "req summary",
-        );
         record_state_change(
             &tx,
             Uuid::new_v4(),
             "sub: Healthy → AuthFailed",
             serde_json::json!({"from": "healthy", "to": "auth_failed"}),
         );
-        // 三条都应能从 channel 拿到 (try_send 不阻塞)
+        // 两条都应能从 channel 拿到 (try_send 不阻塞)
         let e1 = rx.try_recv().expect("system_error 入队");
         assert_eq!(e1.kind, EventKind::SystemError);
         assert_eq!(e1.severity, Severity::Error);
-        let e2 = rx.try_recv().expect("request 入队");
-        assert_eq!(e2.kind, EventKind::Request);
         let e3 = rx.try_recv().expect("state_change 入队");
         assert_eq!(e3.kind, EventKind::SubscriptionStateChange);
         assert_eq!(e3.severity, Severity::Warn);

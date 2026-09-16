@@ -42,7 +42,7 @@ use tokio::sync::{mpsc, RwLock};
 use tracing::warn;
 use uuid::Uuid;
 
-use crate::observability::events::{self, EventEntry, Severity};
+use crate::observability::events::EventEntry;
 use crate::observability::request_log::{RequestLogEntry, RequestStatus};
 use crate::provider::model::AuthHeaderFormat;
 use crate::proxy::client_fingerprint::ClientContext;
@@ -371,7 +371,7 @@ fn finalize_streaming(
     provider_id: String,
     endpoint_id: String,
     real_model: String,
-    display_name: String,
+    _display_name: String,
     retry_count: u32,
     log_tx: mpsc::Sender<RequestLogEntry>,
     event_log_tx: mpsc::Sender<EventEntry>,
@@ -567,25 +567,6 @@ fn finalize_streaming(
             upstream_effort: None,
         };
         let _ = log_tx.try_send(entry);
-        let severity = match &outcome {
-            StreamOutcome::Success => Severity::Info,
-            StreamOutcome::UpstreamError { .. } => Severity::Error,
-        };
-        let event_msg = match &outcome {
-            StreamOutcome::Success => format!(
-                "{} · {} · OpenAI Chat · {}",
-                vm_name.as_str(),
-                display_name,
-                real_model
-            ),
-            StreamOutcome::UpstreamError { message, .. } => format!(
-                "{} · {} · OpenAI Chat · {}",
-                vm_name.as_str(),
-                display_name,
-                message
-            ),
-        };
-        events::record_request(&event_log_tx, attempt_id, sub_id, severity, event_msg);
     });
 
     let stream = futures::stream::unfold(client_rx, |mut rx| async move {
@@ -614,7 +595,7 @@ fn finalize_non_streaming(
     provider_id: String,
     endpoint_id: String,
     real_model: String,
-    display_name: String,
+    _display_name: String,
     retry_count: u32,
     log_tx: mpsc::Sender<RequestLogEntry>,
     event_log_tx: mpsc::Sender<EventEntry>,
@@ -665,7 +646,6 @@ fn finalize_non_streaming(
     let log_real_model = real_model.clone();
     let log_provider_id = provider_id.clone();
     let log_endpoint_id = endpoint_id.clone();
-    let log_display_name = display_name.clone();
     tokio::spawn(async move {
         let _ = state_machine::apply(
             &log_pool,
@@ -709,18 +689,6 @@ fn finalize_non_streaming(
             upstream_effort: None,
         };
         let _ = log_tx.try_send(entry);
-        events::record_request(
-            &log_event_log_tx,
-            attempt_id,
-            sub_id,
-            Severity::Info,
-            format!(
-                "{} · {} · OpenAI Chat · {}",
-                vm_name.as_str(),
-                log_display_name,
-                log_real_model
-            ),
-        );
     });
 
     let bytes = serde_json::to_vec(&final_msg).unwrap_or_default();

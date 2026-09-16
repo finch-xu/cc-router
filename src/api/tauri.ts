@@ -135,7 +135,7 @@ export const api = {
   getReceiptSummary: (range: ReceiptRange) =>
     invoke<ReceiptDto>("get_receipt_summary", { range }),
 
-  // event stream (kind=request / subscription_state_change / system_error)
+  // event stream (kind=subscription_state_change / system_error / quota_reached)
   listEvents: (
     page: number,
     pageSize: number,

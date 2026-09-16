@@ -139,7 +139,6 @@ fn bind_filters<'q>(
 
 fn parse_kind(s: &str) -> EventKind {
     match s {
-        "request" => EventKind::Request,
         "subscription_state_change" => EventKind::SubscriptionStateChange,
         "quota_reached" => EventKind::QuotaReached,
         _ => EventKind::SystemError,

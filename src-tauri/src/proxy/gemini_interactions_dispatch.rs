@@ -31,7 +31,7 @@ use tracing::warn;
 use uuid::Uuid;
 
 use crate::observability::body_dump::{BodyDumpEntry, BodyDumpKind};
-use crate::observability::events::{self, EventEntry, Severity};
+use crate::observability::events::EventEntry;
 use crate::observability::request_log::{RequestLogEntry, RequestStatus};
 use crate::proxy::client_fingerprint::ClientContext;
 use crate::proxy::effort_log::EffortLog;
@@ -300,7 +300,7 @@ fn finalize_streaming(
     provider_id: String,
     endpoint_id: String,
     real_model: String,
-    display_name: String,
+    _display_name: String,
     retry_count: u32,
     log_tx: mpsc::Sender<RequestLogEntry>,
     event_log_tx: mpsc::Sender<EventEntry>,
@@ -438,13 +438,6 @@ fn finalize_streaming(
             upstream_effort: None,
         };
         let _ = log_tx.try_send(entry);
-        events::record_request(
-            &event_log_tx,
-            attempt_id,
-            sub_id,
-            Severity::Info,
-            format!("{} · {} · Gemini Interactions · {}", vm_name.as_str(), display_name, real_model),
-        );
     });
 
     let stream = futures::stream::unfold(client_rx, |mut rx| async move {
@@ -473,7 +466,7 @@ async fn collect_to_json_response(
     provider_id: String,
     endpoint_id: String,
     real_model: String,
-    display_name: String,
+    _display_name: String,
     retry_count: u32,
     log_tx: mpsc::Sender<RequestLogEntry>,
     event_log_tx: mpsc::Sender<EventEntry>,
@@ -583,13 +576,6 @@ async fn collect_to_json_response(
         upstream_effort: None,
     };
     let _ = log_tx.try_send(entry);
-    events::record_request(
-        &event_log_tx,
-        attempt_id,
-        sub_id,
-        Severity::Info,
-        format!("{} · {} · Gemini Interactions · {}", vm_name.as_str(), display_name, real_model),
-    );
 
     let bytes = serde_json::to_vec(&final_msg).unwrap_or_default();
     let mut response = Response::new(Body::from(bytes));

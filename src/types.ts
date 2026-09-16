@@ -708,7 +708,6 @@ export interface ReceiptDto {
 }
 
 export type EventKind =
-  | "request"
   | "subscription_state_change"
   | "system_error"
   | "quota_reached";

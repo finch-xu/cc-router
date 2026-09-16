@@ -13,7 +13,7 @@ use uuid::Uuid;
 
 use crate::error::AppResult;
 use crate::observability::body_dump::{BodyDumpEntry, BodyDumpKind};
-use crate::observability::events::{self, Severity};
+use crate::observability::events;
 use crate::observability::request_log::{RequestLogEntry, RequestStatus};
 use crate::provider::model::AuthType;
 use crate::proxy::client_fingerprint::ClientContext;
@@ -426,18 +426,6 @@ pub async fn dispatch(
                         upstream_effort: None,
                     };
                     let _ = state.request_log_tx.try_send(entry);
-                    events::record_request(
-                        &state.event_log_tx,
-                        attempt_id,
-                        sub_id,
-                        Severity::Error,
-                        format!(
-                            "{} · {} · OAuth · {}",
-                            vm_name.as_str(),
-                            display_name,
-                            err_msg
-                        ),
-                    );
 
                     if retryable {
                         retry_count += 1;
@@ -556,18 +544,6 @@ pub async fn dispatch(
                         upstream_effort: None,
                     };
                     let _ = state.request_log_tx.try_send(entry);
-                    events::record_request(
-                        &state.event_log_tx,
-                        attempt_id,
-                        sub_id,
-                        Severity::Error,
-                        format!(
-                            "{} · {} · Kiro · {}",
-                            vm_name.as_str(),
-                            display_name,
-                            err_msg
-                        ),
-                    );
 
                     if retryable {
                         retry_count += 1;
@@ -696,18 +672,6 @@ pub async fn dispatch(
                         upstream_effort: None,
                     };
                     let _ = state.request_log_tx.try_send(entry);
-                    events::record_request(
-                        &state.event_log_tx,
-                        attempt_id,
-                        sub_id,
-                        Severity::Error,
-                        format!(
-                            "{} · {} · Gemini · {}",
-                            vm_name.as_str(),
-                            display_name,
-                            err_msg
-                        ),
-                    );
 
                     if retryable {
                         retry_count += 1;
@@ -847,18 +811,6 @@ pub async fn dispatch(
                         upstream_effort: None,
                     };
                     let _ = state.request_log_tx.try_send(entry);
-                    events::record_request(
-                        &state.event_log_tx,
-                        attempt_id,
-                        sub_id,
-                        Severity::Error,
-                        format!(
-                            "{} · {} · Gemini Interactions · {}",
-                            vm_name.as_str(),
-                            display_name,
-                            err_msg
-                        ),
-                    );
 
                     if retryable {
                         retry_count += 1;
@@ -997,18 +949,6 @@ pub async fn dispatch(
                         upstream_effort: None,
                     };
                     let _ = state.request_log_tx.try_send(entry);
-                    events::record_request(
-                        &state.event_log_tx,
-                        attempt_id,
-                        sub_id,
-                        Severity::Error,
-                        format!(
-                            "{} · {} · OpenAI · {}",
-                            vm_name.as_str(),
-                            display_name,
-                            err_msg
-                        ),
-                    );
 
                     if retryable {
                         retry_count += 1;
@@ -1148,18 +1088,6 @@ pub async fn dispatch(
                         upstream_effort: None,
                     };
                     let _ = state.request_log_tx.try_send(entry);
-                    events::record_request(
-                        &state.event_log_tx,
-                        attempt_id,
-                        sub_id,
-                        Severity::Error,
-                        format!(
-                            "{} · {} · OpenAI Chat · {}",
-                            vm_name.as_str(),
-                            display_name,
-                            err_msg
-                        ),
-                    );
 
                     if retryable {
                         retry_count += 1;
@@ -1388,30 +1316,6 @@ pub async fn dispatch(
                 };
                 let _ = state.request_log_tx.try_send(entry);
 
-                let event_summary = if is_success {
-                    format!("{} · {} · {}", vm_name.as_str(), display_name, real_model)
-                } else {
-                    format!(
-                        "{} · {} · {} HTTP {}",
-                        vm_name.as_str(),
-                        display_name,
-                        real_model,
-                        status.as_u16()
-                    )
-                };
-                let event_severity = if is_success {
-                    Severity::Info
-                } else {
-                    Severity::Error
-                };
-                events::record_request(
-                    &state.event_log_tx,
-                    attempt_id,
-                    sub_id,
-                    event_severity,
-                    event_summary,
-                );
-
                 if let ShouldRetry::Yes(_) = should_retry {
                     retry_count += 1;
                     continue;
@@ -1519,19 +1423,6 @@ pub async fn dispatch(
                             upstream_effort: None,
                         };
                         let _ = state.request_log_tx.try_send(entry);
-                        events::record_request(
-                            &state.event_log_tx,
-                            attempt_id,
-                            sub_id,
-                            Severity::Error,
-                            format!(
-                                "{} · {} · {} SSE {}",
-                                vm_name.as_str(),
-                                display_name,
-                                real_model,
-                                err_summary
-                            ),
-                        );
 
                         retry_count += 1;
                         continue;
@@ -1581,19 +1472,6 @@ pub async fn dispatch(
                             upstream_effort: None,
                         };
                         let _ = state.request_log_tx.try_send(entry);
-                        events::record_request(
-                            &state.event_log_tx,
-                            attempt_id,
-                            sub_id,
-                            Severity::Error,
-                            format!(
-                                "{} · {} · {} {}",
-                                vm_name.as_str(),
-                                display_name,
-                                real_model,
-                                err_msg
-                            ),
-                        );
                         retry_count += 1;
                         continue;
                     }
@@ -1726,20 +1604,6 @@ pub async fn dispatch(
                     upstream_effort: None,
                 };
                 let _ = state.request_log_tx.try_send(entry);
-
-                events::record_request(
-                    &state.event_log_tx,
-                    attempt_id,
-                    sub_id,
-                    Severity::Error,
-                    format!(
-                        "{} · {} · {} {}",
-                        vm_name.as_str(),
-                        display_name,
-                        real_model,
-                        err_msg
-                    ),
-                );
 
                 retry_count += 1;
                 continue;

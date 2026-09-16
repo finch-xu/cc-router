@@ -41,7 +41,7 @@ use crate::oauth::kiro::{
     KiroOAuthManager, KIRO_AGENT_MODE_HEADER, KIRO_AMZ_INVOCATION_HEADER, KIRO_AMZ_UA_HEADER,
     KIRO_OPTOUT_HEADER,
 };
-use crate::observability::events::{self, EventEntry, Severity};
+use crate::observability::events::EventEntry;
 use crate::observability::request_log::{RequestLogEntry, RequestStatus};
 use crate::proxy::client_fingerprint::ClientContext;
 use crate::proxy::effort_log::EffortLog;
@@ -342,7 +342,7 @@ fn finalize_streaming(
     provider_id: String,
     endpoint_id: String,
     real_model: String,
-    display_name: String,
+    _display_name: String,
     retry_count: u32,
     log_tx: mpsc::Sender<RequestLogEntry>,
     event_log_tx: mpsc::Sender<EventEntry>,
@@ -498,23 +498,6 @@ fn finalize_streaming(
             upstream_effort: upstream_effort_echo,
         };
         let _ = log_tx.try_send(entry);
-        let (severity, summary) = match &upstream_error {
-            Some(msg) => (
-                Severity::Error,
-                format!(
-                    "{} · {} · {} SSE failed: {}",
-                    vm_name.as_str(),
-                    display_name,
-                    real_model,
-                    msg
-                ),
-            ),
-            None => (
-                Severity::Info,
-                format!("{} · {} · {}", vm_name.as_str(), display_name, real_model),
-            ),
-        };
-        events::record_request(&event_log_tx, attempt_id, sub_id, severity, summary);
     });
 
     let stream = futures::stream::unfold(client_rx, |mut rx| async move {
@@ -546,7 +529,7 @@ async fn collect_to_json_response(
     provider_id: String,
     endpoint_id: String,
     real_model: String,
-    display_name: String,
+    _display_name: String,
     retry_count: u32,
     log_tx: mpsc::Sender<RequestLogEntry>,
     event_log_tx: mpsc::Sender<EventEntry>,
@@ -629,19 +612,6 @@ async fn collect_to_json_response(
             upstream_effort: upstream_effort_echo.clone(),
         };
         let _ = log_tx.try_send(entry);
-        events::record_request(
-            &event_log_tx,
-            attempt_id,
-            sub_id,
-            Severity::Error,
-            format!(
-                "{} · {} · {} SSE failed: {}",
-                vm_name.as_str(),
-                display_name,
-                real_model,
-                message
-            ),
-        );
         return (
             StatusCode::BAD_GATEWAY,
             Json(error_body("oauth_upstream_error", &message)),
@@ -718,13 +688,6 @@ async fn collect_to_json_response(
         upstream_effort: upstream_effort_echo.clone(),
     };
     let _ = log_tx.try_send(entry);
-    events::record_request(
-        &event_log_tx,
-        attempt_id,
-        sub_id,
-        Severity::Info,
-        format!("{} · {} · {}", vm_name.as_str(), display_name, real_model),
-    );
 
     let bytes = serde_json::to_vec(&final_msg).unwrap_or_default();
     let mut response = Response::new(Body::from(bytes));
@@ -960,7 +923,7 @@ fn finalize_kiro_streaming(
     provider_id: String,
     endpoint_id: String,
     real_model: String,
-    display_name: String,
+    _display_name: String,
     retry_count: u32,
     log_tx: mpsc::Sender<RequestLogEntry>,
     event_log_tx: mpsc::Sender<EventEntry>,
@@ -1075,13 +1038,6 @@ fn finalize_kiro_streaming(
             upstream_effort: None,
         };
         let _ = log_tx.try_send(entry);
-        events::record_request(
-            &event_log_tx,
-            attempt_id,
-            sub_id,
-            Severity::Info,
-            format!("{} · {} · Kiro · {}", vm_name.as_str(), display_name, real_model),
-        );
     });
 
     let stream = futures::stream::unfold(client_rx, |mut rx| async move {
@@ -1109,7 +1065,7 @@ async fn collect_kiro_to_json_response(
     provider_id: String,
     endpoint_id: String,
     real_model: String,
-    display_name: String,
+    _display_name: String,
     retry_count: u32,
     log_tx: mpsc::Sender<RequestLogEntry>,
     event_log_tx: mpsc::Sender<EventEntry>,
@@ -1196,13 +1152,6 @@ async fn collect_kiro_to_json_response(
         upstream_effort: None,
     };
     let _ = log_tx.try_send(entry);
-    events::record_request(
-        &event_log_tx,
-        attempt_id,
-        sub_id,
-        Severity::Info,
-        format!("{} · {} · Kiro · {}", vm_name.as_str(), display_name, real_model),
-    );
 
     let bytes = serde_json::to_vec(&final_msg).unwrap_or_default();
     let mut response = Response::new(Body::from(bytes));

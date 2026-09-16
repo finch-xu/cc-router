@@ -31,7 +31,7 @@ pub const ZHIPU_ERR_QUOTA_EXHAUSTED: &str = "1308";
 pub const ZHIPU_ERR_RATE_LIMITED: &str = "1302";
 
 use crate::observability::body_dump::{BodyDumpEntry, BodyDumpKind};
-use crate::observability::events::{self, EventEntry, Severity};
+use crate::observability::events::EventEntry;
 use crate::observability::request_log::{RequestLogEntry, RequestStatus};
 use crate::proxy::client_fingerprint::ClientContext;
 use crate::proxy::effort_log::EffortLog;
@@ -49,7 +49,7 @@ pub fn stream_response(
     provider_id: String,
     endpoint_id: String,
     real_model: String,
-    display_name: String,
+    _display_name: String,
     retry_count: u32,
     start: Instant,
     log_tx: mpsc::Sender<RequestLogEntry>,
@@ -223,31 +223,6 @@ pub fn stream_response(
             upstream_effort: None,
         };
         let _ = log_tx.try_send(entry);
-
-        // emit kind=request event 用于事件流时间线
-        let event_severity = if had_error {
-            Severity::Error
-        } else {
-            Severity::Info
-        };
-        let event_summary = if had_error {
-            format!(
-                "{} · {} · {} {}",
-                vm_name.as_str(),
-                display_name,
-                real_model,
-                error_message.as_deref().unwrap_or("流式中断")
-            )
-        } else {
-            format!("{} · {} · {} (SSE)", vm_name.as_str(), display_name, real_model)
-        };
-        events::record_request(
-            &event_log_tx,
-            request_id,
-            subscription_id,
-            event_severity,
-            event_summary,
-        );
     });
 
     let body_stream = stream_from_receiver(client_rx);
