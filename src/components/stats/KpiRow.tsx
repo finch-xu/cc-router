@@ -19,8 +19,9 @@ export function KpiRow({ stats, loading }: { stats?: OverallStatsDto; loading?: 
   const cacheDenom = input + cacheRead + cacheWrite;
   const cacheShare = cacheDenom > 0 ? (cacheRead / cacheDenom) * 100 : null;
   const successCount = o?.success_count ?? 0;
+  // 流式请求可能先吐 tool_use 块后才报错, 计入 tool_use_request_count 但不计入 success_count, 需 clamp
   const toolShare =
-    successCount > 0 ? ((o?.tool_use_request_count ?? 0) / successCount) * 100 : null;
+    successCount > 0 ? Math.min(100, ((o?.tool_use_request_count ?? 0) / successCount) * 100) : null;
 
   return (
     <div className={"stats-kpi" + (loading ? " is-loading" : "")}>

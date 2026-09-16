@@ -11,6 +11,7 @@ import { useT } from "@/i18n";
 import { fmtTime } from "@/lib/format";
 import { customProviderLabel } from "@/lib/providerLabels";
 import type { RequestLogDto } from "@/types";
+import { TOOL_NAME_TRUNCATED_MARKER } from "@/types";
 
 interface Props {
   request: RequestLogDto | null;
@@ -57,7 +58,7 @@ function parseToolNames(raw?: string | null): { chips: [string, number][]; trunc
   const counts = new Map<string, number>();
   let truncated = false;
   for (const n of names) {
-    if (n === "…") {
+    if (n === TOOL_NAME_TRUNCATED_MARKER) {
       truncated = true;
       continue;
     }

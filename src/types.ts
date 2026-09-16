@@ -547,6 +547,12 @@ export type ClientToolId =
  */
 export const CLIENT_TOOL_UNKNOWN_SENTINEL = "__unknown__";
 
+/**
+ * `tool_use_names` JSON 数组超长截断时追加的标记。必须与 Rust 侧
+ * `proxy/tool_log.rs::TRUNCATED_MARKER` 保持同值。
+ */
+export const TOOL_NAME_TRUNCATED_MARKER = "…";
+
 export interface RequestLogDto {
   id: string;
   timestamp: number;

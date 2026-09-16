@@ -1248,13 +1248,12 @@ html:not([data-platform="macos"]) .main.flush { padding-top: 0; }
 
 .stats-kpi {
   display: grid;
-  grid-template-columns: repeat(7, 1fr);
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
   gap: var(--gap-md);
   margin-bottom: 16px;
   transition: opacity 160ms ease;
 }
 .stats-kpi.is-loading { opacity: 0.6; }
-@media (max-width: 1280px) { .stats-kpi { grid-template-columns: repeat(4, 1fr); } }
 @media (max-width: 720px)  { .stats-kpi { grid-template-columns: repeat(2, 1fr); } }
 
 .stats-grid-2 {

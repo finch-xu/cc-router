@@ -33,21 +33,26 @@ export function ToolTopChart({
   errorText?: string | null;
 }) {
   const { t } = useT();
-  const rows: Row[] = useMemo(
-    () =>
-      items.map((it) => {
-        const meta = it.client_tool ? CLIENT_TOOLS_BY_ID[it.client_tool as ClientToolId] : undefined;
-        const clientLabel = meta ? t(meta.i18nKey) : t("requestLogs.client.unknown");
-        return {
-          key: `${it.client_tool ?? "__unknown__"}::${it.tool_name}`,
-          label: displayToolName(it.tool_name),
-          fullName: it.tool_name,
-          clientLabel,
-          call_count: it.call_count,
-        };
-      }),
-    [items, t],
-  );
+  const rows: Row[] = useMemo(() => {
+    const nameCounts = new Map<string, number>();
+    for (const it of items) {
+      nameCounts.set(it.tool_name, (nameCounts.get(it.tool_name) ?? 0) + 1);
+    }
+    return items.map((it) => {
+      const meta = it.client_tool ? CLIENT_TOOLS_BY_ID[it.client_tool as ClientToolId] : undefined;
+      const clientLabel = meta ? t(meta.i18nKey) : t("requestLogs.client.unknown");
+      const displayName = displayToolName(it.tool_name);
+      // 同名工具跨多个客户端时, 纯工具名会在 Y 轴渲染出重复刻度, 需要带上客户端消歧
+      const label = (nameCounts.get(it.tool_name) ?? 0) > 1 ? `${displayName} · ${clientLabel}` : displayName;
+      return {
+        key: `${it.client_tool ?? "__unknown__"}::${it.tool_name}`,
+        label,
+        fullName: it.tool_name,
+        clientLabel,
+        call_count: it.call_count,
+      };
+    });
+  }, [items, t]);
   const height = Math.max(160, rows.length * 28 + 24);
 
   return (
