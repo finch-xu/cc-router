@@ -869,9 +869,10 @@ mod tests {
         assert_eq!(n, 1);
     }
 
-    /// v21: 历史 request 事件被清空, 其他 kind 保留; latency 索引存在。
+    /// v21: 历史 request 事件被清空, 其他 kind 保留; 不再创建 latency 索引 (p95 查询实测走
+    /// idx_timestamp + 临时排序, 索引本身用不上, 只留写入开销)。
     #[tokio::test]
-    async fn v21_drops_legacy_request_events_and_adds_latency_index() {
+    async fn v21_drops_legacy_request_events() {
         let pool = in_memory_pool().await;
         sqlx::query(
             "CREATE TABLE _schema_version (version INTEGER PRIMARY KEY, applied_at INTEGER NOT NULL)",
@@ -897,7 +898,7 @@ mod tests {
         let has_idx: i64 = sqlx::query_scalar(
             "SELECT COUNT(*) FROM sqlite_master WHERE type='index' AND name='idx_requests_latency'")
             .fetch_one(&pool).await.unwrap();
-        assert_eq!(has_idx, 1);
+        assert_eq!(has_idx, 0, "idx_requests_latency 不应被创建 (p95 查询用不上, 只加写入开销)");
     }
 }
 

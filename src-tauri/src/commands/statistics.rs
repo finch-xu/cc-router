@@ -113,7 +113,8 @@ pub async fn get_overall_stats(
 
     // p95 从 requests 表算 (cleanup 删后失真, 接受)。
     // 用 LIMIT 1 OFFSET 直接取第 95 分位, 避免把所有 latency fetch 到 Rust 再排序——
-    // SQLite 已能用索引扫到分位点, AllTime + 大表场景下省下整表传输开销。
+    // 实测 SQLite 走 idx_timestamp 过滤 timestamp 后用临时 B-tree 排序 (无可用的 latency
+    // 索引, 加一个也不会被这条查询用上); AllTime + 大表场景下是整表排序, 按 spec 接受。
     let since_ms = range.since_ms();
     let p95_duration_ms: Option<i64> = sqlx::query_scalar(
         "SELECT total_latency_ms FROM requests
