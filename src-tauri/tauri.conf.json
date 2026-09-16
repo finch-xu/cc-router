@@ -93,6 +93,7 @@
       "migrations/019_stats_daily_local_day.sql",
       "migrations/020_add_forward_client_headers.sql",
       "migrations/021_drop_request_events_and_latency_index.sql",
+      "migrations/022_add_tool_call_stats.sql",
       "../LICENSE"
     ],
     "category": "DeveloperTool",
