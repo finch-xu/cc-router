@@ -733,6 +733,7 @@ pub struct ChatCompletionsSseConverter {
     next_block_index: u32,
     finish_reason: Option<String>,
     usage: Option<UsageSnapshot>,
+    tool_tally: crate::proxy::tool_log::ToolUseTally,
 }
 
 impl ChatCompletionsSseConverter {
@@ -752,6 +753,7 @@ impl ChatCompletionsSseConverter {
             next_block_index: 0,
             finish_reason: None,
             usage: None,
+            tool_tally: Default::default(),
         }
     }
 
@@ -778,12 +780,18 @@ impl ChatCompletionsSseConverter {
             };
             self.process_chunk(&value, &mut out);
         }
+        for e in &out {
+            self.tool_tally.observe_responses_event(e);
+        }
         out.into_iter().map(|e| e.to_sse_frame()).collect()
     }
 
     /// 处理流末: 若上游断流没发 [DONE] / 没发 message_stop, 由调用方触发兜底.
     pub fn finish(&mut self) -> Vec<String> {
         let evs = self.flush_finish();
+        for e in &evs {
+            self.tool_tally.observe_responses_event(e);
+        }
         evs.into_iter().map(|e| e.to_sse_frame()).collect()
     }
 
@@ -810,7 +818,15 @@ impl ChatCompletionsSseConverter {
         }
         // 注意: 不发 message_delta/message_stop, error 帧本身就是终结.
         self.stopped = true;
+        for e in &out {
+            self.tool_tally.observe_responses_event(e);
+        }
         out.into_iter().map(|e| e.to_sse_frame()).collect()
+    }
+
+    /// 本次流累计的工具调用 / stop_reason 观测 (dispatch 写 RequestLogEntry 用)。
+    pub fn tool_tally(&self) -> &crate::proxy::tool_log::ToolUseTally {
+        &self.tool_tally
     }
 
     /// converter 是否已 emit message_start (用于 dispatch 层判断是否需要发 error 前的兜底事件).
@@ -1776,6 +1792,25 @@ mod tests {
         );
         // 第二帧的 args 片段也必须 emit
         assert!(joined.contains("\"partial_json\":\"\\\"rust\\\"}\""));
+    }
+
+    #[test]
+    fn sse_converter_tool_tally_counts_tool_calls_and_stop_reason() {
+        let mut conv = ChatCompletionsSseConverter::new(cfg(), "chatcmpl-1".to_string(), "gpt-4.1".to_string());
+        let frames = [
+            r#"data: {"id":"chatcmpl-1","choices":[{"index":0,"delta":{"role":"assistant","tool_calls":[{"index":0,"id":"call_1","type":"function","function":{"name":"search","arguments":""}}]}}]}"#,
+            r#"data: {"id":"chatcmpl-1","choices":[{"index":0,"delta":{"tool_calls":[{"index":0,"function":{"arguments":"{\"q\":\"rust\"}"}}]}}]}"#,
+            r#"data: {"id":"chatcmpl-1","choices":[{"index":0,"delta":{},"finish_reason":"tool_calls"}],"usage":{"prompt_tokens":3,"completion_tokens":1}}"#,
+            "data: [DONE]",
+        ];
+        for f in frames {
+            let _ = conv.ingest(f);
+        }
+        let _ = conv.finish();
+        let fields = conv.tool_tally().fields(&crate::proxy::tool_log::RequestToolShape::default());
+        assert_eq!(fields.tool_use_count, Some(1));
+        assert_eq!(fields.tool_use_names.as_deref(), Some(r#"["search"]"#));
+        assert_eq!(fields.stop_reason.as_deref(), Some("tool_use"));
     }
 
     /// 修 #2: 单 chunk 内多个 tool_calls 全部缺 `index` 字段, 必须按 id 分到不同 block
