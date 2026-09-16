@@ -1268,6 +1268,14 @@ pub async fn dispatch(
                     .and_then(|v| v.as_str())
                     .map(|s| s.to_string());
 
+                let tool_calls = if is_success {
+                    let mut tally = crate::proxy::tool_log::ToolUseTally::default();
+                    tally.observe_message(&resp_body);
+                    tally.fields(&ctx.tools)
+                } else {
+                    ToolLogFields::request_only(&ctx.tools)
+                };
+
                 let (req_status, error_message, upstream_body_log) = if is_success {
                     (RequestStatus::Success, None, None)
                 } else {
@@ -1320,7 +1328,7 @@ pub async fn dispatch(
                     effective_effort: effort_log.effective.clone(),
                     effort_source: effort_log.source,
                     upstream_effort: None,
-                    tool_calls: ToolLogFields::request_only(&ctx.tools),
+                    tool_calls,
                 };
                 let _ = state.request_log_tx.try_send(entry);
 

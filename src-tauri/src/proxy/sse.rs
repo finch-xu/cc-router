@@ -34,7 +34,7 @@ use crate::observability::body_dump::{BodyDumpEntry, BodyDumpKind};
 use crate::observability::events::EventEntry;
 use crate::observability::request_log::{RequestLogEntry, RequestStatus};
 use crate::proxy::client_fingerprint::ClientContext;
-use crate::proxy::tool_log::ToolLogFields;
+use crate::proxy::tool_log::ToolUseTally;
 use crate::proxy::effort_log::EffortLog;
 use crate::subscription::model::SubscriptionRuntime;
 use crate::subscription::state_machine;
@@ -89,6 +89,7 @@ pub fn stream_response(
         let mut response_model: Option<String> = None;
         let mut had_error = false;
         let mut error_text: Option<String> = None;
+        let mut tool_tally = ToolUseTally::default();
 
         while let Some(chunk) = upstream.next().await {
             let chunk = match chunk {
@@ -140,6 +141,10 @@ pub fn stream_response(
                     if let Some(v) = meta.response_model {
                         response_model = Some(v);
                     }
+                    if let Some(name) = meta.tool_use_name.as_deref() {
+                        tool_tally.observe_name(name);
+                    }
+                    tool_tally.observe_stop_reason(meta.stop_reason.as_deref());
                 }
 
                 if let Err(e) = client_tx.send(Ok(processed)).await {
@@ -222,7 +227,7 @@ pub fn stream_response(
             effective_effort: effort_log.effective.clone(),
             effort_source: effort_log.source,
             upstream_effort: None,
-            tool_calls: ToolLogFields::request_only(&ctx.tools),
+            tool_calls: tool_tally.fields(&ctx.tools),
         };
         let _ = log_tx.try_send(entry);
     });
@@ -250,6 +255,10 @@ struct ParsedMeta {
     cache_read: Option<u32>,
     /// message_start 事件里 message.model 的原值(改写前)
     response_model: Option<String>,
+    /// content_block_start 里 tool_use / server_tool_use 块的 name (其他块 None)
+    tool_use_name: Option<String>,
+    /// message_delta.delta.stop_reason
+    stop_reason: Option<String>,
 }
 
 /// 对单个 SSE 事件（以 `\n\n` 结尾）做改写并提取 tokens。
@@ -268,8 +277,9 @@ fn process_event(
     let event_name = sse_event_name(text);
     let is_message_start = event_name == Some("message_start");
     let is_message_delta = event_name == Some("message_delta");
+    let is_content_block_start = event_name == Some("content_block_start");
 
-    if !is_message_start && !is_message_delta {
+    if !is_message_start && !is_message_delta && !is_content_block_start {
         return (Bytes::copy_from_slice(raw), None);
     }
 
@@ -311,7 +321,30 @@ fn process_event(
         cache_creation: None,
         cache_read: None,
         response_model: None,
+        tool_use_name: None,
+        stop_reason: None,
     };
+
+    if is_content_block_start {
+        let is_tool = matches!(
+            parsed
+                .get("content_block")
+                .and_then(|b| b.get("type"))
+                .and_then(|v| v.as_str()),
+            Some("tool_use") | Some("server_tool_use")
+        );
+        if is_tool {
+            meta.tool_use_name = Some(
+                parsed
+                    .get("content_block")
+                    .and_then(|b| b.get("name"))
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("")
+                    .to_string(),
+            );
+        }
+        return (Bytes::copy_from_slice(raw), Some(meta));
+    }
 
     if is_message_start {
         // 提取 usage 与上游 model 原值(无论是否改写 model 都要记录日志)
@@ -348,6 +381,11 @@ fn process_event(
         // message_delta: 提取 usage，原字节透传。
         // 阿里云百炼把最终的 input_tokens / cache_* 放在 message_delta.usage，
         // 而 Anthropic 原生只给 output_tokens——都读，读不到保持 None 不覆盖。
+        meta.stop_reason = parsed
+            .get("delta")
+            .and_then(|d| d.get("stop_reason"))
+            .and_then(|v| v.as_str())
+            .map(|s| s.to_string());
         if let Some(usage) = parsed.get("usage") {
             meta.output_tokens = usage
                 .get("output_tokens")
@@ -660,12 +698,45 @@ mod tests {
     }
 
     /// content_block_start (含 thinking 块) 应原字节透传, 现已无方言重命名逻辑。
+    /// tool_use 观测加入后, 非 tool 块仍可能产生 meta, 但 tool_use_name 必为 None。
     #[test]
     fn process_event_thinking_block_start_passes_through() {
         let raw = b"event: content_block_start\ndata: {\"type\":\"content_block_start\",\"index\":0,\"content_block\":{\"type\":\"thinking\",\"thinking\":\"x\",\"signature\":\"\"}}\n\n";
         let (bytes, meta) = process_event(raw, Some("model-sonnet"));
-        assert!(meta.is_none());
         assert_eq!(&bytes[..], raw, "content_block_start 应原字节透传");
+        assert!(meta.map(|m| m.tool_use_name.is_none()).unwrap_or(true));
+    }
+
+    /// content_block_start[tool_use] 原字节透传, 且 meta 带出 tool name。
+    #[test]
+    fn process_event_extracts_tool_use_name_and_passes_bytes_through() {
+        let raw = b"event: content_block_start\ndata: {\"type\":\"content_block_start\",\"index\":1,\"content_block\":{\"type\":\"tool_use\",\"id\":\"toolu_1\",\"name\":\"Bash\",\"input\":{}}}\n\n";
+        let (bytes, meta) = process_event(raw, Some("model-sonnet"));
+        assert_eq!(&bytes[..], raw, "content_block_start 必须原字节透传");
+        let meta = meta.expect("tool_use 块应产生 meta");
+        assert_eq!(meta.tool_use_name.as_deref(), Some("Bash"));
+        assert_eq!(meta.stop_reason, None);
+    }
+
+    #[test]
+    fn process_event_server_tool_use_counts_but_text_block_does_not() {
+        let raw = b"event: content_block_start\ndata: {\"type\":\"content_block_start\",\"index\":0,\"content_block\":{\"type\":\"server_tool_use\",\"id\":\"s1\",\"name\":\"web_search\",\"input\":{}}}\n\n";
+        let (_, meta) = process_event(raw, None);
+        assert_eq!(meta.unwrap().tool_use_name.as_deref(), Some("web_search"));
+
+        let raw_text = b"event: content_block_start\ndata: {\"type\":\"content_block_start\",\"index\":0,\"content_block\":{\"type\":\"text\",\"text\":\"\"}}\n\n";
+        let (bytes, meta) = process_event(raw_text, None);
+        assert_eq!(&bytes[..], raw_text);
+        assert!(meta.map(|m| m.tool_use_name.is_none()).unwrap_or(true));
+    }
+
+    #[test]
+    fn process_event_message_delta_extracts_stop_reason() {
+        let raw = b"event: message_delta\ndata: {\"type\":\"message_delta\",\"delta\":{\"stop_reason\":\"tool_use\",\"stop_sequence\":null},\"usage\":{\"output_tokens\":7}}\n\n";
+        let (_, meta) = process_event(raw, Some("model-sonnet"));
+        let meta = meta.unwrap();
+        assert_eq!(meta.stop_reason.as_deref(), Some("tool_use"));
+        assert_eq!(meta.output_tokens, Some(7));
     }
 
     fn into_box_stream(
