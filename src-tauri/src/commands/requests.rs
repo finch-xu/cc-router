@@ -54,6 +54,16 @@ pub struct RequestLogDto {
     pub effort_source: Option<String>,
     /// 上游响应回显的档位, 仅 OpenAI Responses 系有值
     pub upstream_effort: Option<String>,
+    /// Anthropic stop_reason (或跨协议映射后的等价值), 老日志为 NULL
+    pub stop_reason: Option<String>,
+    /// 请求体里客户端声明的可用工具数 (tools 数组长度)
+    pub tools_offered_count: Option<i64>,
+    /// 请求体历史消息里 tool_result 块数
+    pub tool_result_count: Option<i64>,
+    /// 响应里 tool_use / server_tool_use 块数
+    pub tool_use_count: Option<i64>,
+    /// JSON 数组字符串, 前端 JSON.parse
+    pub tool_use_names: Option<String>,
 }
 
 #[derive(Debug, Serialize)]
@@ -144,7 +154,8 @@ pub async fn list_requests(
                 upstream_response_body,
                 client_tool, client_user_agent, client_version, client_ip,
                 entry_kind, downstream_http_version,
-                client_effort, effective_effort, effort_source, upstream_effort
+                client_effort, effective_effort, effort_source, upstream_effort,
+                stop_reason, tools_offered_count, tool_result_count, tool_use_count, tool_use_names
          FROM requests{}
          ORDER BY timestamp DESC
          LIMIT ? OFFSET ?",
@@ -191,6 +202,11 @@ pub async fn list_requests(
             effective_effort: r.try_get("effective_effort").ok(),
             effort_source: r.try_get("effort_source").ok(),
             upstream_effort: r.try_get("upstream_effort").ok(),
+            stop_reason: r.try_get("stop_reason").ok(),
+            tools_offered_count: r.try_get("tools_offered_count").ok(),
+            tool_result_count: r.try_get("tool_result_count").ok(),
+            tool_use_count: r.try_get("tool_use_count").ok(),
+            tool_use_names: r.try_get("tool_use_names").ok(),
         })
         .collect();
 
@@ -212,7 +228,8 @@ const CSV_HEADER: &str = "id,timestamp,timestamp_iso,virtual_model_name,subscrip
 provider_id,endpoint_id,real_model_name,response_model_name,is_streaming,status,http_status,\
 total_latency_ms,input_tokens,output_tokens,cache_creation_tokens,cache_read_tokens,\
 error_message,client_tool,client_user_agent,client_version,client_ip,entry_kind,\
-downstream_http_version,client_effort,effective_effort,effort_source,upstream_effort";
+downstream_http_version,client_effort,effective_effort,effort_source,upstream_effort,\
+stop_reason,tools_offered_count,tool_result_count,tool_use_count,tool_use_names";
 
 /// 把当前筛选下的请求逐行写成 CSV (带 UTF-8 BOM + 表头), 返回行数.
 /// 桌面导出写文件, 网页导出写 Vec<u8>, 共享同一份 SQL 与格式化.
@@ -232,7 +249,8 @@ pub async fn write_csv<W: Write>(
                 upstream_cache_creation, upstream_cache_read, error_message,
                 client_tool, client_user_agent, client_version, client_ip,
                 entry_kind, downstream_http_version,
-                client_effort, effective_effort, effort_source, upstream_effort
+                client_effort, effective_effort, effort_source, upstream_effort,
+                stop_reason, tools_offered_count, tool_result_count, tool_use_count, tool_use_names
          FROM requests{}
          ORDER BY timestamp ASC",
         where_clause
@@ -286,6 +304,11 @@ pub async fn write_csv<W: Write>(
             opt_str(r.try_get("effective_effort").ok()),
             opt_str(r.try_get("effort_source").ok()),
             opt_str(r.try_get("upstream_effort").ok()),
+            opt_str(r.try_get("stop_reason").ok()),
+            opt_num(r.try_get("tools_offered_count").ok()),
+            opt_num(r.try_get("tool_result_count").ok()),
+            opt_num(r.try_get("tool_use_count").ok()),
+            opt_str(r.try_get("tool_use_names").ok()),
         ]
         .join(",");
         writeln!(w, "{}", line).map_err(io_err)?;
@@ -337,14 +360,19 @@ mod tests {
     #[test]
     fn csv_header_has_expected_columns() {
         let cols: Vec<&str> = CSV_HEADER.split(',').collect();
-        assert_eq!(cols.len(), 28, "改了 CSV 列数? 同步 SELECT 与行写入");
+        assert_eq!(cols.len(), 33, "改了 CSV 列数? 同步 SELECT 与行写入");
         assert_eq!(
-            &cols[cols.len() - 4..],
+            &cols[cols.len() - 9..],
             &[
                 "client_effort",
                 "effective_effort",
                 "effort_source",
-                "upstream_effort"
+                "upstream_effort",
+                "stop_reason",
+                "tools_offered_count",
+                "tool_result_count",
+                "tool_use_count",
+                "tool_use_names",
             ]
         );
         // 刻意排除的大字段, 不能悄悄混进来

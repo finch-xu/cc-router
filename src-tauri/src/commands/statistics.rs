@@ -67,6 +67,10 @@ pub struct OverallStatsDto {
     pub total_output_tokens: i64,
     pub total_cache_creation_tokens: i64,
     pub total_cache_read_tokens: i64,
+    /// 工具调用总次数 (tool_use + server_tool_use 块数之和)
+    pub total_tool_use_count: i64,
+    /// 至少发起一次工具调用的请求数; 前端算占比时分母用 success_count
+    pub tool_use_request_count: i64,
 }
 
 #[tauri::command]
@@ -86,7 +90,9 @@ pub async fn get_overall_stats(
             COALESCE(SUM(cache_creation_tokens), 0) AS total_cache_creation_tokens,
             COALESCE(SUM(cache_read_tokens), 0)     AS total_cache_read_tokens,
             COALESCE(SUM(total_duration_ms_sum), 0)   AS dur_sum,
-            COALESCE(SUM(total_duration_ms_count), 0) AS dur_count
+            COALESCE(SUM(total_duration_ms_count), 0) AS dur_count,
+            COALESCE(SUM(tool_use_count), 0) AS total_tool_use_count,
+            COALESCE(SUM(tool_use_request_count), 0) AS tool_use_request_count
          FROM request_stats_daily WHERE day >= ?",
     )
     .bind(&since_day)
@@ -143,6 +149,8 @@ pub async fn get_overall_stats(
         total_output_tokens: row.try_get("total_output_tokens")?,
         total_cache_creation_tokens: row.try_get("total_cache_creation_tokens")?,
         total_cache_read_tokens: row.try_get("total_cache_read_tokens")?,
+        total_tool_use_count: row.try_get("total_tool_use_count")?,
+        tool_use_request_count: row.try_get("tool_use_request_count")?,
     })
 }
 
@@ -299,6 +307,7 @@ pub struct BreakdownDto {
     pub total_cache_creation_tokens: i64,
     pub total_cache_read_tokens: i64,
     pub avg_duration_ms: Option<f64>,
+    pub tool_use_count: i64,
 }
 
 #[tauri::command]
@@ -321,7 +330,8 @@ pub async fn get_breakdown(
                     SUM(cache_creation_tokens) AS total_cache_creation_tokens,
                     SUM(cache_read_tokens)     AS total_cache_read_tokens,
                     SUM(total_duration_ms_sum)   AS dur_sum,
-                    SUM(total_duration_ms_count) AS dur_count
+                    SUM(total_duration_ms_count) AS dur_count,
+                    SUM(tool_use_count) AS tool_use_count
              FROM request_stats_daily
              WHERE day >= ?
              GROUP BY virtual_model_name
@@ -340,7 +350,8 @@ pub async fn get_breakdown(
                     SUM(s.cache_creation_tokens) AS total_cache_creation_tokens,
                     SUM(s.cache_read_tokens)     AS total_cache_read_tokens,
                     SUM(s.total_duration_ms_sum)   AS dur_sum,
-                    SUM(s.total_duration_ms_count) AS dur_count
+                    SUM(s.total_duration_ms_count) AS dur_count,
+                    SUM(s.tool_use_count) AS tool_use_count
              FROM request_stats_daily s
              LEFT JOIN subscriptions sub ON sub.id = s.subscription_id
              WHERE s.day >= ?
@@ -367,6 +378,7 @@ pub async fn get_breakdown(
                 total_cache_creation_tokens: r.try_get("total_cache_creation_tokens")?,
                 total_cache_read_tokens: r.try_get("total_cache_read_tokens")?,
                 avg_duration_ms: avg(dur_sum, dur_count),
+                tool_use_count: r.try_get("tool_use_count")?,
             })
         })
         .collect::<Result<Vec<_>, sqlx::Error>>()
@@ -413,4 +425,101 @@ pub async fn get_token_heatmap(
         })
         .collect::<Result<Vec<_>, sqlx::Error>>()
         .map_err(Into::into)
+}
+
+#[derive(Debug, Serialize)]
+pub struct ToolBreakdownDto {
+    pub tool_name: String,
+    /// requests.client_tool 原值; 哨兵 `__unknown__` 映射为 None (前端渲染「未识别」)
+    pub client_tool: Option<String>,
+    pub call_count: i64,
+}
+
+/// 纯 DB 查询, 供 command 与单测共用。`since_day` 空串 = AllTime。
+pub(crate) async fn query_tool_breakdown(
+    pool: &sqlx::SqlitePool,
+    since_day: &str,
+    limit: u32,
+) -> Result<Vec<ToolBreakdownDto>, sqlx::Error> {
+    let rows = sqlx::query(
+        "SELECT tool_name, client_tool, SUM(call_count) AS call_count
+         FROM tool_stats_daily
+         WHERE day >= ?
+         GROUP BY tool_name, client_tool
+         ORDER BY call_count DESC, tool_name ASC
+         LIMIT ?",
+    )
+    .bind(since_day)
+    .bind(limit.clamp(1, 100) as i64)
+    .fetch_all(pool)
+    .await?;
+    rows.into_iter()
+        .map(|r| {
+            let client: String = r.try_get("client_tool")?;
+            Ok(ToolBreakdownDto {
+                tool_name: r.try_get("tool_name")?,
+                client_tool: if client == crate::observability::request_log::TOOL_STATS_UNKNOWN_CLIENT {
+                    None
+                } else {
+                    Some(client)
+                },
+                call_count: r.try_get("call_count")?,
+            })
+        })
+        .collect()
+}
+
+#[tauri::command]
+pub async fn get_tool_breakdown(
+    state: State<'_, AppState>,
+    range: StatsRange,
+    limit: u32,
+) -> AppResult<Vec<ToolBreakdownDto>> {
+    query_tool_breakdown(&state.db, &range.since_day(), limit)
+        .await
+        .map_err(Into::into)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::db::run_migrations;
+    use sqlx::sqlite::SqlitePoolOptions;
+    use sqlx::SqlitePool;
+    use std::path::PathBuf;
+
+    async fn fresh_pool() -> SqlitePool {
+        let pool = SqlitePoolOptions::new().max_connections(1).connect("sqlite::memory:").await.unwrap();
+        run_migrations(&pool, &PathBuf::from(".")).await.unwrap();
+        pool
+    }
+
+    #[tokio::test]
+    async fn tool_breakdown_orders_by_count_filters_range_and_maps_unknown() {
+        let pool = fresh_pool().await;
+        let today = local_day_key(now_ms());
+        let old = "2000-01-01";
+        for (day, client, name, n) in [
+            (today.as_str(), "claude_code", "Read", 5),
+            (today.as_str(), "claude_code", "Bash", 9),
+            (today.as_str(), "__unknown__", "Read", 2),
+            // 与 today 行故意用不同 tool_name (Edit≠Read): 查询按 (tool_name, client_tool) 聚合,
+            // 若沿用 "Read" 会与 today 的 Read/claude_code 行跨日合并成 105, 使下面的 all[0]==100
+            // 断言失真 —— GROUP BY 不含 day 是刻意设计 (统计范围内工具总调用数), 这里改测试数据而非查询。
+            (old, "claude_code", "Edit", 100),
+        ] {
+            sqlx::query("INSERT INTO tool_stats_daily (day, client_tool, tool_name, call_count) VALUES (?, ?, ?, ?)")
+                .bind(day).bind(client).bind(name).bind(n).execute(&pool).await.unwrap();
+        }
+        let rows = query_tool_breakdown(&pool, &StatsRange::Last7Days.since_day(), 10).await.unwrap();
+        assert_eq!(rows.len(), 3, "旧日期不在 7 天内");
+        assert_eq!((rows[0].tool_name.as_str(), rows[0].call_count), ("Bash", 9));
+        assert_eq!(rows[0].client_tool.as_deref(), Some("claude_code"));
+        assert_eq!((rows[1].tool_name.as_str(), rows[1].call_count), ("Read", 5));
+        assert_eq!(rows[2].client_tool, None, "__unknown__ 哨兵映射为 None");
+
+        let all = query_tool_breakdown(&pool, "", 2).await.unwrap();
+        assert_eq!(all.len(), 2, "limit 生效");
+        assert_eq!(all[0].call_count, 100);
+    }
 }

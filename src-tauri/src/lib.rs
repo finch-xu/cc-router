@@ -130,6 +130,7 @@ pub fn run() {
             commands::statistics::get_daily_series,
             commands::statistics::get_breakdown,
             commands::statistics::get_token_heatmap,
+            commands::statistics::get_tool_breakdown,
             commands::receipts::get_receipt_summary,
             commands::events::list_events,
             commands::settings::get_settings,
