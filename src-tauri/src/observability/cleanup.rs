@@ -1,4 +1,4 @@
-//! 定时清理 requests 表中超过 `log_retention_days` 的旧记录。
+//! 定时清理 `requests` 与 `events` 表中超过 `log_retention_days` 的旧记录。
 //!
 //! 不动 `request_stats_daily` / `receipt_stats_daily` —— 两张按天聚合表永久保留,
 //! 让历史用量统计与小票不受日志清理影响。
@@ -22,6 +22,18 @@ use crate::settings::model::Settings;
 
 const TICK_INTERVAL: Duration = Duration::from_secs(6 * 3600); // 6 小时
 
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct DeletedRows {
+    pub requests: u64,
+    pub events: u64,
+}
+
+impl DeletedRows {
+    pub fn total(self) -> u64 {
+        self.requests + self.events
+    }
+}
+
 pub async fn run(pool: SqlitePool, settings: Arc<RwLock<Settings>>) {
     // 启动后立刻跑一次 (而不是等 6 小时), 让 retention 改动尽快生效
     sweep_once(&pool, &settings).await;
@@ -34,29 +46,35 @@ pub async fn run(pool: SqlitePool, settings: Arc<RwLock<Settings>>) {
     }
 }
 
-/// 删除 requests 表里 timestamp 老于 retention_days 的行。
-/// retention_days = 0 表示「永久保留」, 直接返回 Ok(0)。
+/// 删除 `requests` 与 `events` 表里 timestamp 老于 retention_days 的行 (同一保留期)。
+/// retention_days = 0 表示「永久保留」, 直接返回全 0。
 pub(crate) async fn delete_older_than(
     pool: &SqlitePool,
     retention_days: u32,
-) -> Result<u64, sqlx::Error> {
+) -> Result<DeletedRows, sqlx::Error> {
     if retention_days == 0 {
-        return Ok(0);
+        return Ok(DeletedRows::default());
     }
     let cutoff = now_ms() - (retention_days as i64) * DAY_MS;
-    let res = sqlx::query("DELETE FROM requests WHERE timestamp < ?")
+    let requests = sqlx::query("DELETE FROM requests WHERE timestamp < ?")
         .bind(cutoff)
         .execute(pool)
-        .await?;
-    Ok(res.rows_affected())
+        .await?
+        .rows_affected();
+    let events = sqlx::query("DELETE FROM events WHERE timestamp < ?")
+        .bind(cutoff)
+        .execute(pool)
+        .await?
+        .rows_affected();
+    Ok(DeletedRows { requests, events })
 }
 
 async fn sweep_once(pool: &SqlitePool, settings: &Arc<RwLock<Settings>>) {
     let days = settings.read().await.log_retention_days;
     match delete_older_than(pool, days).await {
-        Ok(0) if days == 0 => debug!("log_retention_days=0, skipping cleanup (永久保留)"),
-        Ok(0) => debug!(retention_days = days, "cleanup ran, no rows deleted"),
-        Ok(n) => info!(rows = n, retention_days = days, "cleaned up old request logs"),
+        Ok(d) if d.total() == 0 && days == 0 => debug!("log_retention_days=0, skipping cleanup (永久保留)"),
+        Ok(d) if d.total() == 0 => debug!(retention_days = days, "cleanup ran, no rows deleted"),
+        Ok(d) => info!(requests = d.requests, events = d.events, retention_days = days, "cleaned up old request logs / events"),
         Err(e) => warn!(?e, "cleanup query failed"),
     }
 }
@@ -128,6 +146,11 @@ mod tests {
             .unwrap()
     }
 
+    async fn insert_event(pool: &SqlitePool, ts_ms: i64) {
+        sqlx::query("INSERT INTO events (id, timestamp, kind, severity, summary) VALUES (?, ?, 'system_error', 'error', 'x')")
+            .bind(Uuid::new_v4().to_string()).bind(ts_ms).execute(pool).await.unwrap();
+    }
+
     #[tokio::test]
     async fn cleanup_deletes_old_requests_but_keeps_stats() {
         let pool = fresh_pool().await;
@@ -195,6 +218,22 @@ mod tests {
 
         // 改 retention=10 天 → 15 天那条也被删, 留 5 天
         delete_older_than(&pool, 10).await.unwrap();
+        assert_eq!(count(&pool, "requests").await, 1);
+    }
+
+    #[tokio::test]
+    async fn cleanup_deletes_old_events_with_same_retention() {
+        let pool = fresh_pool().await;
+        let now = now_ms();
+        insert_event(&pool, now - 100 * DAY_MS).await;
+        insert_event(&pool, now).await;
+        flush_batch(&pool, vec![entry_at(now - 100 * DAY_MS), entry_at(now)], vec![]).await.unwrap();
+
+        let deleted = delete_older_than(&pool, 30).await.unwrap();
+        assert_eq!(deleted.requests, 1);
+        assert_eq!(deleted.events, 1);
+        assert_eq!(deleted.total(), 2);
+        assert_eq!(count(&pool, "events").await, 1);
         assert_eq!(count(&pool, "requests").await, 1);
     }
 }
