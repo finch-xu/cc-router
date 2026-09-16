@@ -197,6 +197,28 @@ pub fn record_system_error(
     );
 }
 
+/// 与 `record_system_error` 同形但 `severity: Warn` —— 给「系统自愈、非硬错误」的场景用
+/// (例如体积安全网自动清理), 避免 UI/告警按 severity 分级时把良性事件当成 Error 过度报警。
+pub fn record_system_warn(
+    tx: &mpsc::Sender<EventEntry>,
+    summary: impl Into<String>,
+    payload: Option<Value>,
+) {
+    record(
+        tx,
+        EventEntry {
+            id: Uuid::new_v4(),
+            timestamp_ms: Utc::now().timestamp_millis(),
+            kind: EventKind::SystemError,
+            severity: Severity::Warn,
+            subscription_id: None,
+            request_id: None,
+            summary: summary.into(),
+            payload,
+        },
+    );
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -245,5 +267,14 @@ mod tests {
         let e3 = rx.try_recv().expect("state_change 入队");
         assert_eq!(e3.kind, EventKind::SubscriptionStateChange);
         assert_eq!(e3.severity, Severity::Warn);
+    }
+
+    #[test]
+    fn record_system_warn_constructs_warn_severity() {
+        let (tx, mut rx) = mpsc::channel::<EventEntry>(8);
+        record_system_warn(&tx, "test", Some(serde_json::json!({"a": 1})));
+        let e = rx.try_recv().expect("system_warn 入队");
+        assert_eq!(e.kind, EventKind::SystemError);
+        assert_eq!(e.severity, Severity::Warn);
     }
 }

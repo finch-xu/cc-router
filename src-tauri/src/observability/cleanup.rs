@@ -182,7 +182,7 @@ async fn sweep_once(
         Ok(d) => {
             total += d.total();
             warn!(requests = d.requests, events = d.events, limit_mb, "db size limit reached, trimmed oldest rows");
-            events::record_system_error(
+            events::record_system_warn(
                 event_tx,
                 format!(
                     "数据库超过 {limit_mb} MB 上限, 已按时间从旧到新清理 {} 条请求日志与 {} 条事件",
