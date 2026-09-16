@@ -382,4 +382,28 @@ mod tests {
         assert_eq!(f.stop_reason, None);
         assert_eq!(ToolLogFields::empty(), ToolLogFields::request_only(&RequestToolShape::default()));
     }
+
+    #[test]
+    fn tally_reads_gemini_style_struct_events() {
+        use crate::proxy::transform::gemini::GeminiSseConverter;
+        let mut conv = GeminiSseConverter::new("gemini-2.5-pro");
+        let frame = json!({
+            "candidates": [{
+                "content": {"parts": [{"functionCall": {"name": "get_weather", "args": {"city": "Tokyo"}}}]},
+                "finishReason": "STOP"
+            }],
+            "usageMetadata": {"promptTokenCount": 3, "candidatesTokenCount": 4}
+        });
+        let mut t = ToolUseTally::default();
+        for evt in conv.feed(&frame) {
+            t.observe_event_json(&evt.data);
+        }
+        for evt in conv.finalize() {
+            t.observe_event_json(&evt.data);
+        }
+        let f = t.fields(&RequestToolShape::default());
+        assert_eq!(f.tool_use_count, Some(1));
+        assert_eq!(f.tool_use_names.as_deref(), Some(r#"["get_weather"]"#));
+        assert!(f.stop_reason.is_some());
+    }
 }

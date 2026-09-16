@@ -34,7 +34,7 @@ use crate::observability::body_dump::{BodyDumpEntry, BodyDumpKind};
 use crate::observability::events::EventEntry;
 use crate::observability::request_log::{RequestLogEntry, RequestStatus};
 use crate::proxy::client_fingerprint::ClientContext;
-use crate::proxy::tool_log::ToolLogFields;
+use crate::proxy::tool_log::ToolUseTally;
 use crate::proxy::effort_log::EffortLog;
 use crate::proxy::oauth_dispatch::{OAuthDispatchError, OAuthDispatchOk};
 use crate::proxy::sse_framing::find_sse_frame_boundary;
@@ -319,6 +319,7 @@ fn finalize_streaming(
         let start = std::time::Instant::now();
         let mut converter = InteractionsSseConverter::new_with_extras(&real_model, emit_thoughts);
         let mut buffer = BytesMut::with_capacity(8 * 1024);
+        let mut tool_tally = ToolUseTally::default();
         // 调试模式: 累积上游原始 SSE 字节, 流结束后落盘 (仿 sse.rs 范式)。
         let mut raw_dump_buf: Option<BytesMut> = body_dump_tx
             .as_ref()
@@ -359,6 +360,7 @@ fn finalize_streaming(
                 }
                 let mut buf = Vec::with_capacity(256);
                 for evt in anth_events {
+                    tool_tally.observe_event_json(&evt.data);
                     buf.extend_from_slice(&evt.to_sse_bytes());
                 }
                 if client_tx.send(Ok(Bytes::from(buf))).await.is_err() {
@@ -381,6 +383,7 @@ fn finalize_streaming(
         if !tail.is_empty() {
             let mut buf = Vec::new();
             for evt in tail {
+                tool_tally.observe_event_json(&evt.data);
                 buf.extend_from_slice(&evt.to_sse_bytes());
             }
             let _ = client_tx.send(Ok(Bytes::from(buf))).await;
@@ -437,7 +440,7 @@ fn finalize_streaming(
             effective_effort: effort_log.effective.clone(),
             effort_source: effort_log.source,
             upstream_effort: None,
-            tool_calls: ToolLogFields::request_only(&ctx.tools),
+            tool_calls: tool_tally.fields(&ctx.tools),
         };
         let _ = log_tx.try_send(entry);
     });
@@ -517,6 +520,12 @@ async fn collect_to_json_response(
     }
     let final_msg = collector.finalize();
 
+    let tool_calls = {
+        let mut tally = ToolUseTally::default();
+        tally.observe_message(&final_msg);
+        tally.fields(&ctx.tools)
+    };
+
     let _ = state_machine::apply(
         &pool,
         &app,
@@ -576,7 +585,7 @@ async fn collect_to_json_response(
         effective_effort: effort_log.effective.clone(),
         effort_source: effort_log.source,
         upstream_effort: None,
-        tool_calls: ToolLogFields::request_only(&ctx.tools),
+        tool_calls,
     };
     let _ = log_tx.try_send(entry);
 

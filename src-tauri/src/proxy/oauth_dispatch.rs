@@ -953,6 +953,7 @@ fn finalize_kiro_streaming(
         let start = std::time::Instant::now();
         let mut decoder = EventStreamDecoder::new();
         let mut converter = KiroSseConverter::new(&real_model);
+        let mut tool_tally = ToolUseTally::default();
 
         let mut stream = upstream_stream;
         'outer: while let Some(chunk) = stream.next().await {
@@ -989,6 +990,7 @@ fn finalize_kiro_streaming(
                 }
                 let mut buf = Vec::new();
                 for evt in anth_events {
+                    tool_tally.observe_event_json(&evt.data);
                     buf.extend_from_slice(&evt.to_sse_bytes());
                 }
                 if client_tx.send(Ok(Bytes::from(buf))).await.is_err() {
@@ -1000,6 +1002,7 @@ fn finalize_kiro_streaming(
         if !tail.is_empty() {
             let mut buf = Vec::new();
             for evt in tail {
+                tool_tally.observe_event_json(&evt.data);
                 buf.extend_from_slice(&evt.to_sse_bytes());
             }
             let _ = client_tx.send(Ok(Bytes::from(buf))).await;
@@ -1049,7 +1052,7 @@ fn finalize_kiro_streaming(
             effective_effort: effort_log.effective.clone(),
             effort_source: effort_log.source,
             upstream_effort: None,
-            tool_calls: ToolLogFields::request_only(&ctx.tools),
+            tool_calls: tool_tally.fields(&ctx.tools),
         };
         let _ = log_tx.try_send(entry);
     });
@@ -1110,6 +1113,12 @@ async fn collect_kiro_to_json_response(
     }
     let final_msg = collector.finalize();
 
+    let tool_calls = {
+        let mut tally = ToolUseTally::default();
+        tally.observe_message(&final_msg);
+        tally.fields(&ctx.tools)
+    };
+
     let _ = state_machine::apply(
         &pool,
         &app,
@@ -1164,7 +1173,7 @@ async fn collect_kiro_to_json_response(
         effective_effort: effort_log.effective.clone(),
         effort_source: effort_log.source,
         upstream_effort: None,
-        tool_calls: ToolLogFields::request_only(&ctx.tools),
+        tool_calls,
     };
     let _ = log_tx.try_send(entry);
 
