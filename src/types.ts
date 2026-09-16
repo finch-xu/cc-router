@@ -586,6 +586,16 @@ export interface RequestLogDto {
   effort_source?: string | null;
   /** 上游响应回显的档位, 仅 OpenAI Responses 系有值 */
   upstream_effort?: string | null;
+  /** 响应 stop_reason 原值 (tool_use / end_turn / max_tokens …), 老日志或错误为 null */
+  stop_reason?: string | null;
+  /** 请求 tools[] 长度 */
+  tools_offered_count?: number | null;
+  /** 最后一条 user 消息里的 tool_result 块数 */
+  tool_result_count?: number | null;
+  /** 响应中 tool_use + server_tool_use 块数; 成功路径恒有值 (含 0), 错误路径 null */
+  tool_use_count?: number | null;
+  /** 调用名 JSON 数组字符串, 保序允许重复; 0 次时 null; 超长以 "…" 结尾 */
+  tool_use_names?: string | null;
 }
 
 export interface ListRequestsResult {
@@ -626,6 +636,9 @@ export interface OverallStatsDto {
   total_output_tokens: number;
   total_cache_creation_tokens: number;
   total_cache_read_tokens: number;
+  total_tool_use_count: number;
+  /** 至少一次工具调用的请求数, 占比分母用 success_count */
+  tool_use_request_count: number;
 }
 
 export interface DailySeriesPointDto {
@@ -658,6 +671,7 @@ export interface BreakdownDto {
   total_cache_creation_tokens: number;
   total_cache_read_tokens: number;
   avg_duration_ms?: number;
+  tool_use_count: number;
 }
 
 export interface HeatmapDayDto {
@@ -666,6 +680,13 @@ export interface HeatmapDayDto {
   /** input + output tokens (不含缓存两项) */
   total_tokens: number;
   request_count: number;
+}
+
+export interface ToolBreakdownDto {
+  tool_name: string;
+  /** ClientToolId 原值; 未识别为 undefined */
+  client_tool?: string | null;
+  call_count: number;
 }
 
 // ===== Receipts (commands/receipts.rs) =====

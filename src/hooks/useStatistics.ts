@@ -40,3 +40,12 @@ export function useTokenHeatmap(days = 365) {
     staleTime: 60_000,
   });
 }
+
+export function useToolBreakdown(range: StatsRange, limit = 10) {
+  return useQuery({
+    queryKey: [STATS_KEY, "tools", range, limit],
+    queryFn: () => api.getToolBreakdown(range, limit),
+    placeholderData: keepPreviousData,
+    staleTime: 5_000,
+  });
+}

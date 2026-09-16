@@ -43,6 +43,7 @@ import type {
   TestConnectionResult,
   TlsStatus,
   TokenQuotas,
+  ToolBreakdownDto,
   UpdateInfo,
   UpdateVirtualModelInput,
   VirtualModelDto,
@@ -132,6 +133,8 @@ export const api = {
     invoke<BreakdownDto[]>("get_breakdown", { range, by }),
   getTokenHeatmap: (days: number) =>
     invoke<HeatmapDayDto[]>("get_token_heatmap", { days }),
+  getToolBreakdown: (range: StatsRange, limit: number) =>
+    invoke<ToolBreakdownDto[]>("get_tool_breakdown", { range, limit }),
 
   getReceiptSummary: (range: ReceiptRange) =>
     invoke<ReceiptDto>("get_receipt_summary", { range }),
