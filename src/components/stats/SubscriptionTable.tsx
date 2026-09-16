@@ -51,6 +51,7 @@ export function SubscriptionTable({
             <th style={{ width: 100, textAlign: "right" }}>{t("stats.bySub.col.successRate")}</th>
             <th style={{ width: 100, textAlign: "right" }}>{t("stats.bySub.col.avgDuration")}</th>
             <th style={{ width: 140, textAlign: "right" }}>{t("stats.bySub.col.tokensTotal")}</th>
+            <th style={{ width: 100, textAlign: "right" }}>{t("stats.bySub.col.toolCalls")}</th>
           </tr>
         </thead>
         <tbody>
@@ -87,6 +88,9 @@ export function SubscriptionTable({
                 </td>
                 <td className="mono tnum" style={{ textAlign: "right" }}>
                   {fmtCompact(it.total_input_tokens + it.total_output_tokens)}
+                </td>
+                <td className="mono tnum" style={{ textAlign: "right" }}>
+                  {fmtNum(it.tool_use_count)}
                 </td>
               </tr>
             );

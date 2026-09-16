@@ -18,6 +18,9 @@ export function KpiRow({ stats, loading }: { stats?: OverallStatsDto; loading?: 
   const cacheWrite = o?.total_cache_creation_tokens ?? 0;
   const cacheDenom = input + cacheRead + cacheWrite;
   const cacheShare = cacheDenom > 0 ? (cacheRead / cacheDenom) * 100 : null;
+  const successCount = o?.success_count ?? 0;
+  const toolShare =
+    successCount > 0 ? ((o?.tool_use_request_count ?? 0) / successCount) * 100 : null;
 
   return (
     <div className={"stats-kpi" + (loading ? " is-loading" : "")}>
@@ -65,6 +68,26 @@ export function KpiRow({ stats, loading }: { stats?: OverallStatsDto; loading?: 
         </div>
         <div className="stat-delta">
           {t("stats.kpi.cacheReadSub", { read: fmtCompact(cacheRead), write: fmtCompact(cacheWrite) })}
+        </div>
+      </div>
+      <div className="stat">
+        <div className="stat-label">{t("stats.kpi.toolCalls")}</div>
+        <div className="stat-val tnum">{fmtCompact(o?.total_tool_use_count ?? 0)}</div>
+        <div className="stat-delta">
+          {t("stats.kpi.toolCallsSub", { requests: fmtNum(o?.tool_use_request_count ?? 0) })}
+        </div>
+      </div>
+      <div className="stat" title={t("stats.kpi.toolShareHint")}>
+        <div className="stat-label">{t("stats.kpi.toolShare")}</div>
+        <div className="stat-val tnum">
+          {toolShare != null ? toolShare.toFixed(1) : "-"}
+          <span className="stat-unit">%</span>
+        </div>
+        <div className="stat-delta">
+          {t("stats.kpi.toolShareSub", {
+            withTools: fmtNum(o?.tool_use_request_count ?? 0),
+            success: fmtNum(o?.success_count ?? 0),
+          })}
         </div>
       </div>
     </div>

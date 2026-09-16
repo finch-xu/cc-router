@@ -8,6 +8,7 @@ import {
   useDailySeries,
   useOverallStats,
   useTokenHeatmap,
+  useToolBreakdown,
 } from "@/hooks/useStatistics";
 import type { StatsRange } from "@/types";
 import { DailyLatencyChart } from "@/components/stats/DailyLatencyChart";
@@ -15,6 +16,7 @@ import { DailyRequestsChart } from "@/components/stats/DailyRequestsChart";
 import { DailyTokensChart } from "@/components/stats/DailyTokensChart";
 import { KpiRow } from "@/components/stats/KpiRow";
 import { SubscriptionTable } from "@/components/stats/SubscriptionTable";
+import { ToolTopChart } from "@/components/stats/ToolTopChart";
 import { VmShareDonut } from "@/components/stats/VmShareDonut";
 import { YearHeatmap } from "@/components/stats/YearHeatmap";
 import { buildSeriesBuckets, isHourlyRange } from "@/components/stats/series";
@@ -45,6 +47,7 @@ export function StatisticsPage() {
   const heatmap = useTokenHeatmap(HEATMAP_DAYS);
   const byVm = useBreakdown(range, "virtual_model");
   const bySub = useBreakdown(range, "subscription");
+  const tools = useToolBreakdown(range, 10);
 
   const isFetching = useIsFetching({ queryKey: [STATS_KEY] }) > 0;
   const refetchAll = () => queryClient.invalidateQueries({ queryKey: [STATS_KEY] });
@@ -102,6 +105,7 @@ export function StatisticsPage() {
         <VmShareDonut items={byVm.data ?? []} loading={byVm.isFetching} errorText={err(byVm.error)} />
         <DailyLatencyChart buckets={buckets} loading={daily.isFetching} errorText={err(daily.error)} />
       </div>
+      <ToolTopChart items={tools.data ?? []} loading={tools.isFetching} errorText={err(tools.error)} />
       <SubscriptionTable items={bySub.data ?? []} loading={bySub.isFetching} errorText={err(bySub.error)} />
     </>
   );
