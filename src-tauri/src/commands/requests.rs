@@ -86,7 +86,7 @@ pub struct RequestLogFilters {
 
 // client_tool 特殊值 → 拼 `IS NULL` 而非 `= ?`. 与前端
 // `src/types.ts::CLIENT_TOOL_UNKNOWN_SENTINEL` 必须保持同值, 否则筛选「未识别」会静默失效.
-const UNKNOWN_SENTINEL: &str = "__unknown__";
+pub(crate) const UNKNOWN_SENTINEL: &str = "__unknown__";
 
 /// 动态构建 WHERE 子句。列名是白名单字面量, 值走 bind, 无注入风险。
 /// 返回 (where 子句, bind 值列表); `IS NULL` 分支不产生 bind 值。

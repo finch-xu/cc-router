@@ -407,7 +407,8 @@ pub(crate) async fn flush_batch(
                 .to_string();
             if let Ok(names) = serde_json::from_str::<Vec<String>>(names_json) {
                 for name in names {
-                    if name == TRUNCATED_MARKER {
+                    // 截断标记与空名都不是真实工具名, 跳过以免污染 tool_stats_daily
+                    if name == TRUNCATED_MARKER || name.is_empty() {
                         continue;
                     }
                     *tool_acc
@@ -1147,9 +1148,12 @@ mod tests {
         assert_eq!(marker_rows, 0);
     }
 
-    /// 与 commands/requests.rs 的筛选哨兵同值, 否则「未识别」在工具榜上会与筛选口径不一致。
+    /// 三处哨兵必须同值: 本模块 `TOOL_STATS_UNKNOWN_CLIENT`、`commands/requests.rs::UNKNOWN_SENTINEL`
+    /// (筛选器「未识别」选项)、前端 `src/types.ts::CLIENT_TOOL_UNKNOWN_SENTINEL`,
+    /// 否则工具榜与筛选口径会静默不一致。
     #[test]
     fn tool_stats_unknown_client_matches_requests_filter_sentinel() {
+        assert_eq!(TOOL_STATS_UNKNOWN_CLIENT, crate::commands::requests::UNKNOWN_SENTINEL);
         assert_eq!(TOOL_STATS_UNKNOWN_CLIENT, "__unknown__");
     }
 }

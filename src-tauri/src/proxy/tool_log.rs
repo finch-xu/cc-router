@@ -406,4 +406,68 @@ mod tests {
         assert_eq!(f.tool_use_names.as_deref(), Some(r#"["get_weather"]"#));
         assert!(f.stop_reason.is_some());
     }
+
+    #[test]
+    fn tally_reads_gemini_interactions_struct_events() {
+        use crate::proxy::transform::gemini_interactions::InteractionsSseConverter;
+        // 帧形状照抄 gemini_interactions.rs::tests::sse_converter_function_call_sets_tool_use_stop_reason
+        let frames = vec![
+            json!({"interaction":{"model":"m"},"event_type":"interaction.created"}),
+            json!({"index":0,"step":{"type":"function_call","id":"ca1","name":"get_weather","arguments":{"city":"Tokyo"}},"event_type":"step.start"}),
+            json!({"index":0,"event_type":"step.stop"}),
+            json!({"interaction":{"status":"requires_action","usage":{"total_input_tokens":50,"total_output_tokens":15}},"event_type":"interaction.completed"}),
+        ];
+        let mut conv = InteractionsSseConverter::new("gemini-3.1-flash-lite");
+        let mut t = ToolUseTally::default();
+        for f in &frames {
+            for evt in conv.feed(f) {
+                t.observe_event_json(&evt.data);
+            }
+        }
+        for evt in conv.finalize() {
+            t.observe_event_json(&evt.data);
+        }
+        let f = t.fields(&RequestToolShape::default());
+        assert_eq!(f.tool_use_count, Some(1));
+        assert_eq!(f.tool_use_names.as_deref(), Some(r#"["get_weather"]"#));
+        assert_eq!(f.stop_reason.as_deref(), Some("tool_use"));
+    }
+
+    #[test]
+    fn tally_reads_kiro_struct_events() {
+        use crate::proxy::transform::aws_event_stream::{
+            build_frame, EventStreamDecoder, HeaderValue,
+        };
+        use crate::proxy::transform::kiro_codewhisperer::KiroSseConverter;
+
+        fn make_frame(event_type: &str, payload_json: Value) -> crate::proxy::transform::aws_event_stream::EventStreamFrame {
+            let bytes = build_frame(
+                &[
+                    (":event-type", HeaderValue::String(event_type.into())),
+                    (":message-type", HeaderValue::String("event".into())),
+                    (":content-type", HeaderValue::String("application/json".into())),
+                ],
+                payload_json.to_string().as_bytes(),
+            );
+            let mut d = EventStreamDecoder::new();
+            d.feed_and_drain(&bytes).unwrap().pop().unwrap()
+        }
+
+        let frame = make_frame(
+            "toolUseEvent",
+            json!({"toolUseId":"tu_1","name":"Bash","input":"{\"cmd\":\"ls\"}","stop":true}),
+        );
+        let mut conv = KiroSseConverter::new("minimax-m2.5");
+        let mut t = ToolUseTally::default();
+        for evt in conv.feed(&frame) {
+            t.observe_event_json(&evt.data);
+        }
+        for evt in conv.finalize() {
+            t.observe_event_json(&evt.data);
+        }
+        let f = t.fields(&RequestToolShape::default());
+        assert_eq!(f.tool_use_count, Some(1));
+        assert_eq!(f.tool_use_names.as_deref(), Some(r#"["Bash"]"#));
+        assert_eq!(f.stop_reason.as_deref(), Some("tool_use"));
+    }
 }
