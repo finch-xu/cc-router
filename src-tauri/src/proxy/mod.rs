@@ -17,6 +17,7 @@ pub mod server;
 pub mod session_key;
 pub mod sse;
 pub mod sse_framing;
+pub mod tool_log;
 pub mod transform;
 pub mod upstream;
 pub mod web;
