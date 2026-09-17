@@ -320,6 +320,7 @@ async fn bootstrap(
             proxy::web::auth::LoginGuard::new_default(),
         )),
         ui_events: tokio::sync::broadcast::channel(proxy::web::events::UI_EVENT_CAPACITY).0,
+        local_secret: Arc::new(runtime_file::generate_secret()),
     };
 
     // 7b. 网页界面事件桥: Tauri emit → broadcast (SSE 订阅方在 proxy/web/events.rs)

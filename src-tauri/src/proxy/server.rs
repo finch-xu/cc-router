@@ -7,7 +7,7 @@ use axum::routing::post;
 use axum::Router;
 use tokio::net::TcpListener;
 use tokio::task::JoinHandle;
-use tracing::{error, info};
+use tracing::{error, info, warn};
 
 use crate::error::{AppError, AppResult};
 use crate::proxy::{handler, middleware as cc_middleware};
@@ -78,6 +78,10 @@ pub async fn start(state: AppState) -> AppResult<()> {
         return Err(AppError::internal("proxy_mode 没有任何 listener 被启用"));
     }
 
+    // 两路 listener 都已绑定, 实际端口此刻才确定 (可能是 pref+n)。写给同机的 cc-router-tui 读。
+    // 失败只 warn: TUI 用不了, 但代理必须照常工作。
+    write_runtime_file(&state).await;
+
     // 任一 listener 退出整体退出 (panic 拖垮 app 是接受的设计, 见 CLAUDE.md).
     for handle in tasks {
         match handle.await {
@@ -142,4 +146,25 @@ async fn bind_with_fallback(host: IpAddr, start_port: u16) -> AppResult<(TcpList
         "无法绑定端口 {start_port}..{}",
         start_port.saturating_add(MAX_PORT_TRIES)
     )))
+}
+
+async fn write_runtime_file(state: &AppState) {
+    let app_data_dir = match crate::db::paths::app_data_dir(&state.app_handle) {
+        Ok(d) => d,
+        Err(e) => {
+            warn!(?e, "无法解析 app_data_dir, 跳过 runtime.json");
+            return;
+        }
+    };
+    let file = crate::runtime_file::RuntimeFile::new(
+        &app_data_dir,
+        *state.http_bound_port.read().await,
+        *state.https_bound_port.read().await,
+        &state.local_secret,
+    );
+    // 同步小文件写入, 只在启动时发生一次, 不值得 spawn_blocking。
+    match crate::runtime_file::write(&app_data_dir, &file) {
+        Ok(()) => info!(http = ?file.http_port, https = ?file.https_port, "runtime.json written"),
+        Err(e) => warn!(?e, "runtime.json 写入失败, cc-router-tui 将无法连接"),
+    }
 }

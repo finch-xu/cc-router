@@ -54,6 +54,9 @@ pub struct AppState {
     pub web_login_guard: Arc<std::sync::Mutex<LoginGuard>>,
     /// Tauri emit 事件的广播副本, 供 /ui/api/events SSE 订阅. 无订阅者时 send 返回 Err, 忽略即可.
     pub ui_events: tokio::sync::broadcast::Sender<UiEvent>,
+    /// 「本机通行」密钥 (cc-router-tui 用). 每次启动重新生成, 只存在于内存和 runtime.json,
+    /// 不进 settings / DB / 任何 DTO。读取方只有 proxy/server.rs (写文件) 与 proxy/web/ 的两个中间件。
+    pub local_secret: Arc<String>,
 }
 
 impl AppState {
