@@ -44,6 +44,22 @@ pub enum CustomProtocol {
     GeminiInteractions,
 }
 
+impl CustomProtocol {
+    fn auth_type(self) -> AuthType {
+        match self {
+            Self::Anthropic => AuthType::ApiKey,
+            Self::Gemini => AuthType::GeminiApiKey,
+            Self::OpenaiResponses => AuthType::OpenaiResponsesApiKey,
+            Self::OpenaiChatCompletions => AuthType::OpenaiChatCompletionsApiKey,
+            Self::GeminiInteractions => AuthType::GeminiInteractionsApiKey,
+        }
+    }
+
+    fn default_models_path(self) -> &'static str {
+        model_discovery::default_models_path(self.auth_type())
+    }
+}
+
 /// 创建订阅时的 source 区分: 内置 yaml 模板 vs 用户自定义。
 #[derive(Debug, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
@@ -63,6 +79,10 @@ pub enum CreateSource {
         auth_header_format: AuthHeaderFormat,
         #[serde(default)]
         protocol: CustomProtocol,
+        /// 表单里「获取模型列表」实际打通的完整地址 (`probe_custom_models` 的返回值)。
+        /// 有值则写进 snapshot 的 `model_discovery.url`, 之后刷新不必再猜; 用户没点过就是 None。
+        #[serde(default)]
+        models_url: Option<String>,
     },
 }
 
@@ -263,9 +283,14 @@ pub async fn create_subscription(
             auth_header_name,
             auth_header_format,
             protocol,
+            models_url,
         } => {
             validate_base_url(&base_url)?;
             validate_messages_path(&messages_path)?;
+            let models_url = models_url.filter(|u| !u.trim().is_empty());
+            if let Some(u) = models_url.as_deref() {
+                validate_base_url(u)?;
+            }
             let is_gemini = protocol == CustomProtocol::Gemini;
             let is_openai = protocol == CustomProtocol::OpenaiResponses;
             let is_openai_chat = protocol == CustomProtocol::OpenaiChatCompletions;
@@ -335,12 +360,23 @@ pub async fn create_subscription(
                     CUSTOM_SOURCE_MARKER.to_string(),
                     AuthType::ApiKey,
                     "custom".to_string(),
-                    // 自定义 Anthropic 订阅默认 disable model_discovery, 走 manual fallback
+                    // Anthropic 兼容中转的 base_url 形态最杂 (常带 /anthropic 之类 messages 专属前缀),
+                    // 刷新时走 model_discovery 的候选探测, 这里只登记协议默认路径。
                     ModelDiscovery {
-                        enabled: false,
+                        enabled: true,
+                        path: protocol.default_models_path().into(),
                         ..ModelDiscovery::default()
                     },
                 )
+            };
+            // 表单里探测成功过 → 直接记下打通的地址, 优先于 base_url + path 拼接。
+            let discovery = match models_url {
+                Some(url) => ModelDiscovery {
+                    enabled: true,
+                    url: Some(url),
+                    ..discovery
+                },
+                None => discovery,
             };
             SubscriptionRow {
                 id,
@@ -476,6 +512,11 @@ pub async fn update_subscription(
         }
         if let Some(conn) = patch.connection {
             if let Some(v) = conn.base_url {
+                if v != guard.row.base_url {
+                    // 记下的 models 地址是对旧 base_url 探测出来的, 换了 base 就作废,
+                    // 下次刷新重新走候选探测。
+                    guard.row.model_discovery.url = None;
+                }
                 guard.row.base_url = v;
             }
             if let Some(v) = conn.messages_path {
@@ -675,13 +716,29 @@ pub async fn refresh_model_list(
             &row,
         )
         .await
+        .map(|cache| (cache, None))
     } else {
-        model_discovery::fetch_and_cache(&state.db, &state.http_client, &row).await
+        model_discovery::fetch_and_cache(&state.db, &state.http_client, &row)
+            .await
+            .map(|(cache, url)| (cache, Some(url)))
     };
 
     match result {
-        Ok(cache) => {
+        Ok((cache, worked_url)) => {
             let mut guard = rt.write().await;
+            // 自定义订阅靠候选探测打通的地址写回 snapshot, 下次直接命中。
+            // 只在与现值不同时落库; 失败不影响本次结果 (下次刷新会再探测一遍)。
+            if let Some(url) = worked_url {
+                if guard.row.is_user_defined
+                    && guard.row.model_discovery.url.as_deref() != Some(url.as_str())
+                {
+                    guard.row.model_discovery.enabled = true;
+                    guard.row.model_discovery.url = Some(url);
+                    if let Err(e) = store::update_row(&state.db, &guard.row).await {
+                        warn!(?e, "models 地址写回订阅失败");
+                    }
+                }
+            }
             guard.model_cache = Some(ModelCache {
                 fetched_at: cache.fetched_at,
                 models: cache.models.clone(),
@@ -695,6 +752,68 @@ pub async fn refresh_model_list(
             reason: e.to_string(),
         }),
     }
+}
+
+/// 新建自定义订阅的表单在**保存前**拉模型列表 (issue #44)。只发一次 GET, 不写库 ——
+/// 刻意不复用内置向导「先落占位订阅再 refresh」的两步流程, 那会留下 `(pending)` 残留订阅。
+#[derive(Debug, Deserialize)]
+pub struct ProbeCustomModelsInput {
+    pub base_url: String,
+    pub auth_header_name: String,
+    pub auth_header_format: AuthHeaderFormat,
+    pub api_key: String,
+    #[serde(default)]
+    pub protocol: CustomProtocol,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum ProbeCustomModelsResult {
+    Auto {
+        models: Vec<ModelInfo>,
+        /// 实际打通的完整地址, 前端保存时原样回传给 `CreateSource::Custom.models_url`。
+        models_url: String,
+    },
+    ManualFallback {
+        reason: String,
+    },
+}
+
+#[tauri::command]
+pub async fn probe_custom_models(
+    state: State<'_, AppState>,
+    input: ProbeCustomModelsInput,
+) -> AppResult<ProbeCustomModelsResult> {
+    let base_url = input.base_url.trim().to_string();
+    validate_base_url(&base_url)?;
+    if input.api_key.is_empty() {
+        return Err(AppError::BadRequest("请先填写 API Key".into()));
+    }
+    if input.auth_header_name.trim().is_empty() {
+        return Err(AppError::BadRequest("鉴权 header 名不能为空".into()));
+    }
+
+    let target = model_discovery::ProbeTarget {
+        base_url,
+        path: input.protocol.default_models_path().into(),
+        auth_type: input.protocol.auth_type(),
+        auth_header_name: input.auth_header_name,
+        auth_header_value: input.auth_header_format.apply(&input.api_key),
+        required_headers: BTreeMap::new(),
+    }
+    .with_custom_defaults();
+
+    Ok(
+        match model_discovery::probe(&state.http_client, &target).await {
+            Ok(found) => ProbeCustomModelsResult::Auto {
+                models: found.models,
+                models_url: found.url,
+            },
+            Err(e) => ProbeCustomModelsResult::ManualFallback {
+                reason: e.to_string(),
+            },
+        },
+    )
 }
 
 /// 余额刷新结果. 前端按 kind 分发渲染.

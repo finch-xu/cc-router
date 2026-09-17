@@ -332,13 +332,30 @@ export type CreateSource =
       auth_header_name: string;
       auth_header_format: AuthHeaderFormat;
       /** 协议家族 — 缺省=anthropic 透传; "gemini"=Gemini generateContent 翻译; "gemini_interactions"=Gemini Interactions API 翻译; "openai_responses"=OpenAI Responses 翻译; "openai_chat_completions"=OpenAI Chat Completions 翻译 (DeepSeek/Together/Groq/Ollama 等兼容生态) */
-      protocol?:
-        | "anthropic"
-        | "gemini"
-        | "gemini_interactions"
-        | "openai_responses"
-        | "openai_chat_completions";
+      protocol?: CustomProtocol;
+      /** 表单里「获取模型列表」实际打通的地址 (probe_custom_models 返回值原样回传); 没探测过则省略 */
+      models_url?: string;
     };
+
+export type CustomProtocol =
+  | "anthropic"
+  | "gemini"
+  | "gemini_interactions"
+  | "openai_responses"
+  | "openai_chat_completions";
+
+/** probe_custom_models 入参: 保存前探测, 不落库 */
+export interface ProbeCustomModelsInput {
+  base_url: string;
+  auth_header_name: string;
+  auth_header_format: AuthHeaderFormat;
+  api_key: string;
+  protocol?: CustomProtocol;
+}
+
+export type ProbeCustomModelsResult =
+  | { kind: "auto"; models: ModelInfo[]; models_url: string }
+  | { kind: "manual_fallback"; reason: string };
 
 export interface CreateSubscriptionInput {
   display_name: string;

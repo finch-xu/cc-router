@@ -169,7 +169,7 @@ impl ProviderEndpoint {
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ModelDiscovery {
     #[serde(default = "default_true")]
     pub enabled: bool,
@@ -183,6 +183,21 @@ pub struct ModelDiscovery {
     pub cache_ttl_hours: u32,
     #[serde(default)]
     pub example_models: Vec<String>,
+}
+
+/// 手写而不是 derive: derive 给出的是 `path: ""` / `cache_ttl_hours: 0`, 与上面的 serde 默认值
+/// 不一致 —— `..ModelDiscovery::default()` 曾因此把空 path 写进自定义订阅的 snapshot
+/// (issue #44 排查时发现, 老数据由 `model_discovery::ProbeTarget::from_row` 兜底)。
+impl Default for ModelDiscovery {
+    fn default() -> Self {
+        Self {
+            enabled: default_true(),
+            path: default_models_path(),
+            url: None,
+            cache_ttl_hours: default_cache_ttl(),
+            example_models: Vec::new(),
+        }
+    }
 }
 
 fn default_true() -> bool {

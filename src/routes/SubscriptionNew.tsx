@@ -30,11 +30,12 @@ import type {
   CreateSubscriptionInput,
   ModelInfo,
   ModelSlots,
+  ProbeCustomModelsResult,
   RefreshModelListResult,
   SlotEfforts,
   VirtualModelName,
 } from "@/types";
-import { allSlotsFilled, MODEL_SLOT_KEYS, uniformSlots } from "@/lib/modelSlots";
+import { allSlotsFilled, uniformSlots } from "@/lib/modelSlots";
 
 type Step = 1 | 2;
 
@@ -172,6 +173,10 @@ export function SubscriptionNewPage() {
   const [customBaseUrl, setCustomBaseUrl] = useState<string>("");
   const [customMessagesPath, setCustomMessagesPath] = useState<string>("/v1/messages");
   const [customAuthPreset, setCustomAuthPreset] = useState<AuthPreset>("bearer");
+  // 「获取模型列表」打通的地址, 连同当时的 base_url 一起记: 之后用户改了 base_url 这个地址就作废, 保存时不回传
+  const [customProbe, setCustomProbe] = useState<{ modelsUrl: string; baseUrl: string } | null>(
+    null,
+  );
 
   const isCustomAnthropic = providerId === CUSTOM_VALUE;
   const lockedPreset = LOCKED_CUSTOM_VALUES.includes(providerId)
@@ -241,6 +246,10 @@ export function SubscriptionNewPage() {
   function handleProviderChange(v: string) {
     setProviderId(v);
     setSubmitError(null);
+    // 换 provider = 换一套连接信息, 上一家探测到的模型列表不能带过来
+    setModels(null);
+    setModelFetchError(null);
+    setCustomProbe(null);
     if (v === CUSTOM_VALUE || LOCKED_CUSTOM_VALUES.includes(v)) {
       setEndpointId("");
       // 自定义路径备注名自动: <自定义厂商名> <随机后缀>
@@ -540,6 +549,49 @@ export function SubscriptionNewPage() {
     navigate(returnTo ?? `/subscriptions/${createdId}`);
   }
 
+  function customAuthHeader(): { name: string; format: AuthHeaderFormat } {
+    return {
+      name: lockedPreset?.authHeaderName ?? AUTH_PRESETS[customAuthPreset].name,
+      format: lockedPreset?.authHeaderFormat ?? AUTH_PRESETS[customAuthPreset].format,
+    };
+  }
+
+  // 自定义路径: 保存前探测模型列表 (不落库, 失败则留在手动输入)
+  async function probeCustomModels() {
+    setSubmitError(null);
+    if (!customBaseUrl) return setSubmitError(t("subscriptionNew.errFillBase"));
+    if (!apiKey) return setSubmitError(t("subscriptionNew.errFillKey"));
+    const baseUrl = customBaseUrl.trim();
+    const auth = customAuthHeader();
+    setFetchingModels(true);
+    setModelFetchError(null);
+    try {
+      const result: ProbeCustomModelsResult = await runtime.invoke("probe_custom_models", {
+        input: {
+          base_url: baseUrl,
+          auth_header_name: auth.name,
+          auth_header_format: auth.format,
+          api_key: apiKey,
+          ...(lockedPreset ? { protocol: lockedPreset.protocol } : {}),
+        },
+      });
+      if (result.kind === "auto") {
+        setModels(result.models);
+        setCustomProbe({ modelsUrl: result.models_url, baseUrl });
+      } else {
+        setModels(null);
+        setCustomProbe(null);
+        setModelFetchError(result.reason);
+      }
+    } catch (e) {
+      setModels(null);
+      setCustomProbe(null);
+      setModelFetchError(String(e));
+    } finally {
+      setFetchingModels(false);
+    }
+  }
+
   // 自定义路径: 单页提交
   async function saveCustom() {
     setSubmitError(null);
@@ -560,9 +612,8 @@ export function SubscriptionNewPage() {
       return setSubmitError(t("subscriptionNew.errFillSlots"));
     }
 
-    const headerName = lockedPreset?.authHeaderName ?? AUTH_PRESETS[customAuthPreset].name;
-    const headerFormat: AuthHeaderFormat =
-      lockedPreset?.authHeaderFormat ?? AUTH_PRESETS[customAuthPreset].format;
+    const { name: headerName, format: headerFormat } = customAuthHeader();
+    const baseUrl = customBaseUrl.trim();
     const protocolOverride = lockedPreset
       ? { protocol: lockedPreset.protocol }
       : {};
@@ -573,17 +624,27 @@ export function SubscriptionNewPage() {
       source: {
         kind: "custom",
         provider_display_name: customProviderName,
-        base_url: customBaseUrl.trim(),
+        base_url: baseUrl,
         messages_path: customMessagesPath.trim(),
         auth_header_name: headerName,
         auth_header_format: headerFormat,
         ...protocolOverride,
+        ...(customProbe && customProbe.baseUrl === baseUrl
+          ? { models_url: customProbe.modelsUrl }
+          : {}),
       },
     };
 
     setSubmitting(true);
     try {
       const created = await createMut.mutateAsync(input);
+      // create 的入参刻意不含 slot_efforts; 用户设过档位才补一次 patch, 全 auto 时省掉这次往返
+      if (Object.keys(slotEfforts).length > 0) {
+        await runtime.invoke("update_subscription", {
+          id: created.id,
+          patch: { slot_efforts: slotEfforts },
+        });
+      }
       await bindToVirtualModelsIfOnboarding(created.id);
       if (isOnboarding) {
         navigate("/guide", { replace: true });
@@ -1003,32 +1064,29 @@ export function SubscriptionNewPage() {
                   <div className="field-hint">{t("subscriptionNew.noteHint")}</div>
                 </div>
 
-                {/* 自定义路径: 单页直接显示各 slot 输入 */}
+                {/* 自定义路径: 单页直接配槽位。与内置向导 step 2 同一个选择器 ——
+                    点「获取模型列表」探测成功变下拉, 没点 / 失败就是手动输入 */}
                 {isCustom && (
                   <div style={{ marginBottom: 24 }}>
-                    <label className="field-label">{t("subscriptionNew.slotsLabel")}</label>
-                    <div className="field-hint" style={{ marginBottom: 8 }}>
+                    <div className="field-hint" style={{ marginTop: 0, marginBottom: 12 }}>
                       {t("subscriptionNew.slotsHint")}
                     </div>
-                    {MODEL_SLOT_KEYS.map((key) => (
-                      <SlotInput
-                        key={key}
-                        label={`model-${key} →`}
-                        value={slots[key]}
-                        onChange={(v) => setSlots({ ...slots, [key]: v })}
-                      />
-                    ))}
-                    {/* 兜底槽 (可选): 留空 = fallback 透传未知 model */}
-                    <SlotInput
-                      label="model-fallback →"
-                      value={slots.fallback ?? ""}
-                      onChange={(v) => setSlots({ ...slots, fallback: v })}
-                      placeholder={t("modelSlot.fallback.none")}
+                    <ModelSlotPicker
+                      value={slots}
+                      onChange={setSlots}
+                      efforts={slotEfforts}
+                      onEffortsChange={setSlotEfforts}
+                      models={models}
+                      loading={fetchingModels}
+                      error={modelFetchError}
+                      onRefresh={probeCustomModels}
+                      refreshLabel={t("subscriptionNew.fetchModels")}
                     />
                   </div>
                 )}
 
-                {(modelFetchError || submitError) && (
+                {/* 自定义路径的探测失败已由上面的选择器就地显示 (warn), 不再在这里重复成 err */}
+                {(submitError || (!isCustom && modelFetchError)) && (
                   <div className="alert err" style={{ marginBottom: 16 }}>
                     {submitError ?? modelFetchError}
                   </div>
@@ -1177,33 +1235,5 @@ export function SubscriptionNewPage() {
         }}
       />
     </>
-  );
-}
-
-function SlotInput({
-  label,
-  value,
-  onChange,
-  placeholder,
-}: {
-  label: string;
-  value: string;
-  onChange: (v: string) => void;
-  placeholder?: string;
-}) {
-  const { t } = useT();
-  return (
-    <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 8 }}>
-      <span style={{ fontFamily: "var(--font-mono)", fontSize: 12, color: "var(--ink-3)", width: 130 }}>
-        {label}
-      </span>
-      <input
-        className="input mono"
-        style={{ flex: 1 }}
-        value={value}
-        onChange={(e) => onChange(e.target.value)}
-        placeholder={placeholder ?? t("subscriptionNew.slotPh")}
-      />
-    </div>
   );
 }

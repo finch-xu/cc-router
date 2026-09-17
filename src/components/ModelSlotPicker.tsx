@@ -31,6 +31,8 @@ interface Props {
   loading?: boolean;
   error?: string | null;
   onRefresh?: () => void;
+  /** 刷新按钮文案, 缺省「刷新模型列表」。还没拉过列表的场景 (自定义订阅新建页) 用「获取」更贴切。 */
+  refreshLabel?: string;
   exampleModels?: string[];
   disabled?: boolean;
 }
@@ -65,6 +67,7 @@ export function ModelSlotPicker({
   loading,
   error,
   onRefresh,
+  refreshLabel,
   exampleModels,
   disabled,
 }: Props) {
@@ -148,7 +151,7 @@ export function ModelSlotPicker({
             type="button"
           >
             <RefreshCw size={12} className={loading ? "animate-spin" : undefined} />
-            {t("modelSlot.refresh")}
+            {refreshLabel ?? t("modelSlot.refresh")}
           </button>
         )}
       </div>

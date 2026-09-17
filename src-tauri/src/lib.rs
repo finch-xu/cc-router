@@ -117,6 +117,7 @@ pub fn run() {
             commands::subscriptions::set_subscription_enabled,
             commands::subscriptions::test_connection,
             commands::subscriptions::refresh_model_list,
+            commands::subscriptions::probe_custom_models,
             commands::subscriptions::refresh_subscription_balance,
             commands::subscriptions::update_token_quotas,
             commands::subscriptions::reset_total_quota_usage,

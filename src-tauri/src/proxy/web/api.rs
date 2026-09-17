@@ -102,7 +102,9 @@ use crate::commands::oauth::{CreateChatGptOAuthSubscriptionInput, CreateKiroSubs
 use crate::commands::receipts::ReceiptRange;
 use crate::commands::requests::RequestLogFilters;
 use crate::commands::statistics::{BreakdownBy, StatsRange};
-use crate::commands::subscriptions::{CreateSubscriptionInput, SubscriptionPatch};
+use crate::commands::subscriptions::{
+    CreateSubscriptionInput, ProbeCustomModelsInput, SubscriptionPatch,
+};
 use crate::commands::virtual_models::UpdateVirtualModelInput;
 use crate::settings::model::SettingsPatch;
 use crate::subscription::model::KiroDisguise;
@@ -122,6 +124,7 @@ web_commands! {
     set_subscription_enabled(id: String, enabled: bool) => commands::subscriptions::set_subscription_enabled(st, args.id, args.enabled).await,
     test_connection(id: String) => commands::subscriptions::test_connection(st, args.id).await,
     refresh_model_list(id: String) => commands::subscriptions::refresh_model_list(st, args.id).await,
+    probe_custom_models(input: ProbeCustomModelsInput) => commands::subscriptions::probe_custom_models(st, args.input).await,
     refresh_subscription_balance(id: String) => commands::subscriptions::refresh_subscription_balance(st, args.id).await,
     update_token_quotas(id: String, quotas: TokenQuotas) => commands::subscriptions::update_token_quotas(st, args.id, args.quotas).await,
     reset_total_quota_usage(id: String) => commands::subscriptions::reset_total_quota_usage(st, args.id).await,
