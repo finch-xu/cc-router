@@ -50,6 +50,15 @@ export function useLanAddresses(enabled: boolean) {
   });
 }
 
+export function useTuiLaunchInfo() {
+  return useQuery({
+    queryKey: ["tui-launch-info"],
+    queryFn: () => api.tuiLaunchInfo(),
+    // sidecar 路径在进程生命周期内不变
+    staleTime: Infinity,
+  });
+}
+
 export function useEnvSnippet() {
   return useQuery({
     queryKey: ["env-snippet"],

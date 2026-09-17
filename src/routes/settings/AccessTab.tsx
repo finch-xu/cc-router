@@ -3,7 +3,7 @@ import { RefreshCw, Check, Copy } from "lucide-react";
 import { Toggle } from "@/components/Toggle";
 import { Spinner } from "@/components/Spinner";
 import { CopyableBlock } from "@/components/CopyableBlock";
-import { useGenerateNewToken, useLanAddresses, useProxyStatus } from "@/hooks/useSettings";
+import { useGenerateNewToken, useLanAddresses, useProxyStatus, useTuiLaunchInfo } from "@/hooks/useSettings";
 import { useT } from "@/i18n";
 import { runtime } from "@/runtime";
 import type { SettingsForm } from "./useSettingsForm";
@@ -209,6 +209,32 @@ export function AccessTab({ form }: { form: SettingsForm }) {
           )}
         </div>
       </div>
+
+      {/* 终端界面 */}
+      <div className="card section">
+        <div className="card-head">
+          <div className="card-title">{t("settings.section.tui")}</div>
+        </div>
+        <div className="card-body">
+          <div className="setting-row">
+            <div className="label-col">
+              {t("settings.tui.enabled.label")}
+              <div className="desc">{t("settings.tui.enabled.desc")}</div>
+            </div>
+            <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+              <Toggle
+                checked={form.tuiEnabled}
+                onChange={(v) => void form.changeTuiEnabled(v)}
+                aria-label={t("settings.tui.enabled.label")}
+              />
+              <span style={{ fontSize: 12, color: "var(--ink-2)" }}>
+                {form.tuiEnabled ? t("settings.tui.enabled.on") : t("settings.tui.enabled.off")}
+              </span>
+            </div>
+          </div>
+          <TuiLaunchRow enabled={form.tuiEnabled} />
+        </div>
+      </div>
     </>
   );
 }
@@ -239,6 +265,32 @@ function WebUiAddresses({ listenAll, authEnabled }: { listenAll: boolean; authEn
           </div>
         )}
       </div>
+    </div>
+  );
+}
+
+/** 启动命令一栏. 开关关着时置灰但仍可见 —— 可以先看好命令再开开关. */
+function TuiLaunchRow({ enabled }: { enabled: boolean }) {
+  const { t } = useT();
+  const info = useTuiLaunchInfo();
+  if (!info.data) return null;
+  const { path, is_appimage } = info.data;
+  return (
+    <div className="setting-row" style={{ opacity: enabled ? 1 : 0.55 }}>
+      <div className="label-col">
+        {t("settings.tui.launch.label")}
+        <div className="desc">
+          {path ? t("settings.tui.launch.desc") : t("settings.tui.launch.missing")}
+          {path && is_appimage && <> {t("settings.tui.launch.appimage")}</>}
+          {path && runtime.kind === "web" && <> {t("settings.tui.launch.webHint")}</>}
+        </div>
+      </div>
+      {path && (
+        <div style={{ minWidth: 0, flex: 1 }}>
+          {/* 路径可能含空格 (macOS 的 Application Support / Windows 的 Program Files), 必须加引号 */}
+          <CopyableBlock text={`"${path}"`} variant="inline" />
+        </div>
+      )}
     </div>
   );
 }

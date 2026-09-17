@@ -44,6 +44,7 @@ import type {
   TlsStatus,
   TokenQuotas,
   ToolBreakdownDto,
+  TuiLaunchInfo,
   UpdateInfo,
   UpdateVirtualModelInput,
   VirtualModelDto,
@@ -156,6 +157,7 @@ export const api = {
   envSnippet: () => invoke<string>("env_snippet"),
   /** 局域网 IPv4 列表 (非回环), 设置页拼网页访问地址用 */
   listLanAddresses: () => invoke<string[]>("list_lan_addresses"),
+  tuiLaunchInfo: () => invoke<TuiLaunchInfo>("tui_launch_info"),
 
   // onboarding
   getOnboardingState: () => invoke<OnboardingState>("get_onboarding_state"),

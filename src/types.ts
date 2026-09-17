@@ -357,6 +357,12 @@ export type ProbeCustomModelsResult =
   | { kind: "auto"; models: ModelInfo[]; models_url: string }
   | { kind: "manual_fallback"; reason: string };
 
+/** tui_launch_info 返回值. path 为 null = 此构建未包含 cc-router-tui (dev / 旧版本) */
+export interface TuiLaunchInfo {
+  path: string | null;
+  is_appimage: boolean;
+}
+
 export interface CreateSubscriptionInput {
   display_name: string;
   api_key: string;
@@ -464,6 +470,8 @@ export interface Settings {
   web_ui_enabled: boolean;
   /** 网页界面是否要求登录（凭代理 auth_token）。默认 true，与 auth_enabled 互相独立 */
   web_ui_auth_enabled: boolean;
+  /** 终端界面 (cc-router-tui) 是否允许接入. 默认关, 与 web_ui_enabled 互相独立 */
+  tui_enabled: boolean;
 }
 
 export type UpdateSource = "international" | "china";
@@ -487,6 +495,7 @@ export interface SettingsPatch {
   max_request_body_mb?: number;
   web_ui_enabled?: boolean;
   web_ui_auth_enabled?: boolean;
+  tui_enabled?: boolean;
   // 注意: auth_token 不在 patch 里,必须通过 generateNewToken() 改
 }
 

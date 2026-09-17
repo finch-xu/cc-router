@@ -35,6 +35,7 @@ export function useSettingsForm() {
   const [debugMode, setDebugMode] = useState(false);
   const [webUiEnabled, setWebUiEnabled] = useState(false);
   const [webUiAuthEnabled, setWebUiAuthEnabled] = useState(true);
+  const [tuiEnabled, setTuiEnabled] = useState(false);
 
   // 仅在首次拿到 settings.data 时灌入本地 state + 记录 baseline. 后续 mutate refetch
   // 不再回灌, 否则会覆盖用户正在 input 里编辑但尚未 blur 的值 (port/cors origin 跳光标).
@@ -77,6 +78,7 @@ export function useSettingsForm() {
     setDebugMode(settings.data.debug_mode ?? false);
     setWebUiEnabled(settings.data.web_ui_enabled);
     setWebUiAuthEnabled(settings.data.web_ui_auth_enabled);
+    setTuiEnabled(settings.data.tui_enabled);
     initializedRef.current = true;
   }, [settings.data]);
 
@@ -164,6 +166,11 @@ export function useSettingsForm() {
     setWebUiAuthEnabled(next);
     await patch({ web_ui_auth_enabled: next });
   }
+  // 即时生效: 中间件每请求读 settings.tui_enabled。
+  async function changeTuiEnabled(next: boolean) {
+    setTuiEnabled(next);
+    await patch({ tui_enabled: next });
+  }
   async function changeCorsEnabled(next: boolean) {
     setCorsEnabled(next);
     await patch({ cors_enabled: next });
@@ -195,6 +202,7 @@ export function useSettingsForm() {
     debugMode,
     webUiEnabled,
     webUiAuthEnabled,
+    tuiEnabled,
     changeLanguage,
     changeUpdateSource,
     changeDebugMode,
@@ -209,6 +217,7 @@ export function useSettingsForm() {
     changeAuthEnabled,
     changeWebUiEnabled,
     changeWebUiAuthEnabled,
+    changeTuiEnabled,
     changeCorsEnabled,
     changeCorsOrigin,
   };
