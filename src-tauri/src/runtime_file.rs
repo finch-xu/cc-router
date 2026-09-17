@@ -148,4 +148,45 @@ mod tests {
         let mode = std::fs::metadata(&path).unwrap().permissions().mode() & 0o777;
         assert_eq!(mode, 0o600, "{mode:o}");
     }
+
+    /// `local_secret` 只允许出现在这几个文件里。任何别处读到它 (尤其是 commands/ 和 DTO)
+    /// 都意味着密钥可能被返回给前端 / 网页 / 写进别的文件。
+    #[test]
+    fn local_secret_is_only_touched_by_allowlisted_files() {
+        const ALLOWED: &[&str] = &[
+            "runtime_file.rs",
+            "state.rs",
+            "lib.rs",
+            "proxy/server.rs",
+            "proxy/web/gate.rs",
+            "proxy/web/auth.rs",
+            "proxy/web/local_pass.rs",
+        ];
+        fn walk(dir: &std::path::Path, out: &mut Vec<std::path::PathBuf>) {
+            for entry in std::fs::read_dir(dir).unwrap().filter_map(Result::ok) {
+                let p = entry.path();
+                if p.is_dir() {
+                    walk(&p, out);
+                } else if p.extension().is_some_and(|e| e == "rs") {
+                    out.push(p);
+                }
+            }
+        }
+        let src = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src");
+        let mut files = Vec::new();
+        walk(&src, &mut files);
+        let offenders: Vec<String> = files
+            .iter()
+            .filter(|p| std::fs::read_to_string(p).unwrap().contains("local_secret"))
+            .map(|p| p.strip_prefix(&src).unwrap().to_string_lossy().replace('\\', "/"))
+            .filter(|rel| !ALLOWED.contains(&rel.as_str()))
+            .collect();
+        assert!(offenders.is_empty(), "local_secret 出现在白名单之外: {offenders:?}");
+    }
+
+    #[test]
+    fn settings_serialization_never_contains_the_secret_field() {
+        let raw = serde_json::to_string(&crate::settings::model::Settings::default()).unwrap();
+        assert!(!raw.contains("local_secret"), "{raw}");
+    }
 }

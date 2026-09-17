@@ -235,25 +235,34 @@ fn unauthorized() -> Response {
     )
 }
 
-/// 中间件: 校验 cookie 会话 (web_ui_auth_enabled=false 时整层直通).
+/// 中间件: 校验 cookie 会话 (web_ui_auth_enabled=false 时整层直通), 或「本机通行」.
 pub async fn require_session(
     State(state): State<AppState>,
     req: Request<Body>,
     next: Next,
 ) -> Response {
-    let auth_enabled = state.settings.read().await.web_ui_auth_enabled;
-    let has_session = if auth_enabled {
-        match cookie_value(req.headers(), SESSION_COOKIE) {
-            Some(id) => state
-                .web_sessions
-                .lock()
-                .map(|mut s| s.touch(&id, Instant::now()))
-                .unwrap_or(false),
-            None => false,
-        }
-    } else {
-        false
+    let (auth_enabled, tui_enabled) = {
+        let s = state.settings.read().await;
+        (s.web_ui_auth_enabled, s.tui_enabled)
     };
+    // 本层只挂在 /ui/api 子树上 (nest 已剥前缀), 所以 is_api_path 恒为 true。
+    // 本机通行等价于一个有效会话: 不查 cookie, 也不经过 LoginGuard。
+    let local = crate::proxy::web::local_pass::from_request(
+        &req,
+        &state.local_secret,
+        tui_enabled,
+        true,
+    );
+    let has_session = local
+        || (auth_enabled
+            && match cookie_value(req.headers(), SESSION_COOKIE) {
+                Some(id) => state
+                    .web_sessions
+                    .lock()
+                    .map(|mut s| s.touch(&id, Instant::now()))
+                    .unwrap_or(false),
+                None => false,
+            });
     match decide(auth_enabled, has_session, req.uri().path()) {
         AuthDecision::Allow => next.run(req).await,
         AuthDecision::Reject => unauthorized(),

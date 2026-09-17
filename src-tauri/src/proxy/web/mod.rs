@@ -4,13 +4,14 @@
 //! 绕开代理 token 校验与 `Access-Control-Allow-Origin: *`——带凭据的管理 API
 //! 绝不能配通配 CORS. 详见 docs/superpowers/specs/2026-09-06-web-ui-runtime-bridge-design.md
 //!
-//! 层次 (外→内): gate (web_ui_enabled 404) → [api 子树: csrf 头 → 会话].
+//! 层次 (外→内): gate (web_ui_enabled 404, 或本机通行) → [api 子树: csrf 头 → 会话 (或本机通行)].
 
 pub mod api;
 pub mod assets;
 pub mod auth;
 pub mod events;
 pub mod gate;
+pub mod local_pass;
 
 use axum::middleware::{from_fn, from_fn_with_state};
 use axum::routing::{get, post};
