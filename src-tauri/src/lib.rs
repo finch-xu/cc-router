@@ -11,6 +11,7 @@ pub mod oauth;
 pub mod observability;
 pub mod provider;
 pub mod proxy;
+pub mod runtime_file;
 pub mod settings;
 pub mod state;
 pub mod subscription;
