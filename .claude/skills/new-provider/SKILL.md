@@ -7,7 +7,7 @@ description: 用于在 cc-router 仓库新增一个 LLM provider（即在 src-ta
 
 ## 这个 skill 在做什么
 
-cc-router 的 Provider 抽象 = 「YAML 描述符」。把一个新厂商接入路由层不需要写 Rust——只需要一份遵循 `providers/_schema.json` 的 YAML，加上 2 处机械同步改动（bundle resources / 可选图标）。
+cc-router 的 Provider 抽象 = 「YAML 描述符」。把一个新厂商接入路由层不需要写 Rust——只需要一份遵循 `providers/_schema.json` 的 YAML，放进 `providers/` 即自动内嵌进二进制；唯一的同步改动是可选的品牌图标。
 
 这份 skill 的价值在于：
 
@@ -19,7 +19,7 @@ cc-router 的 Provider 抽象 = 「YAML 描述符」。把一个新厂商接入�
 
 走本 skill 当且仅当用户在 cc-router 仓库内做「新增 provider」类工作。如果只是改既有 YAML 字段（如调 endpoint 顺序、改 description）则不必走完整流程，直接编辑即可。
 
-## 五步工作流（顺序执行）
+## 三步工作流（顺序执行）
 
 ### Step 1：研究上游文档，决定 YAML 字段
 
@@ -108,37 +108,14 @@ endpoints 数量？
 
 **已有 provider 是最好的参考**：写之前先 `Read` 一个最相似的现有 YAML（按 auth + model_discovery 组合匹配），照葫芦画瓢比从模板硬写更可靠。
 
-### Step 3：注册到 bundle.resources（不能漏）
+### 不需要登记任何清单
 
-**位置**：`src-tauri/tauri.conf.json::bundle.resources`
+YAML 在**编译期内嵌进二进制**：`src-tauri/build.rs` 扫描 `providers/*.yaml` 生成 `include_str!` 表，`provider/loader.rs` 用 `include!` 引入，并且对目录声明了 `rerun-if-changed`。所以 Step 2 把文件放进 `providers/` 就已经完成了「注册」。
 
-```json
-"resources": [
-  "providers/_schema.json",
-  ...
-  "providers/<existing>.yaml",
-  "providers/<new_id>.yaml",   ← 新增此行
-  "migrations/001_init.sql",
-  "../LICENSE"
-]
-```
+- **不要**去改 `src-tauri/tauri.conf.json::bundle.resources`（现在只剩 `../LICENSE`；往里加 yaml 是 2026-09 之前的旧流程）。
+- **没有**白名单 / 总数 assert 要同步——`tests/proxy_e2e.rs` 早已删除。取而代之的是 `loader.rs::tests::every_embedded_provider_parses_and_ids_are_unique`：自动遍历所有内嵌 yaml，拦住解析失败、`id` 冲突、`default_endpoint` 不在 `endpoints[].id` 里这三类错误。
 
-**为什么必须**：Tauri release 打包只把显式列出的文件打进 bundle。漏一行 → dev 模式没事（read from working dir），release 模式 `resource_dir().join("providers")` 扫不到 → fatal。这是 cc-router 最容易踩的坑之一。
-
-### Step 4：更新测试白名单 + 总数 assert
-
-**位置**：`src-tauri/tests/proxy_e2e.rs::provider_loader_loads_builtin_providers`
-
-```rust
-for expected in [..., "<new_id>"] {  // 加到数组末尾
-    assert!(ids.contains_key(expected), "missing provider: {expected}");
-}
-assert_eq!(providers.len(), N+1);    // 数字递增 1
-```
-
-**为什么是双更新**：白名单查存在，`providers.len()` 锁总数。后者能在 YAML 文件被加进目录但漏写 `bundle.resources` 时炸出错——这是它存在的意义。两者必须同步改。
-
-### Step 5：可选图标
+### Step 3：可选图标
 
 **README 不用改**：README 已不再维护 provider 表格（2026-09 删除），「入口与出口」章节只按协议家族分类并点名主要厂商，完整清单以 app 内「添加订阅」页为准。只有当新厂商是知名品牌、值得在出口章节的点名列表里露脸时才加一个名字，普通中转站不加。
 
@@ -163,12 +140,12 @@ const BRAND_MAP: Record<string, BrandIcon> = {
 执行最小验证集：
 
 ```bash
-cd src-tauri && cargo test --test proxy_e2e provider_loader
+cd src-tauri && cargo test --lib provider::loader
 ```
 
-通过 = 5 步同步无错。失败 99% 是漏改 Step 3 的 bundle.resources 或 Step 4 的总数 assert。
+通过 = 新 yaml 能被解析、`id` 不与现有 provider 冲突、`default_endpoint` 合法。失败信息会直接点名出错的文件。
 
-可选：`pnpm tsc --noEmit` 确认 BRAND_MAP 导入没拼错（Step 5 改动时）。
+可选：`pnpm tsc --noEmit` 确认 BRAND_MAP 导入没拼错（Step 3 改动时）。
 
 ## 不做什么
 
@@ -184,7 +161,7 @@ cd src-tauri && cargo test --test proxy_e2e provider_loader
 
 ## 决策提示词
 
-写完 YAML 草稿、执行 Step 3-5 之前，主动向用户确认这 3 件事——它们没有客观正确答案：
+写完 YAML 草稿、执行 Step 3 之前，主动向用户确认这 3 件事——它们没有客观正确答案：
 
 1. **endpoints 数量**：单端点够还是要列国内/国际/订阅/按量多组？
 2. **API Key 字段**：厂商是否真的需要 key？某些（如 Ollama）不校验，要在 `compatibility_notes` 写清楚
@@ -194,4 +171,4 @@ cd src-tauri && cargo test --test proxy_e2e provider_loader
 
 ## 流程结束
 
-5 步走完 + `cargo test` 通过 = 工作完成。**不要**主动提议提交 commit / 发 PR——cc-router 维护者偏好确认改动后自己提交。如果用户明确要求 commit，再走 commit 流程。
+3 步走完 + `cargo test` 通过 = 工作完成。**不要**主动提议提交 commit / 发 PR——cc-router 维护者偏好确认改动后自己提交。如果用户明确要求 commit，再走 commit 流程。

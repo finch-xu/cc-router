@@ -486,11 +486,10 @@ mod tests {
     use crate::db::run_migrations;
     use sqlx::sqlite::SqlitePoolOptions;
     use sqlx::SqlitePool;
-    use std::path::PathBuf;
 
     async fn fresh_pool() -> SqlitePool {
         let pool = SqlitePoolOptions::new().max_connections(1).connect("sqlite::memory:").await.unwrap();
-        run_migrations(&pool, &PathBuf::from(".")).await.unwrap();
+        run_migrations(&pool).await.unwrap();
         pool
     }
 

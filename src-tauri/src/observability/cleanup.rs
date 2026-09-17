@@ -233,7 +233,6 @@ mod tests {
     use crate::virtual_model::VirtualModelName;
     use sqlx::sqlite::SqlitePoolOptions;
     use sqlx::Row;
-    use std::path::PathBuf;
     use uuid::Uuid;
 
     async fn fresh_pool() -> SqlitePool {
@@ -242,7 +241,7 @@ mod tests {
             .connect("sqlite::memory:")
             .await
             .unwrap();
-        run_migrations(&pool, &PathBuf::from("."))
+        run_migrations(&pool)
             .await
             .unwrap();
         pool

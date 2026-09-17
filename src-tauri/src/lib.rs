@@ -69,12 +69,6 @@ pub fn run() {
             observability::logger::init(&app_data_dir)?;
             info!(?app_data_dir, "cc-router starting");
 
-            // 解析 provider YAML 资源目录
-            let resource_dir = app
-                .path()
-                .resource_dir()
-                .expect("无法解析 resource_dir");
-
             // 窗口几何自适应 —— 必须先于 bootstrap: 几何计算是同步且极快的, 而
             // bootstrap 要跑 DB migration / provider 加载 / TLS。配合
             // tauri.conf.json 的 visible=false, 用户看到的第一帧就是正确尺寸。
@@ -85,7 +79,7 @@ pub fn run() {
             // 让 block_on 直接返回省得为托盘再开一次 block_on。
             let handle = app.handle().clone();
             let lang_pref = tauri::async_runtime::block_on(async move {
-                match bootstrap(handle.clone(), app_data_dir, resource_dir).await {
+                match bootstrap(handle.clone(), app_data_dir).await {
                     Ok(state) => {
                         let pref = state.settings.read().await.preferred_language.clone();
                         handle.manage(state);
@@ -191,15 +185,14 @@ pub fn run() {
 async fn bootstrap(
     handle: tauri::AppHandle,
     app_data_dir: std::path::PathBuf,
-    resource_dir: std::path::PathBuf,
 ) -> anyhow::Result<AppState> {
     // 1. DB
     let db_path = app_data_dir.join("config.db");
     let pool = db::init_pool(&db_path).await?;
-    db::run_migrations(&pool, &resource_dir).await?;
+    db::run_migrations(&pool).await?;
 
-    // 2. Provider YAML 加载
-    let providers = provider::loader::load_all(&resource_dir)?;
+    // 2. Provider YAML 加载 (编译期内嵌, 见 build.rs)
+    let providers = provider::loader::load_all()?;
     info!(provider_count = providers.len(), "providers loaded");
 
     // 3. Settings

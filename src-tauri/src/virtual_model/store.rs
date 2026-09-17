@@ -106,12 +106,11 @@ mod sticky_tests {
     use super::*;
     use crate::db::run_migrations;
     use sqlx::sqlite::SqlitePoolOptions;
-    use std::path::PathBuf;
 
     #[tokio::test]
     async fn sticky_mode_roundtrips_through_db() {
         let pool = SqlitePoolOptions::new().max_connections(1).connect("sqlite::memory:").await.unwrap();
-        run_migrations(&pool, &PathBuf::from(".")).await.unwrap();
+        run_migrations(&pool).await.unwrap();
         save_mode(&pool, VirtualModelName::Sonnet, RoutingMode::Sticky).await.unwrap();
         let all = load_all(&pool).await.unwrap();
         assert_eq!(all[&VirtualModelName::Sonnet].mode, RoutingMode::Sticky);

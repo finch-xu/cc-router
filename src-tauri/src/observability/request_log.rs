@@ -599,7 +599,6 @@ mod tests {
     use crate::db::run_migrations;
     use sqlx::sqlite::SqlitePoolOptions;
     use sqlx::Row;
-    use std::path::PathBuf;
 
     async fn fresh_pool() -> SqlitePool {
         let pool = SqlitePoolOptions::new()
@@ -607,7 +606,7 @@ mod tests {
             .connect("sqlite::memory:")
             .await
             .expect("open in-memory db");
-        run_migrations(&pool, &PathBuf::from("."))
+        run_migrations(&pool)
             .await
             .expect("migrate");
         pool

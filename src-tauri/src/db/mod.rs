@@ -133,7 +133,7 @@ pub async fn init_pool(db_path: &Path) -> AppResult<SqlitePool> {
 /// migration 跑在单一 acquired connection 上, 让 v5 里的 `PRAGMA foreign_keys=OFF` 能贯穿整段 SQL —
 /// 用 pool.execute 时连接池可能切换连接导致 PRAGMA 失效, 进而触发 ALTER TABLE RENAME 在 FK=ON
 /// 下与 virtual_model_bindings 引用冲突, 形成"DROP 已 commit, RENAME 失败"的半成品状态。
-pub async fn run_migrations(pool: &SqlitePool, _resource_dir: &Path) -> AppResult<()> {
+pub async fn run_migrations(pool: &SqlitePool) -> AppResult<()> {
     let mut conn = pool.acquire().await?;
 
     sqlx::query(
@@ -385,8 +385,7 @@ mod tests {
     #[tokio::test]
     async fn fresh_db_applies_all_migrations() {
         let pool = in_memory_pool().await;
-        let dir = std::path::PathBuf::from(".");
-        run_migrations(&pool, &dir).await.expect("migrate fresh");
+        run_migrations(&pool).await.expect("migrate fresh");
 
         let versions = applied_versions(&pool).await;
         assert_eq!(versions, vec![1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22]);
@@ -425,8 +424,7 @@ mod tests {
         }
         // 此时 subscriptions 存在, _schema_version 不存在
 
-        let dir = std::path::PathBuf::from(".");
-        run_migrations(&pool, &dir).await.expect("migrate legacy");
+        run_migrations(&pool).await.expect("migrate legacy");
 
         let versions = applied_versions(&pool).await;
         assert_eq!(versions, vec![1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22]); // baseline v=1, 然后跑增量
@@ -440,10 +438,9 @@ mod tests {
     #[tokio::test]
     async fn rerunning_migrations_is_idempotent() {
         let pool = in_memory_pool().await;
-        let dir = std::path::PathBuf::from(".");
-        run_migrations(&pool, &dir).await.expect("first run");
-        run_migrations(&pool, &dir).await.expect("second run");
-        run_migrations(&pool, &dir).await.expect("third run");
+        run_migrations(&pool).await.expect("first run");
+        run_migrations(&pool).await.expect("second run");
+        run_migrations(&pool).await.expect("third run");
 
         let versions = applied_versions(&pool).await;
         assert_eq!(versions, vec![1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22]); // 没有重复写
@@ -504,7 +501,7 @@ mod tests {
         assert!(has_table(&pool, "subscriptions_new").await);
         assert!(!has_table(&pool, "subscriptions").await);
 
-        run_migrations(&pool, &std::path::PathBuf::from("."))
+        run_migrations(&pool)
             .await
             .expect("migrate from half-finished v5");
 
@@ -763,7 +760,7 @@ mod tests {
         .await
         .unwrap();
 
-        run_migrations(&pool, &std::path::PathBuf::from("."))
+        run_migrations(&pool)
             .await
             .expect("apply v19");
 
@@ -837,7 +834,7 @@ mod tests {
         assert_eq!(receipt_rows.0 as usize, expected.len());
 
         // 幂等: 再跑一次不报错, 行数不变
-        run_migrations(&pool, &std::path::PathBuf::from("."))
+        run_migrations(&pool)
             .await
             .expect("rerun is a no-op");
         let again: (i64,) = sqlx::query_as("SELECT count(*) FROM request_stats_daily")
@@ -854,7 +851,7 @@ mod tests {
             .connect("sqlite::memory:")
             .await
             .unwrap();
-        run_migrations(&pool, &std::path::PathBuf::from("."))
+        run_migrations(&pool)
             .await
             .unwrap();
 

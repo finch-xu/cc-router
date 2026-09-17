@@ -589,7 +589,7 @@ mod tests {
             .connect("sqlite::memory:")
             .await
             .expect("open in-memory db");
-        crate::db::run_migrations(&pool, std::path::Path::new("."))
+        crate::db::run_migrations(&pool)
             .await
             .expect("run migrations");
         pool
@@ -685,11 +685,10 @@ mod quota_tests {
     use crate::virtual_model::SubscriptionSlot;
     use chrono::{TimeZone, Utc};
     use sqlx::sqlite::SqlitePoolOptions;
-    use std::path::PathBuf;
 
     async fn fresh_pool() -> SqlitePool {
         let pool = SqlitePoolOptions::new().max_connections(1).connect("sqlite::memory:").await.unwrap();
-        run_migrations(&pool, &PathBuf::from(".")).await.unwrap();
+        run_migrations(&pool).await.unwrap();
         pool
     }
 

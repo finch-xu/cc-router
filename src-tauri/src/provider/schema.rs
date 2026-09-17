@@ -1,17 +1,17 @@
-use std::path::Path;
-
 use once_cell::sync::OnceCell;
 
 use crate::error::{AppError, AppResult};
 
 static COMPILED: OnceCell<jsonschema::Validator> = OnceCell::new();
 
-pub fn compile(schema_path: &Path) -> AppResult<()> {
+/// 与 provider yaml 一样编进二进制 (见 `loader.rs`)。
+const SCHEMA_JSON: &str = include_str!("../../providers/_schema.json");
+
+pub fn compile() -> AppResult<()> {
     if COMPILED.get().is_some() {
         return Ok(());
     }
-    let raw = std::fs::read_to_string(schema_path)?;
-    let value: serde_json::Value = serde_json::from_str(&raw)?;
+    let value: serde_json::Value = serde_json::from_str(SCHEMA_JSON)?;
     let schema = jsonschema::validator_for(&value)
         .map_err(|e| AppError::internal(format!("schema 编译失败: {e}")))?;
     let _ = COMPILED.set(schema);
