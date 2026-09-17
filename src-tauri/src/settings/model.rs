@@ -101,6 +101,10 @@ pub struct Settings {
     /// 仅在 web_ui_enabled=true 时有意义.
     #[serde(default = "default_web_ui_auth_enabled")]
     pub web_ui_auth_enabled: bool,
+    /// 终端界面 (cc-router-tui) 是否允许经「本机通行」接入 /ui/api. 默认关.
+    /// 中间件每请求读取, 开关不需要重启. 与 web_ui_enabled 互相独立.
+    #[serde(default)]
+    pub tui_enabled: bool,
 }
 
 fn default_port() -> u16 {
@@ -161,6 +165,7 @@ impl Default for Settings {
             max_request_body_mb: default_max_request_body_mb(),
             web_ui_enabled: false,
             web_ui_auth_enabled: default_web_ui_auth_enabled(),
+            tui_enabled: false,
         }
     }
 }
@@ -185,6 +190,7 @@ pub struct SettingsPatch {
     pub max_request_body_mb: Option<u32>,
     pub web_ui_enabled: Option<bool>,
     pub web_ui_auth_enabled: Option<bool>,
+    pub tui_enabled: Option<bool>,
 }
 
 impl Settings {
@@ -242,6 +248,9 @@ impl Settings {
         }
         if let Some(p) = patch.web_ui_auth_enabled {
             self.web_ui_auth_enabled = p;
+        }
+        if let Some(p) = patch.tui_enabled {
+            self.tui_enabled = p;
         }
     }
 
@@ -508,5 +517,30 @@ mod tests {
         });
         assert!(s.web_ui_enabled);
         assert!(!s.web_ui_auth_enabled);
+    }
+
+    #[test]
+    fn tui_enabled_defaults_to_false() {
+        assert!(!Settings::default().tui_enabled);
+    }
+
+    #[test]
+    fn legacy_settings_json_without_tui_enabled_loads_as_false() {
+        // 老版本写出的 settings.json 没有这个字段, 升级后必须能读且保持关闭
+        let s: Settings = serde_json::from_str(r#"{"proxy_port": 23456}"#).unwrap();
+        assert!(!s.tui_enabled);
+    }
+
+    #[test]
+    fn apply_patch_sets_tui_enabled() {
+        let mut s = Settings::default();
+        s.apply_patch(SettingsPatch {
+            tui_enabled: Some(true),
+            ..SettingsPatch::default()
+        });
+        assert!(s.tui_enabled);
+        // 不带该字段的 patch 不应把它改回去
+        s.apply_patch(SettingsPatch::default());
+        assert!(s.tui_enabled);
     }
 }
