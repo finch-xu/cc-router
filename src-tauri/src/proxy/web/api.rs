@@ -185,6 +185,8 @@ web_commands! {
     tls_export_ca_pem(dest: String) => commands::tls::tls_export_ca_pem(st, args.dest).await,
     tls_get_ca_pem_text() => commands::tls::tls_get_ca_pem_text(st).await,
     tls_regenerate_leaf() => commands::tls::tls_regenerate_leaf(st).await,
+    // TUI
+    tui_launch_info() => Ok::<_, AppError>(commands::tui::tui_launch_info()),
     // Claude Code / Codex integrations
     read_claude_code_settings() => commands::integrations::read_claude_code_settings(st).await,
     inspect_claude_code_settings() => commands::integrations::inspect_claude_code_settings(st).await,
