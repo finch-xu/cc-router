@@ -10,7 +10,8 @@
     "tauri": "tauri",
     "tauri:dev": "tauri dev",
     "tauri:build": "tauri build",
-    "version:set": "node scripts/set-version.mjs"
+    "version:set": "node scripts/set-version.mjs",
+    "icon:macos": "node scripts/make-macos-icon.mjs"
   },
   "dependencies": {
     "@codemirror/lang-json": "^6.0.2",
