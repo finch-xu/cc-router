@@ -287,8 +287,10 @@ function TuiLaunchRow({ enabled }: { enabled: boolean }) {
       </div>
       {path && (
         <div style={{ minWidth: 0, flex: 1 }}>
-          {/* 路径可能含空格 (macOS 的 Application Support / Windows 的 Program Files), 必须加引号 */}
-          <CopyableBlock text={`"${path}"`} variant="inline" />
+          {/* 默认安装路径三个平台都不含空格, 裸路径在 sh / cmd / PowerShell 里都能直接运行。
+              只有含空格时才加引号 —— PowerShell 里带引号的裸字符串会被当成字符串回显而不是执行,
+              P2 做一键安装时再按平台给出完整命令。 */}
+          <CopyableBlock text={/\s/.test(path) ? `"${path}"` : path} variant="inline" />
         </div>
       )}
     </div>

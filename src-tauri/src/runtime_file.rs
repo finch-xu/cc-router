@@ -11,7 +11,7 @@ use crate::error::AppResult;
 
 pub const FILE_NAME: &str = "runtime.json";
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Clone, Serialize)]
 pub struct RuntimeFile {
     pub pid: u32,
     pub app_version: String,
@@ -19,6 +19,19 @@ pub struct RuntimeFile {
     pub https_port: Option<u16>,
     pub ca_pem_path: Option<String>,
     pub local_secret: String,
+}
+
+impl std::fmt::Debug for RuntimeFile {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("RuntimeFile")
+            .field("pid", &self.pid)
+            .field("app_version", &self.app_version)
+            .field("http_port", &self.http_port)
+            .field("https_port", &self.https_port)
+            .field("ca_pem_path", &self.ca_pem_path)
+            .field("local_secret", &"<redacted>")
+            .finish()
+    }
 }
 
 /// 32 字节随机数的 base64url (无 padding)。
@@ -149,8 +162,9 @@ mod tests {
         assert_eq!(mode, 0o600, "{mode:o}");
     }
 
-    /// `local_secret` 只允许出现在这几个文件里。任何别处读到它 (尤其是 commands/ 和 DTO)
-    /// 都意味着密钥可能被返回给前端 / 网页 / 写进别的文件。
+    /// 字面量 `local_secret` 只允许出现在这几个文件里。这是一道「字段名」层面的栅栏:
+    /// 它拦得住有人在 commands/ 或 DTO 里直接读 `state.local_secret`, 但拦不住先在白名单文件里
+    /// 加一个不同名的访问器再从别处调用 —— 加访问器本身就应该在 review 里被质疑。
     #[test]
     fn local_secret_is_only_touched_by_allowlisted_files() {
         const ALLOWED: &[&str] = &[
@@ -160,7 +174,6 @@ mod tests {
             "proxy/server.rs",
             "proxy/web/gate.rs",
             "proxy/web/auth.rs",
-            "proxy/web/local_pass.rs",
         ];
         fn walk(dir: &std::path::Path, out: &mut Vec<std::path::PathBuf>) {
             for entry in std::fs::read_dir(dir).unwrap().filter_map(Result::ok) {
@@ -188,5 +201,23 @@ mod tests {
     fn settings_serialization_never_contains_the_secret_field() {
         let raw = serde_json::to_string(&crate::settings::model::Settings::default()).unwrap();
         assert!(!raw.contains("local_secret"), "{raw}");
+    }
+
+    #[test]
+    fn debug_output_redacts_the_secret() {
+        let f = RuntimeFile::new(std::path::Path::new("/data"), Some(1), None, "super-secret-value");
+        let shown = format!("{f:?}");
+        assert!(!shown.contains("super-secret-value"), "{shown}");
+        assert!(shown.contains("<redacted>"), "{shown}");
+        assert!(shown.contains("http_port"), "{shown}");
+    }
+
+    #[test]
+    fn write_into_a_missing_directory_errors_and_leaves_nothing_behind() {
+        let dir = tempfile::tempdir().unwrap();
+        let missing = dir.path().join("does-not-exist");
+        let f = RuntimeFile::new(&missing, Some(1), None, "s");
+        assert!(write(&missing, &f).is_err());
+        assert!(!missing.exists());
     }
 }
