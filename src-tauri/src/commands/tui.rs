@@ -9,7 +9,7 @@ use std::path::{Path, PathBuf};
 use serde::Serialize;
 
 use crate::error::{AppError, AppResult};
-use crate::tui_install::{self, InstallBlocked, InstallKind, InstallStatus};
+use crate::tui_install::{self, InstallBlocked, InstallKind, InstallStatus, Outcome};
 
 /// sidecar 的文件名。Tauri 的 externalBin 打包时会去掉 target triple 后缀,
 /// 安装后它与主程序同目录 (macOS: Contents/MacOS/, Windows: 安装目录, deb: /usr/bin/)。
@@ -49,6 +49,15 @@ impl TuiLaunchInfo {
     }
 }
 
+/// `install_tui_command` / `uninstall_tui_command` 的返回值: 装/卸载操作最新一次做没做,
+/// 外加操作完之后重新读到的状态。`cancelled` 只在 macOS 系统授权框被用户点了取消时为 true——
+/// 那不是错误, 但前端需要知道「什么都没发生」而不是误以为成功或吞掉不吭声 (fix-1 R6)。
+#[derive(Debug, Serialize)]
+pub struct TuiInstallOutcome {
+    pub info: TuiLaunchInfo,
+    pub cancelled: bool,
+}
+
 fn sidecar_path_for(exe: &Path) -> Option<PathBuf> {
     exe.parent()
         .filter(|p| !p.as_os_str().is_empty())
@@ -66,8 +75,8 @@ fn current_sidecar() -> Option<String> {
     std::env::current_exe().ok().and_then(|exe| existing_sidecar(&exe))
 }
 
-#[tauri::command]
-pub fn tui_launch_info() -> TuiLaunchInfo {
+/// 同步实现, 只从阻塞线程里调用 (`tui_install::status` 在 Windows 上会拉起一次 PowerShell, 是阻塞 IO)。
+fn launch_info_blocking() -> TuiLaunchInfo {
     let path = current_sidecar();
     let status = match &path {
         Some(p) => tui_install::status(Path::new(p)),
@@ -76,29 +85,45 @@ pub fn tui_launch_info() -> TuiLaunchInfo {
     TuiLaunchInfo::new(path, crate::commands::app::is_appimage_runtime(), status)
 }
 
-/// 安装 / 卸载共用: 拿到 sidecar → 在阻塞线程里跑 (macOS 要等用户在系统授权框里点完) → 返回最新状态。
-async fn change_install(op: fn(&Path) -> tui_install::InstallResult) -> AppResult<TuiLaunchInfo> {
-    let sidecar = current_sidecar().ok_or_else(|| AppError::BadRequest("此版本未包含终端界面程序".into()))?;
-    let path = PathBuf::from(&sidecar);
-    tauri::async_runtime::spawn_blocking(move || op(&path))
-        .await
-        .map_err(|e| AppError::Internal(e.to_string()))?
-        .map_err(AppError::Internal)?;
-    Ok(tui_launch_info())
-}
-
+/// `tui_launch_info` 会在 Windows 上拉起 PowerShell 读注册表, 是阻塞 IO——放进 `spawn_blocking`
+/// 避免卡住 async 工作线程 (fix-1 R9)。join 失败 (阻塞线程 panic) 时退化成「不可用」而不是整个 command 报错。
 #[tauri::command]
-pub async fn install_tui_command() -> AppResult<TuiLaunchInfo> {
-    let info = tui_launch_info();
-    if !info.can_install {
-        return Err(AppError::BadRequest("当前无法添加到 PATH".into()));
+pub async fn tui_launch_info() -> TuiLaunchInfo {
+    match tauri::async_runtime::spawn_blocking(launch_info_blocking).await {
+        Ok(info) => info,
+        Err(_) => TuiLaunchInfo::new(None, crate::commands::app::is_appimage_runtime(), InstallStatus::unavailable()),
     }
-    change_install(tui_install::install).await
+}
+
+/// 安装 / 卸载共用: 在同一个阻塞线程闭包里做完「读状态 (可选 can_install 前置检查) → 执行 → 再读状态」,
+/// 避免每次单独 `spawn_blocking` 各发一趟阻塞 IO (对 install 来说是一读一读, 不是三读, 见 fix-1 R9)。
+async fn change_install(
+    op: fn(&Path) -> tui_install::InstallResult,
+    require_can_install: bool,
+    err_prefix: &'static str,
+) -> AppResult<TuiInstallOutcome> {
+    let sidecar = current_sidecar().ok_or_else(|| AppError::BadRequest("此版本未包含终端界面程序".into()))?;
+    let path = PathBuf::from(sidecar);
+    let (outcome, info) = tauri::async_runtime::spawn_blocking(move || -> AppResult<(Outcome, TuiLaunchInfo)> {
+        if require_can_install && !launch_info_blocking().can_install {
+            return Err(AppError::BadRequest("当前无法添加到 PATH".into()));
+        }
+        let outcome = op(&path).map_err(|raw| AppError::Internal(format!("{err_prefix}: {raw}")))?;
+        Ok((outcome, launch_info_blocking()))
+    })
+    .await
+    .map_err(|e| AppError::Internal(e.to_string()))??;
+    Ok(TuiInstallOutcome { info, cancelled: outcome == Outcome::Cancelled })
 }
 
 #[tauri::command]
-pub async fn uninstall_tui_command() -> AppResult<TuiLaunchInfo> {
-    change_install(tui_install::uninstall).await
+pub async fn install_tui_command() -> AppResult<TuiInstallOutcome> {
+    change_install(tui_install::install, true, "添加到 PATH 失败").await
+}
+
+#[tauri::command]
+pub async fn uninstall_tui_command() -> AppResult<TuiInstallOutcome> {
+    change_install(tui_install::uninstall, false, "从 PATH 移除失败").await
 }
 
 #[cfg(test)]
@@ -139,6 +164,15 @@ mod tests {
         );
         let none = serde_json::to_value(TuiLaunchInfo::new(None, false, InstallStatus::unavailable())).unwrap();
         assert_eq!((&none["install_kind"], &none["can_install"]), (&serde_json::json!("unavailable"), &serde_json::json!(false)));
+    }
+
+    #[test]
+    fn install_outcome_dto_wraps_info_with_a_cancelled_flag() {
+        let status = InstallStatus::unavailable();
+        let info = TuiLaunchInfo::new(None, false, status);
+        let json = serde_json::to_value(TuiInstallOutcome { info, cancelled: true }).unwrap();
+        assert_eq!(json["cancelled"], serde_json::json!(true));
+        assert_eq!(json["info"]["install_kind"], serde_json::json!("unavailable"));
     }
 
     #[test]

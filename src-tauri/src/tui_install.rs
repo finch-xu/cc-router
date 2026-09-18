@@ -64,13 +64,32 @@ impl InstallStatus {
     }
 }
 
+/// 操作到底做没做: `Cancelled` 只在 macOS 提权对话框被用户点了「取消」时出现, 其余成功路径都是 `Done`。
+/// command 层据此决定要不要给前端一条「已取消」的中性提示, 而不是把取消误报成失败或悄无声息。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Outcome {
+    Done,
+    Cancelled,
+}
+
+pub type InstallResult = Result<Outcome, String>;
+
 // ───────────────────────── 纯函数: macOS ─────────────────────────
+
+/// `.app` 是否直接坐在某个卷的根目录上 (`/Volumes/<vol>/<X>.app/...`, 典型的「还没拖出 DMG」)。
+/// 挂载的外置硬盘上装了 `Applications` 目录再放 `.app` (`/Volumes/SSD/Applications/x.app/...`)
+/// 是合法安装, 不算 —— 判断标准是 `.app` 前面只隔着一层卷名。
+fn is_on_disk_image_at_volume_root(sidecar: &Path) -> bool {
+    let comps: Vec<&str> = sidecar.components().filter_map(|c| c.as_os_str().to_str()).collect();
+    // comps[0] 是根 "/"; [1] 应为 "Volumes"; [3] (卷名之后紧跟的一段) 若以 ".app" 结尾就是卷根。
+    comps.get(1).is_some_and(|c| *c == "Volumes") && comps.get(3).is_some_and(|c| c.ends_with(".app"))
+}
 
 pub fn macos_blocked(sidecar: &Path) -> Option<InstallBlocked> {
     let s = sidecar.to_string_lossy();
     if s.contains("/AppTranslocation/") {
         Some(InstallBlocked::Translocated)
-    } else if s.starts_with("/Volumes/") {
+    } else if is_on_disk_image_at_volume_root(sidecar) {
         Some(InstallBlocked::OnDiskImage)
     } else {
         None
@@ -98,6 +117,28 @@ pub fn link_state(link: &Path, sidecar: &Path) -> LinkState {
         Err(_) if link.symlink_metadata().is_ok() => LinkState::Foreign,
         Err(_) => LinkState::Absent,
     }
+}
+
+/// 安装时对目标位置做什么。把决策从平台实现里拆出来, 单独测试——`LinkState::Foreign` 那一支
+/// 「不碰」曾经只在平台 `install`/`uninstall` 里硬编码, 删掉那一行整个测试套件照样绿, 见 fix-1 R3。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum LinkPlan {
+    AlreadyDone,
+    Create,
+    Refuse,
+}
+
+pub fn install_plan(state: &LinkState) -> LinkPlan {
+    match state {
+        LinkState::Ours => LinkPlan::AlreadyDone,
+        LinkState::Absent | LinkState::StaleOurs => LinkPlan::Create,
+        LinkState::Foreign => LinkPlan::Refuse,
+    }
+}
+
+/// true = 该删; 只有 `Ours` / `StaleOurs` (我们自己放的东西) 才删。
+pub fn uninstall_plan(state: &LinkState) -> bool {
+    matches!(state, LinkState::Ours | LinkState::StaleOurs)
 }
 
 /// POSIX shell 单引号转义: 整体包一层 `'…'`, 内部的 `'` 写成 `'\''`。
@@ -129,9 +170,11 @@ pub fn unlink_shell(link: &Path) -> String {
     format!("rm -f {}", sh_quote(&link.to_string_lossy()))
 }
 
-/// osascript 在用户点了「取消」时以非零退出, stderr 里带 `-128` (userCanceledErr)。
+/// osascript 在用户点了「取消」时以非零退出, stderr 里带 `(-128)` (userCanceledErr) 作为**尾巴**。
+/// 只匹配带括号的完整错误码——裸的 `-128` 可能出现在别的地方 (路径名、别的错误码如 `-12800`),
+/// 那样会把真错误误判成取消, 见 fix-1 R5。
 pub fn is_user_cancel(stderr: &str) -> bool {
-    stderr.contains("-128")
+    stderr.trim().ends_with("(-128)")
 }
 
 // ───────────────────────── 纯函数: Windows PATH ─────────────────────────
@@ -167,6 +210,18 @@ pub fn path_without(path: &str, dir: &str) -> String {
     path_entries(path).into_iter().filter(|e| norm_dir(e) != want).collect::<Vec<_>>().join(";")
 }
 
+/// `powershell.exe` 的绝对路径: 不靠 PATH 解析——PATH 顺序可能被篡改, 或者压根没把
+/// System32 放进去。用 `%SystemRoot%` 拼绝对路径, 拿不到就退回 `C:\Windows`。
+/// 用字符串拼接而不是 `PathBuf::join`: 后者按**编译目标**的原生分隔符插入 (这个纯函数全平台编译、
+/// 全平台跑单测, 在 unix 宿主机上 join 会插 `/` 而不是 `\`), 显式拼字符串才能保证结果总是 Windows 路径。
+pub fn powershell_path(system_root: Option<&std::ffi::OsStr>) -> PathBuf {
+    let root = system_root
+        .map(|s| s.to_string_lossy().into_owned())
+        .unwrap_or_else(|| r"C:\Windows".to_string());
+    let root = root.trim_end_matches(['\\', '/']);
+    PathBuf::from(format!(r"{root}\System32\WindowsPowerShell\v1.0\powershell.exe"))
+}
+
 // ───────────────────────── 纯函数: Linux ─────────────────────────
 
 /// sidecar 在这些目录里 = 系统包管理器装的, 已经在 PATH 上。
@@ -183,9 +238,63 @@ pub fn unix_path_contains(path_var: &str, dir: &Path) -> bool {
     path_var.split(':').any(|e| !e.is_empty() && Path::new(e.trim_end_matches('/')) == dir)
 }
 
-// ───────────────────────── 文件操作 (unix 通用, 目标路径由调用方给, 所以能用临时目录测) ─────────────────────────
+/// 两个文件字节是否相同; 任一读不到或长度不同直接 false (先比长度再读全部字节——sidecar 就几 MB, 可以接受)。
+pub fn same_file_content(a: &Path, b: &Path) -> bool {
+    let (ma, mb) = match (std::fs::metadata(a), std::fs::metadata(b)) {
+        (Ok(ma), Ok(mb)) => (ma, mb),
+        _ => return false,
+    };
+    if ma.len() != mb.len() {
+        return false;
+    }
+    match (std::fs::read(a), std::fs::read(b)) {
+        (Ok(ba), Ok(bb)) => ba == bb,
+        _ => false,
+    }
+}
 
-pub type InstallResult = Result<(), String>;
+/// 复制安装 (Linux) 目标位置现在是什么, 按内容判定归属——不像 macOS 有符号链接可以直接问「指向谁」。
+#[cfg(unix)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CopyState {
+    Absent,
+    /// 内容与当前 sidecar 字节相同
+    Ours,
+    /// 内容不同, 也没有我们放的 marker: 不是我们的东西, 不碰
+    Foreign,
+    /// 内容跟当前 sidecar 不一致, 但旁边有 marker 文件——app 更新后 sidecar 变了, 这其实是自家旧副本。
+    /// 覆盖 / 删除都安全。
+    StaleOurs,
+}
+
+/// 与 `target` 同目录的标记文件: 证明 `target` 是 `copy_install` 放的, 不是用户自己的同名文件。
+/// 没有这个标记, app 更新后旧副本内容对不上新 sidecar, 会被误判成 `Foreign`——那对我们自己的
+/// 旧副本是错的 (见 fix-1 R1)。`copy_install` 写它, `copy_uninstall` 删它。
+#[cfg(unix)]
+pub const COPY_MARKER: &str = ".cc-router-tui.installed-by-cc-router";
+
+#[cfg(unix)]
+pub fn copy_state(target: &Path, sidecar: &Path) -> CopyState {
+    let meta = match target.symlink_metadata() {
+        Ok(m) => m,
+        Err(_) => return CopyState::Absent,
+    };
+    if !meta.is_file() {
+        // 符号链接 / 目录: 都不是 copy_install 会放的东西, 一律当外人的, 不碰。
+        return CopyState::Foreign;
+    }
+    if same_file_content(target, sidecar) {
+        return CopyState::Ours;
+    }
+    let has_marker = target.parent().is_some_and(|d| d.join(COPY_MARKER).is_file());
+    if has_marker {
+        CopyState::StaleOurs
+    } else {
+        CopyState::Foreign
+    }
+}
+
+// ───────────────────────── 文件操作 (unix 通用, 目标路径由调用方给, 所以能用临时目录测) ─────────────────────────
 
 /// 不提权建符号链接; 目标位置上是我们的旧链接就先删掉。`Foreign` 由调用方事先挡掉。
 #[cfg(unix)]
@@ -196,24 +305,37 @@ pub fn link_direct(sidecar: &Path, link: &Path) -> std::io::Result<()> {
     std::os::unix::fs::symlink(sidecar, link)
 }
 
-/// 复制 sidecar 到 `target` 并给可执行位。
+/// 复制 sidecar 到 `target` 并给可执行位。`Foreign` 由 `copy_state` 挡掉——拒绝覆盖不是我们放的文件。
 #[cfg(unix)]
 pub fn copy_install(sidecar: &Path, target: &Path) -> InstallResult {
     use std::os::unix::fs::PermissionsExt;
+    if copy_state(target, sidecar) == CopyState::Foreign {
+        return Err(format!("{} 已存在且不是 cc-router 创建的", target.display()));
+    }
     let dir = target.parent().ok_or("无法确定目标目录")?;
     std::fs::create_dir_all(dir).map_err(|e| format!("创建 {}: {e}", dir.display()))?;
     // 先删再拷: 覆盖已存在的文件会沿用它的权限, 而且正在运行的旧副本不能被原地改写 (ETXTBSY)。
     let _ = std::fs::remove_file(target);
     std::fs::copy(sidecar, target).map_err(|e| format!("复制到 {}: {e}", target.display()))?;
-    std::fs::set_permissions(target, std::fs::Permissions::from_mode(0o755)).map_err(|e| e.to_string())
+    std::fs::set_permissions(target, std::fs::Permissions::from_mode(0o755)).map_err(|e| e.to_string())?;
+    // 写 marker: 之后 app 更新、sidecar 字节变了, 仍能认出这是自家旧副本 (CopyState::StaleOurs)。
+    std::fs::write(dir.join(COPY_MARKER), b"").map_err(|e| format!("写 marker: {e}"))?;
+    Ok(Outcome::Done)
 }
 
+/// 只删 `Ours` / `StaleOurs` (我们放的); `Foreign` / `Absent` 原样不动。
 #[cfg(unix)]
-pub fn copy_uninstall(target: &Path) -> InstallResult {
-    if target.is_file() {
-        std::fs::remove_file(target).map_err(|e| format!("删除 {}: {e}", target.display()))?;
+pub fn copy_uninstall(target: &Path, sidecar: &Path) -> InstallResult {
+    match copy_state(target, sidecar) {
+        CopyState::Ours | CopyState::StaleOurs => {
+            std::fs::remove_file(target).map_err(|e| format!("删除 {}: {e}", target.display()))?;
+            if let Some(dir) = target.parent() {
+                let _ = std::fs::remove_file(dir.join(COPY_MARKER));
+            }
+            Ok(Outcome::Done)
+        }
+        CopyState::Foreign | CopyState::Absent => Ok(Outcome::Done),
     }
-    Ok(())
 }
 
 // ───────────────────────── 碰系统的部分 ─────────────────────────
@@ -238,7 +360,7 @@ mod platform {
         }
     }
 
-    /// 以管理员权限跑 shell。用户取消 → `Ok(())` (不算错误, 调用方重新读状态即可)。
+    /// 以管理员权限跑 shell。用户取消 → `Cancelled` (不算错误, 调用方重新读状态即可)。
     fn run_as_admin(shell: &str) -> InstallResult {
         let out = Command::new("/usr/bin/osascript")
             .arg("-e")
@@ -246,36 +368,47 @@ mod platform {
             .output()
             .map_err(|e| format!("无法调用 osascript: {e}"))?;
         let stderr = String::from_utf8_lossy(&out.stderr);
-        if out.status.success() || is_user_cancel(&stderr) {
-            Ok(())
+        if out.status.success() {
+            Ok(Outcome::Done)
+        } else if is_user_cancel(&stderr) {
+            Ok(Outcome::Cancelled)
         } else {
             Err(stderr.trim().to_string())
         }
     }
 
     pub fn install(sidecar: &Path) -> InstallResult {
+        // Translocation / DMG 里跑的临时路径: 装了也没用 (下次启动路径就变了), 这里就近拦掉,
+        // 不能只指望调用方 (command 层) 检查一次——直接调这个函数的路径也要经过同一道闸门。
+        if macos_blocked(sidecar).is_some() {
+            return Err("app 位于临时位置或磁盘映像里, 无法添加到 PATH".to_string());
+        }
         let link = Path::new(LINK);
-        match link_state(link, sidecar) {
-            LinkState::Ours => return Ok(()),
-            LinkState::Foreign => return Err(format!("{LINK} 已存在且不是 cc-router 创建的")),
-            LinkState::StaleOurs | LinkState::Absent => {}
+        match install_plan(&link_state(link, sidecar)) {
+            LinkPlan::AlreadyDone => return Ok(Outcome::Done),
+            LinkPlan::Refuse => return Err(format!("{LINK} 已存在且不是 cc-router 创建的")),
+            LinkPlan::Create => {}
         }
         // 先不提权试一次: /usr/local/bin 对当前用户可写的机器 (装过 Homebrew 的 Intel Mac) 不用弹框。
         match link_direct(sidecar, link) {
-            Ok(()) => Ok(()),
-            Err(_) => run_as_admin(&symlink_shell(sidecar, link)),
+            Ok(()) => Ok(Outcome::Done),
+            Err(_) => {
+                // 提权分支要把 sidecar 路径拼进 shell 字符串; 非 UTF-8 路径经 to_string_lossy 会被
+                // 悄悄改写, 生成的命令可能对着错误路径操作, 必须在这里就拒绝, 不能让它混进 shell 字符串。
+                sidecar.to_str().ok_or("sidecar 路径包含非 UTF-8 字符, 无法提权安装")?;
+                run_as_admin(&symlink_shell(sidecar, link))
+            }
         }
     }
 
     pub fn uninstall(sidecar: &Path) -> InstallResult {
         let link = Path::new(LINK);
-        match link_state(link, sidecar) {
-            LinkState::Ours | LinkState::StaleOurs => {}
+        if !uninstall_plan(&link_state(link, sidecar)) {
             // 不是我们的: 不删
-            LinkState::Absent | LinkState::Foreign => return Ok(()),
+            return Ok(Outcome::Done);
         }
         match std::fs::remove_file(link) {
-            Ok(()) => Ok(()),
+            Ok(()) => Ok(Outcome::Done),
             Err(_) => run_as_admin(&unlink_shell(link)),
         }
     }
@@ -302,7 +435,8 @@ mod platform {
         [Environment]::SetEnvironmentVariable('CCR_TUI_PATH_REFRESH',$null,'User')";
 
     fn powershell(script: &str, new_path: Option<&str>) -> Result<String, String> {
-        let mut cmd = Command::new("powershell.exe");
+        let exe = powershell_path(std::env::var_os("SystemRoot").as_deref());
+        let mut cmd = Command::new(exe);
         cmd.args(["-NoProfile", "-NonInteractive", "-Command", script]).creation_flags(CREATE_NO_WINDOW);
         if let Some(p) = new_path {
             // 新值走环境变量传进去, 不拼进脚本文本: 路径里的引号 / 分号 / $ 都不需要转义。
@@ -338,9 +472,9 @@ mod platform {
         let current = powershell(READ, None)?;
         let next = path_with(&current, &dir);
         if next == current {
-            return Ok(());
+            return Ok(Outcome::Done);
         }
-        powershell(WRITE, Some(&next)).map(|_| ())
+        powershell(WRITE, Some(&next)).map(|_| Outcome::Done)
     }
 
     pub fn uninstall(sidecar: &Path) -> InstallResult {
@@ -348,9 +482,9 @@ mod platform {
         let current = powershell(READ, None)?;
         let next = path_without(&current, &dir);
         if next == current {
-            return Ok(());
+            return Ok(Outcome::Done);
         }
-        powershell(WRITE, Some(&next)).map(|_| ())
+        powershell(WRITE, Some(&next)).map(|_| Outcome::Done)
     }
 }
 
@@ -377,7 +511,9 @@ mod platform {
             };
         }
         let target = target();
-        let in_path = target.as_deref().is_some_and(|t| t.is_file());
+        let state = target.as_deref().map(|t| copy_state(t, sidecar)).unwrap_or(CopyState::Absent);
+        let in_path = state == CopyState::Ours;
+        let blocked = (state == CopyState::Foreign).then_some(InstallBlocked::Occupied);
         let off_path = match (&target, std::env::var("PATH")) {
             (Some(t), Ok(p)) => !t.parent().is_some_and(|d| unix_path_contains(&p, d)),
             _ => false,
@@ -386,7 +522,7 @@ mod platform {
             kind: InstallKind::Copy,
             in_path,
             installed_at: target.filter(|_| in_path).map(|t| t.to_string_lossy().into_owned()),
-            blocked: None,
+            blocked,
             local_bin_off_path: off_path,
         }
     }
@@ -395,8 +531,11 @@ mod platform {
         copy_install(sidecar, &target().ok_or("无法确定 HOME 目录")?)
     }
 
-    pub fn uninstall(_sidecar: &Path) -> InstallResult {
-        target().map_or(Ok(()), |t| copy_uninstall(&t))
+    pub fn uninstall(sidecar: &Path) -> InstallResult {
+        match target() {
+            Some(t) => copy_uninstall(&t, sidecar),
+            None => Ok(Outcome::Done),
+        }
     }
 }
 
@@ -414,6 +553,9 @@ mod tests {
         assert_eq!(macos_blocked(v), Some(InstallBlocked::OnDiskImage));
         let ok = Path::new("/Applications/cc-router.app/Contents/MacOS/cc-router-tui");
         assert_eq!(macos_blocked(ok), None);
+        // 外置硬盘上装了 Applications 目录: .app 不直接坐在卷根上, 是合法安装, 不拦。
+        let external = Path::new("/Volumes/SSD/Applications/cc-router.app/Contents/MacOS/cc-router-tui");
+        assert_eq!(macos_blocked(external), None);
     }
 
     #[cfg(unix)]
@@ -444,6 +586,22 @@ mod tests {
         assert_eq!(link_state(&link, &sidecar), LinkState::Foreign);
     }
 
+    #[test]
+    fn install_plan_matches_link_state() {
+        assert_eq!(install_plan(&LinkState::Ours), LinkPlan::AlreadyDone);
+        assert_eq!(install_plan(&LinkState::Absent), LinkPlan::Create);
+        assert_eq!(install_plan(&LinkState::StaleOurs), LinkPlan::Create);
+        assert_eq!(install_plan(&LinkState::Foreign), LinkPlan::Refuse);
+    }
+
+    #[test]
+    fn uninstall_plan_only_deletes_links_that_are_ours() {
+        assert!(uninstall_plan(&LinkState::Ours));
+        assert!(uninstall_plan(&LinkState::StaleOurs));
+        assert!(!uninstall_plan(&LinkState::Absent));
+        assert!(!uninstall_plan(&LinkState::Foreign));
+    }
+
     #[cfg(unix)]
     #[test]
     fn link_direct_replaces_a_stale_link_of_ours() {
@@ -463,6 +621,72 @@ mod tests {
 
     #[cfg(unix)]
     #[test]
+    fn copy_state_distinguishes_absent_ours_foreign_and_stale_ours() {
+        let dir = tempfile::tempdir().unwrap();
+        let sidecar = dir.path().join("sidecar");
+        std::fs::write(&sidecar, b"payload-v2").unwrap();
+        let target = dir.path().join("target");
+
+        assert_eq!(copy_state(&target, &sidecar), CopyState::Absent);
+
+        std::fs::write(&target, b"payload-v2").unwrap();
+        assert_eq!(copy_state(&target, &sidecar), CopyState::Ours);
+
+        // 内容不同, 没有 marker: 用户自己的同名文件, 不是我们的
+        std::fs::write(&target, b"someone else's binary").unwrap();
+        assert_eq!(copy_state(&target, &sidecar), CopyState::Foreign);
+
+        // 加上 marker: app 更新后 sidecar 换了字节, 但这其实是自家旧副本
+        std::fs::write(dir.path().join(COPY_MARKER), b"").unwrap();
+        assert_eq!(copy_state(&target, &sidecar), CopyState::StaleOurs);
+
+        // 符号链接: 哪怕指向 sidecar 本身, 也不算 Ours (copy_install 只会放普通文件)
+        std::fs::remove_file(&target).unwrap();
+        std::os::unix::fs::symlink(&sidecar, &target).unwrap();
+        assert_eq!(copy_state(&target, &sidecar), CopyState::Foreign);
+
+        // 目录也不碰
+        std::fs::remove_file(&target).unwrap();
+        std::fs::create_dir(&target).unwrap();
+        assert_eq!(copy_state(&target, &sidecar), CopyState::Foreign);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn copy_install_refuses_foreign_and_leaves_it_byte_identical() {
+        let dir = tempfile::tempdir().unwrap();
+        let sidecar = dir.path().join("sidecar");
+        std::fs::write(&sidecar, b"v2").unwrap();
+        let target = dir.path().join("target");
+        std::fs::write(&target, b"someone else's binary").unwrap();
+
+        assert!(copy_install(&sidecar, &target).is_err());
+        assert_eq!(std::fs::read(&target).unwrap(), b"someone else's binary");
+        assert!(!dir.path().join(COPY_MARKER).exists(), "拒绝时不应该留下 marker");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn copy_uninstall_only_touches_ours_and_stale_ours() {
+        let dir = tempfile::tempdir().unwrap();
+        let sidecar = dir.path().join("sidecar");
+        std::fs::write(&sidecar, b"v2").unwrap();
+
+        // Foreign: 不碰
+        let target = dir.path().join("target");
+        std::fs::write(&target, b"foreign content").unwrap();
+        copy_uninstall(&target, &sidecar).unwrap();
+        assert!(target.exists());
+        assert_eq!(std::fs::read(&target).unwrap(), b"foreign content");
+
+        // Absent: 无事发生, 不报错
+        std::fs::remove_file(&target).unwrap();
+        copy_uninstall(&target, &sidecar).unwrap();
+        assert!(!target.exists());
+    }
+
+    #[cfg(unix)]
+    #[test]
     fn copy_install_creates_the_dir_sets_the_exec_bit_and_overwrites() {
         use std::os::unix::fs::PermissionsExt;
         let dir = tempfile::tempdir().unwrap();
@@ -470,19 +694,23 @@ mod tests {
         std::fs::write(&sidecar, b"v2").unwrap();
         let target = local_bin(dir.path()).join("cc-router-tui");
 
-        copy_uninstall(&target).unwrap(); // 没装过: 无事发生
+        copy_uninstall(&target, &sidecar).unwrap(); // 没装过: 无事发生
 
-        // 旧副本是 0644 的: 覆盖后必须是 0755
+        // 旧副本是我们自己放的 (内容对不上新 sidecar, 但旁边有 marker —— StaleOurs): 覆盖后必须是 0755
         std::fs::create_dir_all(target.parent().unwrap()).unwrap();
         std::fs::write(&target, b"v1").unwrap();
         std::fs::set_permissions(&target, std::fs::Permissions::from_mode(0o644)).unwrap();
+        std::fs::write(target.parent().unwrap().join(COPY_MARKER), b"").unwrap();
+        assert_eq!(copy_state(&target, &sidecar), CopyState::StaleOurs);
 
         copy_install(&sidecar, &target).unwrap();
         assert_eq!(std::fs::read(&target).unwrap(), b"v2");
         assert_eq!(std::fs::metadata(&target).unwrap().permissions().mode() & 0o777, 0o755);
+        assert!(target.parent().unwrap().join(COPY_MARKER).is_file(), "marker 保留, 供下次识别");
 
-        copy_uninstall(&target).unwrap();
+        copy_uninstall(&target, &sidecar).unwrap();
         assert!(!target.exists());
+        assert!(!target.parent().unwrap().join(COPY_MARKER).exists(), "marker 跟着一起删");
         assert!(target.parent().unwrap().is_dir(), "只删自己的文件, 不删 ~/.local/bin");
     }
 
@@ -517,6 +745,9 @@ mod tests {
         assert!(is_user_cancel("execution error: User canceled. (-128)"));
         assert!(is_user_cancel("execution error: 用户已取消。 (-128)"));
         assert!(!is_user_cancel("execution error: ln: /usr/local/bin: Read-only file system (1)"));
+        // 假阳性防回归: 路径里含 "-128"、错误码是 "-12800" 都不该被当成取消
+        assert!(!is_user_cancel("execution error: /Users/build-128/x: Permission denied (1)"));
+        assert!(!is_user_cancel("execution error: something failed (-12800)"));
     }
 
     #[test]
@@ -544,6 +775,18 @@ mod tests {
         assert_eq!(path_without(path, r"C:\App"), r"C:\Tools;%USERPROFILE%\bin");
         assert_eq!(path_without(r"C:\Tools", r"C:\App"), r"C:\Tools");
         assert_eq!(path_without(r"C:\App", r"C:\App"), "");
+    }
+
+    #[test]
+    fn powershell_path_resolves_absolutely_with_fallback() {
+        assert_eq!(
+            powershell_path(Some(std::ffi::OsStr::new(r"D:\Win"))),
+            PathBuf::from(r"D:\Win\System32\WindowsPowerShell\v1.0\powershell.exe")
+        );
+        assert_eq!(
+            powershell_path(None),
+            PathBuf::from(r"C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe")
+        );
     }
 
     #[test]

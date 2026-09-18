@@ -189,7 +189,7 @@ web_commands! {
     tls_get_ca_pem_text() => commands::tls::tls_get_ca_pem_text(st).await,
     tls_regenerate_leaf() => commands::tls::tls_regenerate_leaf(st).await,
     // TUI
-    tui_launch_info() => Ok::<_, AppError>(commands::tui::tui_launch_info()),
+    tui_launch_info() => Ok::<_, AppError>(commands::tui::tui_launch_info().await),
     // 这两条只能从桌面窗口调用: 不能让局域网上的网页用户 (或 TUI) 在宿主机上弹系统授权框 / 改宿主机 PATH。
     // 两边的 command 集合必须一致 (registered_matches_generate_handler), 所以照常登记, 但函数体是拒绝桩。
     install_tui_command() => Err::<(), AppError>(AppError::BadRequest(DESKTOP_ONLY.into())),
