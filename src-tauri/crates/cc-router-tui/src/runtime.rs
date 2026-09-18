@@ -73,34 +73,46 @@ fn spawn_fetch(client: Arc<Client>, tx: UnboundedSender<Action>, cmd: Cmd) {
     });
 }
 
+/// 跑一轮「连上事件流 → 转发事件, 直到断线」。返回值是这一轮事件流**实际存活了多久**——
+/// 连接失败 / 超时是 `Duration::ZERO` (绝不会被当成「稳定过」), 连上了才从 `events()` 成功的
+/// 那一刻开始计时到断线为止。`connect_deadline` 独立传参而不是直接读 `CONNECT_DEADLINE`,
+/// 方便测试用一个远小于生产值的超时去戳一个卡住不响应的 mock, 不用真等 10 秒 (G4)。
+///
+/// `ever_connected` 只有真的连上过一次才置 true: 调用方靠它判断「从没连上时不发
+/// `ConnectionLost`」(G6), 免得「从未连接」被 `App` 当成「掉线重连」。
+async fn run_once(client: &Client, tx: &UnboundedSender<Action>, ever_connected: &mut bool, connect_deadline: Duration) -> Duration {
+    // 建立连接本身也要有超时, 否则一个卡住不响应的上游会让这个任务永久挂起 (G4b)。
+    let Ok(Ok(mut stream)) = tokio::time::timeout(connect_deadline, client.events()).await else {
+        return Duration::ZERO;
+    };
+    *ever_connected = true;
+    // 从连上的这一刻开始计时, 而不是从这一轮循环 (含连接排队 / 后面的退避 sleep) 开始算,
+    // 否则「流活了多久」会把连接耗时和断线后的等待都算进去, next_attempt 判断全乱 (G4)。
+    let up = tokio::time::Instant::now();
+    let app_version = client.runtime().await.app_version;
+    if tx.send(Action::Connected { app_version }).is_err() {
+        return up.elapsed();
+    }
+    while let Ok(Some(ev)) = stream.next().await {
+        if tx.send(Action::Sse { name: ev.name, data: ev.data }).is_err() {
+            break;
+        }
+    }
+    up.elapsed()
+}
+
 /// 常驻任务: 连事件流 → 转发事件 → 断了就退避重连。`Client` 在失败时会自己重读 runtime.json,
 /// 所以 app 重启换了端口 / 密钥也能接上。
-///
-/// `ever_connected` 只有真的连上过一次才置 true: 从没连上时不发 `ConnectionLost` (G6), 免得
-/// 「从未连接」被 `App` 当成「掉线重连」, 首次连上时弹一条不存在的「已重新连接」 toast。
 async fn sse_loop(client: Arc<Client>, tx: UnboundedSender<Action>) {
     let mut attempt = 0;
     let mut ever_connected = false;
     loop {
-        let started = Instant::now();
-        // 建立连接本身也要有超时, 否则一个卡住不响应的上游会让这个任务永久挂起 (G4b)。
-        if let Ok(Ok(mut stream)) = tokio::time::timeout(CONNECT_DEADLINE, client.events()).await {
-            ever_connected = true;
-            let app_version = client.runtime().await.app_version;
-            if tx.send(Action::Connected { app_version }).is_err() {
-                return;
-            }
-            while let Ok(Some(ev)) = stream.next().await {
-                if tx.send(Action::Sse { name: ev.name, data: ev.data }).is_err() {
-                    return;
-                }
-            }
-        }
+        let lived = run_once(&client, &tx, &mut ever_connected, CONNECT_DEADLINE).await;
         if ever_connected && tx.send(Action::ConnectionLost).is_err() {
             return;
         }
         tokio::time::sleep(backoff(attempt)).await;
-        attempt = next_attempt(attempt, started.elapsed());
+        attempt = next_attempt(attempt, lived);
     }
 }
 
@@ -249,6 +261,25 @@ mod tests {
         assert_eq!(next_attempt(5, Duration::from_secs(20)), 0);
     }
 
+    /// 咬住 G4 的 bug 场景: 连续几轮「连上即断」(`lived` 都是 `Duration::ZERO`, 对应连接失败 /
+    /// 超时) 必须让退避一档一档往上走 (1s → 2s → 5s), 而不是每轮都被误判成「稳定过」而清零 ——
+    /// 这正是 fix round 1 里量错区间导致的回归: 把 `Duration::ZERO` 之外的「连接耗时 + 退避
+    /// sleep 时长」算进 `stream_lived`, 会让 `next_attempt` 提前判定为已恢复。
+    #[test]
+    fn consecutive_failures_back_off_1_2_5_via_next_attempt_wiring() {
+        let mut attempt = 0;
+        let mut backoffs = Vec::new();
+        for lived in [Duration::ZERO, Duration::ZERO, Duration::ZERO] {
+            backoffs.push(backoff(attempt).as_secs());
+            attempt = next_attempt(attempt, lived);
+        }
+        assert_eq!(backoffs, [1, 2, 5]);
+        assert_eq!(attempt, 3);
+        // 这次流真住满了 STABLE_AFTER: 清零, 下一次断线又是从 1s 开始。
+        attempt = next_attempt(attempt, STABLE_AFTER);
+        assert_eq!(attempt, 0);
+    }
+
     #[test]
     fn fetches_coalesces_concurrent_requests_of_the_same_kind() {
         let mut f = Fetches::default();
@@ -327,5 +358,77 @@ mod tests {
         assert!(seen.is_err(), "从未连上不该发出任何 action, 实际收到 {seen:?}");
 
         task.abort();
+    }
+
+    /// G4 回归: 直接测 `sse_loop` 内部真正喂给 `next_attempt` 的那个值, 而不只是 `next_attempt`
+    /// 这个纯函数本身 —— fix round 1 的 bug 恰恰是「纯函数本身是对的, 喂给它的区间量错了」。
+    #[tokio::test]
+    async fn run_once_returns_zero_lived_duration_when_connect_fails() {
+        let server = MockServer::start().await;
+        Mock::given(method("GET")).and(path("/ui/api/events")).respond_with(ResponseTemplate::new(500)).mount(&server).await;
+        let dir = tempfile::tempdir().unwrap();
+        write_runtime(dir.path(), server.address().port(), "s", "9.9.9-test");
+        let client = Client::connect(dir.path()).unwrap();
+        let (tx, _rx) = unbounded_channel::<Action>();
+        let mut ever_connected = false;
+
+        let lived = run_once(&client, &tx, &mut ever_connected, Duration::from_secs(1)).await;
+
+        assert_eq!(lived, Duration::ZERO);
+        assert!(!ever_connected);
+    }
+
+    #[tokio::test]
+    async fn run_once_returns_a_small_nonzero_lived_duration_for_a_finite_stream() {
+        let server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(path("/ui/api/events"))
+            .respond_with(ResponseTemplate::new(200).set_body_raw(
+                b"event: subscription_state_changed\ndata: \"1\"\n\n".to_vec(),
+                "text/event-stream",
+            ))
+            .mount(&server)
+            .await;
+        let dir = tempfile::tempdir().unwrap();
+        write_runtime(dir.path(), server.address().port(), "s", "9.9.9-test");
+        let client = Client::connect(dir.path()).unwrap();
+        let (tx, mut rx) = unbounded_channel::<Action>();
+        let mut ever_connected = false;
+
+        let lived = run_once(&client, &tx, &mut ever_connected, Duration::from_secs(1)).await;
+
+        assert!(ever_connected);
+        assert!(lived < STABLE_AFTER, "一次快速的连上又断不该被算成「稳定过」, 实际 {lived:?}");
+        assert_eq!(rx.recv().await, Some(Action::Connected { app_version: "9.9.9-test".into() }));
+        assert_eq!(
+            rx.recv().await,
+            Some(Action::Sse { name: "subscription_state_changed".into(), data: "\"1\"".into() })
+        );
+    }
+
+    /// 上游卡住不响应 (mock 延迟 2s) 时, `run_once` 必须按传入的 `connect_deadline` (这里给
+    /// 200ms, 远小于生产的 10s) 及时放弃, 而不是真的等满 mock 的延迟——否则 G4b 的超时保护就是
+    /// 摆设。外层再包一层 800ms 的 timeout 当安全网: 如果 `run_once` 真的没有遵守
+    /// `connect_deadline`, 测试会在 800ms 处失败, 而不是真的挂等 2 秒。
+    #[tokio::test]
+    async fn run_once_treats_a_hanging_connect_as_zero_lived_once_the_deadline_hits() {
+        let server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(path("/ui/api/events"))
+            .respond_with(ResponseTemplate::new(200).set_delay(Duration::from_secs(2)))
+            .mount(&server)
+            .await;
+        let dir = tempfile::tempdir().unwrap();
+        write_runtime(dir.path(), server.address().port(), "s", "9.9.9-test");
+        let client = Client::connect(dir.path()).unwrap();
+        let (tx, _rx) = unbounded_channel::<Action>();
+        let mut ever_connected = false;
+
+        let lived = tokio::time::timeout(Duration::from_millis(800), run_once(&client, &tx, &mut ever_connected, Duration::from_millis(200)))
+            .await
+            .expect("run_once 应该在 connect_deadline (200ms) 附近就返回, 不该等满 mock 的 2s 延迟");
+
+        assert_eq!(lived, Duration::ZERO);
+        assert!(!ever_connected);
     }
 }
