@@ -1,10 +1,11 @@
 import { useEffect, useRef } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { api } from "@/api/tauri";
-import type { SettingsPatch, TuiLaunchInfo } from "@/types";
+import type { SettingsPatch, TuiInstallOutcome } from "@/types";
 
 export const SETTINGS_KEY = ["settings"] as const;
 export const PROXY_STATUS_KEY = ["proxy-status"] as const;
+export const TUI_LAUNCH_INFO_KEY = ["tui-launch-info"] as const;
 
 export function useSettings() {
   return useQuery({
@@ -52,17 +53,18 @@ export function useLanAddresses(enabled: boolean) {
 
 export function useTuiLaunchInfo() {
   return useQuery({
-    queryKey: ["tui-launch-info"],
+    queryKey: TUI_LAUNCH_INFO_KEY,
     queryFn: () => api.tuiLaunchInfo(),
     // sidecar 路径在进程生命周期内不变
     staleTime: Infinity,
   });
 }
 
-/** 添加到 PATH / 移除. 两个 command 都返回最新的 TuiLaunchInfo, 直接写回缓存. */
+/** 添加到 PATH / 移除. 两个 command 都返回 TuiInstallOutcome, 把其中的 info 写回缓存;
+ * cancelled 标志留给调用方从 mutation 的 `.data` 里自己读 (展示「已取消」提示用). */
 export function useTuiPathInstall() {
   const queryClient = useQueryClient();
-  const onSuccess = (info: TuiLaunchInfo) => queryClient.setQueryData(["tui-launch-info"], info);
+  const onSuccess = (outcome: TuiInstallOutcome) => queryClient.setQueryData(TUI_LAUNCH_INFO_KEY, outcome.info);
   return {
     install: useMutation({ mutationFn: () => api.installTuiCommand(), onSuccess }),
     uninstall: useMutation({ mutationFn: () => api.uninstallTuiCommand(), onSuccess }),

@@ -276,18 +276,22 @@ function WebUiAddresses({ listenAll, authEnabled }: { listenAll: boolean; authEn
   );
 }
 
-/** 启动命令 + 添加到 PATH. 开关关着时置灰但仍可见 —— 可以先装好命令再开开关. */
+/** 启动命令 + 添加到 PATH. 开关关着时置灰但仍可见 —— 可以先装好命令再开开关.
+ * 返回一个 fragment 而不是包一层 <div>: 两个 `.setting-row` 必须是 `.card-body` 的直接子元素,
+ * 不然 `.setting-row:first-child/:last-child` 那套边框/间距样式就会认错人 (fix-1 R11)。
+ * opacity 因此分别写在每个 `.setting-row` 自己身上, 不再挂在已经消失的外层 div 上。 */
 function TuiLaunchRow({ enabled }: { enabled: boolean }) {
   const { t } = useT();
   const info = useTuiLaunchInfo();
   if (!info.data) return null;
   const { path, is_appimage, in_path } = info.data;
-  // 已经在 PATH 上 (一键安装过 / deb 装在 /usr/bin): 命令名本身就够了。
-  // 否则给完整路径; 只有含空格时才加引号 —— PowerShell 里带引号的裸字符串会被当成字符串回显而不是执行。
-  const command = !path ? null : in_path ? "cc-router-tui" : /\s/.test(path) ? `"${path}"` : path;
+  // 完整路径永远展示 (spec §7.3): 哪怕已经在 PATH 上, 换一台没重开过的终端 (尤其 Windows) 仍然
+  // 只认得完整路径, 命令名会报「找不到命令」——不能把它换没了。只有含空格时才加引号:
+  // PowerShell 里带引号的裸字符串会被当成字符串回显而不是执行。
+  const fullPathCommand = path ? (/\s/.test(path) ? `"${path}"` : path) : null;
   return (
-    <div style={{ opacity: enabled ? 1 : 0.55 }}>
-      <div className="setting-row">
+    <>
+      <div className="setting-row" style={{ opacity: enabled ? 1 : 0.55 }}>
         <div className="label-col">
           {t("settings.tui.launch.label")}
           <div className="desc">
@@ -296,14 +300,20 @@ function TuiLaunchRow({ enabled }: { enabled: boolean }) {
             {path && runtime.kind === "web" && <> {t("settings.tui.launch.webHint")}</>}
           </div>
         </div>
-        {command && (
-          <div style={{ minWidth: 0, flex: 1 }}>
-            <CopyableBlock text={command} variant="inline" />
+        {fullPathCommand && (
+          <div style={{ minWidth: 0, flex: 1, display: "flex", flexDirection: "column", gap: 6 }}>
+            {in_path && (
+              <>
+                <CopyableBlock text="cc-router-tui" variant="inline" />
+                <span style={{ fontSize: 12, color: "var(--ink-2)" }}>{t("settings.tui.launch.short")}</span>
+              </>
+            )}
+            <CopyableBlock text={fullPathCommand} variant="inline" />
           </div>
         )}
       </div>
-      {path && <TuiPathRow info={info.data} />}
-    </div>
+      {path && <TuiPathRow info={info.data} enabled={enabled} />}
+    </>
   );
 }
 
@@ -314,7 +324,7 @@ function errorText(e: unknown): string {
 }
 
 /** 「添加到 PATH」一栏. 三个平台做法不同, 说明文字跟着 install_kind 走. */
-function TuiPathRow({ info }: { info: TuiLaunchInfo }) {
+function TuiPathRow({ info, enabled }: { info: TuiLaunchInfo; enabled: boolean }) {
   const { t } = useT();
   const { install, uninstall } = useTuiPathInstall();
   const { install_kind: kind, in_path, installed_at, can_install, install_blocked, local_bin_off_path } = info;
@@ -322,11 +332,14 @@ function TuiPathRow({ info }: { info: TuiLaunchInfo }) {
 
   const busy = install.isPending || uninstall.isPending;
   const error = install.error ?? uninstall.error;
+  // 上一次跑完的 (install 或 uninstall, 谁最近成功谁算) 是不是被用户在系统授权框里取消了——
+  // 两边的 mutate() 都会先 reset() 对方和自己, 所以 busy 期间 / 换一次操作后这两个 data 都是 undefined。
+  const cancelled = install.data?.cancelled === true || uninstall.data?.cancelled === true;
   // 改宿主机的 PATH / 弹系统授权框只能在桌面窗口里做, 后端对网页端是拒绝桩。
   const desktop = runtime.kind !== "web";
 
   return (
-    <div className="setting-row">
+    <div className="setting-row" style={{ opacity: enabled ? 1 : 0.55 }}>
       <div className="label-col">
         {t("settings.tui.path.label")}
         <div className="desc">
@@ -335,6 +348,9 @@ function TuiPathRow({ info }: { info: TuiLaunchInfo }) {
             : in_path
               ? t("settings.tui.path.installed", { at: installed_at ?? "" })
               : t(`settings.tui.path.desc.${kind}`)}
+          {in_path && (kind === "user_path" || kind === "copy") && (
+            <div style={{ marginTop: 4 }}>{t(`settings.tui.path.installedNote.${kind}`)}</div>
+          )}
         </div>
       </div>
       <div style={{ display: "flex", flexDirection: "column", gap: 6, alignItems: "flex-start" }}>
@@ -347,6 +363,7 @@ function TuiPathRow({ info }: { info: TuiLaunchInfo }) {
             type="button"
             disabled={busy || !can_install}
             onClick={() => {
+              install.reset();
               uninstall.reset();
               install.mutate();
             }}
@@ -362,6 +379,7 @@ function TuiPathRow({ info }: { info: TuiLaunchInfo }) {
             disabled={busy}
             onClick={() => {
               install.reset();
+              uninstall.reset();
               uninstall.mutate();
             }}
           >
@@ -378,6 +396,7 @@ function TuiPathRow({ info }: { info: TuiLaunchInfo }) {
             <CopyableBlock text={'export PATH="$HOME/.local/bin:$PATH"'} variant="inline" />
           </div>
         )}
+        {!busy && cancelled && <span style={{ fontSize: 12, color: "var(--ink-2)" }}>{t("settings.tui.path.cancelled")}</span>}
         {error != null && <div className="alert err">{errorText(error)}</div>}
       </div>
     </div>

@@ -374,6 +374,12 @@ export interface TuiLaunchInfo {
   local_bin_off_path: boolean;
 }
 
+/** install_tui_command / uninstall_tui_command 返回值. cancelled = 用户在系统授权框里点了取消 (不是错误, 什么都没发生) */
+export interface TuiInstallOutcome {
+  info: TuiLaunchInfo;
+  cancelled: boolean;
+}
+
 export interface CreateSubscriptionInput {
   display_name: string;
   api_key: string;
