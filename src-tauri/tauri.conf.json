@@ -4,9 +4,9 @@
   "version": "5.0.0",
   "identifier": "com.cc-router.desktop",
   "build": {
-    "beforeDevCommand": "pnpm dev",
+    "beforeDevCommand": "node scripts/build-tui-sidecar.mjs && pnpm dev",
     "devUrl": "http://127.0.0.1:1420",
-    "beforeBuildCommand": "pnpm build",
+    "beforeBuildCommand": "pnpm build && node scripts/build-tui-sidecar.mjs",
     "frontendDist": "../dist"
   },
   "app": {
@@ -45,6 +45,9 @@
       "icons/128x128@2x.png",
       "icons/icon.icns",
       "icons/icon.ico"
+    ],
+    "externalBin": [
+      "binaries/cc-router-tui"
     ],
     "resources": [
       "../LICENSE"

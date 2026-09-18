@@ -24,7 +24,8 @@ fn sidecar_path_for(exe: &Path) -> Option<PathBuf> {
 
 fn existing_sidecar(exe: &Path) -> Option<String> {
     sidecar_path_for(exe)
-        .filter(|p| p.is_file())
+        // len > 0: build.rs 的 0 字节占位不算
+        .filter(|p| std::fs::metadata(p).map(|m| m.is_file() && m.len() > 0).unwrap_or(false))
         .map(|p| p.to_string_lossy().into_owned())
 }
 
@@ -55,11 +56,16 @@ mod tests {
     }
 
     #[test]
-    fn missing_file_is_reported_as_none_existing_file_as_some() {
+    fn missing_or_placeholder_is_none_real_file_is_some() {
         let dir = tempfile::tempdir().unwrap();
         let exe = dir.path().join("cc-router");
-        assert_eq!(existing_sidecar(&exe), None);
+        assert_eq!(existing_sidecar(&exe), None, "文件不存在");
+
+        // build.rs 在没跑过打包钩子时放的 0 字节占位: 不能当成「已包含 TUI」
         std::fs::write(dir.path().join(SIDECAR_NAME), b"").unwrap();
+        assert_eq!(existing_sidecar(&exe), None, "0 字节占位");
+
+        std::fs::write(dir.path().join(SIDECAR_NAME), b"\x7fELF").unwrap();
         assert_eq!(
             existing_sidecar(&exe),
             Some(dir.path().join(SIDECAR_NAME).to_string_lossy().into_owned())

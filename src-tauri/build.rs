@@ -3,7 +3,24 @@ use std::path::Path;
 
 fn main() {
     embed_providers();
+    ensure_sidecar_placeholder();
     tauri_build::build()
+}
+
+/// tauri-build 在**每次** cargo 构建 (含 check / test) 时都会复制 `bundle.externalBin` 指向的文件,
+/// 不存在就直接失败。真正的 sidecar 由 `scripts/build-tui-sidecar.mjs` 在 tauri dev / build 的钩子里生成;
+/// 这里只保证「没跑过钩子」的场景 (新克隆后直接 cargo test) 也能编过: 缺文件时放一个 0 字节占位。
+/// 占位永远不会覆盖真文件, `commands::tui` 把 0 字节文件视为「未包含 TUI」。
+fn ensure_sidecar_placeholder() {
+    let manifest_dir = std::env::var("CARGO_MANIFEST_DIR").expect("CARGO_MANIFEST_DIR");
+    let target = std::env::var("TARGET").expect("TARGET");
+    let ext = if target.contains("windows") { ".exe" } else { "" };
+    let dir = Path::new(&manifest_dir).join("binaries");
+    let file = dir.join(format!("cc-router-tui-{target}{ext}"));
+    if !file.exists() {
+        std::fs::create_dir_all(&dir).unwrap_or_else(|e| panic!("创建 {} 失败: {e}", dir.display()));
+        std::fs::write(&file, b"").unwrap_or_else(|e| panic!("写入 {} 失败: {e}", file.display()));
+    }
 }
 
 /// 把 `providers/*.yaml` 编进二进制: 生成 `$OUT_DIR/embedded_providers.rs`, 内容是一张

@@ -57,6 +57,9 @@ dist-ssr/
 # Tauri build artifacts
 src-tauri/gen/schemas/
 
+# cc-router-tui sidecar: 由 scripts/build-tui-sidecar.mjs 生成 (或 build.rs 放的 0 字节占位)
+src-tauri/binaries/
+
 
 CLAUDE.md
 

@@ -1,5 +1,6 @@
 #!/usr/bin/env node
-// 将版本号同步写入 package.json / src-tauri/tauri.conf.json / src-tauri/Cargo.toml / src-tauri/Cargo.lock。
+// 将版本号同步写入 package.json / src-tauri/tauri.conf.json / src-tauri/Cargo.toml /
+// src-tauri/crates/cc-router-tui/Cargo.toml / src-tauri/Cargo.lock。
 // 用法：pnpm version:set 0.2.0
 
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
@@ -44,10 +45,11 @@ function updateCargoToml(relPath) {
   console.log(`  ${relPath}  →  ${version}`);
 }
 
-// Cargo.lock 里本工作区包 cc-router 的 version 也要跟着改, 否则 lock 与 Cargo.toml
-// 不一致, CI 用 --frozen/--locked 会失败。只改 name = "cc-router" 紧跟的那行 version,
+// Cargo.lock 里本工作区包的 version 也要跟着改, 否则 lock 与 Cargo.toml
+// 不一致, CI 用 --frozen/--locked 会失败。只改 name = "<pkg>" 紧跟的那行 version,
 // 不动任何依赖条目 (本地包无 checksum, 这一行就是 cargo 自己会写的内容)。
-function updateCargoLock(relPath) {
+// name = "cc-router" 后面紧跟引号, 不会误匹配 name = "cc-router-tui"。
+function updateCargoLock(relPath, pkg) {
   const full = resolve(root, relPath);
   if (!existsSync(full)) {
     console.log(`  ${relPath}  (不存在, 跳过 — 首次 cargo build 会生成)`);
@@ -55,15 +57,13 @@ function updateCargoLock(relPath) {
   }
   const original = readFileSync(full, "utf8");
   let replaced = false;
-  const updated = original.replace(
-    /(name = "cc-router"\r?\nversion = ")([^"]*)(")/,
-    (_, p, _old, q) => {
-      replaced = true;
-      return `${p}${version}${q}`;
-    },
-  );
+  const pattern = new RegExp(`(name = "${pkg}"\\r?\\nversion = ")([^"]*)(")`);
+  const updated = original.replace(pattern, (_, p, _old, q) => {
+    replaced = true;
+    return `${p}${version}${q}`;
+  });
   if (!replaced) {
-    throw new Error(`未在 ${relPath} 找到 cc-router 包的 version 字段`);
+    throw new Error(`未在 ${relPath} 找到 ${pkg} 包的 version 字段`);
   }
   writeFileSync(full, updated);
   console.log(`  ${relPath}  →  ${version}`);
@@ -73,7 +73,9 @@ console.log(`同步版本号到 ${version}：`);
 updateJson("package.json");
 updateJson("src-tauri/tauri.conf.json");
 updateCargoToml("src-tauri/Cargo.toml");
-updateCargoLock("src-tauri/Cargo.lock");
+updateCargoToml("src-tauri/crates/cc-router-tui/Cargo.toml");
+updateCargoLock("src-tauri/Cargo.lock", "cc-router");
+updateCargoLock("src-tauri/Cargo.lock", "cc-router-tui");
 console.log("完成。建议接下来：");
 console.log(`  git add -u`);
 console.log(`  git commit -m "Bump version to ${version}"`);
