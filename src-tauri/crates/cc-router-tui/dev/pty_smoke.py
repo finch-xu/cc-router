@@ -18,6 +18,7 @@ import os
 import pty
 import re
 import select
+import signal
 import struct
 import sys
 import tempfile
@@ -131,13 +132,37 @@ def main():
     pump(2.0)
     idle_bytes = len(out) - before_idle
     os.write(fd, b"q")
-    pump(1.0)
-    _, status = os.waitpid(pid, 0)
+
+    # 轮询退出而不是阻塞 waitpid: 如果 UI 没接住 q (或者卡死), 阻塞 waitpid 会让脚本永远
+    # 挂着。边等边继续把 pty 的输出读走 (不读会堵住子进程写终端)。
+    exited = False
+    status = 0
+    deadline = time.time() + 3.0
+    while time.time() < deadline:
+        if select.select([fd], [], [], 0.05)[0]:
+            try:
+                out.extend(os.read(fd, 65536))
+            except OSError:
+                pass
+        reaped, status = os.waitpid(pid, os.WNOHANG)
+        if reaped == pid:
+            exited = True
+            break
+    if not exited:
+        try:
+            os.kill(pid, signal.SIGKILL)
+        except ProcessLookupError:
+            pass
+        _, status = os.waitpid(pid, 0)
 
     raw = out.decode("utf-8", "replace")
     text = re.sub(r"\x1b\[[0-9;?]*[A-Za-z]", "", raw)
     failures = []
-    if os.WEXITSTATUS(status) != 0:
+    if not exited:
+        failures.append("按 q 之后 3 秒内没有退出")
+    elif not os.WIFEXITED(status):
+        failures.append(f"被信号 {os.WTERMSIG(status)} 终止")
+    elif os.WEXITSTATUS(status) != 0:
         failures.append(f"退出码 {os.WEXITSTATUS(status)}")
     if "\x1b[?1049h" not in raw or "\x1b[?1049l" not in raw:
         failures.append("没有成对地进入 / 离开备用屏幕")
