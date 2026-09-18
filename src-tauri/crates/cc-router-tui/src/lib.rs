@@ -5,3 +5,4 @@ pub mod format;
 pub mod fx;
 pub mod i18n;
 pub mod theme;
+pub mod widgets;
