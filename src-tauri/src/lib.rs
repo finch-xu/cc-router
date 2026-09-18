@@ -51,7 +51,22 @@ fn on_run_event(_app: &tauri::AppHandle, _event: &tauri::RunEvent) {}
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
-    let app = tauri::Builder::default()
+    let builder = tauri::Builder::default();
+
+    // 单实例: 再次启动时不起新进程, 把已有窗口唤回前台。必须是第一个注册的插件 (官方要求)。
+    // 没有它, 第二个进程会绑到下一个端口、生成自己的密钥并覆盖 runtime.json, cc-router-tui 从此连错实例;
+    // 两个代理还会共用同一个数据库而内存状态各一份。
+    //
+    // 只在 release 下注册: 日常开发时生产版 app 通常正开着给 Claude Code 当代理, 而 dev 构建与它
+    // identifier 相同 —— dev 下也生效的话 `pnpm tauri dev` 会一启动就退出。
+    #[cfg(not(debug_assertions))]
+    let builder = builder.plugin(tauri_plugin_single_instance::init(|app, _argv, _cwd| {
+        if let Some(win) = app.get_webview_window("main") {
+            tray::reveal_window(&win);
+        }
+    }));
+
+    let app = builder
         .plugin(tauri_plugin_shell::init())
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_clipboard_manager::init())
