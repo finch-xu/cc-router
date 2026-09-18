@@ -1,0 +1,156 @@
+#!/usr/bin/env python3
+"""cc-router-tui 的伪终端冒烟测试 (仅 macOS / Linux)。
+
+单测用 TestBackend, 测不到「真的进备用屏幕、真的读键盘、真的退得出来」这一段。这个脚本:
+  1. 起一个假的 cc-router 后端 (5 个 command + 事件流), 在临时目录写一份 runtime.json;
+  2. 在 80x24 的伪终端里跑 TUI, 依次按 2 / ? / Esc / 1 / q;
+  3. 断言: 退出码 0、进出过备用屏幕、几个页面的关键文字都出现过、空闲 2 秒几乎不输出 (按需重绘)。
+
+用法 (仓库根目录):
+  cd src-tauri && cargo build -p cc-router-tui && cd ..
+  python3 src-tauri/crates/cc-router-tui/dev/pty_smoke.py src-tauri/target/debug/cc-router-tui-bin
+
+不进 CI (依赖伪终端与时序); 改了 runtime.rs / main.rs 之后手动跑。后续阶段加页面时, 在 DATA 里补 command、在 EXPECT 里补文字。
+"""
+import fcntl
+import json
+import os
+import pty
+import re
+import select
+import struct
+import sys
+import tempfile
+import termios
+import threading
+import time
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+
+NOW_MS = int(time.time() * 1000)
+
+
+def quota(limit, used):
+    return {"period": "daily", "limit": limit, "input": used, "output": 0, "cache_creation": 0,
+            "cache_read": 0, "period_start_ms": 0, "exceeded": used >= limit}
+
+
+def sub(sid, name, state, dispatchable, usage=None, cooldown=None):
+    return {"id": sid, "display_name": name, "provider_display_name": "p", "enabled": True, "state": state,
+            "cooldown_until": cooldown, "last_error_message": None, "is_dispatchable": dispatchable,
+            "quota_usage": [usage] if usage else []}
+
+
+DATA = {
+    "proxy_status": {"port": 23456, "running": True, "mode": "http", "http_port": 23456, "https_port": None,
+                     "listen_all": False, "base_url": "http://127.0.0.1:23456"},
+    "get_settings": {"preferred_language": "zh", "tui_enabled": True, "auth_enabled": True},
+    "get_overall_stats": {"total_requests": 1284, "success_rate_pct": 98.6, "total_input_tokens": 3000000,
+                          "total_output_tokens": 200000, "total_cache_creation_tokens": 0,
+                          "total_cache_read_tokens": 0},
+    "get_daily_series": [{"day": "2026-01-01", "hour": h, "request_count": abs(h - 12) * 3 + 1} for h in range(24)],
+    "list_subscriptions": [
+        sub("1", "智谱主号", "healthy", True, quota(100, 62)),
+        sub("2", "Kimi 备用", "rate_limited", False, quota(100, 91), NOW_MS + 42000),
+        sub("3", "示例中转", "auth_failed", False),
+    ],
+}
+
+# 去掉转义序列之后必须出现过的文字
+EXPECT = ["总览", "1,284", "98.6%", "智谱主号", "已连接", "此页面将在后续版本提供", "键位"]
+
+
+class Handler(BaseHTTPRequestHandler):
+    protocol_version = "HTTP/1.1"
+
+    def log_message(self, *_):
+        pass
+
+    def do_POST(self):
+        self.rfile.read(int(self.headers.get("content-length", 0)))
+        name = self.path.rsplit("/", 1)[-1]
+        body = json.dumps(DATA[name]).encode()
+        self.send_response(200)
+        self.send_header("content-type", "application/json")
+        self.send_header("content-length", str(len(body)))
+        self.end_headers()
+        self.wfile.write(body)
+
+    def do_GET(self):  # /ui/api/events
+        self.send_response(200)
+        self.send_header("content-type", "text/event-stream")
+        self.send_header("connection", "close")
+        self.end_headers()
+        try:
+            time.sleep(1.5)
+            DATA["list_subscriptions"][0].update(state="rate_limited", is_dispatchable=False)
+            self.wfile.write(b'event: subscription_state_changed\ndata: "1"\n\n')
+            self.wfile.flush()
+            while True:
+                time.sleep(5)
+                self.wfile.write(b": keepalive\n\n")
+                self.wfile.flush()
+        except OSError:
+            pass
+
+
+def main():
+    if len(sys.argv) != 2:
+        sys.exit(__doc__)
+    binary = os.path.abspath(sys.argv[1])
+
+    server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+    threading.Thread(target=server.serve_forever, daemon=True).start()
+    data_dir = tempfile.mkdtemp(prefix="ccr-tui-smoke-")
+    with open(os.path.join(data_dir, "runtime.json"), "w") as f:
+        json.dump({"pid": 1, "app_version": "0.0.0-smoke", "http_port": server.server_address[1],
+                   "https_port": None, "ca_pem_path": None, "local_secret": "smoke"}, f)
+
+    pid, fd = pty.fork()
+    if pid == 0:
+        os.environ.update(COLORTERM="truecolor", TERM="xterm-256color")
+        os.environ.pop("NO_COLOR", None)
+        os.execv(binary, [binary, "--data-dir", data_dir])
+    fcntl.ioctl(fd, termios.TIOCSWINSZ, struct.pack("HHHH", 24, 80, 0, 0))
+
+    out = bytearray()
+
+    def pump(seconds):
+        end = time.time() + seconds
+        while time.time() < end:
+            if select.select([fd], [], [], 0.05)[0]:
+                try:
+                    out.extend(os.read(fd, 65536))
+                except OSError:
+                    return
+
+    pump(3.0)  # 启动动效 + 首次加载 + 1.5s 时的状态变更事件
+    for keys in (b"2", b"?", b"\x1b", b"1"):
+        os.write(fd, keys)
+        pump(0.6)
+    before_idle = len(out)
+    pump(2.0)
+    idle_bytes = len(out) - before_idle
+    os.write(fd, b"q")
+    pump(1.0)
+    _, status = os.waitpid(pid, 0)
+
+    raw = out.decode("utf-8", "replace")
+    text = re.sub(r"\x1b\[[0-9;?]*[A-Za-z]", "", raw)
+    failures = []
+    if os.WEXITSTATUS(status) != 0:
+        failures.append(f"退出码 {os.WEXITSTATUS(status)}")
+    if "\x1b[?1049h" not in raw or "\x1b[?1049l" not in raw:
+        failures.append("没有成对地进入 / 离开备用屏幕")
+    failures += [f"没出现过: {needle}" for needle in EXPECT if needle not in text]
+    # 空闲时只有 250ms tick 带来的零星重绘 (冷却倒计时每秒变一格)。几 KB 以上说明在持续全速重画。
+    if idle_bytes > 4000:
+        failures.append(f"空闲 2 秒输出了 {idle_bytes} 字节, 按需重绘失效")
+
+    print(f"输出 {len(out)} 字节, 空闲 2 秒 {idle_bytes} 字节")
+    if failures:
+        sys.exit("冒烟失败:\n  " + "\n  ".join(failures))
+    print("冒烟通过")
+
+
+if __name__ == "__main__":
+    main()
