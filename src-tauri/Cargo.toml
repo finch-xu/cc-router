@@ -1,3 +1,7 @@
+# workspace 根就是主 crate 自己: Cargo.lock 与 target/ 位置不变, 不带 -p 的 cargo 命令仍只作用于主 crate。
+[workspace]
+members = [".", "crates/cc-router-tui"]
+
 [package]
 name = "cc-router"
 version = "5.0.0"

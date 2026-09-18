@@ -1,0 +1,26 @@
+[package]
+name = "cc-router-tui"
+version = "5.0.0"
+edition = "2021"
+description = "cc-router 的终端界面"
+license = "MIT"
+publish = false
+
+# bin 名刻意不叫 cc-router-tui: tauri-build 会把 sidecar 复制成 target/<profile>/cc-router-tui,
+# 与同名的 cargo 产物撞路径 (占位文件会把真二进制覆盖成 0 字节)。最终用户看到的文件名由
+# scripts/build-tui-sidecar.mjs 与 tauri.conf.json::bundle.externalBin 决定, 仍是 cc-router-tui。
+[[bin]]
+name = "cc-router-tui-bin"
+path = "src/main.rs"
+
+[dependencies]
+anyhow = "1"
+reqwest = { version = "0.13", default-features = false, features = ["rustls", "json"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+thiserror = "2"
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "time", "sync"] }
+
+[dev-dependencies]
+tempfile = "3"
+wiremock = "0.6"
