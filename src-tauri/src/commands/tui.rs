@@ -5,11 +5,35 @@
 //! 改宿主机的 PATH。`proxy/web/api.rs::web_commands!` 里这两条是拒绝桩 (不调用这里的函数), 有源码扫描测试锁住。
 
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicBool, Ordering};
 
 use serde::Serialize;
 
 use crate::error::{AppError, AppResult};
 use crate::tui_install::{self, InstallBlocked, InstallKind, InstallStatus, Outcome};
+
+/// `install_tui_command` / `uninstall_tui_command` 是不是正有一个在跑。前端的 `busy` 只是组件
+/// 本地 state, 离开设置页再回来 (macOS 授权框可能开着好几分钟) 会重新变成 `false`, 按钮重新可点——
+/// 后端必须自己也挡一道, 否则能同时弹出第二个系统授权框, 或者在 Windows 上让两次
+/// 读-改-写用户 PATH 的操作相互穿插 (fix-2 F3)。
+static BUSY: AtomicBool = AtomicBool::new(false);
+
+/// RAII 释放: 不管 `change_install` 从哪个分支退出 (成功 / `?` 提前返回的错误 / `spawn_blocking`
+/// join 失败), `Drop` 都会把 `BUSY` 放回 `false`, 不需要在每个 return 分支手动清一次。
+struct BusyGuard;
+
+impl BusyGuard {
+    /// 拿不到 (已经有一个在跑) 返回 `None`, 调用方据此报「上一次操作还没结束」。
+    fn acquire() -> Option<Self> {
+        BUSY.compare_exchange(false, true, Ordering::SeqCst, Ordering::SeqCst).ok().map(|_| Self)
+    }
+}
+
+impl Drop for BusyGuard {
+    fn drop(&mut self) {
+        BUSY.store(false, Ordering::SeqCst);
+    }
+}
 
 /// sidecar 的文件名。Tauri 的 externalBin 打包时会去掉 target triple 后缀,
 /// 安装后它与主程序同目录 (macOS: Contents/MacOS/, Windows: 安装目录, deb: /usr/bin/)。
@@ -102,6 +126,7 @@ async fn change_install(
     require_can_install: bool,
     err_prefix: &'static str,
 ) -> AppResult<TuiInstallOutcome> {
+    let _guard = BusyGuard::acquire().ok_or_else(|| AppError::BadRequest("上一次操作还没结束".into()))?;
     let sidecar = current_sidecar().ok_or_else(|| AppError::BadRequest("此版本未包含终端界面程序".into()))?;
     let path = PathBuf::from(sidecar);
     let (outcome, info) = tauri::async_runtime::spawn_blocking(move || -> AppResult<(Outcome, TuiLaunchInfo)> {
@@ -129,6 +154,14 @@ pub async fn uninstall_tui_command() -> AppResult<TuiInstallOutcome> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn busy_guard_blocks_concurrent_acquisition_until_dropped() {
+        let g1 = BusyGuard::acquire().expect("第一次拿锁应该成功");
+        assert!(BusyGuard::acquire().is_none(), "锁被占着的时候第二次拿锁必须失败");
+        drop(g1);
+        assert!(BusyGuard::acquire().is_some(), "释放之后应该能重新拿到");
+    }
 
     #[test]
     fn sidecar_sits_next_to_the_main_executable() {

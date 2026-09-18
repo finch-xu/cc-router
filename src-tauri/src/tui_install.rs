@@ -79,10 +79,15 @@ pub type InstallResult = Result<Outcome, String>;
 /// `.app` 是否直接坐在某个卷的根目录上 (`/Volumes/<vol>/<X>.app/...`, 典型的「还没拖出 DMG」)。
 /// 挂载的外置硬盘上装了 `Applications` 目录再放 `.app` (`/Volumes/SSD/Applications/x.app/...`)
 /// 是合法安装, 不算 —— 判断标准是 `.app` 前面只隔着一层卷名。
+/// 用 `to_string_lossy` 而不是 `to_str`: 后者对非 UTF-8 分量返回 `None`, `filter_map` 会把它整段
+/// 丢掉, 后面所有分量的下标就全部往前移一位——这个判断全靠下标, 移位会让好端端的路径判断错
+/// (fix-2 F7)。`.app` 后缀按 ASCII 大小写不敏感比较 (`cc-router.APP` 也算)。
 fn is_on_disk_image_at_volume_root(sidecar: &Path) -> bool {
-    let comps: Vec<&str> = sidecar.components().filter_map(|c| c.as_os_str().to_str()).collect();
+    let comps: Vec<std::borrow::Cow<'_, str>> =
+        sidecar.components().map(|c| c.as_os_str().to_string_lossy()).collect();
     // comps[0] 是根 "/"; [1] 应为 "Volumes"; [3] (卷名之后紧跟的一段) 若以 ".app" 结尾就是卷根。
-    comps.get(1).is_some_and(|c| *c == "Volumes") && comps.get(3).is_some_and(|c| c.ends_with(".app"))
+    comps.get(1).is_some_and(|c| c.as_ref() == "Volumes")
+        && comps.get(3).is_some_and(|c| c.to_ascii_lowercase().ends_with(".app"))
 }
 
 pub fn macos_blocked(sidecar: &Path) -> Option<InstallBlocked> {
@@ -111,6 +116,12 @@ pub enum LinkState {
 pub fn link_state(link: &Path, sidecar: &Path) -> LinkState {
     match std::fs::read_link(link) {
         Ok(target) if target == sidecar => LinkState::Ours,
+        // 有意放宽: 只要符号链接指向的路径**文件名**是 cc-router-tui, 不管目标目录是哪, 就认成
+        // StaleOurs——不要求非得在 `.app/Contents/MacOS/` 下面。替换一个符号链接不会丢用户数据
+        // (跟 Linux 的整份复制不一样, 那边错判的代价是真的覆盖/删掉一个文件, 所以才要 marker 那套
+        // 更严格的校验); 反过来如果要求必须匹配 `.app` 内部路径, 同一台机器上一个 dev 构建
+        // (target/debug/cc-router-tui) 和一次正式安装会互相把对方的链接当成「别人的」, 谁也点不动
+        // 「添加到 PATH」(fix-2 F8)。
         Ok(target) if target.file_name() == sidecar.file_name() => LinkState::StaleOurs,
         Ok(_) => LinkState::Foreign,
         // 不是符号链接: 存在即是别人的文件
@@ -156,18 +167,24 @@ pub fn admin_script(shell: &str) -> String {
     format!("do shell script {} with administrator privileges", applescript_quote(shell))
 }
 
+/// 提权脚本用绝对路径调 `mkdir`/`ln`/`rm`, 不吃 `PATH`——这段是要跑在 root 下的, 不能让
+/// 一个被篡改的 `PATH` 决定实际执行的是哪个二进制 (fix-2 F4)。
+/// 授权框可能停留好几分钟, 这段时间里目标位置可能被别的东西占了: 脚本自己在真正动手前
+/// **重新检查一次** (check-then-act 的窗口不能只靠 Rust 侧在弹框之前判断一次的 `LinkState`)。
+/// `[ ! -e L ]`(不存在) 或 `[ -L L ]`(是符号链接, 不管指向哪, 都可以安全地 `ln -sfn` 覆盖) 才继续,
+/// 否则 `exit 1` 拒绝——注意 `-e` 对失效的悬空符号链接是 false, 所以必须显式再判一次 `-L`。
 pub fn symlink_shell(sidecar: &Path, link: &Path) -> String {
     let dir = link.parent().unwrap_or(Path::new("/"));
-    format!(
-        "mkdir -p {} && ln -sfn {} {}",
-        sh_quote(&dir.to_string_lossy()),
-        sh_quote(&sidecar.to_string_lossy()),
-        sh_quote(&link.to_string_lossy())
-    )
+    let l = sh_quote(&link.to_string_lossy());
+    let d = sh_quote(&dir.to_string_lossy());
+    let s = sh_quote(&sidecar.to_string_lossy());
+    format!("[ ! -e {l} ] || [ -L {l} ] || exit 1; /bin/mkdir -p {d} && /bin/ln -sfn {s} {l}")
 }
 
+/// 同样重新检查一次: 只有此刻仍是符号链接才删, 避免授权框开着的这段时间里目标被换成了别人的文件。
 pub fn unlink_shell(link: &Path) -> String {
-    format!("rm -f {}", sh_quote(&link.to_string_lossy()))
+    let l = sh_quote(&link.to_string_lossy());
+    format!("[ -L {l} ] || exit 0; /bin/rm -f {l}")
 }
 
 /// osascript 在用户点了「取消」时以非零退出, stderr 里带 `(-128)` (userCanceledErr) 作为**尾巴**。
@@ -222,6 +239,51 @@ pub fn powershell_path(system_root: Option<&std::ffi::OsStr>) -> PathBuf {
     PathBuf::from(format!(r"{root}\System32\WindowsPowerShell\v1.0\powershell.exe"))
 }
 
+// `powershell -Command "<script>"` 默认的 `$ErrorActionPreference` 是 `Continue`: 一条语句抛错,
+// 后面的语句照样跑, 退出码只看最后一条语句成不成功。这会让「读注册表失败」悄悄变成「读到空 PATH」,
+// 「写注册表失败」悄悄变成「整体成功」——必须每段脚本第一句就把它改成 `Stop` (fix-2 F1)。
+// 两段脚本都不能含 `"` 字符: Rust 侧用 `-Command <script>` 传参, Windows 的参数拼接/转义规则
+// 会把内嵌的 `"` 搞复杂, 干脆全程只用单引号写 PowerShell 字符串字面量, 从根源上绕开。
+
+/// 读用户级 `HKCU\Environment\Path`。`DoNotExpandEnvironmentNames` 保留 `%USERPROFILE%\…` 原文,
+/// 不展开也不改类型。`OpenSubKey` 拿不到 `Environment` 键是真正的错误 (`throw`, 非 0 退出) ——
+/// 与「有键但没有 Path 值」(`GetValue` 的默认值 `''`, 合法的空 PATH) 是两件不同的事, 不能混。
+/// 输出前先把控制台编码换成**不带 BOM** 的 UTF-8 (`New-Object Text.UTF8Encoding $false`) ——
+/// 默认的 `[Text.Encoding]::UTF8` 静态实例自带 BOM 预导, 会粘在第一个 PATH 条目前面;
+/// 不换编码则退回系统 OEM 代码页, CJK 字符经 `from_utf8_lossy` 会变成一串 U+FFFD。
+/// 输出前缀固定标记 `CCR1:`, 供 `decode_ps_read` 校验「这确实是我们的脚本跑完的」而不是半截输出。
+pub const PS_READ: &str = "$ErrorActionPreference='Stop';\
+    [Console]::OutputEncoding=New-Object Text.UTF8Encoding $false;\
+    $k=[Microsoft.Win32.Registry]::CurrentUser.OpenSubKey('Environment');\
+    if(-not $k){throw 'Environment key missing'};\
+    $v=$k.GetValue('Path','',[Microsoft.Win32.RegistryValueOptions]::DoNotExpandEnvironmentNames);\
+    [Console]::Out.Write('CCR1:'+$v)";
+
+/// 写回 `HKCU\Environment\Path`, 保留原有的值类型 (没有旧值时按 `ExpandString` 新建, 与
+/// Windows 自己新建这个值时用的类型一致)。新值经环境变量 `CCR_NEW_PATH` 传入而不是拼进脚本文本,
+/// 但 PowerShell 里读一个不存在/空的环境变量得到的是 `$null`, `SetValue('Path',$null,…)` 会直接
+/// 抛错——`[string]$env:CCR_NEW_PATH` 强制转换成空字符串, 才能把「PATH 被清空」当成合法值写回,
+/// 而不是让 WRITE 在这种边界情况下失败。最后广播一次 `WM_SETTINGCHANGE`(对不存在的变量
+/// `SetEnvironmentVariable`), 新开的终端立即看到新 PATH。
+pub const PS_WRITE: &str = "$ErrorActionPreference='Stop';\
+    $k=[Microsoft.Win32.Registry]::CurrentUser.CreateSubKey('Environment');\
+    $kind=if($k.GetValueNames() -contains 'Path'){$k.GetValueKind('Path')}else{[Microsoft.Win32.RegistryValueKind]::ExpandString};\
+    $v=[string]$env:CCR_NEW_PATH;\
+    $k.SetValue('Path',$v,$kind);\
+    [Environment]::SetEnvironmentVariable('CCR_TUI_PATH_REFRESH',$null,'User')";
+
+/// `PS_READ` 的输出解码: 严格 UTF-8 (无效字节直接拒绝, 不用 `from_utf8_lossy` 悄悄换成 U+FFFD——
+/// 那样会把损坏的 PATH 当成合法值写回注册表), 去掉最多一个开头的 BOM, 再校验 `CCR1:` 标记。
+/// 标记缺失说明脚本没跑完 / 跑的不是我们期望的脚本, 当错误处理, 不能当空字符串放过。
+/// 标记之后的内容原样返回、不 trim——这段之后会被原样写回注册表, 用户 PATH 里如果真有
+/// 尾部空格这类怪值, 我们不该替他们“修正”掉。
+pub fn decode_ps_read(stdout: &[u8]) -> Result<String, String> {
+    let s = String::from_utf8(stdout.to_vec()).map_err(|_| "读取用户 PATH 失败: 输出不是合法 UTF-8".to_string())?;
+    let s = s.strip_prefix('\u{FEFF}').unwrap_or(s.as_str());
+    let rest = s.strip_prefix("CCR1:").ok_or_else(|| "读取用户 PATH 失败: 输出缺少标记".to_string())?;
+    Ok(rest.to_string())
+}
+
 // ───────────────────────── 纯函数: Linux ─────────────────────────
 
 /// sidecar 在这些目录里 = 系统包管理器装的, 已经在 PATH 上。
@@ -260,18 +322,50 @@ pub enum CopyState {
     Absent,
     /// 内容与当前 sidecar 字节相同
     Ours,
-    /// 内容不同, 也没有我们放的 marker: 不是我们的东西, 不碰
+    /// 内容不同, marker 也没有 / 对不上: 不是我们的东西, 不碰
     Foreign,
-    /// 内容跟当前 sidecar 不一致, 但旁边有 marker 文件——app 更新后 sidecar 变了, 这其实是自家旧副本。
-    /// 覆盖 / 删除都安全。
+    /// 内容跟当前 sidecar 不一致, 但 marker 记录的 (长度, mtime) 与它现在的 metadata 完全对得上——
+    /// app 更新后 sidecar 换了字节, 这其实是自家旧副本。覆盖 / 删除都安全。
     StaleOurs,
 }
 
 /// 与 `target` 同目录的标记文件: 证明 `target` 是 `copy_install` 放的, 不是用户自己的同名文件。
-/// 没有这个标记, app 更新后旧副本内容对不上新 sidecar, 会被误判成 `Foreign`——那对我们自己的
-/// 旧副本是错的 (见 fix-1 R1)。`copy_install` 写它, `copy_uninstall` 删它。
+/// 内容是 `copy_install` 写完之后立刻读回的 `"<字节数> <mtime 秒>\n"`——只留一个空文件 (v1 做法)
+/// 有个漏洞: 用户手动删掉了我们的副本、自己放了同名文件, 空 marker 还留在原地, 会把这份**别人的**
+/// 文件误判成「自家旧副本」从而允许覆盖 / 删除 (fix-2 F5 修的就是这个)。记录长度 + mtime 之后,
+/// 只有当前文件的 metadata 跟 marker 里记的完全一致才认——用户自己放的文件几乎不可能凑巧撞上。
+/// 残余风险: marker 写失败 (磁盘满 / 权限问题, 极端情况) 时这次复制仍然成功 (`copy_install` 不因此
+/// 报错), 但下一次会把刚装好的这份也误判成 `Foreign`, 需要用户手动处理——比反过来 (把用户文件
+/// 误判成自家的从而覆盖/删除) 安全得多, 是有意的取舍。marker 读写都是 best-effort, `status()` 只读
+/// 不写不删。
 #[cfg(unix)]
 pub const COPY_MARKER: &str = ".cc-router-tui.installed-by-cc-router";
+
+/// 文件的 (字节数, mtime 的 unix 秒数)。拿不到 metadata / mtime 早于 unix epoch (几乎不可能, 但
+/// 保守处理) 都返回 `None`——调用方据此把 `copy_state` 判成 `Foreign`, 不是 panic 或者假装匹配。
+#[cfg(unix)]
+fn file_len_and_mtime(path: &Path) -> Option<(u64, u64)> {
+    let meta = std::fs::metadata(path).ok()?;
+    let mtime = meta.modified().ok()?.duration_since(std::time::UNIX_EPOCH).ok()?.as_secs();
+    Some((meta.len(), mtime))
+}
+
+#[cfg(unix)]
+fn marker_content(len: u64, mtime: u64) -> String {
+    format!("{len} {mtime}\n")
+}
+
+/// 解析 marker 文件内容; 格式不对 (字段数不对 / 不是数字) 都是 `None`, 而不是 panic 或凑一半数据。
+#[cfg(unix)]
+fn parse_marker(content: &str) -> Option<(u64, u64)> {
+    let mut parts = content.split_whitespace();
+    let len = parts.next()?.parse().ok()?;
+    let mtime = parts.next()?.parse().ok()?;
+    if parts.next().is_some() {
+        return None; // 多出字段: 当成格式不认识的垃圾, 不猜。
+    }
+    Some((len, mtime))
+}
 
 #[cfg(unix)]
 pub fn copy_state(target: &Path, sidecar: &Path) -> CopyState {
@@ -286,11 +380,30 @@ pub fn copy_state(target: &Path, sidecar: &Path) -> CopyState {
     if same_file_content(target, sidecar) {
         return CopyState::Ours;
     }
-    let has_marker = target.parent().is_some_and(|d| d.join(COPY_MARKER).is_file());
-    if has_marker {
+    let current = match file_len_and_mtime(target) {
+        Some(v) => v,
+        None => return CopyState::Foreign,
+    };
+    let marker_matches = target
+        .parent()
+        .and_then(|d| std::fs::read_to_string(d.join(COPY_MARKER)).ok())
+        .and_then(|s| parse_marker(&s))
+        .is_some_and(|recorded| recorded == current);
+    if marker_matches {
         CopyState::StaleOurs
     } else {
         CopyState::Foreign
+    }
+}
+
+/// `CopyState` → `(in_path, blocked)` 的映射, 从 Linux `platform::status` 里拆出来单独测试
+/// (原来内嵌在平台代码里, 删掉 `Foreign` 那一支照样能过全套测试——同 fix-1 R3 对 macOS 的整改)。
+#[cfg(unix)]
+pub fn copy_status_fields(state: &CopyState) -> (bool, Option<InstallBlocked>) {
+    match state {
+        CopyState::Ours => (true, None),
+        CopyState::Foreign => (false, Some(InstallBlocked::Occupied)),
+        CopyState::StaleOurs | CopyState::Absent => (false, None),
     }
 }
 
@@ -318,8 +431,12 @@ pub fn copy_install(sidecar: &Path, target: &Path) -> InstallResult {
     let _ = std::fs::remove_file(target);
     std::fs::copy(sidecar, target).map_err(|e| format!("复制到 {}: {e}", target.display()))?;
     std::fs::set_permissions(target, std::fs::Permissions::from_mode(0o755)).map_err(|e| e.to_string())?;
-    // 写 marker: 之后 app 更新、sidecar 字节变了, 仍能认出这是自家旧副本 (CopyState::StaleOurs)。
-    std::fs::write(dir.join(COPY_MARKER), b"").map_err(|e| format!("写 marker: {e}"))?;
+    // 写 marker: 记录**刚写完这一份**的 (长度, mtime), 之后 app 更新、sidecar 字节变了, 仍能凭这两个
+    // 数字认出这是自家旧副本 (CopyState::StaleOurs)。best-effort——写失败不能把一次成功的复制变成
+    // Err (旧行为), 代价是下次可能被误判成 Foreign, 见 COPY_MARKER 文档注释里的取舍说明。
+    if let Some((len, mtime)) = file_len_and_mtime(target) {
+        let _ = std::fs::write(dir.join(COPY_MARKER), marker_content(len, mtime));
+    }
     Ok(Outcome::Done)
 }
 
@@ -378,6 +495,11 @@ mod platform {
     }
 
     pub fn install(sidecar: &Path) -> InstallResult {
+        // sh_quote 只转义单引号, 挡不住一个以 "-" 开头的参数被 ln 当成选项解析——sidecar 永远应该是
+        // current_exe() 边上拼出来的绝对路径, 不是绝对路径本身就说明调用方传错了, 直接拒绝 (fix-2 F4)。
+        if !sidecar.is_absolute() {
+            return Err("sidecar 路径不是绝对路径, 拒绝安装".to_string());
+        }
         // Translocation / DMG 里跑的临时路径: 装了也没用 (下次启动路径就变了), 这里就近拦掉,
         // 不能只指望调用方 (command 层) 检查一次——直接调这个函数的路径也要经过同一道闸门。
         if macos_blocked(sidecar).is_some() {
@@ -422,19 +544,9 @@ mod platform {
 
     const CREATE_NO_WINDOW: u32 = 0x0800_0000;
 
-    // 直接读写注册表值而不是 [Environment]::Get/SetEnvironmentVariable: 后者读出来的是**展开后**的值,
-    // 写回去又一律存成 REG_SZ —— 用户 PATH 里的 %USERPROFILE%\… 会被永久展开, 类型也被改掉。
-    // 更不能用 setx (截断到 1024 字符)。写完后借一次对不存在变量的 SetEnvironmentVariable 广播 WM_SETTINGCHANGE,
-    // 新开的终端立即看到新 PATH。
-    const READ: &str = "[Console]::OutputEncoding=[Text.Encoding]::UTF8; \
-        $k=[Microsoft.Win32.Registry]::CurrentUser.OpenSubKey('Environment'); \
-        if($k){[Console]::Out.Write($k.GetValue('Path','',[Microsoft.Win32.RegistryValueOptions]::DoNotExpandEnvironmentNames))}";
-    const WRITE: &str = "$k=[Microsoft.Win32.Registry]::CurrentUser.CreateSubKey('Environment'); \
-        $kind=if($k.GetValueNames() -contains 'Path'){$k.GetValueKind('Path')}else{[Microsoft.Win32.RegistryValueKind]::ExpandString}; \
-        $k.SetValue('Path',$env:CCR_NEW_PATH,$kind); \
-        [Environment]::SetEnvironmentVariable('CCR_TUI_PATH_REFRESH',$null,'User')";
-
-    fn powershell(script: &str, new_path: Option<&str>) -> Result<String, String> {
+    /// 跑一段脚本, 原始 stdout 字节 (不在这里假设编码——`PS_READ` 自己把编码钉死成不带 BOM 的
+    /// UTF-8 并加了 `CCR1:` 标记, 解码交给 `decode_ps_read`)。
+    fn powershell(script: &str, new_path: Option<&str>) -> Result<Vec<u8>, String> {
         let exe = powershell_path(std::env::var_os("SystemRoot").as_deref());
         let mut cmd = Command::new(exe);
         cmd.args(["-NoProfile", "-NonInteractive", "-Command", script]).creation_flags(CREATE_NO_WINDOW);
@@ -444,10 +556,17 @@ mod platform {
         }
         let out = cmd.output().map_err(|e| format!("无法调用 PowerShell: {e}"))?;
         if out.status.success() {
-            Ok(String::from_utf8_lossy(&out.stdout).into_owned())
+            Ok(out.stdout)
         } else {
             Err(String::from_utf8_lossy(&out.stderr).trim().to_string())
         }
+    }
+
+    /// `PS_READ` + 解码一步到位; READ 失败或输出解不出标记都直接 `Err`, 调用方 (`install`/`uninstall`)
+    /// 据此绝不会带着一个「看起来是空 PATH 但其实是读失败」的值去算 `next` 再写回去 (fix-2 F1)。
+    fn read_user_path() -> Result<String, String> {
+        let raw = powershell(PS_READ, None)?;
+        decode_ps_read(&raw)
     }
 
     fn install_dir(sidecar: &Path) -> Option<String> {
@@ -456,7 +575,22 @@ mod platform {
 
     pub fn status(sidecar: &Path) -> InstallStatus {
         let dir = install_dir(sidecar);
-        let user_path = powershell(READ, None).unwrap_or_default();
+        let user_path = match read_user_path() {
+            Ok(p) => p,
+            Err(e) => {
+                // 读失败不能悄悄当成「没装」——那样用户已经装过的状态会在偶发的 PowerShell 抽风
+                // 后被前端展示成「未添加」, 诱导用户再点一次「添加」。保底展示未添加 (不确定就不
+                // 显示已装), 但把原因记进日志, 方便排查是不是宿主机 PowerShell 环境有问题。
+                tracing::warn!(error = %e, "读取用户 PATH 失败, 状态展示为未添加");
+                return InstallStatus {
+                    kind: InstallKind::UserPath,
+                    in_path: false,
+                    installed_at: None,
+                    blocked: None,
+                    local_bin_off_path: false,
+                };
+            }
+        };
         let in_path = dir.as_deref().is_some_and(|d| path_contains(&user_path, d));
         InstallStatus {
             kind: InstallKind::UserPath,
@@ -469,22 +603,26 @@ mod platform {
 
     pub fn install(sidecar: &Path) -> InstallResult {
         let dir = install_dir(sidecar).ok_or("无法确定安装目录")?;
-        let current = powershell(READ, None)?;
+        let current = read_user_path()?;
         let next = path_with(&current, &dir);
         if next == current {
             return Ok(Outcome::Done);
         }
-        powershell(WRITE, Some(&next)).map(|_| Outcome::Done)
+        // 写之前把原值记进日志: WRITE 是覆盖式写整个 PATH 字符串, 一旦哪里算错, 这是用户唯一能
+        // 从 app 日志里手动抄回去的记录。
+        tracing::info!(old = %current, "修改用户 PATH 前的原值");
+        powershell(PS_WRITE, Some(&next)).map(|_| Outcome::Done)
     }
 
     pub fn uninstall(sidecar: &Path) -> InstallResult {
         let dir = install_dir(sidecar).ok_or("无法确定安装目录")?;
-        let current = powershell(READ, None)?;
+        let current = read_user_path()?;
         let next = path_without(&current, &dir);
         if next == current {
             return Ok(Outcome::Done);
         }
-        powershell(WRITE, Some(&next)).map(|_| Outcome::Done)
+        tracing::info!(old = %current, "修改用户 PATH 前的原值");
+        powershell(PS_WRITE, Some(&next)).map(|_| Outcome::Done)
     }
 }
 
@@ -512,8 +650,7 @@ mod platform {
         }
         let target = target();
         let state = target.as_deref().map(|t| copy_state(t, sidecar)).unwrap_or(CopyState::Absent);
-        let in_path = state == CopyState::Ours;
-        let blocked = (state == CopyState::Foreign).then_some(InstallBlocked::Occupied);
+        let (in_path, blocked) = copy_status_fields(&state);
         let off_path = match (&target, std::env::var("PATH")) {
             (Some(t), Ok(p)) => !t.parent().is_some_and(|d| unix_path_contains(&p, d)),
             _ => false,
@@ -556,6 +693,9 @@ mod tests {
         // 外置硬盘上装了 Applications 目录: .app 不直接坐在卷根上, 是合法安装, 不拦。
         let external = Path::new("/Volumes/SSD/Applications/cc-router.app/Contents/MacOS/cc-router-tui");
         assert_eq!(macos_blocked(external), None);
+        // 大小写不敏感: cc-router.APP 也算 .app 后缀 (fix-2 F7)。
+        let upper = Path::new("/Volumes/X/cc-router.APP/Contents/MacOS/cc-router-tui");
+        assert_eq!(macos_blocked(upper), Some(InstallBlocked::OnDiskImage));
     }
 
     #[cfg(unix)]
@@ -636,9 +776,20 @@ mod tests {
         std::fs::write(&target, b"someone else's binary").unwrap();
         assert_eq!(copy_state(&target, &sidecar), CopyState::Foreign);
 
-        // 加上 marker: app 更新后 sidecar 换了字节, 但这其实是自家旧副本
-        std::fs::write(dir.path().join(COPY_MARKER), b"").unwrap();
+        // marker 记录的 (长度, mtime) 与 target 现在的 metadata 完全对得上: 自家旧副本
+        let (len, mtime) = file_len_and_mtime(&target).unwrap();
+        std::fs::write(dir.path().join(COPY_MARKER), marker_content(len, mtime)).unwrap();
         assert_eq!(copy_state(&target, &sidecar), CopyState::StaleOurs);
+
+        // marker 内容是垃圾 (解析不出两个数字): 不信它, 当 Foreign
+        std::fs::write(dir.path().join(COPY_MARKER), b"not a marker\n").unwrap();
+        assert_eq!(copy_state(&target, &sidecar), CopyState::Foreign);
+
+        // 孤儿 marker: 数字能解析, 但跟 target 现在的 metadata 对不上 (target 内容换过): 不信它
+        std::fs::write(dir.path().join(COPY_MARKER), marker_content(len + 1, mtime)).unwrap();
+        assert_eq!(copy_state(&target, &sidecar), CopyState::Foreign);
+
+        std::fs::remove_file(dir.path().join(COPY_MARKER)).unwrap();
 
         // 符号链接: 哪怕指向 sidecar 本身, 也不算 Ours (copy_install 只会放普通文件)
         std::fs::remove_file(&target).unwrap();
@@ -649,6 +800,32 @@ mod tests {
         std::fs::remove_file(&target).unwrap();
         std::fs::create_dir(&target).unwrap();
         assert_eq!(copy_state(&target, &sidecar), CopyState::Foreign);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn orphan_marker_does_not_promote_a_foreign_file_to_stale_ours() {
+        let dir = tempfile::tempdir().unwrap();
+        let sidecar = dir.path().join("sidecar");
+        std::fs::write(&sidecar, b"v2").unwrap();
+        let target = dir.path().join("target");
+        std::fs::write(&target, b"user's own binary, unrelated to us").unwrap();
+        // 孤儿 marker: 用户手动删过我们的旧副本、自己放了别的文件, marker 还留在原地,
+        // 但记录的数字跟这份新文件的 metadata 对不上——fix-2 F5 修的就是这种情况。
+        std::fs::write(dir.path().join(COPY_MARKER), marker_content(999_999, 1)).unwrap();
+
+        assert_eq!(copy_state(&target, &sidecar), CopyState::Foreign);
+        assert!(copy_install(&sidecar, &target).is_err());
+        assert_eq!(std::fs::read(&target).unwrap(), b"user's own binary, unrelated to us");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn copy_status_fields_matches_each_state() {
+        assert_eq!(copy_status_fields(&CopyState::Ours), (true, None));
+        assert_eq!(copy_status_fields(&CopyState::Foreign), (false, Some(InstallBlocked::Occupied)));
+        assert_eq!(copy_status_fields(&CopyState::StaleOurs), (false, None));
+        assert_eq!(copy_status_fields(&CopyState::Absent), (false, None));
     }
 
     #[cfg(unix)]
@@ -696,21 +873,30 @@ mod tests {
 
         copy_uninstall(&target, &sidecar).unwrap(); // 没装过: 无事发生
 
-        // 旧副本是我们自己放的 (内容对不上新 sidecar, 但旁边有 marker —— StaleOurs): 覆盖后必须是 0755
+        // 旧副本是我们自己放的 v1 (marker 记录跟它的 (长度, mtime) 匹配 —— StaleOurs): 覆盖后
+        // 必须是 0755, marker 必须更新成新副本的数字 (不能留着 v1 的旧值)。
         std::fs::create_dir_all(target.parent().unwrap()).unwrap();
         std::fs::write(&target, b"v1").unwrap();
         std::fs::set_permissions(&target, std::fs::Permissions::from_mode(0o644)).unwrap();
-        std::fs::write(target.parent().unwrap().join(COPY_MARKER), b"").unwrap();
+        let (v1_len, v1_mtime) = file_len_and_mtime(&target).unwrap();
+        std::fs::write(target.parent().unwrap().join(COPY_MARKER), marker_content(v1_len, v1_mtime)).unwrap();
         assert_eq!(copy_state(&target, &sidecar), CopyState::StaleOurs);
 
         copy_install(&sidecar, &target).unwrap();
         assert_eq!(std::fs::read(&target).unwrap(), b"v2");
         assert_eq!(std::fs::metadata(&target).unwrap().permissions().mode() & 0o777, 0o755);
-        assert!(target.parent().unwrap().join(COPY_MARKER).is_file(), "marker 保留, 供下次识别");
+        let marker_path = target.parent().unwrap().join(COPY_MARKER);
+        assert!(marker_path.is_file(), "marker 保留, 供下次识别");
+        let (v2_len, v2_mtime) = file_len_and_mtime(&target).unwrap();
+        assert_eq!(
+            parse_marker(&std::fs::read_to_string(&marker_path).unwrap()),
+            Some((v2_len, v2_mtime)),
+            "marker 必须更新到 v2 的 (长度, mtime), 不能留着 v1 的旧值"
+        );
 
         copy_uninstall(&target, &sidecar).unwrap();
         assert!(!target.exists());
-        assert!(!target.parent().unwrap().join(COPY_MARKER).exists(), "marker 跟着一起删");
+        assert!(!marker_path.exists(), "marker 跟着一起删");
         assert!(target.parent().unwrap().is_dir(), "只删自己的文件, 不删 ~/.local/bin");
     }
 
@@ -730,15 +916,22 @@ mod tests {
         let shell = symlink_shell(Path::new("/Users/o'brien/cc-router.app/Contents/MacOS/cc-router-tui"), Path::new("/usr/local/bin/cc-router-tui"));
         assert_eq!(
             shell,
-            r"mkdir -p '/usr/local/bin' && ln -sfn '/Users/o'\''brien/cc-router.app/Contents/MacOS/cc-router-tui' '/usr/local/bin/cc-router-tui'"
+            r"[ ! -e '/usr/local/bin/cc-router-tui' ] || [ -L '/usr/local/bin/cc-router-tui' ] || exit 1; /bin/mkdir -p '/usr/local/bin' && /bin/ln -sfn '/Users/o'\''brien/cc-router.app/Contents/MacOS/cc-router-tui' '/usr/local/bin/cc-router-tui'"
         );
         let script = admin_script(&shell);
-        assert!(script.starts_with("do shell script \"mkdir -p "));
+        assert!(script.starts_with("do shell script \"[ ! -e "));
         assert!(script.ends_with("\" with administrator privileges"));
         // shell 里的反斜杠在 AppleScript 字面量里必须成对
         assert!(script.contains(r"o'\\''brien"), "{script}");
-        assert_eq!(unlink_shell(Path::new("/usr/local/bin/cc-router-tui")), "rm -f '/usr/local/bin/cc-router-tui'");
+        assert_eq!(
+            unlink_shell(Path::new("/usr/local/bin/cc-router-tui")),
+            "[ -L '/usr/local/bin/cc-router-tui' ] || exit 0; /bin/rm -f '/usr/local/bin/cc-router-tui'"
+        );
     }
+
+    /// bite check (b) 记录: 把 `symlink_shell` 改回不带 `[ ! -e L ] || [ -L L ] || exit 1;` 这道
+    /// check-then-act 重新检查, 上面这个精确字符串断言就会失败——这就是「测试真的咬得住」的证明,
+    /// 已经手动做过一次并还原, 见 final-fix-report.md。
 
     #[test]
     fn user_cancel_is_recognised() {
@@ -776,6 +969,44 @@ mod tests {
         assert_eq!(path_without(r"C:\Tools", r"C:\App"), r"C:\Tools");
         assert_eq!(path_without(r"C:\App", r"C:\App"), "");
     }
+
+    #[test]
+    fn ps_scripts_fail_closed_and_contain_no_double_quotes() {
+        for script in [PS_READ, PS_WRITE] {
+            assert!(!script.contains('"'), "脚本不能含双引号 (Windows 参数转义会变复杂): {script}");
+            assert!(script.starts_with("$ErrorActionPreference='Stop';"), "必须第一句就 fail-closed: {script}");
+        }
+        assert!(PS_READ.contains("CCR1:"));
+        assert!(PS_READ.contains("UTF8Encoding $false"));
+        assert!(PS_READ.contains("DoNotExpandEnvironmentNames"));
+        assert!(PS_WRITE.contains("GetValueKind"));
+        assert!(PS_WRITE.contains("ExpandString"));
+        assert!(PS_WRITE.contains("CCR_NEW_PATH"));
+    }
+
+    #[test]
+    fn decode_ps_read_cases() {
+        assert_eq!(decode_ps_read(b"CCR1:C:\\Tools;C:\\App").unwrap(), r"C:\Tools;C:\App");
+        // BOM: 只剥一个
+        let mut with_bom = "\u{FEFF}".as_bytes().to_vec();
+        with_bom.extend_from_slice(b"CCR1:C:\\Tools");
+        assert_eq!(decode_ps_read(&with_bom).unwrap(), r"C:\Tools");
+        // 空值是合法的空 PATH, 不是错误
+        assert_eq!(decode_ps_read(b"CCR1:").unwrap(), "");
+        // 结尾的 ; 和空格必须原样保留, 不能被 trim——这段之后要原样写回注册表
+        assert_eq!(decode_ps_read("CCR1:C:\\Tools; ".as_bytes()).unwrap(), "C:\\Tools; ");
+        // 标记缺失: 读到的东西不是我们期望的脚本产出, 当错误处理
+        assert!(decode_ps_read(b"C:\\Tools").is_err());
+        assert!(decode_ps_read(b"").is_err());
+        // 非法 UTF-8 (含典型的 GBK 字节, 例如 "你" 在 GBK 里是 0xC4 0xE3, 不是合法 UTF-8 序列):
+        // 严格拒绝, 不能靠 from_utf8_lossy 悄悄换成 U+FFFD 再当正常值用。
+        assert!(decode_ps_read(&[0xC4, 0xE3]).is_err());
+        assert!(decode_ps_read(&[0xFF, 0xFE, 0x00]).is_err());
+    }
+
+    /// bite check (a) 记录: 把 `decode_ps_read` 里 `CCR1:` 的校验去掉 (直接 `Ok(s.to_string())`),
+    /// 上面 `decode_ps_read_cases` 里「标记缺失 → Err」的两个断言就会失败——已手动做过一次并还原,
+    /// 见 final-fix-report.md。
 
     #[test]
     fn powershell_path_resolves_absolutely_with_fallback() {
