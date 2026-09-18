@@ -48,12 +48,16 @@ pub enum Dir {
 pub struct Fx {
     enabled: bool,
     mgr: EffectManager<FxKey>,
+    /// toast 消散效果还剩多久播完; `None` = 没在播 (或从没触发过), `Some(ZERO)` = 播完了。
+    /// 独立于 `mgr` 追踪是因为 `EffectManager` 一旦效果结束就把它整个清掉, 调用方问不出
+    /// 「它是不是刚播完」——而 `draw_toast` 恰好需要这个「刚播完」的瞬间去停止继续画它 (H2)。
+    toast_out_left: Option<std::time::Duration>,
 }
 
 impl Fx {
     /// `enabled = false` 时所有方法都是空操作, 调用点不需要分支。
     pub fn new(enabled: bool) -> Self {
-        Self { enabled, mgr: EffectManager::default() }
+        Self { enabled, mgr: EffectManager::default(), toast_out_left: None }
     }
 
     pub fn enabled(&self) -> bool {
@@ -69,6 +73,9 @@ impl Fx {
     pub fn process(&mut self, elapsed: std::time::Duration, buf: &mut Buffer, area: Rect) {
         if self.enabled {
             self.mgr.process_effects(Duration::from_millis(elapsed.as_millis() as u32), buf, area);
+            if let Some(left) = self.toast_out_left {
+                self.toast_out_left = Some(left.saturating_sub(elapsed));
+            }
         }
     }
 
@@ -81,6 +88,7 @@ impl Fx {
     /// 丢掉所有在播的效果。终端太小时没有可以叠加动效的画面, 不清掉的话 `is_running()` 会一直为真。
     pub fn clear(&mut self) {
         self.mgr = EffectManager::default();
+        self.toast_out_left = None;
     }
 
     /// 启动: logo 逐格凝聚, 其余内容从暗色淡入。
@@ -114,10 +122,21 @@ impl Fx {
             .with_pattern(SweepPattern::right_to_left(8))
             .with_area(toast);
         self.add(FxKey::Toast, effect);
+        self.toast_out_left = None;
     }
 
     pub fn toast_out(&mut self, toast: Rect) {
         self.add(FxKey::Toast, fx::dissolve((ms::TOAST_OUT, Interpolation::QuadIn)).with_area(toast));
+        if self.enabled {
+            self.toast_out_left = Some(std::time::Duration::from_millis(u64::from(ms::TOAST_OUT)));
+        }
+    }
+
+    /// 消散效果是否已经播完 (`toast_out` 从触发到现在累计流逝的时间 ≥ `ms::TOAST_OUT`)。
+    /// 关掉动效时恒为 `false`——没有消散效果, 也就没有「刚播完」这回事, 调用方仍按 `Toast::expired`
+    /// (`toast::LIFETIME_MS`) 的老逻辑显示到过期为止。
+    pub fn toast_out_finished(&self) -> bool {
+        matches!(self.toast_out_left, Some(d) if d.is_zero())
     }
 
     /// 功能性动画: 某条订阅的状态变了, 那一行从状态色回落, 视线直接落过去。
@@ -218,5 +237,32 @@ mod tests {
         fx.row_changed("b", PART, Color::Red);
         fx.process(StdDuration::from_millis(200), &mut buf, AREA);
         assert!(fx.is_running(), "b 才播了 200ms");
+    }
+
+    /// H2: `draw_toast` 靠 `toast_out_finished()` 判断消散有没有播完, 才能在「播完但还没被
+    /// `Tick` 弹出」的空隙里不再画它 —— 这条测试锁住这个信号本身的语义。
+    #[test]
+    fn toast_out_finished_tracks_the_dissolve() {
+        let mut fx = Fx::new(true);
+        let mut buf = Buffer::empty(AREA);
+        assert!(!fx.toast_out_finished(), "还没触发 toast_out");
+
+        fx.toast_out(PART);
+        assert!(!fx.toast_out_finished(), "刚触发, 还没开始流逝时间");
+
+        fx.process(StdDuration::from_millis(u64::from(ms::TOAST_OUT) / 2), &mut buf, AREA);
+        assert!(!fx.toast_out_finished(), "播到一半");
+
+        fx.process(StdDuration::from_millis(u64::from(ms::TOAST_OUT)), &mut buf, AREA);
+        assert!(fx.toast_out_finished(), "累计流逝已经 ≥ TOAST_OUT");
+
+        fx.toast_in(PART, Color::DarkGray);
+        assert!(!fx.toast_out_finished(), "toast_in 重置了标记");
+
+        // 关掉动效时恒为 false: 没有消散效果, 也就没有「刚播完」这回事。
+        let mut disabled = Fx::new(false);
+        disabled.toast_out(PART);
+        disabled.process(StdDuration::from_millis(u64::from(ms::TOAST_OUT) * 2), &mut buf, AREA);
+        assert!(!disabled.toast_out_finished(), "关闭动效时恒为 false");
     }
 }

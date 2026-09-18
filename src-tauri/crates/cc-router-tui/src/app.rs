@@ -291,6 +291,11 @@ impl App {
             }
             Some(_) => {}
         }
+        // 消散效果播完之后不再画它: 它要等下一次 `Action::Tick` (可能晚 200ms 才到) 才会被真正
+        // 弹出队列, 这段空隙里任何重画 (按键 / SSE 事件) 都不能让它以全亮度闪回 (H2)。
+        if toast.fading && self.fx.toast_out_finished() {
+            return;
+        }
         toast::draw(frame, area, toast, &self.theme);
     }
 

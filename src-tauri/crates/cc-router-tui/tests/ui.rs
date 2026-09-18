@@ -472,6 +472,28 @@ fn the_first_load_does_not_pulse() {
     assert!(!a.wants_fast_frames(), "首次加载没有旧值可比, 不该脉冲");
 }
 
+/// H2: toast 的消散效果 (`fx::ms::TOAST_OUT` = 300ms) 播完之后, `Action::Tick` 要等到下一个
+/// 250ms 档位才会真正把它弹出队列 —— 这段空隙里任何重画 (按键 / SSE 事件触发, 都不带
+/// `elapsed` 时间) 不该让它以全亮度闪回。
+#[test]
+fn a_dissolved_toast_does_not_flash_back() {
+    let mut a = loaded(true);
+    settle(&mut a); // 播完启动动效
+
+    a.update(Action::ConnectionLost);
+    a.update(Action::Connected { app_version: VERSION.into() });
+    settle(&mut a); // 播完 toast_in
+
+    a.update(Action::Tick { now_ms: NOW + 2_750 });
+    render(&mut a, 80, 24); // 触发消散 (fading = true), 这一帧还没播
+
+    render_with(&mut a, 80, 24, Duration::from_millis(400)); // 播完消散 (300ms 足够)
+
+    // 模拟 Tick 之前的一次按键重画: 没有新的 Tick, 消散早已播完。
+    let out = render_with(&mut a, 80, 24, Duration::ZERO);
+    assert!(!out.contains(ZH.toast_reconnected), "消散播完后不该再闪回\n{out}");
+}
+
 #[test]
 fn quit_action_yields_the_quit_cmd() {
     assert_eq!(loaded(false).update(Action::Quit), vec![Cmd::Quit]);

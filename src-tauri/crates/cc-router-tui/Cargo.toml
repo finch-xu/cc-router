@@ -14,7 +14,6 @@ name = "cc-router-tui-bin"
 path = "src/main.rs"
 
 [dependencies]
-anyhow = "1"
 # event-stream: 异步读键盘。ratatui 再导出的就是这个 crate, 这里只是为了打开 feature (cargo 会合并)。
 crossterm = { version = "0.29", features = ["event-stream"] }
 futures-util = { version = "0.3", default-features = false }

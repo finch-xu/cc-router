@@ -18,6 +18,7 @@ const HELP: &str = "\
 cc-router-tui — cc-router 的终端界面
 
 用法: cc-router-tui [选项]
+不带参数运行即进入界面 (需要 cc-router 桌面 app 正在运行, 且已在 设置 → 安全与访问 → 终端界面 打开开关)。
 
 选项:
   --check            连接正在运行的 cc-router 并打印状态, 然后退出
@@ -71,6 +72,25 @@ fn explain(err: &ClientError) -> String {
     }
 }
 
+/// `ui` 里两类完全不同的失败: 连不上桌面 app (`ClientError`, 走 `explain`) vs 本地终端本身
+/// 初始化不了 (比如没有 tty)。故意不把后者塞进 `ClientError::Transport`——那条分支的 Display
+/// 是「网络错误: …」, 会让「请在真正的终端窗口里运行」被误报成网络问题。
+enum Failure {
+    Client(ClientError),
+    Terminal(std::io::Error),
+}
+
+impl From<ClientError> for Failure {
+    fn from(e: ClientError) -> Self {
+        Failure::Client(e)
+    }
+}
+
+/// 终端初始化失败 (没有可用 tty 等) 时给人看的一句话。
+fn terminal_failure_message(err: &std::io::Error) -> String {
+    format!("无法初始化终端: {err}\n请在真正的终端窗口里运行 cc-router-tui。")
+}
+
 fn env(key: &str) -> Option<String> {
     std::env::var(key).ok()
 }
@@ -103,7 +123,7 @@ async fn check(client: Client) -> Result<(), ClientError> {
     Ok(())
 }
 
-async fn ui(client: Client, no_fx: bool) -> Result<(), ClientError> {
+async fn ui(client: Client, no_fx: bool) -> Result<(), Failure> {
     // 进界面前先调一次: 既拿到语言设置, 也把「未运行 / 未启用」这类错误挡在备用屏幕之外。
     let settings: Settings = client.call(commands::GET_SETTINGS, json!({})).await?;
     let theme = Theme::new(ColorMode::detect(env));
@@ -115,7 +135,7 @@ async fn ui(client: Client, no_fx: bool) -> Result<(), ClientError> {
         now_ms: runtime::unix_ms(),
         tui_version: env!("CARGO_PKG_VERSION"),
     });
-    runtime::run(Arc::new(client), app).await.map_err(|e| ClientError::Transport(format!("终端: {e}")))
+    runtime::run(Arc::new(client), app).await.map_err(Failure::Terminal)
 }
 
 #[tokio::main]
@@ -135,15 +155,19 @@ async fn main() -> ExitCode {
             return ExitCode::from(2);
         }
     };
-    let result = match connect(&args) {
-        Ok(client) if args.check => check(client).await,
+    let result: Result<(), Failure> = match connect(&args) {
+        Ok(client) if args.check => check(client).await.map_err(Failure::Client),
         Ok(client) => ui(client, args.no_fx).await,
-        Err(e) => Err(e),
+        Err(e) => Err(Failure::Client(e)),
     };
     match result {
         Ok(()) => ExitCode::SUCCESS,
-        Err(e) => {
+        Err(Failure::Client(e)) => {
             eprintln!("{}", explain(&e));
+            ExitCode::FAILURE
+        }
+        Err(Failure::Terminal(e)) => {
+            eprintln!("{}", terminal_failure_message(&e));
             ExitCode::FAILURE
         }
     }
@@ -180,5 +204,15 @@ mod tests {
     fn bad_input_is_reported_not_ignored() {
         assert_eq!(parse(&["--data-dir"]), Parsed::Invalid("--data-dir 需要一个路径".into()));
         assert_eq!(parse(&["--wat"]), Parsed::Invalid("未知参数: --wat".into()));
+    }
+
+    /// H1: 终端初始化失败 (没有 tty 等) 不该被当成「网络错误」报出来——那是 `ClientError::Transport`
+    /// 的文案, 和「连不上桌面 app」是两码事, 会把用户带偏。
+    #[test]
+    fn terminal_failure_message_is_not_reported_as_a_network_error() {
+        let err = std::io::Error::other("x");
+        let msg = terminal_failure_message(&err);
+        assert!(msg.contains("无法初始化终端"), "{msg}");
+        assert!(!msg.contains("网络错误"), "{msg}");
     }
 }

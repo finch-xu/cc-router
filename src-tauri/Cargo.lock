@@ -825,7 +825,6 @@ dependencies = [
 name = "cc-router-tui"
 version = "5.0.0"
 dependencies = [
- "anyhow",
  "crossterm",
  "futures-util",
  "insta",
