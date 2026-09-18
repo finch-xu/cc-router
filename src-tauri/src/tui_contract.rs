@@ -82,14 +82,18 @@ fn subscription_matches() {
     row.display_name = "智谱主号".into();
     row.provider_display_name = "智谱".into();
     let id = row.id.to_string();
-    let real = SubscriptionDto::from_runtime(&SubscriptionRuntime::from_row(row), Vec::new());
+    let mut rt = SubscriptionRuntime::from_row(row);
+    rt.cooldown_until = Some(chrono::DateTime::from_timestamp_millis(1_700_000_000_000).unwrap());
+    rt.last_error_message = Some("上游 429".into());
+    let real = SubscriptionDto::from_runtime(&rt, Vec::new());
     let view: dto::Subscription = through_json(&real);
     assert_eq!(view.id, id);
     assert_eq!(view.display_name, "智谱主号");
     assert_eq!(view.provider_display_name, "智谱");
     assert!(view.enabled);
     assert_eq!(view.state, dto::SubscriptionState::Healthy);
-    assert_eq!(view.cooldown_until, None);
+    assert_eq!(view.cooldown_until, Some(1_700_000_000_000));
+    assert_eq!(view.last_error_message.as_deref(), Some("上游 429"));
 }
 
 /// 后端的每一个状态, TUI 都必须认得 —— 落到 `Unknown` 说明 TUI 的枚举漏了一个。

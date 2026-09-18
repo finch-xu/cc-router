@@ -1,6 +1,7 @@
 //! 视图结构体: 只声明 TUI 实际用到的字段, 其余忽略 (serde 默认行为)。
-//! 与后端 DTO 的契约由 golden fixture 锁住: 主 crate 的测试把样例 DTO 序列化进
-//! `tests/fixtures/*.json`, 本文件的测试把它们反序列化回来。后端改字段名 → 主 crate 那边先失败。
+//! 与后端 DTO 的契约由主 crate 的 `src/tui_contract.rs` 锁住: 那边把主 crate 作为被测对象、
+//! 本 crate 作为 dev-dependency, 用真实 DTO 序列化后反序列化进这里的结构体。
+//! 后端改字段名 / 枚举值 → 那边的测试当场失败。给 TUI 加新字段时同步在那边加一条断言。
 
 use serde::Deserialize;
 
