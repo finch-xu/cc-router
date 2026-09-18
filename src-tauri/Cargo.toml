@@ -84,3 +84,8 @@ codegen-units = 1
 lto = true
 opt-level = "s"
 strip = true
+
+# 过程宏与 build script 只在构建期运行, 不进产物。macOS 26 (Darwin 27) 的 dyld 会拒绝加载被 strip 过的
+# 过程宏 dylib ("mis-aligned LINKEDIT string pool"), 导致 release 构建在 sqlx 的宏上失败; 对它们关掉 strip 无损。
+[profile.release.build-override]
+strip = false
