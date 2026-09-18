@@ -5,7 +5,7 @@ use std::process::ExitCode;
 
 use cc_router_tui::client::discovery::{default_data_dir, Platform};
 use cc_router_tui::client::dto::{ProxyStatus, Settings, Subscription, SubscriptionState};
-use cc_router_tui::client::{Client, ClientError};
+use cc_router_tui::client::{commands, Client, ClientError};
 use serde_json::json;
 
 const HELP: &str = "\
@@ -74,13 +74,13 @@ async fn check(args: Args) -> Result<(), ClientError> {
         None => default_data_dir(Platform::current(), |k| std::env::var(k).ok())?,
     };
     let client = Client::connect(&data_dir)?;
-    let status: ProxyStatus = client.call("proxy_status", json!({})).await?;
-    let settings: Settings = client.call("get_settings", json!({})).await?;
-    let subs: Vec<Subscription> = client.call("list_subscriptions", json!({})).await?;
+    let status: ProxyStatus = client.call(commands::PROXY_STATUS, json!({})).await?;
+    let settings: Settings = client.call(commands::GET_SETTINGS, json!({})).await?;
+    let subs: Vec<Subscription> = client.call(commands::LIST_SUBSCRIPTIONS, json!({})).await?;
     let _events = client.events().await?; // 只验证事件流能建立
     let rt = client.runtime().await;
 
-    let dispatchable = subs.iter().filter(|s| s.state == SubscriptionState::Healthy).count();
+    let dispatchable = subs.iter().filter(|s| s.enabled && s.state == SubscriptionState::Healthy).count();
     println!("已连接 cc-router {} (pid {})", rt.app_version, rt.pid);
     println!("  地址     {}", status.base_url);
     println!("  模式     {}{}", status.mode, if status.listen_all { " · 监听 0.0.0.0" } else { "" });

@@ -119,8 +119,12 @@ impl Client {
         let status = resp.status().as_u16();
         if status == 401 || status == 403 || status == 404 {
             let body = resp.text().await.unwrap_or_default();
-            // 命令名拼错也是 404, 但它带 JSON 体 —— 那是真的 API 错误, 重读密钥没用。
-            if body.contains("unknown_command") {
+            // 命令层的错误体形如 {"code": "...", ...} (字符串 code) —— 那是真的 API 错误
+            // (订阅不存在 / 命令名拼错等), 重读密钥没用。网关的 404 (空体) 与会话层的 401
+            // (Anthropic 风格, 无顶层 code) 都不满足这个形状, 仍走「密钥过期」重试路径。
+            let has_command_layer_code =
+                serde_json::from_str::<Value>(&body).ok().and_then(|v| v.get("code").and_then(Value::as_str).map(str::to_string)).is_some();
+            if has_command_layer_code {
                 return Err(api_error(status, &body));
             }
             let err = if status == 403 { api_error(status, &body) } else { ClientError::Disabled };
@@ -148,7 +152,7 @@ impl Client {
     /// `args` 是 camelCase 的参数对象, 无参数传 `json!({})`。
     pub async fn call<T: DeserializeOwned>(&self, name: &str, args: Value) -> Result<T, ClientError> {
         let resp = self
-            .send_with_retry(|http, base| http.post(format!("{base}/ui/api/cmd/{name}")).json(&args))
+            .send_with_retry(|http, base| http.post(format!("{base}/ui/api/cmd/{name}")).timeout(Duration::from_secs(15)).json(&args))
             .await?;
         let status = resp.status();
         let body = resp.text().await.map_err(|e| ClientError::Transport(e.to_string()))?;
@@ -270,6 +274,34 @@ mod tests {
         write_runtime(dir.path(), port_of(&server), "s");
         let err = Client::connect(dir.path()).unwrap().call::<Value>("nope", json!({})).await.unwrap_err();
         assert!(matches!(&err, ClientError::Api { status: 404, code, .. } if code == "unknown_command"), "{err}");
+    }
+
+    /// 命令层的 404 (订阅不存在等) 带 JSON 体, 是真的 API 错误, 不能当成密钥过期去重试。
+    #[tokio::test]
+    async fn command_layer_404_with_code_is_an_api_error_and_is_not_retried() {
+        let server = MockServer::start().await;
+        Mock::given(method("POST"))
+            .respond_with(ResponseTemplate::new(404).set_body_json(json!({"code":"subscription_not_found","message":"订阅不存在"})))
+            .expect(1)
+            .mount(&server)
+            .await;
+        let dir = tempfile::tempdir().unwrap();
+        write_runtime(dir.path(), port_of(&server), "s");
+        let err = Client::connect(dir.path()).unwrap().call::<Value>("get_subscription", json!({"id":"x"})).await.unwrap_err();
+        assert!(matches!(&err, ClientError::Api { status: 404, code, .. } if code == "subscription_not_found"), "{err}");
+    }
+
+    /// runtime.json 在两次尝试之间消失了 (app 退出后被清理): 报告的应是第一次的判断, 而不是「找不到文件」。
+    #[tokio::test]
+    async fn reload_failure_surfaces_the_original_error() {
+        let server = MockServer::start().await;
+        Mock::given(method("POST")).respond_with(ResponseTemplate::new(401)).expect(1).mount(&server).await;
+        let dir = tempfile::tempdir().unwrap();
+        write_runtime(dir.path(), port_of(&server), "s");
+        let client = Client::connect(dir.path()).unwrap();
+        std::fs::remove_file(dir.path().join(RUNTIME_FILE)).unwrap();
+        let err = client.call::<Value>("x", json!({})).await.unwrap_err();
+        assert!(matches!(err, ClientError::Disabled), "{err}");
     }
 
     #[tokio::test]

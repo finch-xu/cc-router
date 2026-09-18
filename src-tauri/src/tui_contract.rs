@@ -105,3 +105,12 @@ fn every_backend_state_is_known_to_the_tui() {
         assert_ne!(view, dto::SubscriptionState::Unknown, "{state:?}");
     }
 }
+
+/// TUI 调用的每个 command 名都必须还在 web_commands! 表里 —— 改名会在这里炸, 而不是在用户终端里变成 unknown_command。
+#[test]
+fn commands_are_registered() {
+    use crate::proxy::web::api::REGISTERED;
+    for name in cc_router_tui::client::commands::ALL {
+        assert!(REGISTERED.contains(name), "TUI 调用的 command `{name}` 不在 web_commands! 表里");
+    }
+}
