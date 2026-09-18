@@ -19,9 +19,11 @@ crate-type = ["staticlib", "cdylib", "rlib"]
 tauri-build = { version = "2", features = [] }
 
 [dependencies]
-# 钉住以规避 bitflags>=2.10 的 named-flags 递归宏撞穿 dispatch2 0.3.1 的 recursion_limit
-# TUI 引入 ratatui 0.30 需要 bitflags ^2.10; dispatch2 更新已兼容
-bitflags = "2"
+# 下限钉在 2.13.2: bitflags 2.10 / 2.11 的 named-flags 宏按 flag 递归展开, 会撞穿 dispatch2 0.3.1 的
+# recursion_limit (ac72e29 曾因此钉死 =2.9.4)。TUI 的 ratatui 0.30 要求 bitflags ^2.10, 不能再钉旧版;
+# 2.13.2 已实测可编译 dispatch2 0.3.1 (cargo clean -p dispatch2 && cargo check)。升级 bitflags 后若 macOS 构建
+# 报 "recursion limit reached while expanding __bitflags_flag_name!", 回到这里。
+bitflags = "2.13.2"
 tauri = { version = "2", features = ["tray-icon"] }
 tauri-plugin-clipboard-manager = "2"
 tauri-plugin-dialog = "2"
