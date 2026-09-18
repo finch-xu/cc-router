@@ -450,6 +450,10 @@ pub struct SubscriptionDto {
     pub quota_usage: Vec<QuotaUsageDto>,
     pub enabled: bool,
     pub state: SubscriptionState,
+    /// 调度器此刻会不会选它: `SubscriptionRuntime::is_dispatchable` 的结果 (启用 + 健康 + 不在冷却 + 限额未满)。
+    /// 给只想显示「N 个可调度」的客户端 (TUI) 用, 免得它们各自重算这四个条件。
+    #[serde(default)]
+    pub is_dispatchable: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub cooldown_until: Option<i64>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -594,6 +598,7 @@ impl SubscriptionDto {
             },
             enabled: rt.row.enabled,
             state: rt.state,
+            is_dispatchable: rt.is_dispatchable(Utc::now()),
             cooldown_until: rt.cooldown_until.map(|t| t.timestamp_millis()),
             last_error_message: rt.last_error_message.clone(),
             created_at: rt.row.created_at.timestamp_millis(),
@@ -742,6 +747,22 @@ mod tests {
         rt2.quota_usage.add(now, 1_000_000, 0, 0, 0);
         assert!(rt2.is_dispatchable(now));
         let _ = QuotaPeriod::Total;
+    }
+
+    #[test]
+    fn dto_is_dispatchable_follows_the_runtime() {
+        use crate::subscription::quota::TokenQuotas;
+        let mut row = SubscriptionRow::test_fixture("p", "e");
+        row.token_quotas = TokenQuotas { total: Some(100), ..Default::default() };
+        let mut rt = SubscriptionRuntime::from_row(row);
+        assert!(SubscriptionDto::from_runtime(&rt, vec![]).is_dispatchable);
+        rt.quota_usage.add(Utc::now(), 100, 0, 0, 0);
+        assert!(!SubscriptionDto::from_runtime(&rt, vec![]).is_dispatchable, "限额满了");
+
+        let mut row = SubscriptionRow::test_fixture("p", "e");
+        row.enabled = false;
+        let rt = SubscriptionRuntime::from_row(row);
+        assert!(!SubscriptionDto::from_runtime(&rt, vec![]).is_dispatchable, "手动停用");
     }
 
     #[test]

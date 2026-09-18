@@ -11,6 +11,8 @@ pub mod commands {
     pub const PROXY_STATUS: &str = "proxy_status";
     pub const GET_SETTINGS: &str = "get_settings";
     pub const LIST_SUBSCRIPTIONS: &str = "list_subscriptions";
+    pub const GET_OVERALL_STATS: &str = "get_overall_stats";
+    pub const GET_DAILY_SERIES: &str = "get_daily_series";
     /// 契约测试遍历这张表; 加新 command 时同时加进来。
-    pub const ALL: &[&str] = &[PROXY_STATUS, GET_SETTINGS, LIST_SUBSCRIPTIONS];
+    pub const ALL: &[&str] = &[PROXY_STATUS, GET_SETTINGS, LIST_SUBSCRIPTIONS, GET_OVERALL_STATS, GET_DAILY_SERIES];
 }

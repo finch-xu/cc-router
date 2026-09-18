@@ -4,7 +4,7 @@ use std::path::PathBuf;
 use std::process::ExitCode;
 
 use cc_router_tui::client::discovery::{default_data_dir, Platform};
-use cc_router_tui::client::dto::{ProxyStatus, Settings, Subscription, SubscriptionState};
+use cc_router_tui::client::dto::{ProxyStatus, Settings, Subscription};
 use cc_router_tui::client::{commands, Client, ClientError};
 use serde_json::json;
 
@@ -80,7 +80,7 @@ async fn check(args: Args) -> Result<(), ClientError> {
     let _events = client.events().await?; // 只验证事件流能建立
     let rt = client.runtime().await;
 
-    let dispatchable = subs.iter().filter(|s| s.enabled && s.state == SubscriptionState::Healthy).count();
+    let dispatchable = subs.iter().filter(|s| s.is_dispatchable).count();
     println!("已连接 cc-router {} (pid {})", rt.app_version, rt.pid);
     println!("  地址     {}", status.base_url);
     println!("  模式     {}{}", status.mode, if status.listen_all { " · 监听 0.0.0.0" } else { "" });

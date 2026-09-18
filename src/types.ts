@@ -276,6 +276,8 @@ export interface SubscriptionDto {
   quota_usage: QuotaUsageDto[];
   enabled: boolean;
   state: SubscriptionState;
+  /** 调度器此刻会不会选它 (启用 + 健康 + 不在冷却 + 限额未满), 后端算好的。 */
+  is_dispatchable: boolean;
   cooldown_until?: number;
   last_error_message?: string;
   created_at: number;
