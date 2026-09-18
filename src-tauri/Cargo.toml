@@ -20,7 +20,8 @@ tauri-build = { version = "2", features = [] }
 
 [dependencies]
 # 钉住以规避 bitflags>=2.10 的 named-flags 递归宏撞穿 dispatch2 0.3.1 的 recursion_limit
-bitflags = "=2.9.4"
+# TUI 引入 ratatui 0.30 需要 bitflags ^2.10; dispatch2 更新已兼容
+bitflags = "2"
 tauri = { version = "2", features = ["tray-icon"] }
 tauri-plugin-clipboard-manager = "2"
 tauri-plugin-dialog = "2"

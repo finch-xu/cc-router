@@ -15,12 +15,22 @@ path = "src/main.rs"
 
 [dependencies]
 anyhow = "1"
+# event-stream: 异步读键盘。ratatui 再导出的就是这个 crate, 这里只是为了打开 feature (cargo 会合并)。
+crossterm = { version = "0.29", features = ["event-stream"] }
+futures-util = { version = "0.3", default-features = false }
+ratatui = "0.30"
 reqwest = { version = "0.13", default-features = false, features = ["rustls", "json"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
+# 不要默认的 dsl feature (会带进一个解析器), 效果全部用 Rust API 构造。
+tachyonfx = { version = "0.25", default-features = false, features = ["std"] }
 thiserror = "2"
+throbber-widgets-tui = "0.11"
 tokio = { version = "1", features = ["rt-multi-thread", "macros", "time", "sync"] }
+tui-big-text = "0.8"
+unicode-width = "0.2"
 
 [dev-dependencies]
+insta = "1"
 tempfile = "3"
 wiremock = "0.6"
