@@ -19,6 +19,7 @@ pub mod tls;
 pub mod tray;
 #[cfg(test)]
 mod tui_contract;
+pub mod tui_install;
 pub mod updater_source;
 pub mod virtual_model;
 pub mod window;
