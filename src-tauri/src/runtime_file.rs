@@ -174,6 +174,7 @@ mod tests {
             "proxy/server.rs",
             "proxy/web/gate.rs",
             "proxy/web/auth.rs",
+            "tui_contract.rs", // 仅 cfg(test): 验证 TUI 读得懂 runtime.json
         ];
         fn walk(dir: &std::path::Path, out: &mut Vec<std::path::PathBuf>) {
             for entry in std::fs::read_dir(dir).unwrap().filter_map(Result::ok) {

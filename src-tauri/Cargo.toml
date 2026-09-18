@@ -81,6 +81,8 @@ if-addrs = "0.13"
 [dev-dependencies]
 wiremock = "0.6"
 tempfile = "3"
+# 契约测试用: 把真实 DTO 反序列化进 TUI 的视图结构体。依赖方向只能是这一个。
+cc-router-tui = { path = "crates/cc-router-tui" }
 
 [profile.release]
 panic = "abort"

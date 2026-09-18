@@ -711,6 +711,7 @@ dependencies = [
  "base64 0.23.1",
  "bitflags 2.9.4",
  "bytes",
+ "cc-router-tui",
  "chrono",
  "crc32fast",
  "futures",
