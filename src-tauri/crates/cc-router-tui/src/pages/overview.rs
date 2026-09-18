@@ -96,11 +96,13 @@ impl Overview {
 
     fn draw_hero(&mut self, frame: &mut Frame, area: Rect, show_logo: bool, ctx: &DrawCtx) {
         let info_area = if show_logo {
-            // 左边空 2 列, 让 logo 与下面面板里的文字左对齐 (边框 1 + 内距 1)。
+            // 左边空 2 列, 让 logo 与下面面板里的文字左对齐 (边框 1 + 内距 1); logo 与信息区之间留 3 列。
+            // 信息区不再额外收内距 (fix round 2): 80 列终端下旧的「2 + 36 + 2 + 内距 2」只剩 36 列,
+            // 放不下「监听 0.0.0.0」这行 (http 37 列 / https 38 列), 现在满打满算给到 39 列。
             let [_, logo, _, info] = Layout::horizontal([
                 Constraint::Length(2),
                 Constraint::Length(LOGO_WIDTH),
-                Constraint::Length(2),
+                Constraint::Length(3),
                 Constraint::Min(0),
             ])
             .areas(area);
@@ -114,7 +116,8 @@ impl Overview {
             info.centered_vertically(Constraint::Length(2))
         } else {
             self.logo_area = None;
-            area
+            // 没有 logo 时手动留 2 列左内距, 让文字仍然与下面面板里的内容左对齐。
+            area.inner(ratatui::layout::Margin::new(2, 0))
         };
 
         let s = ctx.s;
@@ -132,7 +135,7 @@ impl Overview {
                 ctx.theme.muted_style(),
             ));
         }
-        frame.render_widget(Paragraph::new(lines), info_area.inner(ratatui::layout::Margin::new(2, 0)));
+        frame.render_widget(Paragraph::new(lines), info_area);
     }
 
     fn draw_today(&mut self, frame: &mut Frame, area: Rect, ctx: &mut DrawCtx, flash_values: &[&'static str]) {

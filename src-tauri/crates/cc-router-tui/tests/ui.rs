@@ -472,8 +472,21 @@ fn empty_subscription_list_and_listen_all_are_shown() {
     d.subscriptions = vec![];
     d.status.listen_all = true;
     a.update(Action::OverviewLoaded(Box::new(d)));
-    // 80 列下 logo 会把「基址 · 监听 0.0.0.0」这行挤到只剩 36 列, 放不下, 用宽一点的终端。
-    let out = render(&mut a, 120, 24);
+    // 80×24 是支持的最小终端: 「基址 · 监听 0.0.0.0」这一整行必须放得下, 不能被裁掉 (fix round 2)。
+    let out = render(&mut a, 80, 24);
     assert!(out.contains(ZH.ov_no_subs), "{out}");
     assert!(out.contains(ZH.ov_listen_all), "{out}");
+    assert!(out.contains("监听 0.0.0.0"), "{out}");
+
+    // https 的 base_url 比 http 多一个字符, 是更紧的那个场景, 同样要放得下。
+    let mut b = app(false);
+    b.update(Action::Connected { app_version: VERSION.into() });
+    let mut d2 = data();
+    d2.subscriptions = vec![];
+    d2.status.listen_all = true;
+    d2.status.base_url = "https://127.0.0.1:23457".into();
+    b.update(Action::OverviewLoaded(Box::new(d2)));
+    let out2 = render(&mut b, 80, 24);
+    assert!(out2.contains("https://127.0.0.1:23457"), "{out2}");
+    assert!(out2.contains("监听 0.0.0.0"), "{out2}");
 }
