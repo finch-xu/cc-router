@@ -38,11 +38,11 @@ impl Toast {
     }
 }
 
-/// 贴着右边、紧挨标签栏下方。
-pub fn area(screen: Rect, text: &str) -> Rect {
+/// 贴着右边、顶部对齐 `top`——调用方传内容区的 `y`, 这样有版本不一致横幅时 toast 不会盖住它。
+pub fn area(screen: Rect, top: u16, text: &str) -> Rect {
     let max = screen.width.saturating_sub(4);
     let width = (text.width() as u16 + 4).min(max);
-    Rect::new(screen.right().saturating_sub(width + 1), screen.y + 3, width, 3).intersection(screen)
+    Rect::new(screen.right().saturating_sub(width + 1), top, width, 3).intersection(screen)
 }
 
 pub fn draw(frame: &mut Frame, area: Rect, toast: &Toast, theme: &Theme) {
@@ -73,10 +73,10 @@ mod tests {
     #[test]
     fn area_hugs_the_right_edge_and_never_leaves_the_screen() {
         let screen = Rect::new(0, 0, 80, 24);
-        let a = area(screen, "已重新连接"); // 10 列
+        let a = area(screen, 3, "已重新连接"); // 10 列
         assert_eq!((a.width, a.height, a.right(), a.y), (14, 3, 79, 3));
         let long = "长".repeat(100);
-        let a = area(screen, &long);
+        let a = area(screen, 3, &long);
         assert_eq!(a.width, 76);
         assert!(screen.contains(ratatui::layout::Position::new(a.x, a.y)));
     }

@@ -6,7 +6,7 @@ use ratatui::style::Style;
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, BorderType, LineGauge, Padding, Paragraph, Sparkline};
 use ratatui::Frame;
-use throbber_widgets_tui::{Throbber, ThrobberState, BRAILLE_SIX};
+use throbber_widgets_tui::{Throbber, BRAILLE_SIX};
 use tui_big_text::{BigText, PixelSize};
 
 use super::{Component, DrawCtx};
@@ -16,6 +16,7 @@ use crate::format::{compact, fit, mmss, percent, thousands};
 use crate::i18n::Strings;
 use crate::widgets::badge::{badge, severity};
 use crate::widgets::keybar::Hint;
+use crate::widgets::spinner_state;
 
 const LOGO_TEXT: &str = "cc-router";
 /// Quadrant 像素: 8×8 字模横竖各减半 → 每字 4 列 × 4 行。
@@ -134,7 +135,7 @@ impl Overview {
         frame.render_widget(Paragraph::new(lines), info_area.inner(ratatui::layout::Margin::new(2, 0)));
     }
 
-    fn draw_today(&mut self, frame: &mut Frame, area: Rect, ctx: &mut DrawCtx) {
+    fn draw_today(&mut self, frame: &mut Frame, area: Rect, ctx: &mut DrawCtx, flash_values: &[&'static str]) {
         let s = ctx.s;
         let block = panel(ctx, s.ov_today);
         let inner = block.inner(area);
@@ -153,8 +154,7 @@ impl Overview {
             let [l, v] = Layout::horizontal([Constraint::Min(0), Constraint::Length(9)]).areas(row);
             frame.render_widget(Line::styled(label, ctx.theme.muted_style()), l);
             frame.render_widget(Line::raw(value).right_aligned(), v);
-            if let Some(pos) = self.flash_values.iter().position(|k| *k == key) {
-                self.flash_values.swap_remove(pos);
+            if flash_values.contains(&key) {
                 ctx.fx.value_changed(key, v, ctx.theme.accent);
             }
         }
@@ -182,7 +182,7 @@ impl Overview {
         frame.render_widget(Line::styled(line, ctx.theme.muted_style()), axis);
     }
 
-    fn draw_health(&mut self, frame: &mut Frame, area: Rect, ctx: &mut DrawCtx) {
+    fn draw_health(&mut self, frame: &mut Frame, area: Rect, ctx: &mut DrawCtx, flash_rows: &[String]) {
         let s = ctx.s;
         let block = panel(ctx, s.ov_health)
             .title_bottom(Line::from(format!(" {} ", self.subscriptions.len())).right_aligned().style(ctx.theme.muted_style()));
@@ -190,8 +190,7 @@ impl Overview {
         frame.render_widget(block, area);
 
         if !self.loaded {
-            let mut state = ThrobberState::default();
-            state.calc_step(ctx.tick as i8);
+            let mut state = spinner_state(ctx.tick);
             let throbber = Throbber::default().label(s.loading).throbber_set(BRAILLE_SIX).style(ctx.theme.muted_style());
             frame.render_stateful_widget(throbber, inner, &mut state);
             return;
@@ -257,8 +256,7 @@ impl Overview {
                 None => frame.render_widget(Line::styled("—", ctx.theme.muted_style()), label),
             }
 
-            if let Some(pos) = self.flash_rows.iter().position(|id| *id == sub.id) {
-                self.flash_rows.swap_remove(pos);
+            if flash_rows.contains(&sub.id) {
                 ctx.fx.row_changed(&sub.id, row, b.color);
             }
         }
@@ -267,8 +265,6 @@ impl Overview {
             let hidden = self.subscriptions.len() - shown;
             frame.render_widget(Line::styled((s.ov_more_rows)(hidden), ctx.theme.muted_style()), row);
         }
-        // 被截掉的行没机会闪, 别让它们攒到下次。
-        self.flash_rows.clear();
     }
 }
 
@@ -302,6 +298,11 @@ impl Component for Overview {
     }
 
     fn draw(&mut self, frame: &mut Frame, area: Rect, ctx: &mut DrawCtx) {
+        // 取走待播的闪烁队列: 不管下面两个面板是不是提前 return, self.flash_rows / self.flash_values
+        // 从这一帧起都是空的, 不会残留到以后的帧 (F3)。
+        let flash_rows = std::mem::take(&mut self.flash_rows);
+        let flash_values = std::mem::take(&mut self.flash_values);
+
         let show_logo = area.height >= LOGO_HEIGHT + MID_HEIGHT + MIN_HEALTH_HEIGHT;
         let hero_height = if show_logo { LOGO_HEIGHT } else { 2 };
         let [hero, mid, health] =
@@ -309,9 +310,9 @@ impl Component for Overview {
         let [today, hourly] = Layout::horizontal([Constraint::Length(TODAY_WIDTH), Constraint::Min(0)]).areas(mid);
 
         self.draw_hero(frame, hero, show_logo, ctx);
-        self.draw_today(frame, today, ctx);
+        self.draw_today(frame, today, ctx, &flash_values);
         self.draw_hourly(frame, hourly, ctx);
-        self.draw_health(frame, health, ctx);
+        self.draw_health(frame, health, ctx, &flash_rows);
     }
 
     fn hints(&self, s: &'static Strings) -> Vec<Hint<'static>> {

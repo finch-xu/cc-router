@@ -11,7 +11,7 @@ use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, BorderType, Tabs};
 use ratatui::Frame;
-use throbber_widgets_tui::{Throbber, ThrobberState, BRAILLE_SIX};
+use throbber_widgets_tui::{Throbber, BRAILLE_SIX};
 
 use crate::action::{Action, Cmd};
 use crate::fx::{self, Dir, Fx};
@@ -21,13 +21,14 @@ use crate::pages::placeholder::Placeholder;
 use crate::pages::{Component, DrawCtx};
 use crate::theme::Theme;
 use crate::widgets::toast::{self, Toast, ToastKind};
-use crate::widgets::{help, keybar};
+use crate::widgets::{help, keybar, spinner_state};
 
 pub const MIN_WIDTH: u16 = 80;
 pub const MIN_HEIGHT: u16 = 24;
-const TAB_COUNT: usize = 5;
 /// 可见页面每 5 秒重拉一次用量类数字 (20 × 250ms)。
 const POLL_EVERY_TICKS: u64 = 20;
+/// toast 队列上限, 含正在屏幕上的那条; 超出丢最旧的排队项 (F4)。
+const MAX_TOASTS: usize = 4;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Conn {
@@ -145,7 +146,7 @@ impl App {
     }
 
     fn switch_tab(&mut self, to: usize, dir: Dir) -> Vec<Cmd> {
-        if to >= TAB_COUNT || to == self.tab {
+        if to >= self.s.tabs.len() || to == self.tab {
             return Vec::new();
         }
         self.tab = to;
@@ -164,6 +165,19 @@ impl App {
         }
     }
 
+    /// 两处 toast 入口共用: 与最新排队的一条重复 (同 kind 同 text) 就丢弃, 否则挤掉最旧的排队项
+    /// (下标 1, 下标 0 是正在屏幕上的那条, 不能被挤走)。
+    fn push_toast(&mut self, toast: Toast) {
+        let is_dup = self.toasts.back().is_some_and(|t| t.kind == toast.kind && t.text == toast.text);
+        if is_dup {
+            return;
+        }
+        self.toasts.push_back(toast);
+        while self.toasts.len() > MAX_TOASTS {
+            self.toasts.remove(1);
+        }
+    }
+
     pub fn update(&mut self, action: Action) -> Vec<Cmd> {
         match action {
             Action::Quit => vec![Cmd::Quit],
@@ -171,8 +185,14 @@ impl App {
                 let dir = if to > self.tab { Dir::Forward } else { Dir::Backward };
                 self.switch_tab(to, dir)
             }
-            Action::NextTab => self.switch_tab((self.tab + 1) % TAB_COUNT, Dir::Forward),
-            Action::PrevTab => self.switch_tab((self.tab + TAB_COUNT - 1) % TAB_COUNT, Dir::Backward),
+            Action::NextTab => {
+                let n = self.s.tabs.len();
+                self.switch_tab((self.tab + 1) % n, Dir::Forward)
+            }
+            Action::PrevTab => {
+                let n = self.s.tabs.len();
+                self.switch_tab((self.tab + n - 1) % n, Dir::Backward)
+            }
             Action::ToggleHelp => {
                 if self.popup.is_some() {
                     self.close_popup();
@@ -200,7 +220,7 @@ impl App {
             }
             Action::Connected { ref app_version } => {
                 if self.conn == Conn::Reconnecting {
-                    self.toasts.push_back(Toast::new(ToastKind::Success, self.s.toast_reconnected));
+                    self.push_toast(Toast::new(ToastKind::Success, self.s.toast_reconnected));
                 }
                 self.conn = Conn::Connected;
                 self.app_version = Some(app_version.clone());
@@ -213,7 +233,7 @@ impl App {
             Action::LoadFailed { ref message, .. } => {
                 // 断线期间每次轮询都会失败, 状态点已经在说「重连中」了, 不再刷屏。
                 if self.conn == Conn::Connected {
-                    self.toasts.push_back(Toast::new(ToastKind::Error, (self.s.toast_load_failed)(message)));
+                    self.push_toast(Toast::new(ToastKind::Error, (self.s.toast_load_failed)(message)));
                 }
                 Vec::new()
             }
@@ -234,8 +254,7 @@ impl App {
                 ),
             ]),
             Conn::Connecting | Conn::Reconnecting => {
-                let mut state = ThrobberState::default();
-                state.calc_step(self.tick as i8);
+                let state = spinner_state(self.tick);
                 let spinner = Throbber::default().throbber_set(BRAILLE_SIX).to_symbol_span(&state);
                 let text = if self.conn == Conn::Connecting { self.s.conn_connecting } else { self.s.conn_reconnecting };
                 Line::from(vec![Span::raw(" "), spinner, Span::raw(format!("{text} "))]).style(Style::new().fg(self.theme.warn))
@@ -257,10 +276,10 @@ impl App {
         frame.render_widget(tabs, area);
     }
 
-    fn draw_toast(&mut self, frame: &mut Frame, screen: Rect) {
+    fn draw_toast(&mut self, frame: &mut Frame, screen: Rect, top: u16) {
         let now = self.now_ms;
         let Some(toast) = self.toasts.front_mut() else { return };
-        let area = toast::area(screen, &toast.text);
+        let area = toast::area(screen, top, &toast.text);
         match toast.shown_at {
             None => {
                 toast.shown_at = Some(now);
@@ -281,6 +300,8 @@ impl App {
         if screen.width < MIN_WIDTH || screen.height < MIN_HEIGHT {
             let line = Line::raw(self.s.too_small).centered();
             frame.render_widget(line, screen.centered_vertically(Constraint::Length(1)));
+            // 太小画不出可以叠动效的内容; 不清掉的话 is_running() 会一直为真, 把主循环锁在 60fps。
+            self.fx.clear();
             return;
         }
         // 空闲时两帧之间可能隔了几百毫秒; 动效是这一帧才加进来的话, 不能把这段空闲算成它已经播过的时间。
@@ -315,7 +336,7 @@ impl App {
         left.insert(0, ("1-5", s.key_switch_tab));
         keybar::draw(frame, footer, &left, &[("?", s.key_help), ("q", s.key_quit)], &self.theme);
 
-        self.draw_toast(frame, screen);
+        self.draw_toast(frame, screen, content.y);
 
         if self.popup.is_some() {
             // 压暗背景用静态的 DIM 修饰符而不是动效: 16 色 / 无色终端下同样成立。

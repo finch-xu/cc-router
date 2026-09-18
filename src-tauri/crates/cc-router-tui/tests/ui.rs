@@ -374,3 +374,106 @@ fn with_fx_disabled_nothing_ever_animates() {
     render(&mut a, 80, 24);
     assert!(!a.wants_fast_frames());
 }
+
+/// F1: 终端太小画不出内容, 在播的效果必须被清掉, 否则 `wants_fast_frames()` 会一直为真
+/// 把主循环锁死在 60fps。
+#[test]
+fn shrinking_below_the_minimum_stops_the_animation_loop() {
+    let mut a = loaded(true);
+    render(&mut a, 80, 24);
+    assert!(a.wants_fast_frames(), "启动动效这一帧才开始");
+    render(&mut a, 79, 24);
+    assert!(!a.wants_fast_frames(), "太小画不出内容, 动效应该被清掉");
+}
+
+/// F2: `calc_step(0)` 在 throbber-widgets-tui 里是「随机取一格」, spinner 步长不能传 0 ——
+/// 否则同一状态画两次会得到不同的帧, 违反 `draw` 是状态纯函数的约束。用 tick=0 (未连接第一帧)
+/// 和帮助弹窗打开 (走 draw_health 的 loading 分支) 两种场景各画两遍比较。
+#[test]
+fn drawing_the_same_state_twice_gives_the_same_frame() {
+    let mut a = app(false);
+    let first = render(&mut a, 80, 24);
+    let second = render(&mut a, 80, 24);
+    assert_eq!(first, second);
+
+    let mut b = loaded(false);
+    b.update(Action::ToggleHelp);
+    let first = render(&mut b, 80, 24);
+    let second = render(&mut b, 80, 24);
+    assert_eq!(first, second);
+}
+
+/// F3: 空列表加载时没有「旧」行可以比较, 不该把更早排队、还没画出来的闪烁带到后面某一帧。
+/// (对照第一次加载改变了一条订阅状态 → 排队一个闪烁; 紧接着加载空列表, 在这个闪烁还没画之前
+/// 就把它取走扔掉; 再加载回原始数据时, 因为对比的「旧」列表是空的, 不会重新排队这个闪烁。)
+#[test]
+fn a_flash_queued_while_the_list_was_empty_does_not_fire_later() {
+    let mut a = loaded(true);
+    settle(&mut a);
+
+    let mut subs = data().subscriptions;
+    subs[1].state = SubscriptionState::RateLimited;
+    subs[1].is_dispatchable = false;
+    a.update(Action::SubscriptionsLoaded(subs));
+    a.update(Action::SubscriptionsLoaded(vec![]));
+    render(&mut a, 80, 24);
+    settle(&mut a);
+
+    a.update(Action::SubscriptionsLoaded(data().subscriptions));
+    render(&mut a, 80, 24);
+    assert!(!a.wants_fast_frames(), "早前排队又落空的闪烁不该在这里冒出来");
+}
+
+/// F4: 断线期间每 5 秒轮询失败一次, 文案完全相同; 不该无限堆积 toast 队列。
+#[test]
+fn repeated_failures_do_not_pile_up_toasts() {
+    let mut a = loaded(false);
+    let fail = || Action::LoadFailed { cmd: Cmd::FetchOverview, message: "boom".into() };
+    for _ in 0..10 {
+        a.update(fail());
+    }
+    assert!(render(&mut a, 80, 24).contains("加载失败：boom"));
+    a.update(Action::Tick { now_ms: NOW + 3_000 });
+    assert!(!render(&mut a, 80, 24).contains("加载失败"), "去重后只剩一条, 过期就该消失");
+}
+
+/// F6: `toast::area` 之前硬编码 `screen.y + 3`——版本不一致横幅也画在这一行, 会被 toast 盖住。
+#[test]
+fn a_toast_does_not_cover_the_version_banner() {
+    let mut a = app(false);
+    a.update(Action::Connected { app_version: "1.2.3".into() });
+    a.update(Action::LoadFailed { cmd: Cmd::FetchOverview, message: "boom".into() });
+    let out = render(&mut a, 120, 30);
+    assert!(out.contains('⚠') && out.contains("加载失败"), "{out}");
+}
+
+/// F7: `a_changed_number_pulses_but_the_first_load_does_not` 的「首次加载不脉冲」这一半被
+/// `settle()` 悄悄吞掉了, 单独补一个覆盖它。
+#[test]
+fn the_first_load_does_not_pulse() {
+    let mut a = app(true);
+    a.update(Action::Connected { app_version: VERSION.into() });
+    settle(&mut a);
+    a.update(Action::OverviewLoaded(Box::new(data())));
+    render(&mut a, 80, 24);
+    assert!(!a.wants_fast_frames(), "首次加载没有旧值可比, 不该脉冲");
+}
+
+#[test]
+fn quit_action_yields_the_quit_cmd() {
+    assert_eq!(loaded(false).update(Action::Quit), vec![Cmd::Quit]);
+}
+
+#[test]
+fn empty_subscription_list_and_listen_all_are_shown() {
+    let mut a = app(false);
+    a.update(Action::Connected { app_version: VERSION.into() });
+    let mut d = data();
+    d.subscriptions = vec![];
+    d.status.listen_all = true;
+    a.update(Action::OverviewLoaded(Box::new(d)));
+    // 80 列下 logo 会把「基址 · 监听 0.0.0.0」这行挤到只剩 36 列, 放不下, 用宽一点的终端。
+    let out = render(&mut a, 120, 24);
+    assert!(out.contains(ZH.ov_no_subs), "{out}");
+    assert!(out.contains(ZH.ov_listen_all), "{out}");
+}

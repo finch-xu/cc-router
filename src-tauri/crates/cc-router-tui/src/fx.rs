@@ -78,6 +78,11 @@ impl Fx {
         }
     }
 
+    /// 丢掉所有在播的效果。终端太小时没有可以叠加动效的画面, 不清掉的话 `is_running()` 会一直为真。
+    pub fn clear(&mut self) {
+        self.mgr = EffectManager::default();
+    }
+
     /// 启动: logo 逐格凝聚, 其余内容从暗色淡入。
     pub fn startup(&mut self, logo: Rect, screen: Rect, from: Color) {
         let logo_fx = fx::coalesce((ms::STARTUP, Interpolation::QuadOut)).with_area(logo);
@@ -187,6 +192,21 @@ mod tests {
         }
         fx.process(StdDuration::from_millis(u64::from(ms::PAGE)), &mut buf, AREA);
         assert!(!fx.is_running());
+    }
+
+    #[test]
+    fn clear_stops_everything() {
+        let mut fx = Fx::new(true);
+        let mut buf = Buffer::empty(AREA);
+        fx.startup(PART, AREA, Color::DarkGray);
+        fx.row_changed("a", PART, Color::Red);
+        assert!(fx.is_running());
+        fx.clear();
+        assert!(!fx.is_running());
+        // clear 之后照常能再触发新效果, 不是把 Fx 弄坏了。
+        fx.page_enter(Dir::Forward, AREA, Color::DarkGray);
+        fx.process(StdDuration::from_millis(10), &mut buf, AREA);
+        assert!(fx.is_running());
     }
 
     #[test]
