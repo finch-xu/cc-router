@@ -51,23 +51,32 @@ export function useLanAddresses(enabled: boolean) {
   });
 }
 
+/** sidecar 的路径在进程生命周期内不变, 但 `in_path` / `install_blocked` / `local_bin_off_path`
+ * 会在 app 外面发生变化 (用户在终端里手动装了 / 卸了, 或者手动解决了「已被占用」的冲突) ——
+ * 这三个字段不能跟 path 一样按「永不过期」处理, 否则用户在终端修好冲突之后回到设置页, 按钮还是
+ * 灰的。改成每次挂载都重新读一次、窗口重新聚焦也重新读 (fix-2 F2)。 */
 export function useTuiLaunchInfo() {
   return useQuery({
     queryKey: TUI_LAUNCH_INFO_KEY,
     queryFn: () => api.tuiLaunchInfo(),
-    // sidecar 路径在进程生命周期内不变
-    staleTime: Infinity,
+    staleTime: 0,
+    refetchOnMount: "always",
+    refetchOnWindowFocus: true,
   });
 }
 
-/** 添加到 PATH / 移除. 两个 command 都返回 TuiInstallOutcome, 把其中的 info 写回缓存;
- * cancelled 标志留给调用方从 mutation 的 `.data` 里自己读 (展示「已取消」提示用). */
+/** 添加到 PATH / 移除. 两个 command 都返回 TuiInstallOutcome, 成功时把其中的 info 立即写回缓存
+ * (界面不用等下一次 refetch 就能翻转); cancelled 标志留给调用方从 mutation 的 `.data` 里自己读
+ * (展示「已取消」提示用)。`onSettled` 无论成败都强制重新拉一次最新状态——installed_at 的具体值、
+ * blocked 的具体原因这些只有后端知道, 成功时的 info 只是"这次操作完之后"的快照, 不代表期间没有
+ * 别的因素 (比如用户几乎同时在终端里也动了一下) 让它又变了 (fix-2 F2)。 */
 export function useTuiPathInstall() {
   const queryClient = useQueryClient();
   const onSuccess = (outcome: TuiInstallOutcome) => queryClient.setQueryData(TUI_LAUNCH_INFO_KEY, outcome.info);
+  const onSettled = () => queryClient.invalidateQueries({ queryKey: TUI_LAUNCH_INFO_KEY });
   return {
-    install: useMutation({ mutationFn: () => api.installTuiCommand(), onSuccess }),
-    uninstall: useMutation({ mutationFn: () => api.uninstallTuiCommand(), onSuccess }),
+    install: useMutation({ mutationFn: () => api.installTuiCommand(), onSuccess, onSettled }),
+    uninstall: useMutation({ mutationFn: () => api.uninstallTuiCommand(), onSuccess, onSettled }),
   };
 }
 

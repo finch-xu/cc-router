@@ -284,11 +284,14 @@ function TuiLaunchRow({ enabled }: { enabled: boolean }) {
   const { t } = useT();
   const info = useTuiLaunchInfo();
   if (!info.data) return null;
-  const { path, is_appimage, in_path } = info.data;
+  const { path, is_appimage, in_path, local_bin_off_path } = info.data;
   // 完整路径永远展示 (spec §7.3): 哪怕已经在 PATH 上, 换一台没重开过的终端 (尤其 Windows) 仍然
   // 只认得完整路径, 命令名会报「找不到命令」——不能把它换没了。只有含空格时才加引号:
   // PowerShell 里带引号的裸字符串会被当成字符串回显而不是执行。
   const fullPathCommand = path ? (/\s/.test(path) ? `"${path}"` : path) : null;
+  // Linux copy 装到了 ~/.local/bin, 但那个目录本身不在当前 PATH 里 (下面 TuiPathRow 会警告这件事)
+  // 时, 短命令 cc-router-tui 其实还是敲不出来的——不能同时又在这里宣称「已在 PATH 上」(fix-2 F8)。
+  const showShort = in_path && !local_bin_off_path;
   return (
     <>
       <div className="setting-row" style={{ opacity: enabled ? 1 : 0.55 }}>
@@ -302,7 +305,7 @@ function TuiLaunchRow({ enabled }: { enabled: boolean }) {
         </div>
         {fullPathCommand && (
           <div style={{ minWidth: 0, flex: 1, display: "flex", flexDirection: "column", gap: 6 }}>
-            {in_path && (
+            {showShort && (
               <>
                 <CopyableBlock text="cc-router-tui" variant="inline" />
                 <span style={{ fontSize: 12, color: "var(--ink-2)" }}>{t("settings.tui.launch.short")}</span>
@@ -338,11 +341,18 @@ function TuiPathRow({ info, enabled }: { info: TuiLaunchInfo; enabled: boolean }
   // 改宿主机的 PATH / 弹系统授权框只能在桌面窗口里做, 后端对网页端是拒绝桩。
   const desktop = runtime.kind !== "web";
 
+  // occupied 提示要指名冲突的具体路径, 不新增一个 DTO 字段——两种可能的 install_kind 各自的
+  // 目标路径是固定的常量, 前端算得出来 (fix-2 F8)。其余两个 blocked.* 文案不吃参数, 传了也没事:
+  // applyParams 按 `{path}` 逐个 split/join, 模板里没有这个占位符时循环等于空操作。
+  const occupiedPath = kind === "symlink" ? "/usr/local/bin/cc-router-tui" : kind === "copy" ? "~/.local/bin/cc-router-tui" : "";
+
   return (
     <div className="setting-row" style={{ opacity: enabled ? 1 : 0.55 }}>
       <div className="label-col">
         {t("settings.tui.path.label")}
-        <div className="desc">
+        {/* 200px 的 label-col 宽度放不下一条完整的 Windows 路径, 又没有天然的换行机会 (反斜杠不是
+            换行点) —— overflowWrap: anywhere 允许在任意字符处断行, 而不是把整行文字推出容器 (fix-2 F8)。 */}
+        <div className="desc" style={{ overflowWrap: "anywhere" }}>
           {kind === "system"
             ? t("settings.tui.path.system")
             : in_path
@@ -388,7 +398,7 @@ function TuiPathRow({ info, enabled }: { info: TuiLaunchInfo; enabled: boolean }
           </button>
         )}
         {install_blocked && !in_path && (
-          <div className="alert warn">{t(`settings.tui.path.blocked.${install_blocked}`)}</div>
+          <div className="alert warn">{t(`settings.tui.path.blocked.${install_blocked}`, { path: occupiedPath })}</div>
         )}
         {kind === "copy" && in_path && local_bin_off_path && (
           <div className="alert warn" style={{ display: "flex", flexDirection: "column", gap: 6 }}>

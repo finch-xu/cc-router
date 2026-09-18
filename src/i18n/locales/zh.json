@@ -131,7 +131,7 @@
   "settings.tui.path.desktopOnly": "请在运行 cc-router 的那台电脑上,打开桌面 app 操作。",
   "settings.tui.path.blocked.translocated": "cc-router 目前是从下载位置直接运行的,路径是临时的。请先把它移到「应用程序」文件夹,再重新打开。",
   "settings.tui.path.blocked.on_disk_image": "cc-router 还在磁盘映像里。请先把它拖到「应用程序」文件夹,再重新打开。",
-  "settings.tui.path.blocked.occupied": "目标位置上已经有一个同名的 cc-router-tui,而且不是 cc-router 放的,为避免覆盖不会自动处理。",
+  "settings.tui.path.blocked.occupied": "{path} 已存在,而且不是 cc-router 放的,为避免覆盖不会自动处理。",
   "settings.tui.path.localBinOffPath": "~/.local/bin 不在你的 PATH 里。把下面这行加到 shell 配置文件 (如 ~/.bashrc) 后重开终端:",
   "settings.section.storage": "数据存储",
   "settings.storage.retention.label": "请求日志保留期",
