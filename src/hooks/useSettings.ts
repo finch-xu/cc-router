@@ -1,7 +1,7 @@
 import { useEffect, useRef } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { api } from "@/api/tauri";
-import type { SettingsPatch } from "@/types";
+import type { SettingsPatch, TuiLaunchInfo } from "@/types";
 
 export const SETTINGS_KEY = ["settings"] as const;
 export const PROXY_STATUS_KEY = ["proxy-status"] as const;
@@ -57,6 +57,16 @@ export function useTuiLaunchInfo() {
     // sidecar 路径在进程生命周期内不变
     staleTime: Infinity,
   });
+}
+
+/** 添加到 PATH / 移除. 两个 command 都返回最新的 TuiLaunchInfo, 直接写回缓存. */
+export function useTuiPathInstall() {
+  const queryClient = useQueryClient();
+  const onSuccess = (info: TuiLaunchInfo) => queryClient.setQueryData(["tui-launch-info"], info);
+  return {
+    install: useMutation({ mutationFn: () => api.installTuiCommand(), onSuccess }),
+    uninstall: useMutation({ mutationFn: () => api.uninstallTuiCommand(), onSuccess }),
+  };
 }
 
 export function useEnvSnippet() {

@@ -1,11 +1,18 @@
 import { useEffect, useRef, useState } from "react";
-import { RefreshCw, Check, Copy } from "lucide-react";
+import { RefreshCw, Check, Copy, Terminal, Trash2 } from "lucide-react";
 import { Toggle } from "@/components/Toggle";
 import { Spinner } from "@/components/Spinner";
 import { CopyableBlock } from "@/components/CopyableBlock";
-import { useGenerateNewToken, useLanAddresses, useProxyStatus, useTuiLaunchInfo } from "@/hooks/useSettings";
+import {
+  useGenerateNewToken,
+  useLanAddresses,
+  useProxyStatus,
+  useTuiLaunchInfo,
+  useTuiPathInstall,
+} from "@/hooks/useSettings";
 import { useT } from "@/i18n";
 import { runtime } from "@/runtime";
+import type { TuiLaunchInfo } from "@/types";
 import type { SettingsForm } from "./useSettingsForm";
 
 /** 安全与访问: 鉴权 token / CORS / 网页界面. */
@@ -269,30 +276,110 @@ function WebUiAddresses({ listenAll, authEnabled }: { listenAll: boolean; authEn
   );
 }
 
-/** 启动命令一栏. 开关关着时置灰但仍可见 —— 可以先看好命令再开开关. */
+/** 启动命令 + 添加到 PATH. 开关关着时置灰但仍可见 —— 可以先装好命令再开开关. */
 function TuiLaunchRow({ enabled }: { enabled: boolean }) {
   const { t } = useT();
   const info = useTuiLaunchInfo();
   if (!info.data) return null;
-  const { path, is_appimage } = info.data;
+  const { path, is_appimage, in_path } = info.data;
+  // 已经在 PATH 上 (一键安装过 / deb 装在 /usr/bin): 命令名本身就够了。
+  // 否则给完整路径; 只有含空格时才加引号 —— PowerShell 里带引号的裸字符串会被当成字符串回显而不是执行。
+  const command = !path ? null : in_path ? "cc-router-tui" : /\s/.test(path) ? `"${path}"` : path;
   return (
-    <div className="setting-row" style={{ opacity: enabled ? 1 : 0.55 }}>
+    <div style={{ opacity: enabled ? 1 : 0.55 }}>
+      <div className="setting-row">
+        <div className="label-col">
+          {t("settings.tui.launch.label")}
+          <div className="desc">
+            {path ? t("settings.tui.launch.desc") : t("settings.tui.launch.missing")}
+            {path && is_appimage && !in_path && <> {t("settings.tui.launch.appimage")}</>}
+            {path && runtime.kind === "web" && <> {t("settings.tui.launch.webHint")}</>}
+          </div>
+        </div>
+        {command && (
+          <div style={{ minWidth: 0, flex: 1 }}>
+            <CopyableBlock text={command} variant="inline" />
+          </div>
+        )}
+      </div>
+      {path && <TuiPathRow info={info.data} />}
+    </div>
+  );
+}
+
+/** 后端错误是 `{ code, message }` 对象 (Tauri 拒绝值 / 网页端 JSON), 不是 Error. */
+function errorText(e: unknown): string {
+  if (e && typeof e === "object" && "message" in e) return String((e as { message: unknown }).message);
+  return String(e);
+}
+
+/** 「添加到 PATH」一栏. 三个平台做法不同, 说明文字跟着 install_kind 走. */
+function TuiPathRow({ info }: { info: TuiLaunchInfo }) {
+  const { t } = useT();
+  const { install, uninstall } = useTuiPathInstall();
+  const { install_kind: kind, in_path, installed_at, can_install, install_blocked, local_bin_off_path } = info;
+  if (kind === "unavailable") return null;
+
+  const busy = install.isPending || uninstall.isPending;
+  const error = install.error ?? uninstall.error;
+  // 改宿主机的 PATH / 弹系统授权框只能在桌面窗口里做, 后端对网页端是拒绝桩。
+  const desktop = runtime.kind !== "web";
+
+  return (
+    <div className="setting-row">
       <div className="label-col">
-        {t("settings.tui.launch.label")}
+        {t("settings.tui.path.label")}
         <div className="desc">
-          {path ? t("settings.tui.launch.desc") : t("settings.tui.launch.missing")}
-          {path && is_appimage && <> {t("settings.tui.launch.appimage")}</>}
-          {path && runtime.kind === "web" && <> {t("settings.tui.launch.webHint")}</>}
+          {kind === "system"
+            ? t("settings.tui.path.system")
+            : in_path
+              ? t("settings.tui.path.installed", { at: installed_at ?? "" })
+              : t(`settings.tui.path.desc.${kind}`)}
         </div>
       </div>
-      {path && (
-        <div style={{ minWidth: 0, flex: 1 }}>
-          {/* 默认安装路径三个平台都不含空格, 裸路径在 sh / cmd / PowerShell 里都能直接运行。
-              只有含空格时才加引号 —— PowerShell 里带引号的裸字符串会被当成字符串回显而不是执行,
-              P2 做一键安装时再按平台给出完整命令。 */}
-          <CopyableBlock text={/\s/.test(path) ? `"${path}"` : path} variant="inline" />
-        </div>
-      )}
+      <div style={{ display: "flex", flexDirection: "column", gap: 6, alignItems: "flex-start" }}>
+        {kind !== "system" && !desktop && (
+          <span style={{ fontSize: 12, color: "var(--ink-2)" }}>{t("settings.tui.path.desktopOnly")}</span>
+        )}
+        {kind !== "system" && desktop && !in_path && (
+          <button
+            className="btn"
+            type="button"
+            disabled={busy || !can_install}
+            onClick={() => {
+              uninstall.reset();
+              install.mutate();
+            }}
+          >
+            {install.isPending ? <Spinner /> : <Terminal size={12} />}
+            {t("settings.tui.path.add")}
+          </button>
+        )}
+        {kind !== "system" && desktop && in_path && (
+          <button
+            className="btn"
+            type="button"
+            disabled={busy}
+            onClick={() => {
+              install.reset();
+              uninstall.mutate();
+            }}
+          >
+            {uninstall.isPending ? <Spinner /> : <Trash2 size={12} />}
+            {t("settings.tui.path.remove")}
+          </button>
+        )}
+        {install_blocked && !in_path && (
+          <div className="alert warn">{t(`settings.tui.path.blocked.${install_blocked}`)}</div>
+        )}
+        {kind === "copy" && in_path && local_bin_off_path && (
+          <div className="alert warn" style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+            {t("settings.tui.path.localBinOffPath")}
+            <CopyableBlock text={'export PATH="$HOME/.local/bin:$PATH"'} variant="inline" />
+          </div>
+        )}
+        {error != null && <div className="alert err">{errorText(error)}</div>}
+      </div>
     </div>
   );
 }

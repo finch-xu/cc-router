@@ -158,6 +158,9 @@ export const api = {
   /** 局域网 IPv4 列表 (非回环), 设置页拼网页访问地址用 */
   listLanAddresses: () => invoke<string[]>("list_lan_addresses"),
   tuiLaunchInfo: () => invoke<TuiLaunchInfo>("tui_launch_info"),
+  /** 仅桌面端可用; 网页端后端直接拒绝 */
+  installTuiCommand: () => invoke<TuiLaunchInfo>("install_tui_command"),
+  uninstallTuiCommand: () => invoke<TuiLaunchInfo>("uninstall_tui_command"),
 
   // onboarding
   getOnboardingState: () => invoke<OnboardingState>("get_onboarding_state"),

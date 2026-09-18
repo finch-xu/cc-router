@@ -363,6 +363,15 @@ export type ProbeCustomModelsResult =
 export interface TuiLaunchInfo {
   path: string | null;
   is_appimage: boolean;
+  /** 「添加到 PATH」在这台机器上的做法. system = 已在系统 PATH (deb), unavailable = 没有 sidecar; 这两种不显示按钮 */
+  install_kind: "symlink" | "user_path" | "copy" | "system" | "unavailable";
+  in_path: boolean;
+  /** 已安装时的位置: macOS 链接路径 / Windows PATH 条目 / Linux 复制目标 */
+  installed_at: string | null;
+  can_install: boolean;
+  install_blocked: "translocated" | "on_disk_image" | "occupied" | null;
+  /** 仅 copy: ~/.local/bin 不在 PATH 里 */
+  local_bin_off_path: boolean;
 }
 
 export interface CreateSubscriptionInput {
