@@ -1,0 +1,376 @@
+//! 界面测试: `App` 的更新逻辑 + `TestBackend` 渲染结果。不碰网络、不碰真实终端。
+//!
+//! 快照在 `tests/snapshots/`。改了布局后先看 diff 再接受:
+//!   INSTA_UPDATE=always cargo test -p cc-router-tui --test ui
+//! 动效在快照里一律关闭 (`fx_enabled: false`), 否则第一帧是启动动效的中间态。
+
+use std::time::Duration;
+
+use cc_router_tui::action::{Action, Cmd, OverviewData};
+use cc_router_tui::app::{App, AppOptions};
+use cc_router_tui::client::dto::{
+    OverallStats, ProxyStatus, QuotaPeriod, QuotaUsage, SeriesPoint, Settings, Subscription, SubscriptionState,
+};
+use cc_router_tui::i18n::ZH;
+use cc_router_tui::theme::{ColorMode, Theme};
+use ratatui::backend::TestBackend;
+use ratatui::crossterm::event::{KeyCode, KeyEvent, KeyEventKind, KeyEventState, KeyModifiers};
+use ratatui::Terminal;
+
+const NOW: i64 = 1_700_000_000_000;
+const VERSION: &str = "9.9.9";
+
+fn app(fx_enabled: bool) -> App {
+    App::new(AppOptions {
+        strings: &ZH,
+        theme: Theme::new(ColorMode::TrueColor),
+        fx_enabled,
+        now_ms: NOW,
+        tui_version: VERSION,
+    })
+}
+
+fn quota(limit: u64, used: u64) -> QuotaUsage {
+    QuotaUsage {
+        period: QuotaPeriod::Daily,
+        limit: Some(limit),
+        input: used,
+        output: 0,
+        cache_creation: 0,
+        cache_read: 0,
+        exceeded: used >= limit,
+    }
+}
+
+fn sub(id: &str, name: &str, state: SubscriptionState) -> Subscription {
+    Subscription {
+        id: id.into(),
+        display_name: name.into(),
+        provider_display_name: "p".into(),
+        enabled: true,
+        state,
+        cooldown_until: None,
+        last_error_message: None,
+        is_dispatchable: state == SubscriptionState::Healthy,
+        quota_usage: vec![],
+    }
+}
+
+fn data() -> OverviewData {
+    let mut zhipu = sub("1", "智谱主号", SubscriptionState::Healthy);
+    zhipu.quota_usage = vec![quota(100, 62)];
+    let mut kimi = sub("2", "Kimi 备用", SubscriptionState::RateLimited);
+    kimi.cooldown_until = Some(NOW + 42_000);
+    kimi.quota_usage = vec![quota(100, 91)];
+    let relay = sub("3", "示例中转", SubscriptionState::AuthFailed);
+    let mut off = sub("4", "停用的订阅", SubscriptionState::Healthy);
+    off.enabled = false;
+    off.is_dispatchable = false;
+    OverviewData {
+        status: ProxyStatus {
+            running: true,
+            mode: "http".into(),
+            http_port: Some(23456),
+            https_port: None,
+            listen_all: false,
+            base_url: "http://127.0.0.1:23456".into(),
+        },
+        settings: Settings { preferred_language: "zh".into(), tui_enabled: true, auth_enabled: true },
+        stats: OverallStats {
+            total_requests: 1284,
+            success_rate_pct: 98.6,
+            total_input_tokens: 3_000_000,
+            total_output_tokens: 200_000,
+            total_cache_creation_tokens: 0,
+            total_cache_read_tokens: 0,
+        },
+        series: (0..24).map(|h| SeriesPoint { hour: Some(h), request_count: (h - 12).abs() * 3 + 1 }).collect(),
+        // 故意把停用的放最前、出问题的放后面: 页面要自己按严重程度排。
+        subscriptions: vec![off, zhipu, kimi, relay],
+    }
+}
+
+fn loaded(fx_enabled: bool) -> App {
+    let mut a = app(fx_enabled);
+    assert_eq!(a.update(Action::Connected { app_version: VERSION.into() }), vec![Cmd::FetchOverview]);
+    assert!(a.update(Action::OverviewLoaded(Box::new(data()))).is_empty());
+    a
+}
+
+fn render_with(a: &mut App, width: u16, height: u16, elapsed: Duration) -> String {
+    let mut terminal = Terminal::new(TestBackend::new(width, height)).unwrap();
+    terminal.draw(|f| a.draw(f, elapsed)).unwrap();
+    terminal.backend().to_string()
+}
+
+fn render(a: &mut App, width: u16, height: u16) -> String {
+    render_with(a, width, height, Duration::ZERO)
+}
+
+fn key(code: KeyCode) -> KeyEvent {
+    KeyEvent::new(code, KeyModifiers::NONE)
+}
+
+// ---------- 快照 ----------
+
+#[test]
+fn overview_80x24() {
+    insta::assert_snapshot!(render(&mut loaded(false), 80, 24));
+}
+
+#[test]
+fn overview_120x40() {
+    insta::assert_snapshot!(render(&mut loaded(false), 120, 40));
+}
+
+#[test]
+fn help_popup_80x24() {
+    let mut a = loaded(false);
+    a.update(Action::ToggleHelp);
+    insta::assert_snapshot!(render(&mut a, 80, 24));
+}
+
+#[test]
+fn placeholder_page_80x24() {
+    let mut a = loaded(false);
+    a.update(Action::SwitchTab(1));
+    insta::assert_snapshot!(render(&mut a, 80, 24));
+}
+
+// ---------- 渲染内容 ----------
+
+#[test]
+fn overview_shows_the_numbers_and_sorts_broken_first() {
+    let out = render(&mut loaded(false), 80, 24);
+    for needle in ["1,284", "98.6%", "3.2M", "http://127.0.0.1:23456", "鉴权 开启", "已连接", "v9.9.9"] {
+        assert!(out.contains(needle), "缺 {needle:?}\n{out}");
+    }
+    // 4 个订阅里只有「智谱主号」可调度
+    assert!(out.contains("4 个订阅 · 1 个可调度"), "{out}");
+    assert!(out.contains("限流 · 00:42"), "{out}");
+    let pos = |needle: &str| out.find(needle).unwrap_or_else(|| panic!("缺 {needle}\n{out}"));
+    assert!(pos("Kimi 备用") < pos("智谱主号"), "出问题的排在可调度的前面");
+    assert!(pos("智谱主号") < pos("停用的订阅"), "手动停用的排最后");
+    assert!(out.contains("62%") && out.contains("91%"), "{out}");
+}
+
+#[test]
+fn before_the_first_load_it_says_connecting_and_loading() {
+    let out = render(&mut app(false), 80, 24);
+    assert!(out.contains(ZH.conn_connecting), "{out}");
+    assert!(out.contains(ZH.loading), "{out}");
+}
+
+#[test]
+fn small_terminal_only_shows_the_hint() {
+    for (w, h) in [(79, 24), (80, 23)] {
+        let out = render(&mut loaded(false), w, h);
+        assert!(out.contains("请放大终端窗口"), "{w}x{h}\n{out}");
+        assert!(!out.contains("已连接"), "{w}x{h} 不应该再画外壳");
+    }
+}
+
+#[test]
+fn version_mismatch_shows_a_banner() {
+    let mut a = app(false);
+    a.update(Action::Connected { app_version: "1.2.3".into() });
+    let out = render(&mut a, 120, 30);
+    assert!(out.contains("9.9.9") && out.contains("1.2.3") && out.contains('⚠'), "{out}");
+    assert!(!render(&mut loaded(false), 120, 30).contains('⚠'));
+}
+
+#[test]
+fn long_subscription_list_is_truncated_with_a_count() {
+    let mut a = app(false);
+    a.update(Action::Connected { app_version: VERSION.into() });
+    let mut d = data();
+    d.subscriptions = (0..30).map(|i| sub(&i.to_string(), &format!("sub-{i:02}"), SubscriptionState::Healthy)).collect();
+    a.update(Action::OverviewLoaded(Box::new(d)));
+    let out = render(&mut a, 80, 24);
+    // 80×24: 健康度面板内高 9 行 → 8 条 + 1 行「还有 22 个」
+    assert!(out.contains("… 还有 22 个"), "{out}");
+    assert!(out.contains("sub-07") && !out.contains("sub-08"), "{out}");
+}
+
+#[test]
+fn reconnect_toast_appears_then_expires() {
+    let mut a = loaded(false);
+    a.update(Action::ConnectionLost);
+    assert!(render(&mut a, 80, 24).contains(ZH.conn_reconnecting));
+    a.update(Action::Connected { app_version: VERSION.into() });
+    assert!(render(&mut a, 80, 24).contains(ZH.toast_reconnected));
+    a.update(Action::Tick { now_ms: NOW + 2_999 });
+    assert!(render(&mut a, 80, 24).contains(ZH.toast_reconnected));
+    a.update(Action::Tick { now_ms: NOW + 3_000 });
+    assert!(!render(&mut a, 80, 24).contains(ZH.toast_reconnected));
+}
+
+#[test]
+fn load_failure_toasts_only_while_connected() {
+    let fail = || Action::LoadFailed { cmd: Cmd::FetchOverview, message: "boom".into() };
+    let mut a = loaded(false);
+    a.update(fail());
+    assert!(render(&mut a, 80, 24).contains("加载失败：boom"));
+
+    let mut b = loaded(false);
+    b.update(Action::ConnectionLost);
+    b.update(fail());
+    assert!(!render(&mut b, 80, 24).contains("加载失败"));
+}
+
+// ---------- 更新逻辑 ----------
+
+#[test]
+fn keys_map_to_actions() {
+    let mut a = loaded(false);
+    assert_eq!(a.handle_key(key(KeyCode::Char('q'))), Some(Action::Quit));
+    assert_eq!(a.handle_key(key(KeyCode::Char('3'))), Some(Action::SwitchTab(2)));
+    assert_eq!(a.handle_key(key(KeyCode::Char('6'))), None);
+    assert_eq!(a.handle_key(key(KeyCode::Tab)), Some(Action::NextTab));
+    assert_eq!(a.handle_key(key(KeyCode::BackTab)), Some(Action::PrevTab));
+    assert_eq!(a.handle_key(key(KeyCode::Char('r'))), Some(Action::Refresh));
+    assert_eq!(a.handle_key(key(KeyCode::Char('?'))), Some(Action::ToggleHelp));
+    assert_eq!(a.handle_key(KeyEvent::new(KeyCode::Char('c'), KeyModifiers::CONTROL)), Some(Action::Quit));
+}
+
+#[test]
+fn key_release_events_are_ignored() {
+    let release = KeyEvent {
+        code: KeyCode::Char('q'),
+        modifiers: KeyModifiers::NONE,
+        kind: KeyEventKind::Release,
+        state: KeyEventState::NONE,
+    };
+    assert_eq!(loaded(false).handle_key(release), None);
+}
+
+#[test]
+fn an_open_popup_swallows_page_keys_but_not_ctrl_c() {
+    let mut a = loaded(false);
+    a.update(Action::ToggleHelp);
+    assert_eq!(a.handle_key(key(KeyCode::Char('2'))), None);
+    assert_eq!(a.handle_key(key(KeyCode::Char('r'))), None);
+    assert_eq!(a.handle_key(key(KeyCode::Esc)), Some(Action::ClosePopup));
+    assert_eq!(a.handle_key(key(KeyCode::Char('q'))), Some(Action::ClosePopup));
+    assert_eq!(a.handle_key(KeyEvent::new(KeyCode::Char('c'), KeyModifiers::CONTROL)), Some(Action::Quit));
+}
+
+#[test]
+fn tabs_wrap_around_and_returning_to_a_page_refreshes_it() {
+    let mut a = loaded(false);
+    assert!(a.update(Action::PrevTab).is_empty(), "占位页不拉数据");
+    assert!(render(&mut a, 80, 24).contains(ZH.coming_soon));
+    assert_eq!(a.update(Action::NextTab), vec![Cmd::FetchOverview], "从第 5 页绕回总览");
+    assert!(a.update(Action::SwitchTab(0)).is_empty(), "已经在这一页");
+    assert!(a.update(Action::SwitchTab(9)).is_empty());
+}
+
+#[test]
+fn only_the_visible_page_polls_and_only_while_connected() {
+    let mut a = loaded(false);
+    let mut fetches = 0;
+    for i in 1..=40 {
+        fetches += a.update(Action::Tick { now_ms: NOW + i * 250 }).len();
+    }
+    assert_eq!(fetches, 2, "40 个 tick = 10 秒 = 2 次轮询");
+
+    a.update(Action::ConnectionLost);
+    let quiet: usize = (41..=80).map(|i| a.update(Action::Tick { now_ms: NOW + i * 250 }).len()).sum();
+    assert_eq!(quiet, 0, "断线期间不轮询");
+
+    let mut b = loaded(false);
+    b.update(Action::SwitchTab(3));
+    let hidden: usize = (1..=40).map(|i| b.update(Action::Tick { now_ms: NOW + i * 250 }).len()).sum();
+    assert_eq!(hidden, 0, "总览不可见时不轮询");
+}
+
+#[test]
+fn subscription_events_refetch_the_list_only_on_the_overview() {
+    let ev = |name: &str| Action::Sse { name: name.into(), data: "\"1\"".into() };
+    let mut a = loaded(false);
+    assert_eq!(a.update(ev("subscription_state_changed")), vec![Cmd::FetchSubscriptions]);
+    assert_eq!(a.update(ev("subscription_quota_reached")), vec![Cmd::FetchSubscriptions]);
+    assert!(a.update(ev("route_attempt_started")).is_empty());
+    a.update(Action::SwitchTab(2));
+    assert!(a.update(ev("subscription_state_changed")).is_empty());
+}
+
+#[test]
+fn a_load_that_finishes_after_leaving_the_page_still_lands() {
+    let mut a = app(false);
+    a.update(Action::Connected { app_version: VERSION.into() });
+    a.update(Action::SwitchTab(1));
+    a.update(Action::OverviewLoaded(Box::new(data())));
+    a.update(Action::SwitchTab(0));
+    assert!(render(&mut a, 80, 24).contains("1,284"));
+}
+
+// ---------- 动效 ----------
+
+/// 把正在播的效果播完。
+fn settle(a: &mut App) {
+    render(a, 80, 24);
+    render_with(a, 80, 24, Duration::from_secs(2));
+    assert!(!a.wants_fast_frames());
+}
+
+#[test]
+fn startup_effect_plays_once() {
+    let mut a = loaded(true);
+    render(&mut a, 80, 24);
+    assert!(a.wants_fast_frames(), "第一帧触发启动动效");
+    render_with(&mut a, 80, 24, Duration::from_secs(2));
+    assert!(!a.wants_fast_frames());
+    render(&mut a, 80, 24);
+    assert!(!a.wants_fast_frames(), "只播一次");
+}
+
+/// 空闲时两帧之间隔了很久, 新触发的效果不能被这段空闲「快进」掉。
+#[test]
+fn idle_time_before_a_trigger_does_not_fast_forward_the_effect() {
+    let mut a = loaded(true);
+    settle(&mut a);
+    a.update(Action::SwitchTab(1));
+    render_with(&mut a, 80, 24, Duration::from_secs(5));
+    assert!(a.wants_fast_frames(), "切页效果这一帧才开始");
+    render_with(&mut a, 80, 24, Duration::from_millis(200));
+    assert!(!a.wants_fast_frames(), "150ms 的效果 200ms 后结束");
+}
+
+#[test]
+fn a_changed_subscription_row_flashes() {
+    let mut a = loaded(true);
+    settle(&mut a);
+
+    a.update(Action::SubscriptionsLoaded(data().subscriptions));
+    render(&mut a, 80, 24);
+    assert!(!a.wants_fast_frames(), "没变化就不闪");
+
+    let mut subs = data().subscriptions;
+    subs[1].state = SubscriptionState::RateLimited;
+    subs[1].is_dispatchable = false;
+    a.update(Action::SubscriptionsLoaded(subs));
+    render(&mut a, 80, 24);
+    assert!(a.wants_fast_frames());
+}
+
+#[test]
+fn a_changed_number_pulses_but_the_first_load_does_not() {
+    let mut a = loaded(true);
+    settle(&mut a);
+    let mut d = data();
+    d.stats.total_requests += 1;
+    a.update(Action::OverviewLoaded(Box::new(d)));
+    render(&mut a, 80, 24);
+    assert!(a.wants_fast_frames());
+}
+
+#[test]
+fn with_fx_disabled_nothing_ever_animates() {
+    let mut a = loaded(false);
+    render(&mut a, 80, 24);
+    a.update(Action::SwitchTab(1));
+    a.update(Action::ToggleHelp);
+    render(&mut a, 80, 24);
+    assert!(!a.wants_fast_frames());
+}
