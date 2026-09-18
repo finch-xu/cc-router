@@ -242,46 +242,64 @@ pub fn powershell_path(system_root: Option<&std::ffi::OsStr>) -> PathBuf {
 // `powershell -Command "<script>"` 默认的 `$ErrorActionPreference` 是 `Continue`: 一条语句抛错,
 // 后面的语句照样跑, 退出码只看最后一条语句成不成功。这会让「读注册表失败」悄悄变成「读到空 PATH」,
 // 「写注册表失败」悄悄变成「整体成功」——必须每段脚本第一句就把它改成 `Stop` (fix-2 F1)。
+// **但 `$ErrorActionPreference='Stop'` 只管**「非终止性」错误 (cmdlet 走 `Write-Error` 报的那类);
+// .NET 方法调用 (`$k.GetValue(...)`、`$k.SetValue(...)`) 抛的是 CLR 异常, 是不是被当前引擎版本
+// 升级成终止性错误并不是稳定契约——真出现「没被升级」的情况, `$v` 会是 `$null`, 后面的语句照样
+// 跑完、`CCR1:`+空 base64 正常打印、退出码 0, install 会拿着一个「看起来是空 PATH」的假值把用户
+// PATH 整个覆盖成我们这一条 (fix-3 B1)。修法是显式 `try{…}catch{…;exit 1}` 兜底, 不依赖
+// `$ErrorActionPreference` 的隐式升级行为。`try` 块外层仍然先设 `$ErrorActionPreference='Stop'`——
+// 双保险, 也让 cmdlet 类的非终止性错误照样被升级进 catch。
 // 两段脚本都不能含 `"` 字符: Rust 侧用 `-Command <script>` 传参, Windows 的参数拼接/转义规则
 // 会把内嵌的 `"` 搞复杂, 干脆全程只用单引号写 PowerShell 字符串字面量, 从根源上绕开。
 
 /// 读用户级 `HKCU\Environment\Path`。`DoNotExpandEnvironmentNames` 保留 `%USERPROFILE%\…` 原文,
-/// 不展开也不改类型。`OpenSubKey` 拿不到 `Environment` 键是真正的错误 (`throw`, 非 0 退出) ——
-/// 与「有键但没有 Path 值」(`GetValue` 的默认值 `''`, 合法的空 PATH) 是两件不同的事, 不能混。
-/// 输出前先把控制台编码换成**不带 BOM** 的 UTF-8 (`New-Object Text.UTF8Encoding $false`) ——
-/// 默认的 `[Text.Encoding]::UTF8` 静态实例自带 BOM 预导, 会粘在第一个 PATH 条目前面;
-/// 不换编码则退回系统 OEM 代码页, CJK 字符经 `from_utf8_lossy` 会变成一串 U+FFFD。
+/// 不展开也不改类型。`OpenSubKey` 拿不到 `Environment` 键是真正的错误 (`throw`, 走 `catch` 非 0
+/// 退出) —— 与「有键但没有 Path 值」(`GetValue` 的默认值 `''`, 合法的空 PATH) 是两件不同的事,
+/// 不能混。**不碰 `[Console]::OutputEncoding`**: 我们用 `CREATE_NO_WINDOW` + 管道起的进程没有
+/// 真正的控制台, 读/写这个属性在这类「无控制台」进程里可能直接抛 `IOException: The handle is
+/// invalid`——曾经把它当第一条可能失败的语句, 一旦抛错整个 Windows 功能直接不可用 (fix-3 B2)。
+/// 改成把值编码成 **base64**: `[Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes($v))`
+/// 只产出 ASCII 字符, 天然不受控制台代码页影响, 也不需要碰 `OutputEncoding`。
 /// 输出前缀固定标记 `CCR1:`, 供 `decode_ps_read` 校验「这确实是我们的脚本跑完的」而不是半截输出。
 pub const PS_READ: &str = "$ErrorActionPreference='Stop';\
-    [Console]::OutputEncoding=New-Object Text.UTF8Encoding $false;\
+    try{\
     $k=[Microsoft.Win32.Registry]::CurrentUser.OpenSubKey('Environment');\
     if(-not $k){throw 'Environment key missing'};\
-    $v=$k.GetValue('Path','',[Microsoft.Win32.RegistryValueOptions]::DoNotExpandEnvironmentNames);\
-    [Console]::Out.Write('CCR1:'+$v)";
+    $v=[string]$k.GetValue('Path','',[Microsoft.Win32.RegistryValueOptions]::DoNotExpandEnvironmentNames);\
+    [Console]::Out.Write('CCR1:'+[Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes($v)))\
+    }catch{[Console]::Error.Write($_.ToString());exit 1}";
 
 /// 写回 `HKCU\Environment\Path`, 保留原有的值类型 (没有旧值时按 `ExpandString` 新建, 与
 /// Windows 自己新建这个值时用的类型一致)。新值经环境变量 `CCR_NEW_PATH` 传入而不是拼进脚本文本,
 /// 但 PowerShell 里读一个不存在/空的环境变量得到的是 `$null`, `SetValue('Path',$null,…)` 会直接
 /// 抛错——`[string]$env:CCR_NEW_PATH` 强制转换成空字符串, 才能把「PATH 被清空」当成合法值写回,
 /// 而不是让 WRITE 在这种边界情况下失败。最后广播一次 `WM_SETTINGCHANGE`(对不存在的变量
-/// `SetEnvironmentVariable`), 新开的终端立即看到新 PATH。
+/// `SetEnvironmentVariable`), 新开的终端立即看到新 PATH。同 `PS_READ`: 全部包进
+/// `try{…}catch{…;exit 1}`——`SetValue` 抛错不能被最后一条 `SetEnvironmentVariable` 的成功
+/// 掩盖掉, 那样会汇报「已完成」但其实什么都没写进去 (fix-3 B1)。
 pub const PS_WRITE: &str = "$ErrorActionPreference='Stop';\
+    try{\
     $k=[Microsoft.Win32.Registry]::CurrentUser.CreateSubKey('Environment');\
     $kind=if($k.GetValueNames() -contains 'Path'){$k.GetValueKind('Path')}else{[Microsoft.Win32.RegistryValueKind]::ExpandString};\
     $v=[string]$env:CCR_NEW_PATH;\
     $k.SetValue('Path',$v,$kind);\
-    [Environment]::SetEnvironmentVariable('CCR_TUI_PATH_REFRESH',$null,'User')";
+    [Environment]::SetEnvironmentVariable('CCR_TUI_PATH_REFRESH',$null,'User')\
+    }catch{[Console]::Error.Write($_.ToString());exit 1}";
 
-/// `PS_READ` 的输出解码: 严格 UTF-8 (无效字节直接拒绝, 不用 `from_utf8_lossy` 悄悄换成 U+FFFD——
-/// 那样会把损坏的 PATH 当成合法值写回注册表), 去掉最多一个开头的 BOM, 再校验 `CCR1:` 标记。
-/// 标记缺失说明脚本没跑完 / 跑的不是我们期望的脚本, 当错误处理, 不能当空字符串放过。
-/// 标记之后的内容原样返回、不 trim——这段之后会被原样写回注册表, 用户 PATH 里如果真有
-/// 尾部空格这类怪值, 我们不该替他们“修正”掉。
+/// `PS_READ` 的输出解码。严格 UTF-8 (无效字节直接拒绝, 不用 `from_utf8_lossy` 悄悄换成 U+FFFD),
+/// 去掉最多一个开头的 BOM, 再 `trim()`——这一步现在是安全的: 标记之后的内容是纯 ASCII 的 base64,
+/// PowerShell 输出可能带的尾部换行不会混进真正的 PATH 值 (旧版本在这里特意不 trim, 因为那时候
+/// 标记后面直接是原始 PATH 文本, trim 会啃掉用户 PATH 里故意留的尾部空格——现在这层保护移到了
+/// base64 内部, 外层的 ASCII 包装可以放心 trim)。`CCR1:` 标记缺失说明脚本没跑完 / 跑的不是我们
+/// 期望的脚本, 当错误处理。标记之后的内容按标准 base64 解码、再做一次严格 UTF-8 校验, 两步任一失败
+/// 都是 `Err`, 不猜测、不用损坏的字节拼出一个「看起来对」的字符串。
 pub fn decode_ps_read(stdout: &[u8]) -> Result<String, String> {
+    use base64::{engine::general_purpose::STANDARD, Engine as _};
     let s = String::from_utf8(stdout.to_vec()).map_err(|_| "读取用户 PATH 失败: 输出不是合法 UTF-8".to_string())?;
-    let s = s.strip_prefix('\u{FEFF}').unwrap_or(s.as_str());
-    let rest = s.strip_prefix("CCR1:").ok_or_else(|| "读取用户 PATH 失败: 输出缺少标记".to_string())?;
-    Ok(rest.to_string())
+    let s = s.strip_prefix('\u{FEFF}').unwrap_or(s.as_str()).trim();
+    let encoded = s.strip_prefix("CCR1:").ok_or_else(|| "读取用户 PATH 失败: 输出缺少标记".to_string())?;
+    let bytes = STANDARD.decode(encoded).map_err(|e| format!("读取用户 PATH 失败: base64 解码失败: {e}"))?;
+    String::from_utf8(bytes).map_err(|_| "读取用户 PATH 失败: base64 内容不是合法 UTF-8".to_string())
 }
 
 // ───────────────────────── 纯函数: Linux ─────────────────────────
@@ -544,8 +562,8 @@ mod platform {
 
     const CREATE_NO_WINDOW: u32 = 0x0800_0000;
 
-    /// 跑一段脚本, 原始 stdout 字节 (不在这里假设编码——`PS_READ` 自己把编码钉死成不带 BOM 的
-    /// UTF-8 并加了 `CCR1:` 标记, 解码交给 `decode_ps_read`)。
+    /// 跑一段脚本, 原始 stdout 字节 (不在这里假设编码——`PS_READ` 自己把值编成 ASCII 的 base64
+    /// 并加了 `CCR1:` 标记, 不依赖控制台代码页, 解码交给 `decode_ps_read`)。
     fn powershell(script: &str, new_path: Option<&str>) -> Result<Vec<u8>, String> {
         let exe = powershell_path(std::env::var_os("SystemRoot").as_deref());
         let mut cmd = Command::new(exe);
@@ -696,6 +714,17 @@ mod tests {
         // 大小写不敏感: cc-router.APP 也算 .app 后缀 (fix-2 F7)。
         let upper = Path::new("/Volumes/X/cc-router.APP/Contents/MacOS/cc-router-tui");
         assert_eq!(macos_blocked(upper), Some(InstallBlocked::OnDiskImage));
+    }
+
+    // 唯一一个真的调用 `install`/`uninstall` 的测试: 只有在能确认要测的那条 return 排在**第一条
+    // 语句**、之前没有任何 syscall 时才安全 (上面 `pub fn install` 的源码已经确认: 非绝对路径检查
+    // 是函数体的第一行, 在 `macos_blocked`(纯字符串比较) 和 `link_state`(读, 不写) 之前就返回)。
+    // 不要再加别的调用 `install`/`uninstall` 的测试——这两个函数在其它分支会碰真实的
+    // `/usr/local/bin`、可能弹系统授权框, 不是 tempdir 能兜住的。
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn install_rejects_a_non_absolute_sidecar_path_before_touching_anything() {
+        assert!(install(Path::new("relative/cc-router-tui")).is_err());
     }
 
     #[cfg(unix)]
@@ -929,10 +958,6 @@ mod tests {
         );
     }
 
-    /// bite check (b) 记录: 把 `symlink_shell` 改回不带 `[ ! -e L ] || [ -L L ] || exit 1;` 这道
-    /// check-then-act 重新检查, 上面这个精确字符串断言就会失败——这就是「测试真的咬得住」的证明,
-    /// 已经手动做过一次并还原, 见 final-fix-report.md。
-
     #[test]
     fn user_cancel_is_recognised() {
         assert!(is_user_cancel("execution error: User canceled. (-128)"));
@@ -975,38 +1000,49 @@ mod tests {
         for script in [PS_READ, PS_WRITE] {
             assert!(!script.contains('"'), "脚本不能含双引号 (Windows 参数转义会变复杂): {script}");
             assert!(script.starts_with("$ErrorActionPreference='Stop';"), "必须第一句就 fail-closed: {script}");
+            assert!(script.contains("try{"), "必须显式 try, 不能只靠 $ErrorActionPreference 隐式升级异常: {script}");
+            assert!(script.contains("}catch{"), "{script}");
+            assert!(script.contains("exit 1"), "catch 里必须非 0 退出, 不能让最后一条无关语句的成功掩盖前面的异常: {script}");
         }
         assert!(PS_READ.contains("CCR1:"));
-        assert!(PS_READ.contains("UTF8Encoding $false"));
+        assert!(PS_READ.contains("ToBase64String"));
+        assert!(!PS_READ.contains("OutputEncoding"), "无控制台进程里碰这个属性可能直接抛异常, 不能再用: {PS_READ}");
         assert!(PS_READ.contains("DoNotExpandEnvironmentNames"));
         assert!(PS_WRITE.contains("GetValueKind"));
         assert!(PS_WRITE.contains("ExpandString"));
         assert!(PS_WRITE.contains("CCR_NEW_PATH"));
     }
 
+    // 上面这条测试就是 bite check 的证据: 把 PS_READ/PS_WRITE 的 `catch{...}` 块里的 `exit 1`
+    // 删掉, `assert!(script.contains("exit 1"), ...)` 会失败——已手动做过一次并还原, 记录见
+    // final-fix-report.md「最后一轮」小节。
+
     #[test]
     fn decode_ps_read_cases() {
-        assert_eq!(decode_ps_read(b"CCR1:C:\\Tools;C:\\App").unwrap(), r"C:\Tools;C:\App");
+        use base64::{engine::general_purpose::STANDARD, Engine as _};
+        let wrap = |s: &str| format!("CCR1:{}", STANDARD.encode(s.as_bytes()));
+
+        assert_eq!(decode_ps_read(wrap(r"C:\Tools;C:\App").as_bytes()).unwrap(), r"C:\Tools;C:\App");
         // BOM: 只剥一个
         let mut with_bom = "\u{FEFF}".as_bytes().to_vec();
-        with_bom.extend_from_slice(b"CCR1:C:\\Tools");
+        with_bom.extend_from_slice(wrap(r"C:\Tools").as_bytes());
         assert_eq!(decode_ps_read(&with_bom).unwrap(), r"C:\Tools");
-        // 空值是合法的空 PATH, 不是错误
+        // 空值是合法的空 PATH, 不是错误 (空字符串的 base64 就是空字符串)
         assert_eq!(decode_ps_read(b"CCR1:").unwrap(), "");
-        // 结尾的 ; 和空格必须原样保留, 不能被 trim——这段之后要原样写回注册表
-        assert_eq!(decode_ps_read("CCR1:C:\\Tools; ".as_bytes()).unwrap(), "C:\\Tools; ");
+        // 结尾的 ; 和空格必须原样保留——base64 是按字节编码的, 不会因为外层 trim() 而丢
+        assert_eq!(decode_ps_read(wrap("C:\\Tools; ").as_bytes()).unwrap(), "C:\\Tools; ");
+        // CJK 往返: 中文用户名路径, 编码/解码要严格对称
+        assert_eq!(decode_ps_read(wrap(r"C:\Users\张三\bin").as_bytes()).unwrap(), r"C:\Users\张三\bin");
         // 标记缺失: 读到的东西不是我们期望的脚本产出, 当错误处理
         assert!(decode_ps_read(b"C:\\Tools").is_err());
         assert!(decode_ps_read(b"").is_err());
-        // 非法 UTF-8 (含典型的 GBK 字节, 例如 "你" 在 GBK 里是 0xC4 0xE3, 不是合法 UTF-8 序列):
-        // 严格拒绝, 不能靠 from_utf8_lossy 悄悄换成 U+FFFD 再当正常值用。
-        assert!(decode_ps_read(&[0xC4, 0xE3]).is_err());
+        // 标记在, 但后面不是合法 base64
+        assert!(decode_ps_read(b"CCR1:not-valid-base64!!!").is_err());
+        // 合法 base64, 但解出来的字节不是合法 UTF-8 (GBK 的「你」是 0xC4 0xE3, 不是合法 UTF-8 序列)
+        assert!(decode_ps_read(format!("CCR1:{}", STANDARD.encode([0xC4u8, 0xE3])).as_bytes()).is_err());
+        // 整段 stdout 本身就不是合法 UTF-8 (还没到 base64 解码那一步)
         assert!(decode_ps_read(&[0xFF, 0xFE, 0x00]).is_err());
     }
-
-    /// bite check (a) 记录: 把 `decode_ps_read` 里 `CCR1:` 的校验去掉 (直接 `Ok(s.to_string())`),
-    /// 上面 `decode_ps_read_cases` 里「标记缺失 → Err」的两个断言就会失败——已手动做过一次并还原,
-    /// 见 final-fix-report.md。
 
     #[test]
     fn powershell_path_resolves_absolutely_with_fallback() {

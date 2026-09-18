@@ -54,12 +54,14 @@ export function useLanAddresses(enabled: boolean) {
 /** sidecar 的路径在进程生命周期内不变, 但 `in_path` / `install_blocked` / `local_bin_off_path`
  * 会在 app 外面发生变化 (用户在终端里手动装了 / 卸了, 或者手动解决了「已被占用」的冲突) ——
  * 这三个字段不能跟 path 一样按「永不过期」处理, 否则用户在终端修好冲突之后回到设置页, 按钮还是
- * 灰的。改成每次挂载都重新读一次、窗口重新聚焦也重新读 (fix-2 F2)。 */
+ * 灰的。`refetchOnMount: "always"` + `refetchOnWindowFocus: true` 保证挂载 / 切回来都重新读;
+ * `staleTime` 给 3 秒而不是 0——alt-tab 在这个页面上来回切几次 (每次都触发 focus) 不该每次都
+ * 真去拉起一次 PowerShell / 重新读两个几 MB 的二进制比字节, 3 秒内的重复聚焦直接用缓存 (fix-3 B5)。 */
 export function useTuiLaunchInfo() {
   return useQuery({
     queryKey: TUI_LAUNCH_INFO_KEY,
     queryFn: () => api.tuiLaunchInfo(),
-    staleTime: 0,
+    staleTime: 3_000,
     refetchOnMount: "always",
     refetchOnWindowFocus: true,
   });

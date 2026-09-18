@@ -299,7 +299,10 @@ function TuiLaunchRow({ enabled }: { enabled: boolean }) {
           {t("settings.tui.launch.label")}
           <div className="desc">
             {path ? t("settings.tui.launch.desc") : t("settings.tui.launch.missing")}
-            {path && is_appimage && !in_path && <> {t("settings.tui.launch.appimage")}</>}
+            {/* 门槛是 !showShort 而不是 !in_path: ~/.local/bin 不在 PATH 上时 showShort 是 false,
+                这时候即便技术上 in_path=true (marker 认出来是自家复制), 短命令也敲不出来, AppImage
+                用户仍然需要看到「这条路径每次启动都会变」的解释 (fix-3 B6)。 */}
+            {path && is_appimage && !showShort && <> {t("settings.tui.launch.appimage")}</>}
             {path && runtime.kind === "web" && <> {t("settings.tui.launch.webHint")}</>}
           </div>
         </div>
