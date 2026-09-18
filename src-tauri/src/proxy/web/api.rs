@@ -110,6 +110,9 @@ use crate::settings::model::SettingsPatch;
 use crate::subscription::model::KiroDisguise;
 use crate::subscription::quota::TokenQuotas;
 
+/// 网页 / TUI 通道上被拒绝的 command 的统一回复。
+const DESKTOP_ONLY: &str = "此操作只能在桌面 app 里执行";
+
 web_commands! {
     (st, app, args)
     // providers
@@ -187,6 +190,10 @@ web_commands! {
     tls_regenerate_leaf() => commands::tls::tls_regenerate_leaf(st).await,
     // TUI
     tui_launch_info() => Ok::<_, AppError>(commands::tui::tui_launch_info()),
+    // 这两条只能从桌面窗口调用: 不能让局域网上的网页用户 (或 TUI) 在宿主机上弹系统授权框 / 改宿主机 PATH。
+    // 两边的 command 集合必须一致 (registered_matches_generate_handler), 所以照常登记, 但函数体是拒绝桩。
+    install_tui_command() => Err::<(), AppError>(AppError::BadRequest(DESKTOP_ONLY.into())),
+    uninstall_tui_command() => Err::<(), AppError>(AppError::BadRequest(DESKTOP_ONLY.into())),
     // Claude Code / Codex integrations
     read_claude_code_settings() => commands::integrations::read_claude_code_settings(st).await,
     inspect_claude_code_settings() => commands::integrations::inspect_claude_code_settings(st).await,
@@ -249,6 +256,22 @@ mod tests {
     /// 扫描 lib.rs 的 `generate_handler![...]` 登记表, 取每个 path 的最后一段
     /// (函数名), 与 web_commands! 生成的 REGISTERED 做集合对比。两边任何一边
     /// 漏登记都会在这里炸——网页 API 是否完整覆盖桌面 command 集合, 靠这个锁住。
+    /// 「添加到 PATH」会在宿主机上弹授权框 / 改 PATH, 网页与 TUI 通道必须是拒绝桩:
+    /// 登记行里不允许出现对真实实现的调用。扫源码是因为 `dispatch` 需要完整的 AppState 才能跑。
+    #[test]
+    fn host_mutating_tui_commands_are_refusal_stubs_here() {
+        let src = include_str!("api.rs");
+        for name in ["install_tui_command", "uninstall_tui_command"] {
+            assert!(REGISTERED.contains(&name), "{name} 必须登记 (两边集合要一致)");
+            let line = src
+                .lines()
+                .find(|l| l.trim_start().starts_with(&format!("{name}()")))
+                .unwrap_or_else(|| panic!("找不到 {name} 的登记行"));
+            assert!(line.contains("DESKTOP_ONLY") && line.contains("Err::<"), "{name} 不是拒绝桩: {line}");
+            assert!(!line.contains("commands::tui::"), "{name} 调到了真实实现: {line}");
+        }
+    }
+
     #[test]
     fn registered_matches_generate_handler() {
         let lib_rs = include_str!("../../lib.rs");

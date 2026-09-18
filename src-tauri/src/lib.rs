@@ -181,6 +181,8 @@ pub fn run() {
             commands::tls::tls_get_ca_pem_text,
             commands::tls::tls_regenerate_leaf,
             commands::tui::tui_launch_info,
+            commands::tui::install_tui_command,
+            commands::tui::uninstall_tui_command,
             commands::integrations::read_claude_code_settings,
             commands::integrations::inspect_claude_code_settings,
             commands::integrations::write_claude_code_settings,
