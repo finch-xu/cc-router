@@ -443,8 +443,21 @@ fn a_toast_does_not_cover_the_version_banner() {
     let mut a = app(false);
     a.update(Action::Connected { app_version: "1.2.3".into() });
     a.update(Action::LoadFailed { cmd: Cmd::FetchOverview, message: "boom".into() });
-    let out = render(&mut a, 120, 30);
-    assert!(out.contains('⚠') && out.contains("加载失败"), "{out}");
+    // 80 列下版本不一致的横幅文案比屏幕还宽, 会填满整行; toast 如果画到这一行,
+    // 一定会用自己的边框字符覆盖掉横幅的一部分 —— 这样测试才咬得住 toast 顶行硬编码回归。
+    let out = render(&mut a, 80, 30);
+    let lines: Vec<&str> = out.lines().collect();
+    let banner_line = lines.iter().position(|l| l.contains('⚠')).unwrap_or_else(|| panic!("没有横幅行\n{out}"));
+    let toast_line = lines.iter().position(|l| l.contains("加载失败")).unwrap_or_else(|| panic!("没有 toast 文字行\n{out}"));
+    assert!(
+        toast_line >= banner_line + 2,
+        "toast 顶部至少要在横幅下方 2 行 (顶边框 1 行 + 文字行) (banner={banner_line}, toast={toast_line})\n{out}"
+    );
+    let banner_text = lines[banner_line];
+    assert!(
+        !banner_text.contains('╭') && !banner_text.contains('╮') && !banner_text.contains('│'),
+        "横幅行不该出现 toast 的边框字符\n{out}"
+    );
 }
 
 /// F7: `a_changed_number_pulses_but_the_first_load_does_not` 的「首次加载不脉冲」这一半被
