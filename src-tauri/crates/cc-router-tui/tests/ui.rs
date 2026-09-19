@@ -397,6 +397,33 @@ fn a_changed_subscription_row_flashes() {
     assert!(a.wants_fast_frames());
 }
 
+/// I1 fix round 1: 订阅变更通知 (`on_subscriptions_changed` 的 fan-out) 必须从 `Fetch::Overview`
+/// 与 `Fetch::Subscriptions` 两条 `FetchDone` 分支都能送达页面。重构前两处各自维护一份页面列表,
+/// 漏改其中一处不会挂任何编译错误或既有测试, 只会表现成"轮询触发的整页刷新不闪, 但 SSE 触发的
+/// 单独订阅刷新会闪"这种只在真机上才会注意到的不对称。
+#[test]
+fn subscription_changes_reach_pages_from_both_fetch_kinds() {
+    // 经 Fetch::Overview (整页加载) 送达的变化。
+    let mut a = loaded(true);
+    settle(&mut a);
+    let mut d = data();
+    d.subscriptions[1].state = SubscriptionState::RateLimited;
+    d.subscriptions[1].is_dispatchable = false;
+    a.update(overview_done(2, d));
+    render(&mut a, 80, 24);
+    assert!(a.wants_fast_frames(), "经 Fetch::Overview 送达的订阅变化也该闪");
+
+    // 经 Fetch::Subscriptions (单独刷新) 送达的变化; 另开一个 App 避免和上面的动效互相干扰。
+    let mut b = loaded(true);
+    settle(&mut b);
+    let mut subs = data().subscriptions;
+    subs[1].state = SubscriptionState::RateLimited;
+    subs[1].is_dispatchable = false;
+    b.update(subs_done(2, subs));
+    render(&mut b, 80, 24);
+    assert!(b.wants_fast_frames(), "经 Fetch::Subscriptions 送达的订阅变化也该闪");
+}
+
 #[test]
 fn a_changed_number_pulses_but_the_first_load_does_not() {
     let mut a = loaded(true);

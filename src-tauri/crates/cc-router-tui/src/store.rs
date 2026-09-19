@@ -98,6 +98,27 @@ mod tests {
         b2.is_dispatchable = false;
         let changed2 = store.apply_subscriptions(3, vec![a_disabled, b2]);
         assert_eq!(changed2, Some(vec!["a".to_string()]));
+
+        // is_dispatchable 单独变, state 仍是 Healthy —— 这正是 token 限额打满的场景:
+        // SubscriptionState 本身不变 (后端不为"用户自己设的配额满了"单独发一个 state), 只有
+        // is_dispatchable 从 true 掉到 false。fix round 1 (M2) 前的用例只覆盖了「state 和
+        // is_dispatchable 一起变」, 漏了这条最容易在生产里出现的组合。
+        let mut store2 = Store::default();
+        store2.apply_subscriptions(1, vec![sub("c", SubscriptionState::Healthy)]);
+        let mut c_quota_full = sub("c", SubscriptionState::Healthy);
+        c_quota_full.is_dispatchable = false;
+        let changed3 = store2.apply_subscriptions(2, vec![c_quota_full]);
+        assert_eq!(changed3, Some(vec!["c".to_string()]), "is_dispatchable 单独变也要算变化");
+
+        // state 单独变, is_dispatchable 不变 (两个都不可调度的状态之间切换, 比如限流 → 临时错误)。
+        let mut store3 = Store::default();
+        let mut d1 = sub("d", SubscriptionState::RateLimited);
+        d1.is_dispatchable = false;
+        store3.apply_subscriptions(1, vec![d1]);
+        let mut d2 = sub("d", SubscriptionState::TransientError);
+        d2.is_dispatchable = false;
+        let changed4 = store3.apply_subscriptions(2, vec![d2]);
+        assert_eq!(changed4, Some(vec!["d".to_string()]), "state 单独变也要算变化");
     }
 
     #[test]

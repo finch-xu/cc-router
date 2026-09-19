@@ -246,9 +246,18 @@ async fn event_loop(terminal: &mut ratatui::DefaultTerminal, client: Arc<Client>
         }
         // 抽干再画: select! 那一个处理完之后, 把这时已经排在队列里的 action 一并处理掉,
         // 再回到循环顶部画一帧 (为事件洪峰准备; 键盘与 tick 走 select! 的常规分支, 不受影响)。
-        while let Ok(a) = rx.try_recv() {
-            if process_action(a, &client, &tx, &mut fetches, &mut issued, app) {
-                break 'outer;
+        // **有界**: 只抽干「进入这段代码那一刻已经排队的那些」(`rx.len()` 那一刻的快照),
+        // 不是无条件 `while let` —— 否则一个持续produce的生产者 (比如密集 SSE) 会让抽干永远
+        // 抽不完, 一直不回到循环顶部, 键盘响应和下一帧重绘都被无限期推迟 (M5 fix round 1)。
+        // 抽干过程中 `process_action` 触发的新 fetch 结果晚一点由下一轮循环处理, 不会丢。
+        for _ in 0..rx.len() {
+            match rx.try_recv() {
+                Ok(a) => {
+                    if process_action(a, &client, &tx, &mut fetches, &mut issued, app) {
+                        break 'outer;
+                    }
+                }
+                Err(_) => break,
             }
         }
     }

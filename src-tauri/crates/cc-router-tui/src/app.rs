@@ -179,6 +179,14 @@ impl App {
         }
     }
 
+    /// `Store` 刚接受了一份订阅列表 (`FetchDone` 两个分支共用): 广播给所有页面。**唯一**列出
+    /// 全部页面字段的地方 —— 以后加新页面只改这一处, 不会出现"某个 FetchDone 分支忘了通知新
+    /// 页面"这种只有部分刷新路径才触发、没有测试能咬住的漏更 (fix round 1, I1)。
+    fn notify_subscriptions_changed(&mut self, changed: &[String]) {
+        self.overview.on_subscriptions_changed(changed);
+        self.placeholder.on_subscriptions_changed(changed);
+    }
+
     /// 两处 toast 入口共用: 与最新排队的一条重复 (同 kind 同 text) 就丢弃, 否则挤掉最旧的排队项
     /// (下标 1, 下标 0 是正在屏幕上的那条, 不能被挤走)。
     fn push_toast(&mut self, toast: Toast) {
@@ -246,14 +254,16 @@ impl App {
                     }
                     Vec::new()
                 }
-                // 总览一次整页加载: 先把订阅列表交给 Store, 状态变了的 id 广播给所有页面;
-                // 不管 Store 是不是接受了这份订阅列表 (可能是晚到的旧结果), 总览页自己的其它
-                // 字段 (今日统计 / 每小时序列 / 代理状态) 都照常更新。
-                Ok(FetchData::Overview(data)) if fetch == Fetch::Overview => {
-                    let changed = self.store.apply_subscriptions(issued, data.subscriptions.clone());
+                // 总览一次整页加载: 订阅列表 `mem::take` 挪给 Store (不克隆——克隆一次给 Store、
+                // 整个 OverviewData 转给总览页时又整体克隆一次, 同一份列表会被复制两遍), 状态变了
+                // 的 id 广播给所有页面; 不管 Store 是不是接受了这份订阅列表 (可能是晚到的旧结果),
+                // 总览页自己的其它字段 (今日统计 / 每小时序列 / 代理状态) 都照常更新。
+                Ok(FetchData::Overview(mut data)) => {
+                    debug_assert_eq!(fetch, Fetch::Overview, "spawn_fetch 应该保证 FetchData::Overview 只配 Fetch::Overview");
+                    let subs = std::mem::take(&mut data.subscriptions);
+                    let changed = self.store.apply_subscriptions(issued, subs);
                     if let Some(changed) = &changed {
-                        self.overview.on_subscriptions_changed(changed);
-                        self.placeholder.on_subscriptions_changed(changed);
+                        self.notify_subscriptions_changed(changed);
                     }
                     let action = Action::FetchDone { fetch, issued, result: Ok(FetchData::Overview(data)) };
                     // 加载结果永远交给发起它的页面, 哪怕用户已经切走了。
@@ -261,16 +271,14 @@ impl App {
                 }
                 // 单独的订阅列表刷新 (SSE 触发): 只进 Store, 不需要转给任何页面的 update ——
                 // 各页面画的时候直接读 ctx.store。
-                Ok(FetchData::Subscriptions(subs)) if fetch == Fetch::Subscriptions => {
+                Ok(FetchData::Subscriptions(subs)) => {
+                    debug_assert_eq!(fetch, Fetch::Subscriptions, "spawn_fetch 应该保证 FetchData::Subscriptions 只配 Fetch::Subscriptions");
                     let changed = self.store.apply_subscriptions(issued, subs);
                     if let Some(changed) = &changed {
-                        self.overview.on_subscriptions_changed(changed);
-                        self.placeholder.on_subscriptions_changed(changed);
+                        self.notify_subscriptions_changed(changed);
                     }
                     Vec::new()
                 }
-                // fetch 与 result 的种类对不上 (理论上不会发生, spawn_fetch 保证两者始终配对)。
-                Ok(_) => Vec::new(),
             },
             Action::Refresh | Action::Sse { .. } => {
                 Self::select_page(self.tab, &mut self.overview, &mut self.placeholder).update(&action, &self.store)
