@@ -59,11 +59,17 @@ pub struct Strings {
     pub key_edit_model: &'static str,
     pub key_edit_effort: &'static str,
     pub key_save: &'static str,
+    /// M6 (fix round final): 脏页面上 `Esc` 的 hint 文案 ("放弃"), 与 `key_back` ("返回", 不脏时
+    /// 用) 区分开——同一个键在脏/不脏两种状态下的语义不同, 底栏提示也该跟着换。
+    pub key_discard: &'static str,
     /// Task 6: 虚拟模型页——成员列表里 `J`/`K` 重排序、`a` 加入、`x` 移除。
     pub key_move: &'static str,
     pub key_add: &'static str,
     pub key_remove: &'static str,
     pub key_mode: &'static str,
+    /// M6 (fix round final): 虚拟模型页 Models 焦点下 `⏎` 的 hint 文案 ("成员")——比旧的
+    /// `key_detail` ("详情") 更准确地描述这个键的作用 (进入这个虚拟模型的订阅成员列表)。
+    pub key_members: &'static str,
 
     pub help_title: &'static str,
     /// (键, 说明)
@@ -77,8 +83,13 @@ pub struct Strings {
 
     /// 过滤选择弹窗里「使用当前输入」那一行的文案, 参数是输入框里 (trim 过的) 文本。
     pub picker_use_typed: fn(text: &str) -> String,
-    /// 过滤后没有任何匹配项时列表区显示的占位文案。
+    /// 过滤后没有任何匹配项时列表区显示的占位文案 (且 `allow_custom` 为 false, 或者输入框非空但
+    /// 没有匹配——I2(d) 起 "零匹配 + 空输入 + 允许自定义" 这种情况改用 [`Strings::picker_type_to_enter`])。
     pub picker_empty: &'static str,
+    /// I2(d): `allow_custom` 且输入框为空 (trim 之后) 且没有任何候选项时的占位文案——引导用户
+    /// 打字后回车直接用输入的文本, 与 `picker_empty` ("没有匹配项", 用于确实存在候选但过滤不出
+    /// 结果、或者压根不允许自定义的场景) 区分开。
+    pub picker_type_to_enter: &'static str,
     /// 过滤选择弹窗底部的键位提示。
     pub picker_keys: &'static str,
     /// Task 5: 改模型 / 改思考档位两个 picker 的标题, 参数是槽位显示名 (四个主槽的英文原名, 或
@@ -184,6 +195,10 @@ pub struct Strings {
     pub sub_model_required: &'static str,
     /// 草稿对应的订阅从 `Store` 消失 (被别处删除) 时的提示。
     pub sub_gone: &'static str,
+    /// I1/M5 (fix round final): 这条订阅 (虚拟模型同理) 正有一次保存在飞行中时, 拒绝任何会修改
+    /// 草稿的按键 (含再按一次 `s`) 时的提示——避免飞行中的编辑被落地的保存结果悄悄冲掉 (D1 的
+    /// 姊妹问题: D1 保证了草稿不会被冲掉, 但没有在编辑发生的那一刻就告诉用户"现在编辑不安全")。
+    pub saving_in_progress: &'static str,
 
     // ---------- Task 6: 虚拟模型页 ----------
     pub vm_title: &'static str,
@@ -216,6 +231,10 @@ pub struct Strings {
     /// 拒绝保存的提示——`Unknown.as_wire()` 会静默降级成 `"sequential"`, 不能让用户在不知情的
     /// 情况下把它发回后端。
     pub vm_unknown_mode: &'static str,
+    /// I4 (fix round final): 订阅列表还没加载完 (或一直加载失败) 时, `a`/`x`/`J`/`K`/`s` 的拒绝
+    /// 提示——这段时间不能断定成员列表里找不到的 id 到底是"已删除"还是"只是还没拉到", 所以不
+    /// 显示 `vm_missing`、也不允许这几个会依赖订阅列表的编辑操作。
+    pub vm_subs_not_loaded: &'static str,
     pub vm_help_rows: &'static [(&'static str, &'static str)],
 }
 
@@ -281,10 +300,12 @@ pub const ZH: Strings = Strings {
     key_edit_model: "改模型",
     key_edit_effort: "改档位",
     key_save: "保存",
+    key_discard: "放弃",
     key_move: "移动",
     key_add: "加入",
     key_remove: "移除",
     key_mode: "模式",
+    key_members: "成员",
 
     help_title: "键位",
     help_rows: &[
@@ -302,6 +323,7 @@ pub const ZH: Strings = Strings {
 
     picker_use_typed: |text| format!("使用「{text}」"),
     picker_empty: "没有匹配项",
+    picker_type_to_enter: "输入后按 ⏎ 使用该文本",
     picker_keys: "⏎ 选择   Esc 取消",
     pick_model_title: |slot| format!("选择 {slot} 的模型"),
     pick_effort_title: |slot| format!("选择 {slot} 的思考档位"),
@@ -385,7 +407,8 @@ pub const ZH: Strings = Strings {
         ("↑↓ / j k", "上一条 / 下一条"),
         ("g / G", "第一条 / 最后一条"),
         ("PgUp / PgDn", "翻页"),
-        ("⏎ / Esc", "进入 / 退出详情"),
+        ("⏎ / → / l", "进入详情"),
+        ("Esc / ← / h", "退出详情"),
         ("⏎ (详情内)", "改当前槽位的模型"),
         ("o", "改当前槽位的思考档位"),
         ("s", "保存槽位修改"),
@@ -405,6 +428,7 @@ pub const ZH: Strings = Strings {
     sub_effort_na_kiro: "Kiro 不支持思考档位",
     sub_model_required: "模型不能为空",
     sub_gone: "这条订阅已不存在",
+    saving_in_progress: "正在保存,请稍候",
 
     vm_title: "虚拟模型",
     vm_mode_seq: "顺序",
@@ -423,6 +447,7 @@ pub const ZH: Strings = Strings {
     vm_remove_ghosts_first: "列表里有已删除的订阅,请先按 x 移除",
     vm_pick_add_title: |vm| format!("给 {vm} 加入订阅"),
     vm_unknown_mode: "这个调度模式当前版本不认识,请在桌面 app 里修改",
+    vm_subs_not_loaded: "订阅列表还没加载完,请稍候",
     vm_help_rows: &[
         ("↑↓ / j k", "上一项 / 下一项"),
         ("⏎ / → / l", "进入订阅列表"),

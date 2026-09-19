@@ -79,6 +79,20 @@ pub trait Component {
     /// 有没有关系 (比如订阅页只关心 `id` 匹配自己当前草稿的 `UpdateSlots`)。默认什么都不做。
     fn on_mutation_done(&mut self, _mutation: &Mutation, _ok: bool) {}
 
+    /// I1 (fix round final): 一次就地操作**刚刚发出去** (`App::start_mutation` 真的往忙碌表里插入
+    /// 那一刻), `App` 对**全部**页面各调一次——与 `on_mutation_done` 成对, 让编辑类页面知道"这个
+    /// 实体现在有一次保存在飞行中", 从而拒绝任何会继续修改同一份草稿的按键 (避免飞行中的编辑被
+    /// 落地的保存结果悄悄冲掉, D1 的姊妹问题)。默认什么都不做。
+    fn on_mutation_started(&mut self, _mutation: &Mutation) {}
+
+    /// M1 (fix round final): `Store` 刚**接受**了一份新的订阅列表或虚拟模型列表 (不管有没有变化),
+    /// `App` 对**全部**页面各调一次——编辑类页面借这个时机立刻核对一遍 `is_dirty()` 缓存 (`Draft`
+    /// 的 `sync`), 不用等下一次真正的 `Component::update()` 调用 (轮询最多要等 5 秒) 才发现"刚接受
+    /// 的新值其实已经和草稿相等了"。与 `on_subscriptions_changed` 的区别: 后者只在订阅列表**变化**
+    /// 时触发、只广播"哪些 id 变了" (给闪烁用); 这个方法订阅列表和虚拟模型列表都触发、不管内容
+    /// 变没变、也不带 diff, 纯粹是"该核对草稿了"的信号。默认什么都不做。
+    fn on_store_changed(&mut self, _store: &Store) {}
+
     /// 页面在 `update()` 内部想弹一条 toast (`update` 签名只能返回 `Vec<Cmd>`, 塞不进一个
     /// `Action`) 时, 存进这里; `App` 在调用 `update()` 之后轮询一次取走。默认没有待发的通知。
     fn take_notice(&mut self) -> Option<(ToastKind, String)> {

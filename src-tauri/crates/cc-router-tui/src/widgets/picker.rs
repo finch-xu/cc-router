@@ -32,11 +32,17 @@ pub struct PickerItem {
 }
 
 /// 弹窗是给谁开的; 结果原样带回, 页面据此知道该把值填到哪 (Task 5/6 起消费)。
+///
+/// I5 (fix round final): 每个变体都带着"这次弹窗是为哪个实体开的" (订阅 id / 虚拟模型名)——
+/// `PickerDone` 落地时可能已经隔了一段时间 (用户在弹窗里打字/翻页), 期间这个实体可能已经从
+/// `Store` 消失、或者 (理论上不该发生, 但防御性地) 页面的选中项变成了另一个; 页面据此判断"这次
+/// 结果还该不该应用到我当前的选中项上", 不匹配就静默忽略 (见 `pages::subscriptions::Subscriptions::applies_to`
+/// / `pages::virtual_models::VirtualModels::apply_add_choice`)。
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum PickerTag {
-    SlotModel { slot: Slot },
-    SlotEffort { slot: Slot },
-    VmAddSubscription,
+    SlotModel { sub_id: String, slot: Slot },
+    SlotEffort { sub_id: String, slot: Slot },
+    VmAddSubscription { vm: String },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -45,8 +51,9 @@ pub struct PickerSpec {
     pub title: String,
     pub items: Vec<PickerItem>,
     pub allow_custom: bool,
-    /// 输入框初值。**不参与首次过滤**——打开时显示全部, 只用来定位初始选中行 (`id == initial`
-    /// 的那一项, 没有就第一行); 用户一旦编辑过输入框, 之后就按当前输入过滤 (见 [`PickerState::dirty`])。
+    /// I2(a) (fix round final): 只用来定位打开时的初始选中行 (`id == initial` 的那一项, 没有就
+    /// 第一行)——**不再预填进输入框**, 不参与过滤, 也不会让"使用「…」"自定义行在打开那一刻就出现
+    /// (旧版会把它塞进输入框, 用户第一次打字变成"追加在预填值后面", 见 I2 的问题描述)。
     pub initial: String,
 }
 
@@ -67,9 +74,6 @@ pub enum PickerRow {
 pub struct PickerState {
     spec: PickerSpec,
     input: Input,
-    /// 输入框的值是否被编辑过 (哪怕改回和 `initial`一样的文本也算)。控制 `initial` 要不要参与
-    /// 过滤: 见 [`PickerSpec::initial`] 与 [`PickerState::visible`]。
-    dirty: bool,
     selected: usize,
     list_state: ListState,
     /// 上一帧列表区域的可视行数, `PageUp`/`PageDown` 按这个翻页; 第一帧画出来之前用
@@ -79,23 +83,25 @@ pub struct PickerState {
 
 // `tui_input::Input` 不实现 `PartialEq` (它的内部还有 yank 缓冲等实现细节, 不适合参与相等比较),
 // 所以不能整体 `#[derive(PartialEq)]`——按「逻辑上是同一个状态」手写: 规格、输入框的文本与光标
-// 位置、是否已编辑、选中下标。`list_state` (滚动偏移缓存) 与 `last_list_rows` (上一帧量出来的
-// 几何) 都不参与相等判断, 跟 `Fx` / `TableState` 同一条道理: 不是业务状态。
+// 位置、选中下标。`list_state` (滚动偏移缓存) 与 `last_list_rows` (上一帧量出来的几何) 都不参与
+// 相等判断, 跟 `Fx` / `TableState` 同一条道理: 不是业务状态。I2(a) (fix round final) 起输入框不再
+// 预填 `initial`, "是否编辑过" (旧版的 `dirty` 字段) 不再影响过滤, 从相等比较里一并去掉。
 impl PartialEq for PickerState {
     fn eq(&self, other: &Self) -> bool {
         self.spec == other.spec
             && self.input.value() == other.input.value()
             && self.input.cursor() == other.input.cursor()
-            && self.dirty == other.dirty
             && self.selected == other.selected
     }
 }
 
 impl PickerState {
     pub fn new(spec: PickerSpec) -> Self {
-        let input = Input::new(spec.initial.clone());
-        let mut state =
-            Self { spec, input, dirty: false, selected: 0, list_state: ListState::default(), last_list_rows: DEFAULT_LIST_ROWS };
+        // I2(a) (fix round final): 输入框不再预填 `initial`——旧版预填之后用户第一次打字会变成
+        // "追加在预填值后面" (I2 的问题描述: 输入 "glm" 实际变成 "dglm"); `initial` 现在只用来
+        // 定位下面的初始选中行。
+        let input = Input::default();
+        let mut state = Self { spec, input, selected: 0, list_state: ListState::default(), last_list_rows: DEFAULT_LIST_ROWS };
         let rows = state.visible();
         state.selected = rows
             .iter()
@@ -104,19 +110,23 @@ impl PickerState {
         state
     }
 
-    /// 当前过滤后的可见行 (含置顶的「使用输入的文本」行)。纯函数, 供测试与 `draw` 共用。
+    /// 当前过滤后的可见行。纯函数, 供测试与 `draw` 共用。
     ///
     /// 过滤规则: 输入按空白拆成多个词 (大小写不敏感), 每个词都要是某一项 `label` 或 `id` 的子串
-    /// 才算命中; 还没编辑过输入框时忽略当前文本, 按空查询处理 (= 显示全部), 对应
-    /// [`PickerSpec::initial`] 「不参与首次过滤」的约定。
+    /// 才算命中——输入框起初是空的 (见 [`PickerState::new`]), 空查询天然显示全部, 不再需要额外的
+    /// "还没编辑过就忽略当前文本" 特殊处理。
     ///
-    /// 「使用输入的文本」这一行由 `allow_custom` 单独控制, 与是否编辑过无关——哪怕 `initial`
-    /// 本身就是一段自定义文本 (不对应任何 item), 打开弹窗时也该看得到「使用「xxx」」这一行。
+    /// I2(b) (fix round final): 顺序是**匹配的 item 在前, 「使用输入的文本」这一行 (`allow_custom`
+    /// 时) 排在最后**——旧版把自定义行置顶, 过滤后按 `⏎` 默认选中它而不是排在后面的真实匹配项,
+    /// 是 I2 报告的根因。自定义行只在 `allow_custom` 为真、输入非空白、且不精确等于某个 item 的
+    /// id 时才出现, 与是否编辑过输入框无关。
     pub fn visible(&self) -> Vec<PickerRow> {
-        let query = if self.dirty { self.input.value() } else { "" };
+        let query = self.input.value();
         let words: Vec<String> = query.split_whitespace().map(str::to_lowercase).collect();
 
-        let mut rows = Vec::new();
+        let mut rows: Vec<PickerRow> =
+            self.spec.items.iter().filter(|item| Self::item_matches(item, &words)).cloned().map(PickerRow::Item).collect();
+
         let typed = self.input.value().trim();
         if self.spec.allow_custom && !typed.is_empty() {
             let exact_id_match = self.spec.items.iter().any(|item| item.id == typed);
@@ -125,7 +135,6 @@ impl PickerState {
             }
         }
 
-        rows.extend(self.spec.items.iter().filter(|item| Self::item_matches(item, &words)).cloned().map(PickerRow::Item));
         rows
     }
 
@@ -181,9 +190,9 @@ impl PickerState {
             KeyCode::Esc => Some(Action::ClosePopup),
             _ => {
                 if self.input.handle_event(&Event::Key(key)).is_some_and(|changed| changed.value) {
-                    self.dirty = true;
-                    // 过滤结果变了: 选中下标回到第一行, 而不是停在旧下标上 (可能已经指向别的项目
-                    // 甚至越界)。
+                    // I2(c): 过滤结果变了, 选中下标回到第一行 (现在是第一个匹配的 item, 或者没有
+                    // 匹配时是排在最后、此刻也是唯一一行的自定义行)——不再停在旧下标上 (可能已经
+                    // 指向别的项目甚至越界)。
                     self.selected = 0;
                 }
                 None
@@ -259,7 +268,11 @@ pub fn draw(frame: &mut Frame, area: Rect, state: &mut PickerState, theme: &Them
     frame.set_cursor_position((cursor_x.min(input_area.right().saturating_sub(1)), input_area.y));
 
     if rows.is_empty() {
-        frame.render_widget(Line::raw(s.picker_empty).centered().style(theme.muted_style()), list_area);
+        // I2(d): 允许自定义、还没打过字 (trim 之后是空) 时没有 "使用「…」" 行可看 (它要求非空白),
+        // 也没有任何候选——引导用户打字后按 ⏎ 直接用输入的文本, 而不是笼统的 "没有匹配项"
+        // (`picker_empty` 留给 "确实有候选但过滤不出结果" / "不允许自定义" 这两种场景)。
+        let text = if state.spec.allow_custom && state.input.value().trim().is_empty() { s.picker_type_to_enter } else { s.picker_empty };
+        frame.render_widget(Line::raw(text).centered().style(theme.muted_style()), list_area);
         return;
     }
 
@@ -293,7 +306,7 @@ mod tests {
     }
 
     fn spec(items: Vec<PickerItem>, allow_custom: bool, initial: &str) -> PickerSpec {
-        PickerSpec { tag: PickerTag::VmAddSubscription, title: "选择".into(), items, allow_custom, initial: initial.into() }
+        PickerSpec { tag: PickerTag::VmAddSubscription { vm: "vm".into() }, title: "选择".into(), items, allow_custom, initial: initial.into() }
     }
 
     fn key(code: KeyCode) -> KeyEvent {
@@ -341,23 +354,63 @@ mod tests {
         type_str(&mut exact, "a");
         assert!(!exact.visible().iter().any(|r| matches!(r, PickerRow::UseTyped(_))), "精确匹配 id 时不出现");
 
-        let mut custom = PickerState::new(spec(items.clone(), true, ""));
+        // I2(b) (fix round final): 非空且不精确匹配时应该出现, 但排在**最后**一行 (旧版置顶,
+        // 正是 I2 报告的根因: 过滤后按 ⏎ 默认选中它而不是后面的真实匹配项)。
+        let mut custom = PickerState::new(spec(items, true, ""));
         type_str(&mut custom, "zzz");
-        assert_eq!(custom.visible().first(), Some(&PickerRow::UseTyped("zzz".into())), "非空且不精确匹配时应该置顶");
+        assert_eq!(custom.visible().last(), Some(&PickerRow::UseTyped("zzz".into())), "非空且不精确匹配时应该置底");
+    }
 
-        // Fix round H: initial 非空的两种边界情况——同样的判定规则, 但这次是打开弹窗那一刻就该
-        // 生效, 不需要用户先敲一个字符。
-        let initial_matches = PickerState::new(spec(items.clone(), true, "a"));
+    /// I2(a) (fix round final): `initial` 只用来定位打开时的选中行, 不再预填进输入框——`initial`
+    /// 本身是不是某个 item 的 id, 都不该在打开那一刻就冒出一行 "使用「…」" (旧版会, 因为输入框被
+    /// 预填成了 `initial`)。
+    #[test]
+    fn initial_never_shows_a_custom_row_or_prefills_the_input() {
+        let items = vec![item("a", "Alpha")];
+        let opened_with_matching_initial = PickerState::new(spec(items.clone(), true, "a"));
+        assert_eq!(opened_with_matching_initial.input.value(), "", "打开时输入框应该是空的");
+        assert!(!opened_with_matching_initial.visible().iter().any(|r| matches!(r, PickerRow::UseTyped(_))));
+
+        let opened_with_nonmatching_initial = PickerState::new(spec(items, true, "zzz"));
+        assert_eq!(opened_with_nonmatching_initial.input.value(), "");
         assert!(
-            !initial_matches.visible().iter().any(|r| matches!(r, PickerRow::UseTyped(_))),
-            "initial 精确等于某个 item 的 id 时, 打开就不该有自定义行"
+            !opened_with_nonmatching_initial.visible().iter().any(|r| matches!(r, PickerRow::UseTyped(_))),
+            "initial 不是任何 item 的 id 也不该在打开时就显示自定义行——它已经不参与过滤/输入了"
         );
-        let initial_custom = PickerState::new(spec(items, true, "zzz"));
+    }
+
+    /// I2: 过滤后按 ⏎ 应该选中第一个真正匹配的 item, 不是 (旧版会) 排在最前面的自定义文本行。
+    #[test]
+    fn filter_then_enter_picks_the_first_match() {
+        let items = vec![item("glm-4.6", "GLM 4.6 主力"), item("glm-4.5-air", "GLM 4.5 Air"), item("gpt-4o", "GPT-4o")];
+        let mut state = PickerState::new(spec(items, true, ""));
+        type_str(&mut state, "gl");
         assert_eq!(
-            initial_custom.visible().first(),
-            Some(&PickerRow::UseTyped("zzz".into())),
-            "initial 不是任何 item 的 id 时, 打开就该看到自定义行, 不用等用户先编辑"
+            state.handle_key(key(KeyCode::Enter)),
+            Some(Action::PickerDone {
+                tag: PickerTag::VmAddSubscription { vm: "vm".into() },
+                choice: PickerChoice::Item("glm-4.6".into())
+            }),
+            "过滤后回车应该选中第一个匹配项, 不是自定义文本"
         );
+    }
+
+    /// I2(b): 自定义行排在匹配项的最后面, 只有在没有任何匹配项时才会被选中 (它此时是唯一一行)。
+    #[test]
+    fn custom_row_is_last_and_selected_only_when_nothing_matches() {
+        let items = vec![item("glm-4.6", "GLM 4.6 主力"), item("glm-4.5-air", "GLM 4.5 Air")];
+        let mut state = PickerState::new(spec(items, true, ""));
+
+        type_str(&mut state, "gl");
+        let rows = state.visible();
+        assert_eq!(rows.len(), 3, "两个匹配项 + 自定义行\n{rows:?}");
+        assert!(matches!(rows.last(), Some(PickerRow::UseTyped(_))), "自定义行应该排在匹配项后面\n{rows:?}");
+        assert_eq!(state.selected, 0, "有匹配项时选中项应该是第一个匹配, 不是自定义行");
+
+        type_str(&mut state, "zzz"); // 输入变成 "glzzz", 不匹配任何 item
+        let rows2 = state.visible();
+        assert_eq!(rows2, vec![PickerRow::UseTyped("glzzz".into())], "没有匹配项时应该只剩自定义行");
+        assert_eq!(state.selected, 0, "没有匹配项时自定义行应该被选中 (它是唯一一行)");
     }
 
     #[test]
@@ -367,7 +420,7 @@ mod tests {
         type_str(&mut state, "  zzz  ");
         assert_eq!(
             state.handle_key(key(KeyCode::Enter)),
-            Some(Action::PickerDone { tag: PickerTag::VmAddSubscription, choice: PickerChoice::Custom("zzz".into()) })
+            Some(Action::PickerDone { tag: PickerTag::VmAddSubscription { vm: "vm".into() }, choice: PickerChoice::Custom("zzz".into()) })
         );
     }
 

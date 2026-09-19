@@ -75,13 +75,28 @@ pub struct VirtualModels {
     /// `draft.is_some()` 与 `is_dirty()` 恒等价——零编辑 (空列表上的 `x`/`J`/`K`、到头的
     /// `J`/`K`) 或者改回原值都不会留下草稿, 见 [`Draft::edit`]。
     draft: Draft<VmDraft>,
+    /// I1 (fix round final): 正在保存中的虚拟模型名 (`Mutation::UpdateVirtualModel` 从
+    /// `on_mutation_started` 到对应 `on_mutation_done` 之间); `Some` 时拒绝任何会继续修改草稿的
+    /// 按键 (含再按一次 `s`), 与订阅详情页 `Subscriptions::saving` 同一套道理。
+    saving: Option<String>,
     /// 下一帧要闪一下的订阅 id; `draw` 取走。
     flash_rows: Vec<String>,
+    /// 页面在 `update()` 内部想弹的一条 toast, `App::update_page` 在调用 `update()` 之后轮询取走
+    /// (与订阅详情页 `Subscriptions::pending_notice` 同一套机制)。
+    pending_notice: Option<(ToastKind, String)>,
 }
 
 impl Default for VirtualModels {
     fn default() -> Self {
-        Self { selected_index: 0, focus: VmFocus::Models, members_cursor: 0, draft: Draft::default(), flash_rows: Vec::new() }
+        Self {
+            selected_index: 0,
+            focus: VmFocus::Models,
+            members_cursor: 0,
+            draft: Draft::default(),
+            saving: None,
+            flash_rows: Vec::new(),
+            pending_notice: None,
+        }
     }
 }
 
@@ -89,6 +104,15 @@ impl VirtualModels {
     fn pane_border_style(&self, theme: &Theme, is_left: bool) -> Style {
         let left_focused = matches!(self.focus, VmFocus::Models);
         pane_border_style(theme, is_left == left_focused)
+    }
+
+    /// I1: 当前选中的虚拟模型是否正有一次 `UpdateVirtualModel` 保存在飞行中。
+    fn is_saving(&self) -> bool {
+        self.saving.is_some()
+    }
+
+    fn saving_notice(s: &'static Strings) -> Action {
+        Action::Notify { kind: ToastKind::Info, text: s.saving_in_progress.to_string() }
     }
 
     /// 当前应该显示的调度模式: 有草稿 (且属于这个虚拟模型) 就用草稿, 否则用 `Store` 里的原始值。
@@ -151,7 +175,8 @@ impl VirtualModels {
             return Action::Notify { kind: ToastKind::Info, text: s.vm_nothing_to_add.to_string() };
         }
         Action::OpenPicker(PickerSpec {
-            tag: PickerTag::VmAddSubscription,
+            // I5: 带上这次弹窗是为哪个虚拟模型开的, `PickerDone` 落地时据此核对是否还该应用。
+            tag: PickerTag::VmAddSubscription { vm: vm.name.clone() },
             title: (s.vm_pick_add_title)(&vm.name),
             items,
             allow_custom: false,
@@ -159,9 +184,12 @@ impl VirtualModels {
         })
     }
 
-    /// `PickerDone { tag: VmAddSubscription, .. }` 落地: 追加到草稿末尾, 光标跟到它。
-    /// `PickerChoice::Custom` 理论上不会发生 (`allow_custom: false`), 防御性地忽略。
-    fn apply_add_choice(&mut self, choice: &PickerChoice, store: &Store) {
+    /// `PickerDone { tag: VmAddSubscription { vm }, .. }` 落地: 追加到草稿末尾, 光标跟到它。
+    /// `PickerChoice::Custom` 理论上不会发生 (`allow_custom: false`), 防御性地忽略。I5: `vm` 对不
+    /// 上当前选中的虚拟模型就静默忽略 (理论上不该发生, 虚拟模型固定只有 5 个且不能在有草稿时切换
+    /// 选中项, 但防御性地核对一次); I1: 这个虚拟模型正有保存在飞行中时拒绝, 弹 `saving_in_progress`
+    /// (存进 `pending_notice`, 与订阅页 `apply_picker_choice` 同一套「`update()` 内部想弹通知」机制)。
+    fn apply_add_choice(&mut self, vm_name: &str, choice: &PickerChoice, store: &Store, s: &'static Strings) {
         let PickerChoice::Item(id) = choice else { return };
         let vms = store.virtual_models();
         if vms.is_empty() {
@@ -169,6 +197,13 @@ impl VirtualModels {
         }
         let idx = self.selected_index.min(vms.len() - 1);
         let vm = &vms[idx];
+        if vm.name != vm_name {
+            return;
+        }
+        if self.is_saving() {
+            self.pending_notice = Some((ToastKind::Info, s.saving_in_progress.to_string()));
+            return;
+        }
         let base = vm_draft_base(vm);
         self.draft.edit(&base, |d| d.subscription_ids.push(id.clone()));
         self.members_cursor = self.effective_subscription_ids(vm).len() - 1;
@@ -184,6 +219,14 @@ impl VirtualModels {
             return None;
         }
         let draft = self.draft.get()?;
+        // I5: 防御性地要求草稿的 `name` 等于当前选中项 (与订阅详情页 `save_action` 同一条道理)——
+        // 理论上不该发生 (选中项在有草稿时不能被换掉, 见 `move_model_selection`), 但绝不能把一个
+        // 不在屏幕上的虚拟模型的草稿发出去。
+        let vms = store.virtual_models();
+        let selected_name = vms.get(self.selected_index.min(vms.len().saturating_sub(1))).map(|vm| vm.name.as_str());
+        if selected_name != Some(draft.name.as_str()) {
+            return None;
+        }
         if draft.mode == RoutingMode::Unknown {
             return Some(Action::Notify { kind: ToastKind::Info, text: s.vm_unknown_mode.to_string() });
         }
@@ -272,6 +315,11 @@ impl VirtualModels {
         }
 
         let store = ctx.store;
+        // I4: 订阅列表还没加载完 (`list_subscriptions` 还没回来, 或者一直失败) 时, `store.subscription`
+        // 对任何 id 都会返回 `None`——这不代表这些订阅"已删除", 只是这一刻还不知道。区分这两种情况,
+        // 免得每个成员在页面刚打开、还没等到第一次订阅列表加载完成的那几百毫秒里全部被误标成
+        // `vm_missing`, 顺带把 `s`/`a`/`x`/`J`/`K` 都指向"请先移除已删除的订阅"这种具有误导性的提示。
+        let subs_loaded = store.subscriptions_loaded();
         let mut items: Vec<ListItem> = Vec::with_capacity(ids.len());
         for (i, id) in ids.iter().enumerate() {
             let mut spans = vec![Span::styled(format!("{:>2} ", i + 1), theme.muted_style())];
@@ -287,6 +335,13 @@ impl VirtualModels {
                     if is_fallback && sub.auth_type != "api_key" && sub.model_slots.fallback.trim().is_empty() {
                         spans.push(Span::styled(s.vm_will_skip, Style::new().fg(theme.warn)));
                     }
+                }
+                None if !subs_loaded => {
+                    // I4: 还不知道这条订阅是否存在——只显示 id 前 8 位, 不带 `vm_missing` (不能
+                    // 断言"已删除")。
+                    let prefix: String = id.chars().take(8).collect();
+                    spans.push(Span::styled(fit("?", MEMBER_SYMBOL_COL), theme.muted_style()));
+                    spans.push(Span::styled(fit(&prefix, MEMBER_NAME_COL), theme.muted_style()));
                 }
                 None => {
                     // V2 (fix round P3b): 订阅在 Store 里找不到 (被别处删除) 这一行——之前是手写
@@ -342,20 +397,41 @@ impl Component for VirtualModels {
         }
         let idx = self.selected_index.min(vms.len() - 1);
         let vm = &vms[idx];
+        // I4: 订阅列表还没加载完 (或一直加载失败) 时, `a`/`x`/`J`/`K`/`s` 都依赖它才能判断"这个 id
+        // 是不是真的已删除" / "能不能加入", 统一拒绝——不能在这段时间把找不到的 id 误判成"已删除"。
+        let subs_loaded = store.subscriptions_loaded();
 
         match self.focus {
             VmFocus::Models => match key.code {
                 KeyCode::Up | KeyCode::Char('k') => self.move_model_selection(vms, idx, -1, s),
                 KeyCode::Down | KeyCode::Char('j') => self.move_model_selection(vms, idx, 1, s),
+                // M6: 现在读作「成员」(见 `Strings::key_members`), 更准确地描述这个键的作用。
                 KeyCode::Enter | KeyCode::Right | KeyCode::Char('l') => {
                     self.focus = VmFocus::Members;
                     None
                 }
                 // 「m 在 Models 焦点下也可用（作用于选中的虚拟模型，同样产生草稿）」。
                 KeyCode::Char('m') => {
+                    if self.is_saving() {
+                        return Some(Self::saving_notice(s));
+                    }
                     let base = vm_draft_base(vm);
                     self.draft.edit(&base, |d| d.mode = d.mode.next());
                     None
+                }
+                // I3: `s`/`Esc` 现在 Models 焦点下也可用, 不用先进 Members 才能保存/放弃——同一份
+                // 草稿两个焦点都能碰到 (`m` 早就是这样), 保存/放弃理应对称。
+                KeyCode::Char('s') => {
+                    if self.is_saving() {
+                        return Some(Self::saving_notice(s));
+                    }
+                    if !subs_loaded {
+                        return Some(Action::Notify { kind: ToastKind::Info, text: s.vm_subs_not_loaded.to_string() });
+                    }
+                    self.save_action(s, store)
+                }
+                KeyCode::Esc if self.is_dirty() => {
+                    Some(Action::OpenConfirm { prompt: s.confirm_discard.to_string(), on_yes: Box::new(Action::DiscardDraft) })
                 }
                 _ => None,
             },
@@ -376,6 +452,12 @@ impl Component for VirtualModels {
                     // `Draft::edit` 自己核对结果是否等于 base (空列表 / 单项列表上的 no-op swap
                     // 结果必然与 base 相等, 会被自动丢弃, 不需要在这里重复判断一遍)。
                     KeyCode::Char('J') => {
+                        if self.is_saving() {
+                            return Some(Self::saving_notice(s));
+                        }
+                        if !subs_loaded {
+                            return Some(Action::Notify { kind: ToastKind::Info, text: s.vm_subs_not_loaded.to_string() });
+                        }
                         if cursor + 1 < len {
                             let base = vm_draft_base(vm);
                             self.draft.edit(&base, |d| d.subscription_ids.swap(cursor, cursor + 1));
@@ -384,6 +466,12 @@ impl Component for VirtualModels {
                         None
                     }
                     KeyCode::Char('K') => {
+                        if self.is_saving() {
+                            return Some(Self::saving_notice(s));
+                        }
+                        if !subs_loaded {
+                            return Some(Action::Notify { kind: ToastKind::Info, text: s.vm_subs_not_loaded.to_string() });
+                        }
                         if cursor > 0 {
                             let base = vm_draft_base(vm);
                             self.draft.edit(&base, |d| d.subscription_ids.swap(cursor - 1, cursor));
@@ -391,8 +479,22 @@ impl Component for VirtualModels {
                         }
                         None
                     }
-                    KeyCode::Char('a') => Some(self.open_add_picker(vm, store, s)),
+                    KeyCode::Char('a') => {
+                        if self.is_saving() {
+                            return Some(Self::saving_notice(s));
+                        }
+                        if !subs_loaded {
+                            return Some(Action::Notify { kind: ToastKind::Info, text: s.vm_subs_not_loaded.to_string() });
+                        }
+                        Some(self.open_add_picker(vm, store, s))
+                    }
                     KeyCode::Char('x') => {
+                        if self.is_saving() {
+                            return Some(Self::saving_notice(s));
+                        }
+                        if !subs_loaded {
+                            return Some(Action::Notify { kind: ToastKind::Info, text: s.vm_subs_not_loaded.to_string() });
+                        }
                         let base = vm_draft_base(vm);
                         self.draft.edit(&base, |d| {
                             if cursor < d.subscription_ids.len() {
@@ -407,11 +509,22 @@ impl Component for VirtualModels {
                         None
                     }
                     KeyCode::Char('m') => {
+                        if self.is_saving() {
+                            return Some(Self::saving_notice(s));
+                        }
                         let base = vm_draft_base(vm);
                         self.draft.edit(&base, |d| d.mode = d.mode.next());
                         None
                     }
-                    KeyCode::Char('s') => self.save_action(s, store),
+                    KeyCode::Char('s') => {
+                        if self.is_saving() {
+                            return Some(Self::saving_notice(s));
+                        }
+                        if !subs_loaded {
+                            return Some(Action::Notify { kind: ToastKind::Info, text: s.vm_subs_not_loaded.to_string() });
+                        }
+                        self.save_action(s, store)
+                    }
                     KeyCode::Esc | KeyCode::Left | KeyCode::Char('h') => {
                         if self.is_dirty() {
                             Some(Action::OpenConfirm { prompt: s.confirm_discard.to_string(), on_yes: Box::new(Action::DiscardDraft) })
@@ -427,15 +540,15 @@ impl Component for VirtualModels {
         }
     }
 
-    fn update(&mut self, action: &Action, store: &Store, _s: &'static Strings) -> Vec<Cmd> {
+    fn update(&mut self, action: &Action, store: &Store, s: &'static Strings) -> Vec<Cmd> {
         self.sync_draft_with_store(store);
         match action {
             // 右栏要订阅名 / 厂商 / badge, 所以两个 Fetch 都要——被 `Fetches` 去重, 每 5 秒都发也
             // 没关系。
             Action::Refresh | Action::Connected { .. } => vec![Cmd::Fetch(Fetch::VirtualModels), Cmd::Fetch(Fetch::Subscriptions)],
             Action::Sse { name, .. } if SSE_REFETCH.contains(&name.as_str()) => vec![Cmd::Fetch(Fetch::Subscriptions)],
-            Action::PickerDone { tag: PickerTag::VmAddSubscription, choice } => {
-                self.apply_add_choice(choice, store);
+            Action::PickerDone { tag: PickerTag::VmAddSubscription { vm }, choice } => {
+                self.apply_add_choice(vm, choice, store, s);
                 Vec::new()
             }
             _ => Vec::new(),
@@ -467,15 +580,33 @@ impl Component for VirtualModels {
 
     fn hints(&self, s: &'static Strings) -> Vec<Hint<'static>> {
         match self.focus {
-            VmFocus::Models => vec![("↑↓", s.key_select), ("⏎", s.key_detail), ("m", s.key_mode)],
+            // M6/I3 (fix round final): `⏎` 现在读作「成员」而不是「详情」(更准确); 脏时 `s 保存`
+            // 挪到 `↑↓ 选择` 右边第一个, 紧跟着加一条 `Esc 放弃`——与 Members 焦点同一套优先级
+            // (`s` 最不该被 80 列裁掉, `Esc` 次之), `m` 在 Models 焦点下也能造草稿 (I3 之前就是
+            // 这样), 保存/放弃这两个键理应跟着它一起在这个焦点下也看得见。
+            VmFocus::Models => {
+                let mut hints = vec![("↑↓", s.key_select)];
+                if self.is_dirty() {
+                    hints.push(("s", s.key_save));
+                    hints.push(("Esc", s.key_discard));
+                }
+                hints.push(("⏎", s.key_members));
+                hints.push(("m", s.key_mode));
+                if !self.is_dirty() {
+                    hints.push(("s", s.key_save));
+                }
+                hints
+            }
             VmFocus::Members => {
                 // V1(b) (fix round P3b): 80 列放不下时 keybar 从右往左丢, `s` 原来排最后, `m` 反而
                 // 先它一步留下——丢掉保存提示是最糟的裁剪结果。脏时把 `s` 挪到 `↑↓ 选择` 右边第一个
                 // (保证它是最后才会被裁掉的那批), 不脏时留在原位 (跟着 `m` 之后, 视觉上更贴近
-                // "调整完之后保存" 的顺序)。
+                // "调整完之后保存" 的顺序)。M6 (fix round final): 脏时紧跟着 `s` 再加一条
+                // `Esc 放弃`, 与订阅详情页同一套规则。
                 let mut hints = vec![("↑↓", s.key_select)];
                 if self.is_dirty() {
                     hints.push(("s", s.key_save));
+                    hints.push(("Esc", s.key_discard));
                 }
                 hints.push(("J K", s.key_move));
                 hints.push(("a", s.key_add));
@@ -497,6 +628,14 @@ impl Component for VirtualModels {
         self.flash_rows = changed.to_vec();
     }
 
+    /// M1 (fix round final): `Store` 刚接受了一份 (可能与草稿恰好相等的) 新虚拟模型列表——这条
+    /// action 只经过 `App::update` 里 `Ok(FetchData::VirtualModels(..))` 分支, 不会触发这个页面的
+    /// `Component::update` (那条路径只更新 `Store`, 不转给任何页面), 所以旧版 `is_dirty()` 缓存要
+    /// 等下一次真正的 `update()` (最多 5 秒的轮询) 才会被核对; 这里立刻核对一遍。
+    fn on_store_changed(&mut self, store: &Store) {
+        self.sync_draft_with_store(store);
+    }
+
     fn is_dirty(&self) -> bool {
         self.draft.is_dirty()
     }
@@ -506,7 +645,18 @@ impl Component for VirtualModels {
         self.focus = VmFocus::Models;
     }
 
+    fn on_mutation_started(&mut self, mutation: &Mutation) {
+        if let Mutation::UpdateVirtualModel { name, .. } = mutation {
+            self.saving = Some(name.clone());
+        }
+    }
+
     fn on_mutation_done(&mut self, mutation: &Mutation, ok: bool) {
+        if let Mutation::UpdateVirtualModel { name, .. } = mutation {
+            if self.saving.as_deref() == Some(name.as_str()) {
+                self.saving = None;
+            }
+        }
         if !ok {
             return;
         }
@@ -520,6 +670,10 @@ impl Component for VirtualModels {
                 }
             }
         }
+    }
+
+    fn take_notice(&mut self) -> Option<(ToastKind, String)> {
+        self.pending_notice.take()
     }
 }
 

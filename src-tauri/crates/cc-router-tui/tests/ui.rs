@@ -18,7 +18,7 @@ use cc_router_tui::pages::Pages;
 use cc_router_tui::theme::{ColorMode, Theme};
 use cc_router_tui::widgets::picker::{self, PickerChoice, PickerItem, PickerSpec, PickerTag, Slot};
 use cc_router_tui::widgets::toast::ToastKind;
-use cc_router_tui::widgets::{confirm, help};
+use cc_router_tui::widgets::{confirm, help, toast};
 use ratatui::backend::TestBackend;
 use ratatui::crossterm::event::{KeyCode, KeyEvent, KeyEventKind, KeyEventState, KeyModifiers};
 use ratatui::style::Modifier;
@@ -272,7 +272,7 @@ fn picker_items() -> Vec<PickerItem> {
 
 fn picker_spec() -> PickerSpec {
     PickerSpec {
-        tag: PickerTag::SlotModel { slot: Slot::Sonnet },
+        tag: PickerTag::SlotModel { sub_id: "1".into(), slot: Slot::Sonnet },
         title: "选择模型".into(),
         items: picker_items(),
         allow_custom: true,
@@ -1074,7 +1074,7 @@ fn picker_done_reaches_the_current_page() {
     let Some(Action::PickerDone { tag, choice }) = action else {
         panic!("⏎ 应该产出 PickerDone, 实际 {action:?}");
     };
-    assert_eq!(tag, PickerTag::SlotModel { slot: Slot::Fable });
+    assert_eq!(tag, PickerTag::SlotModel { sub_id: "1".into(), slot: Slot::Fable });
     assert_eq!(choice, PickerChoice::Custom("glm-x".into()));
 
     assert!(a.update(Action::PickerDone { tag, choice }).is_empty(), "PickerDone 不产出 Cmd");
@@ -1140,6 +1140,19 @@ fn popup_borders_survive_wide_glyphs_underneath() {
     picker_app.update(Action::OpenPicker(picker_spec()));
     let picker_area = picker::area(screen);
     assert_borders_intact(&render(&mut picker_app, 80, 24), picker_area, "Picker");
+
+    // M3 (fix round final): toast 也贴着页面内容画, 同样可能撞上宽字符横跨边缘——80×24 下总览页的
+    // 「鉴权 开启 · 4 个订阅 · 1 个可调度」这行 (y=5) 里, 「个可调度」的「个」字横跨列 66/67;
+    // `toast::area` 的左边缘 x = 79 - width, `width = text.width() + 4` (未触顶 76 上限时) ——
+    // 选一段显示宽度恰好 8 的文本, 算出 `width=12`, `x=67`, 左边缘前一列正好落在「个」字上,
+    // 复现当初 `ui__picker_popup_80x24.snap` 那种「宽字符横跨左边缘」的场景 (`widgets::clear_popup_area`
+    // 文档有完整解释)。toast 不是 `Popup` 的一种, 没有走同一个渲染入口, 需要单独验证它也修好了。
+    const COLLISION_TEXT: &str = "12345678"; // 显示宽度 8 (全角字符宽度不是 1, 这里刻意用 ASCII)
+    let mut toast_app = loaded(false);
+    toast_app.update(Action::Notify { kind: ToastKind::Success, text: COLLISION_TEXT.into() });
+    let toast_area = toast::area(screen, 3, COLLISION_TEXT);
+    assert_eq!(toast_area.left(), 67, "这条用例的前提: 文本宽度选得不对, 撞不上「个」字横跨的那一列");
+    assert_borders_intact(&render(&mut toast_app, 80, 24), toast_area, "Toast");
 }
 
 #[test]
@@ -1415,7 +1428,7 @@ fn drawing_the_same_state_twice_gives_the_same_frame() {
     render(&mut i, 80, 24);
     i.handle_key(key(KeyCode::Enter));
     i.handle_key(key(KeyCode::Enter));
-    i.update(Action::PickerDone { tag: PickerTag::SlotModel { slot: Slot::Fable }, choice: PickerChoice::Item("m3".into()) });
+    i.update(Action::PickerDone { tag: PickerTag::SlotModel { sub_id: "1".into(), slot: Slot::Fable }, choice: PickerChoice::Item("m3".into()) });
     let first = render(&mut i, 80, 24);
     let second = render(&mut i, 80, 24);
     assert_eq!(first, second, "有草稿的状态应该幂等");
@@ -2060,11 +2073,11 @@ fn last_outcome_is_cleared_when_a_new_mutation_starts() {
 
 // ---------- 订阅详情里改槽位 (Task 5: 焦点模型 + 草稿 + 保存) ----------
 
-/// 提取 `Action::OpenPicker` 里的 `PickerTag::SlotModel { slot }`——测槽位光标移动时反复用。
+/// 提取 `Action::OpenPicker` 里的 `PickerTag::SlotModel { slot, .. }`——测槽位光标移动时反复用。
 fn opened_model_slot(action: Option<Action>) -> Slot {
     match action {
         Some(Action::OpenPicker(spec)) => match spec.tag {
-            PickerTag::SlotModel { slot } => slot,
+            PickerTag::SlotModel { slot, .. } => slot,
             other => panic!("期待 SlotModel tag, 实际 {other:?}"),
         },
         other => panic!("期待打开模型 picker, 实际 {other:?}"),
@@ -2137,7 +2150,7 @@ fn enter_opens_a_model_picker_with_cached_models_and_custom_allowed() {
     a.handle_key(key(KeyCode::Enter)); // Detail{Fable}
     let action = a.handle_key(key(KeyCode::Enter));
     let Some(Action::OpenPicker(spec)) = action else { panic!("{action:?}") };
-    assert_eq!(spec.tag, PickerTag::SlotModel { slot: Slot::Fable });
+    assert_eq!(spec.tag, PickerTag::SlotModel { sub_id: "1".into(), slot: Slot::Fable });
     assert!(spec.allow_custom, "应该允许自定义输入");
     assert_eq!(spec.items.len(), 12, "应该用该订阅的 model_cache 填充\n{:?}", spec.items);
     assert!(spec.items.iter().any(|i| i.id == "m0"), "{:?}", spec.items);
@@ -2153,7 +2166,7 @@ fn fallback_slot_offers_a_clear_item_first() {
     a.handle_key(key(KeyCode::Char('G'))); // -> Fallback
     let action = a.handle_key(key(KeyCode::Enter));
     let Some(Action::OpenPicker(spec)) = action else { panic!("{action:?}") };
-    assert_eq!(spec.tag, PickerTag::SlotModel { slot: Slot::Fallback });
+    assert_eq!(spec.tag, PickerTag::SlotModel { sub_id: "1".into(), slot: Slot::Fallback });
     assert_eq!(spec.items.first().map(|i| i.id.as_str()), Some(""), "第一项应该是清空兜底槽\n{:?}", spec.items);
     assert_eq!(spec.items.first().map(|i| i.label.as_str()), Some(ZH.pick_clear_fallback));
 }
@@ -2166,7 +2179,7 @@ fn picking_a_model_creates_a_draft_and_marks_the_row() {
     a.handle_key(key(KeyCode::Enter));
     a.handle_key(key(KeyCode::Enter)); // 打开 Fable picker
 
-    a.update(Action::PickerDone { tag: PickerTag::SlotModel { slot: Slot::Fable }, choice: PickerChoice::Item("m3".into()) });
+    a.update(Action::PickerDone { tag: PickerTag::SlotModel { sub_id: "1".into(), slot: Slot::Fable }, choice: PickerChoice::Item("m3".into()) });
     let out = render(&mut a, 80, 24);
     assert!(out.contains("m3"), "{out}");
     assert!(out.contains(ZH.sub_slot_modified), "{out}");
@@ -2180,11 +2193,11 @@ fn picking_the_original_value_again_clears_dirty() {
     render(&mut a, 80, 24);
     a.handle_key(key(KeyCode::Enter));
     a.handle_key(key(KeyCode::Enter));
-    a.update(Action::PickerDone { tag: PickerTag::SlotModel { slot: Slot::Fable }, choice: PickerChoice::Item("m3".into()) });
+    a.update(Action::PickerDone { tag: PickerTag::SlotModel { sub_id: "1".into(), slot: Slot::Fable }, choice: PickerChoice::Item("m3".into()) });
     assert!(render(&mut a, 80, 24).contains(" *"));
 
     a.handle_key(key(KeyCode::Enter)); // 重新打开 picker
-    a.update(Action::PickerDone { tag: PickerTag::SlotModel { slot: Slot::Fable }, choice: PickerChoice::Custom("glm-4.6".into()) });
+    a.update(Action::PickerDone { tag: PickerTag::SlotModel { sub_id: "1".into(), slot: Slot::Fable }, choice: PickerChoice::Custom("glm-4.6".into()) });
     let clean_out = render(&mut a, 80, 24);
     assert!(!clean_out.contains(" *"), "改回原值应该清掉 dirty\n{clean_out}");
     assert!(!clean_out.contains(ZH.sub_slot_modified), "{clean_out}");
@@ -2206,7 +2219,7 @@ fn custom_blank_is_rejected_for_main_slots_but_clears_the_fallback() {
 
     a.handle_key(key(KeyCode::Enter));
     assert!(a
-        .update(Action::PickerDone { tag: PickerTag::SlotModel { slot: Slot::Fable }, choice: PickerChoice::Custom("   ".into()) })
+        .update(Action::PickerDone { tag: PickerTag::SlotModel { sub_id: "1".into(), slot: Slot::Fable }, choice: PickerChoice::Custom("   ".into()) })
         .is_empty());
     let out = render(&mut a, 80, 24);
     assert!(!out.contains(" *"), "空白应该被拒绝, 不产生草稿\n{out}");
@@ -2214,7 +2227,7 @@ fn custom_blank_is_rejected_for_main_slots_but_clears_the_fallback() {
 
     a.handle_key(key(KeyCode::Char('G'))); // -> Fallback (现在值 "glm-4.5")
     a.handle_key(key(KeyCode::Enter));
-    a.update(Action::PickerDone { tag: PickerTag::SlotModel { slot: Slot::Fallback }, choice: PickerChoice::Custom("  ".into()) });
+    a.update(Action::PickerDone { tag: PickerTag::SlotModel { sub_id: "1".into(), slot: Slot::Fallback }, choice: PickerChoice::Custom("  ".into()) });
     let out2 = render(&mut a, 80, 24);
     assert!(out2.contains(" *"), "兜底槽清空 (从有值变没有值) 应该产生草稿\n{out2}");
     assert!(out2.contains(ZH.sub_slot_unset), "{out2}");
@@ -2229,7 +2242,7 @@ fn effort_picker_lists_auto_plus_the_allowlist() {
     a.handle_key(key(KeyCode::Char('j'))); // Opus (effort=high)
     let action = a.handle_key(key(KeyCode::Char('o')));
     let Some(Action::OpenPicker(spec)) = action else { panic!("{action:?}") };
-    assert_eq!(spec.tag, PickerTag::SlotEffort { slot: Slot::Opus });
+    assert_eq!(spec.tag, PickerTag::SlotEffort { sub_id: "1".into(), slot: Slot::Opus });
     assert!(!spec.allow_custom, "不该允许自定义档位");
     assert_eq!(spec.items.len(), 1 + EFFORT_CHOICES.len());
     assert_eq!(spec.items[0].id, "");
@@ -2271,7 +2284,7 @@ fn s_saves_the_whole_slots_and_efforts() {
     render(&mut a, 80, 24);
     a.handle_key(key(KeyCode::Enter)); // Fable
     a.handle_key(key(KeyCode::Enter));
-    a.update(Action::PickerDone { tag: PickerTag::SlotModel { slot: Slot::Fable }, choice: PickerChoice::Item("m3".into()) });
+    a.update(Action::PickerDone { tag: PickerTag::SlotModel { sub_id: "1".into(), slot: Slot::Fable }, choice: PickerChoice::Item("m3".into()) });
 
     let action = a.handle_key(key(KeyCode::Char('s')));
     assert_eq!(
@@ -2300,7 +2313,7 @@ fn s_does_nothing_when_clean_and_refuses_offline() {
     assert_eq!(a.handle_key(key(KeyCode::Char('s'))), None, "不脏时 s 不该有动作");
 
     a.handle_key(key(KeyCode::Enter)); // 打开 picker
-    a.update(Action::PickerDone { tag: PickerTag::SlotModel { slot: Slot::Fable }, choice: PickerChoice::Item("m3".into()) });
+    a.update(Action::PickerDone { tag: PickerTag::SlotModel { sub_id: "1".into(), slot: Slot::Fable }, choice: PickerChoice::Item("m3".into()) });
     a.update(Action::ConnectionLost);
     let action = a.handle_key(key(KeyCode::Char('s')));
     assert!(matches!(action, Some(Action::Mutate(Mutation::UpdateSlots { .. }))), "{action:?}");
@@ -2317,7 +2330,7 @@ fn draft_survives_polling_and_is_cleared_only_by_a_successful_save() {
     render(&mut a, 80, 24);
     a.handle_key(key(KeyCode::Enter));
     a.handle_key(key(KeyCode::Enter));
-    a.update(Action::PickerDone { tag: PickerTag::SlotModel { slot: Slot::Fable }, choice: PickerChoice::Item("m3".into()) });
+    a.update(Action::PickerDone { tag: PickerTag::SlotModel { sub_id: "1".into(), slot: Slot::Fable }, choice: PickerChoice::Item("m3".into()) });
     let dirty_out = render(&mut a, 80, 24);
     assert!(dirty_out.contains("m3") && dirty_out.contains(" *"), "{dirty_out}");
 
@@ -2348,42 +2361,82 @@ fn draft_survives_polling_and_is_cleared_only_by_a_successful_save() {
     assert!(!out_after_ok.contains(" *"), "成功后草稿应该被清掉\n{out_after_ok}");
 }
 
-/// D1 (fix round P3b): 一次保存发出去之后 (还没等结果回来) 用户又编辑了一次——结果 (对应第一次
-/// 编辑, m3) 落地时不该无脑清掉草稿, 因为草稿这时已经是第二次编辑 (m9) 了。旧版 `on_mutation_done`
-/// 只按 `id` 匹配就清空, 会把 m9 这次编辑悄悄冲掉且没有任何提示。
-#[test]
-fn edits_made_while_a_save_is_in_flight_survive_it() {
-    let mut a = subs_app(false);
-    render(&mut a, 80, 24);
-    a.handle_key(key(KeyCode::Enter));
-    a.handle_key(key(KeyCode::Enter)); // 打开 Fable picker
-    a.update(Action::PickerDone { tag: PickerTag::SlotModel { slot: Slot::Fable }, choice: PickerChoice::Item("m3".into()) });
+// ---------- I1 (fix round final): 保存飞行中拒绝继续编辑 (两个页面各一份, 同名) ----------
+//
+// 取代旧版 `edits_made_while_a_save_is_in_flight_survive_it` (订阅页) /
+// `reorders_made_while_a_save_is_in_flight_survive_it` (虚拟模型页, D1 fix round P3b) ——那两个
+// 名字描述的行为 ("在途编辑照样生效, 只是不会被冲掉") 已经不对: I1 把"照样生效"改成了"直接拒绝"。
 
-    let action = a.handle_key(key(KeyCode::Char('s')));
-    let mutation = match action {
-        Some(Action::Mutate(m)) => m,
-        other => panic!("{other:?}"),
-    };
-    assert_eq!(a.update(Action::Mutate(mutation.clone())), vec![Cmd::Mutate(Box::new(mutation.clone()))]);
+mod subscriptions_saving_in_flight {
+    use super::*;
 
-    // 保存 (m3) 还在飞行中, 用户又编辑了一次, 改成 m9。
-    a.handle_key(key(KeyCode::Enter)); // 重新打开 Fable picker (焦点还在 Fable 槽)
-    a.update(Action::PickerDone { tag: PickerTag::SlotModel { slot: Slot::Fable }, choice: PickerChoice::Item("m9".into()) });
+    /// 一次保存发出去之后 (还没等结果回来), 旧版靠 `on_mutation_done` 里"只有负载与当前草稿完全
+    /// 相等才清空"这条规则保证飞行中的新编辑不被冲掉——但这只解决了"不丢失", 没有解决"用户不知道
+    /// 这么做不安全"。I1 改成直接拒绝: 保存在飞行中时, 任何会继续修改草稿的按键 (`⏎`/`o`/再按一次
+    /// `s`, 以及防御性覆盖的 `PickerDone` 直接落地) 都被拒绝, 弹 `saving_in_progress`, 草稿原样
+    /// 不动; `MutationDone(Ok)` + 随后的 refetch 落地后页面变干净、显示保存后的真值;
+    /// `MutationDone(Err)` 落地后草稿原样保留、且又能正常编辑 (`saving` 标记被摘掉)。
+    #[test]
+    fn edits_are_refused_while_a_save_is_in_flight() {
+        let mut a = subs_app(false);
+        render(&mut a, 80, 24);
+        a.handle_key(key(KeyCode::Enter));
+        a.handle_key(key(KeyCode::Enter)); // 打开 Fable picker
+        a.update(Action::PickerDone { tag: PickerTag::SlotModel { sub_id: "1".into(), slot: Slot::Fable }, choice: PickerChoice::Item("m3".into()) });
 
-    // 第一次保存 (m3) 的结果回来了, 后端随后带回来的刷新结果也是 m3 (第一次保存后的真值)。
-    a.update(Action::MutationDone { mutation: mutation.clone(), barrier: 0, result: Ok(MutationOutcome::SlotsSaved) });
-    let mut after_first_save = detail_subs();
-    after_first_save[0].model_slots.fable = "m3".into();
-    a.update(subs_done(2, after_first_save));
+        let action = a.handle_key(key(KeyCode::Char('s')));
+        let mutation = match action {
+            Some(Action::Mutate(m)) => m,
+            other => panic!("{other:?}"),
+        };
+        assert_eq!(a.update(Action::Mutate(mutation.clone())), vec![Cmd::Mutate(Box::new(mutation.clone()))]);
 
-    let out = render(&mut a, 80, 24);
-    assert!(out.contains("m9") && out.contains(" *"), "在途保存不该吞掉后续的编辑\n{out}");
+        // 保存 (m3) 还在飞行中: ⏎ / o / 再按一次 s 都该被拒绝, 弹同一条 saving_in_progress 提示。
+        // 像真实运行时一样把 `handle_key` 的返回值转发进 `update` (`Action::Notify` 才会真的入队)。
+        for code in [KeyCode::Enter, KeyCode::Char('o'), KeyCode::Char('s')] {
+            let action = a.handle_key(key(code));
+            assert_eq!(
+                action,
+                Some(Action::Notify { kind: ToastKind::Info, text: ZH.saving_in_progress.into() }),
+                "{code:?} 应该在保存飞行中被拒绝"
+            );
+            a.update(action.unwrap());
+        }
+        // 防御性: 就算真的收到一条针对这条订阅的 `PickerDone` (正常流程走不到, 因为上面 ⏎ 已经被拒绝、
+        // 不会真的打开新 picker), 也不该被应用。
+        assert!(a
+            .update(Action::PickerDone { tag: PickerTag::SlotModel { sub_id: "1".into(), slot: Slot::Fable }, choice: PickerChoice::Item("m9".into()) })
+            .is_empty());
+        let out_while_saving = render(&mut a, 80, 24);
+        assert!(out_while_saving.contains("m3") && !out_while_saving.contains("m9"), "飞行中的编辑都不该生效\n{out_while_saving}");
+        assert!(out_while_saving.contains(ZH.saving_in_progress), "{out_while_saving}");
 
-    let action2 = a.handle_key(key(KeyCode::Char('s')));
-    assert!(
-        matches!(&action2, Some(Action::Mutate(Mutation::UpdateSlots { model_slots, .. })) if model_slots.fable == "m9"),
-        "s 应该发第二次编辑 (m9) 的状态, 不是已经过时的第一次 (m3)\n{action2:?}"
-    );
+        // 结果回来了 (成功), 后端随后带回来的刷新结果也是 m3 (保存后的真值)。
+        a.update(Action::MutationDone { mutation: mutation.clone(), barrier: 0, result: Ok(MutationOutcome::SlotsSaved) });
+        let mut after_save = detail_subs();
+        after_save[0].model_slots.fable = "m3".into();
+        a.update(subs_done(2, after_save));
+        let out_ok = render(&mut a, 80, 24);
+        assert!(!out_ok.contains(" *"), "保存成功后应该变干净\n{out_ok}");
+        assert!(out_ok.contains("m3"), "{out_ok}");
+
+        // 另起一局: 保存失败之后草稿应该原样保留, 而且又能正常编辑了 (saving 标记被摘掉)。
+        let mut b = subs_app(false);
+        render(&mut b, 80, 24);
+        b.handle_key(key(KeyCode::Enter));
+        b.handle_key(key(KeyCode::Enter));
+        b.update(Action::PickerDone { tag: PickerTag::SlotModel { sub_id: "1".into(), slot: Slot::Fable }, choice: PickerChoice::Item("m3".into()) });
+        let mutation_b = match b.handle_key(key(KeyCode::Char('s'))) {
+            Some(Action::Mutate(m)) => m,
+            other => panic!("{other:?}"),
+        };
+        b.update(Action::Mutate(mutation_b.clone()));
+        b.update(Action::MutationDone { mutation: mutation_b, barrier: 0, result: Err("网络错误".into()) });
+        let out_err = render(&mut b, 80, 24);
+        assert!(out_err.contains("m3") && out_err.contains(" *"), "失败应该保留草稿\n{out_err}");
+        let action_after_err = b.handle_key(key(KeyCode::Enter));
+        assert!(matches!(action_after_err, Some(Action::OpenPicker(_))), "失败之后应该又能正常编辑, 实际 {action_after_err:?}");
+    }
 }
 
 /// D2(a) (fix round P3b): 选中一个新模型再选回原值——草稿应该被真的丢弃 (不是「存在但不脏」的
@@ -2394,11 +2447,11 @@ fn a_reverted_draft_is_dropped_and_actions_work_again() {
     render(&mut a, 80, 24);
     a.handle_key(key(KeyCode::Enter));
     a.handle_key(key(KeyCode::Enter)); // 打开 Fable picker
-    a.update(Action::PickerDone { tag: PickerTag::SlotModel { slot: Slot::Fable }, choice: PickerChoice::Item("m3".into()) });
+    a.update(Action::PickerDone { tag: PickerTag::SlotModel { sub_id: "1".into(), slot: Slot::Fable }, choice: PickerChoice::Item("m3".into()) });
     assert!(render(&mut a, 80, 24).contains(" *"));
 
     a.handle_key(key(KeyCode::Enter)); // 重新打开 picker
-    a.update(Action::PickerDone { tag: PickerTag::SlotModel { slot: Slot::Fable }, choice: PickerChoice::Custom("glm-4.6".into()) }); // 改回原值
+    a.update(Action::PickerDone { tag: PickerTag::SlotModel { sub_id: "1".into(), slot: Slot::Fable }, choice: PickerChoice::Custom("glm-4.6".into()) }); // 改回原值
     let clean_out = render(&mut a, 80, 24);
     assert!(!clean_out.contains(" *"), "{clean_out}");
 
@@ -2444,7 +2497,7 @@ fn esc_with_a_draft_asks_and_yes_returns_to_the_list() {
     render(&mut a, 80, 24);
     a.handle_key(key(KeyCode::Enter));
     a.handle_key(key(KeyCode::Enter));
-    a.update(Action::PickerDone { tag: PickerTag::SlotModel { slot: Slot::Fable }, choice: PickerChoice::Item("m3".into()) });
+    a.update(Action::PickerDone { tag: PickerTag::SlotModel { sub_id: "1".into(), slot: Slot::Fable }, choice: PickerChoice::Item("m3".into()) });
 
     let action = a.handle_key(key(KeyCode::Esc));
     assert_eq!(action, Some(Action::OpenConfirm { prompt: ZH.confirm_discard.into(), on_yes: Box::new(Action::DiscardDraft) }));
@@ -2465,7 +2518,7 @@ fn leaving_the_tab_or_quitting_with_a_draft_asks() {
     render(&mut a, 80, 24);
     a.handle_key(key(KeyCode::Enter));
     a.handle_key(key(KeyCode::Enter));
-    a.update(Action::PickerDone { tag: PickerTag::SlotModel { slot: Slot::Fable }, choice: PickerChoice::Item("m3".into()) });
+    a.update(Action::PickerDone { tag: PickerTag::SlotModel { sub_id: "1".into(), slot: Slot::Fable }, choice: PickerChoice::Item("m3".into()) });
 
     assert!(a.update(Action::Quit).is_empty(), "有草稿时 q 应该先确认");
     let out = render(&mut a, 80, 24);
@@ -2484,7 +2537,7 @@ fn mutation_keys_are_refused_while_dirty() {
     render(&mut a, 80, 24);
     a.handle_key(key(KeyCode::Enter));
     a.handle_key(key(KeyCode::Enter));
-    a.update(Action::PickerDone { tag: PickerTag::SlotModel { slot: Slot::Fable }, choice: PickerChoice::Item("m3".into()) });
+    a.update(Action::PickerDone { tag: PickerTag::SlotModel { sub_id: "1".into(), slot: Slot::Fable }, choice: PickerChoice::Item("m3".into()) });
 
     for code in [KeyCode::Char('e'), KeyCode::Char('t'), KeyCode::Char('m'), KeyCode::Char('b')] {
         assert_eq!(
@@ -2503,7 +2556,7 @@ fn draft_is_dropped_when_the_subscription_disappears() {
     render(&mut a, 80, 24);
     a.handle_key(key(KeyCode::Enter));
     a.handle_key(key(KeyCode::Enter));
-    a.update(Action::PickerDone { tag: PickerTag::SlotModel { slot: Slot::Fable }, choice: PickerChoice::Item("m3".into()) });
+    a.update(Action::PickerDone { tag: PickerTag::SlotModel { sub_id: "1".into(), slot: Slot::Fable }, choice: PickerChoice::Item("m3".into()) });
     assert!(render(&mut a, 80, 24).contains(" *"));
 
     let mut without_zhipu = detail_subs();
@@ -2528,7 +2581,7 @@ fn sub_gone_is_noticed_as_soon_as_the_list_arrives() {
     render(&mut a, 80, 24);
     a.handle_key(key(KeyCode::Enter));
     a.handle_key(key(KeyCode::Enter));
-    a.update(Action::PickerDone { tag: PickerTag::SlotModel { slot: Slot::Fable }, choice: PickerChoice::Item("m3".into()) });
+    a.update(Action::PickerDone { tag: PickerTag::SlotModel { sub_id: "1".into(), slot: Slot::Fable }, choice: PickerChoice::Item("m3".into()) });
     assert!(render(&mut a, 80, 24).contains(" *"));
 
     let mut without_zhipu = detail_subs();
@@ -2540,6 +2593,53 @@ fn sub_gone_is_noticed_as_soon_as_the_list_arrives() {
     assert!(!out.contains(" *"), "订阅消失后草稿应该立刻被丢弃, 不用等下一次 update()\n{out}");
     assert!(out.contains(ZH.sub_gone), "{out}");
     assert!(out.contains(ZH.sub_col_name), "焦点应该立刻退回列表\n{out}");
+}
+
+/// I5: picker 打开时 (还没等用户 ⏎ 完成选择) 引用的订阅被别处删掉了——`resolve_selection` 会把
+/// `selected_id` 重新指向新列表里同一下标的另一条 (焦点仍停在 `Detail`, 因为这时候还没有草稿,
+/// `sync_draft_with_store` 提前 return, 不会主动把焦点挪回列表)。这时候用户在弹窗里按下 ⏎, 落地
+/// 的 `PickerDone` 仍然带着弹窗打开那一刻钉住的旧 `sub_id`——不该被套用到现在选中的另一条订阅上。
+#[test]
+fn a_picker_result_for_a_vanished_subscription_is_ignored() {
+    let mut a = subs_app(false); // 默认选中 "1" (智谱主号)
+    render(&mut a, 80, 24);
+    a.handle_key(key(KeyCode::Enter)); // List -> Detail{Fable}
+    let open_action = a.handle_key(key(KeyCode::Enter)).expect("第二次 ⏎ 应该打开 picker");
+    match &open_action {
+        Action::OpenPicker(spec) => assert_eq!(spec.tag, PickerTag::SlotModel { sub_id: "1".into(), slot: Slot::Fable }),
+        other => panic!("{other:?}"),
+    }
+    a.update(open_action); // 弹窗打开, tag 钉住 sub_id == "1"
+
+    // "1" 被删除 (别处), 轮询带回新列表——resolve_selection 把 selected_id 重新指向新列表同一
+    // 下标的订阅 ("2", Kimi 备用)。
+    let mut without_zhipu = detail_subs();
+    without_zhipu.remove(0);
+    a.update(subs_done(2, without_zhipu));
+    render(&mut a, 80, 24); // 触发一次 resolve_selection, 把 selected_id 重新指向 "2"
+
+    // 用户这时候在 (已经过时的) 弹窗里选中了一个模型——落地的 PickerDone 仍然带着旧 sub_id "1"。
+    assert!(a
+        .update(Action::PickerDone { tag: PickerTag::SlotModel { sub_id: "1".into(), slot: Slot::Fable }, choice: PickerChoice::Item("m3".into()) })
+        .is_empty());
+    let out = render(&mut a, 80, 24);
+    assert!(!out.contains(" *"), "消失订阅的 picker 结果不该产生任何草稿\n{out}");
+    assert!(!out.contains("m3"), "更不该把结果错误地写进现在选中的另一条订阅\n{out}");
+}
+
+/// I5: 虚拟模型页同理——弹窗结果里的 `vm` 对不上当前选中的虚拟模型时静默忽略。虚拟模型固定只有
+/// 5 个、选中项在有草稿时也换不掉, 这个场景理论上走不到, 但 `PickerTag` 已经带着 `vm` 字段, 这里
+/// 直接注入一条不一致的 `PickerDone` 覆盖这条防御性分支。
+#[test]
+fn a_picker_result_for_another_virtual_model_is_ignored() {
+    let mut a = vm_app(false); // 默认选中 model-fable (ids: ["1", ghost], 2 个成员)
+    assert!(a
+        .update(Action::PickerDone { tag: PickerTag::VmAddSubscription { vm: "model-sonnet".into() }, choice: PickerChoice::Item("2".into()) })
+        .is_empty());
+    let out = render(&mut a, 80, 24);
+    assert!(!out.contains(" *"), "跟当前选中项不一致的虚拟模型不该被应用\n{out}");
+    let fable_line = vm_list_row(&out, "model-fable");
+    assert!(fable_line.contains('2'), "model-fable 的成员数不该被这条无关的 PickerDone 改变\n{fable_line}");
 }
 
 /// I2 修正: 短模型名不该把 effort 列推到很远的右边——模型名结尾与 "high" 之间的距离不该超过
@@ -2585,7 +2685,7 @@ fn subscriptions_dirty_80x24() {
     render(&mut a, 80, 24);
     a.handle_key(key(KeyCode::Enter));
     a.handle_key(key(KeyCode::Enter));
-    a.update(Action::PickerDone { tag: PickerTag::SlotModel { slot: Slot::Fable }, choice: PickerChoice::Item("m3".into()) });
+    a.update(Action::PickerDone { tag: PickerTag::SlotModel { sub_id: "1".into(), slot: Slot::Fable }, choice: PickerChoice::Item("m3".into()) });
     insta::assert_snapshot!(render(&mut a, 80, 24));
 }
 
@@ -2706,6 +2806,36 @@ fn members_show_names_badges_and_missing_ids() {
     assert!(out.contains("ghost-le"), "缺失订阅应该显示 id 前 8 位\n{out}");
 }
 
+/// I4: 订阅列表还没加载完时 (`list_subscriptions` 还没回来), `store.subscription` 对任何 id 都会
+/// 返回 `None`——不该被误判成"已删除" (不显示 `vm_missing`), `a`/`x`/`J`/`K`/`s` 也该统一拒绝
+/// (弹 `vm_subs_not_loaded`), 而不是把用户导向"请先移除已删除的订阅"这种具有误导性的提示。订阅
+/// 列表到了之后, 才恢复正常的 ghost 判定。
+#[test]
+fn members_are_not_called_deleted_before_subscriptions_load() {
+    let mut a = app(false);
+    a.update(Action::Connected { app_version: VERSION.into() });
+    a.update(Action::SwitchTab(Tab::VirtualModels));
+    a.update(vm_done(1, vm_list())); // 虚拟模型列表到了, 订阅列表还没到
+
+    let out = render(&mut a, 80, 24);
+    assert!(!out.contains(ZH.vm_missing), "订阅列表还没加载完时不该显示已删除\n{out}");
+    assert!(out.contains("ghost-le"), "应该显示 id 前缀\n{out}");
+
+    a.handle_key(key(KeyCode::Right)); // Members, model-fable ids=["1", ghost]
+    for code in [KeyCode::Char('a'), KeyCode::Char('x'), KeyCode::Char('J'), KeyCode::Char('K'), KeyCode::Char('s')] {
+        assert_eq!(
+            a.handle_key(key(code)),
+            Some(Action::Notify { kind: ToastKind::Info, text: ZH.vm_subs_not_loaded.into() }),
+            "{code:?} 应该在订阅列表还没加载完时被拒绝"
+        );
+    }
+
+    // 订阅列表到了之后, 才恢复正常的 ghost 判定。
+    a.update(subs_done(1, vm_subs()));
+    let out2 = render(&mut a, 80, 24);
+    assert!(out2.contains(ZH.vm_missing), "订阅列表到了之后应该正常显示已删除\n{out2}");
+}
+
 #[test]
 fn fallback_marks_translated_subscriptions_without_a_fallback_slot() {
     let mut a = vm_app(false);
@@ -2786,12 +2916,12 @@ fn a_offers_only_unbound_subscriptions_and_appends() {
     a.handle_key(key(KeyCode::Right)); // Members, model-fable ids=["1", ghost]
     let action = a.handle_key(key(KeyCode::Char('a')));
     let Some(Action::OpenPicker(spec)) = action else { panic!("{action:?}") };
-    assert_eq!(spec.tag, PickerTag::VmAddSubscription);
+    assert_eq!(spec.tag, PickerTag::VmAddSubscription { vm: "model-fable".into() });
     let ids: Vec<&str> = spec.items.iter().map(|i| i.id.as_str()).collect();
     assert_eq!(ids, vec!["2", "3", "4", "5"], "候选应该排除已经在列表里的 \"1\"\n{ids:?}");
 
     a.update(Action::OpenPicker(spec));
-    let done = Action::PickerDone { tag: PickerTag::VmAddSubscription, choice: PickerChoice::Item("2".into()) };
+    let done = Action::PickerDone { tag: PickerTag::VmAddSubscription { vm: "model-fable".into() }, choice: PickerChoice::Item("2".into()) };
     assert!(a.update(done).is_empty(), "PickerDone 不产出 Cmd");
     let out = render(&mut a, 80, 24);
     assert!(out.contains("Kimi 备用"), "新加入的订阅应该出现在成员列表里\n{out}");
@@ -2810,7 +2940,9 @@ fn a_with_nothing_left_toasts() {
         let action = a.handle_key(key(KeyCode::Char('a')));
         let Some(Action::OpenPicker(spec)) = action else { panic!("{action:?}") };
         a.update(Action::OpenPicker(spec));
-        assert!(a.update(Action::PickerDone { tag: PickerTag::VmAddSubscription, choice: PickerChoice::Item(id.into()) }).is_empty());
+        assert!(a
+            .update(Action::PickerDone { tag: PickerTag::VmAddSubscription { vm: "model-fable".into() }, choice: PickerChoice::Item(id.into()) })
+            .is_empty());
     }
     let action = a.handle_key(key(KeyCode::Char('a')));
     assert_eq!(action, Some(Action::Notify { kind: ToastKind::Info, text: ZH.vm_nothing_to_add.into() }), "所有订阅都绑定后应该就地提示");
@@ -2847,6 +2979,42 @@ fn m_cycles_the_mode_in_either_pane() {
     let out2 = render(&mut a, 80, 24);
     let fable_line2 = vm_list_row(&out2, "model-fable");
     assert!(fable_line2.contains(ZH.vm_mode_sticky), "Members 焦点下 m 应该继续切到会话\n{fable_line2}");
+}
+
+/// I3: `s`/`Esc` 现在 Models 焦点下也可用, 不用先进 Members 才能保存/放弃 (`m` 造草稿早就是这样,
+/// 保存/放弃理应对称)。用 model-opus (无 ghost 成员, 避免被 V2 的守卫拦下, 干扰这条用例本身要
+/// 验证的东西)。
+#[test]
+fn mode_change_in_models_focus_can_be_saved_and_discarded_there() {
+    let mut a = vm_app(false);
+    a.handle_key(key(KeyCode::Down)); // model-opus (初始 round_robin)
+    a.handle_key(key(KeyCode::Char('m'))); // round_robin -> sticky, 仍在 Models 焦点
+    let action = a.handle_key(key(KeyCode::Char('s')));
+    assert_eq!(
+        action,
+        Some(Action::Mutate(Mutation::UpdateVirtualModel {
+            name: "model-opus".into(),
+            mode: RoutingMode::Sticky,
+            subscription_ids: vec!["1".into(), "2".into(), "3".into()],
+        })),
+        "Models 焦点下应该也能直接保存, 不用先进 Members, 实际 {action:?}"
+    );
+
+    // 另开一局: Models 焦点造草稿, 直接按 Esc 也该弹确认放弃, 与 Members 焦点同一套流程。
+    let mut b = vm_app(false);
+    b.handle_key(key(KeyCode::Down));
+    b.handle_key(key(KeyCode::Char('m')));
+    let esc_action = b.handle_key(key(KeyCode::Esc));
+    assert_eq!(
+        esc_action,
+        Some(Action::OpenConfirm { prompt: ZH.confirm_discard.into(), on_yes: Box::new(Action::DiscardDraft) }),
+        "Models 焦点下 Esc 也该弹确认放弃"
+    );
+    b.update(esc_action.unwrap());
+    assert_eq!(b.handle_key(key(KeyCode::Char('y'))), Some(Action::Confirmed(Box::new(Action::DiscardDraft))));
+    b.update(Action::Confirmed(Box::new(Action::DiscardDraft)));
+    let out = render(&mut b, 80, 24);
+    assert!(!out.contains(" *"), "确认放弃后应该干净\n{out}");
 }
 
 #[test]
@@ -3012,50 +3180,83 @@ fn s_refuses_offline_and_ignores_while_busy() {
     assert!(a.update(Action::Mutate(mutation)).is_empty(), "同一虚拟模型忙碌中应该被忽略");
 }
 
-/// D1 (fix round P3b): 一次保存发出去之后 (还没等结果回来) 用户又重排序了一次——结果落地时不该
-/// 无脑清掉草稿, 因为草稿这时已经是第二次重排序的结果了。用 model-opus (无 ghost 成员, 避免和
-/// V2 的守卫互相干扰)。
-#[test]
-fn reorders_made_while_a_save_is_in_flight_survive_it() {
-    let mut a = vm_app(false);
-    a.handle_key(key(KeyCode::Down)); // model-opus, ids=["1","2","3"]
-    a.handle_key(key(KeyCode::Right)); // Members
-    a.handle_key(key(KeyCode::Char('J'))); // cursor 0 -> swap(0,1): ["2","1","3"], cursor=1
-    let action = a.handle_key(key(KeyCode::Char('s')));
-    let mutation = match action {
-        Some(Action::Mutate(m)) => m,
-        other => panic!("{other:?}"),
-    };
-    assert_eq!(a.update(Action::Mutate(mutation.clone())), vec![Cmd::Mutate(Box::new(mutation.clone()))]);
+mod virtual_models_saving_in_flight {
+    use super::*;
 
-    // 保存 (["2","1","3"]) 还在飞行中, 用户又按了一次 J: cursor=1 -> swap(1,2): ["2","3","1"]。
-    a.handle_key(key(KeyCode::Char('J')));
+    /// 一次保存发出去之后 (还没等结果回来), 旧版靠 `on_mutation_done` 的"负载与当前草稿完全相等
+    /// 才清空"规则保证不丢——I1 改成直接拒绝: 保存飞行中时 `J`/`K`/`a`/`x`/`m`/再按一次 `s` 都被
+    /// 拒绝, 弹 `saving_in_progress`, 草稿不动; `MutationDone(Ok)` + refetch 落地后页面变干净;
+    /// `MutationDone(Err)` 落地后草稿保留且又能编辑。用 model-opus (无 ghost 成员, 避免和 V2 的
+    /// 守卫互相干扰)。
+    #[test]
+    fn edits_are_refused_while_a_save_is_in_flight() {
+        let mut a = vm_app(false);
+        a.handle_key(key(KeyCode::Down)); // model-opus, ids=["1","2","3"]
+        a.handle_key(key(KeyCode::Right)); // Members
+        a.handle_key(key(KeyCode::Char('J'))); // cursor 0 -> swap(0,1): ["2","1","3"], cursor=1
+        let action = a.handle_key(key(KeyCode::Char('s')));
+        let mutation = match action {
+            Some(Action::Mutate(m)) => m,
+            other => panic!("{other:?}"),
+        };
+        assert_eq!(a.update(Action::Mutate(mutation.clone())), vec![Cmd::Mutate(Box::new(mutation.clone()))]);
 
-    // 第一次保存的结果回来了, 后端随后带回来的刷新结果也是第一次保存的顺序。
-    a.update(Action::MutationDone { mutation: mutation.clone(), barrier: 0, result: Ok(MutationOutcome::VirtualModelSaved) });
-    let mut vms_after_first_save = vm_list();
-    vms_after_first_save.iter_mut().find(|vm| vm.name == "model-opus").unwrap().subscription_ids =
-        vec!["2".into(), "1".into(), "3".into()];
-    a.update(vm_done(2, vms_after_first_save));
+        // 保存 (["2","1","3"]) 还在飞行中: J/K/a/x/m/再按一次 s 都该被拒绝, 弹同一条提示, 草稿不变。
+        // 像真实运行时一样把 `handle_key` 的返回值转发进 `update` (`Action::Notify` 才会真的入队)。
+        for code in [KeyCode::Char('J'), KeyCode::Char('K'), KeyCode::Char('x'), KeyCode::Char('m'), KeyCode::Char('s')] {
+            let action = a.handle_key(key(code));
+            assert_eq!(
+                action,
+                Some(Action::Notify { kind: ToastKind::Info, text: ZH.saving_in_progress.into() }),
+                "{code:?} 应该在保存飞行中被拒绝"
+            );
+            a.update(action.unwrap());
+        }
 
-    let out = render(&mut a, 80, 24);
-    assert!(out.contains(" *"), "在途保存不该吞掉后续的重排序\n{out}");
-    let pos = |needle: &str| out.find(needle).unwrap_or_else(|| panic!("缺 {needle}\n{out}"));
-    assert!(
-        pos("Kimi 备用") < pos("示例中转") && pos("示例中转") < pos("智谱主号"),
-        "成员顺序应该是第二次重排序 (\"2\",\"3\",\"1\") 之后的样子\n{out}"
-    );
+        let out_while_saving = render(&mut a, 80, 24);
+        let pos = |out: &str, needle: &str| out.find(needle).unwrap_or_else(|| panic!("缺 {needle}\n{out}"));
+        assert!(
+            pos(&out_while_saving, "Kimi 备用") < pos(&out_while_saving, "智谱主号")
+                && pos(&out_while_saving, "智谱主号") < pos(&out_while_saving, "示例中转"),
+            "飞行中的编辑都不该生效, 顺序应该还是第一次保存时的 [\"2\",\"1\",\"3\"]\n{out_while_saving}"
+        );
+        assert!(out_while_saving.contains(ZH.saving_in_progress), "{out_while_saving}");
 
-    let action2 = a.handle_key(key(KeyCode::Char('s')));
-    assert_eq!(
-        action2,
-        Some(Action::Mutate(Mutation::UpdateVirtualModel {
-            name: "model-opus".into(),
-            mode: RoutingMode::RoundRobin,
-            subscription_ids: vec!["2".into(), "3".into(), "1".into()],
-        })),
-        "s 应该发第二次重排序之后的状态"
-    );
+        // 结果回来了 (成功), 后端随后带回来的刷新结果也是第一次保存的顺序。
+        a.update(Action::MutationDone { mutation: mutation.clone(), barrier: 0, result: Ok(MutationOutcome::VirtualModelSaved) });
+        let mut vms_after_save = vm_list();
+        vms_after_save.iter_mut().find(|vm| vm.name == "model-opus").unwrap().subscription_ids = vec!["2".into(), "1".into(), "3".into()];
+        a.update(vm_done(2, vms_after_save));
+        let out_ok = render(&mut a, 80, 24);
+        assert!(!out_ok.contains(" *"), "保存成功后应该变干净\n{out_ok}");
+
+        // 另起一局: 保存失败之后草稿应该原样保留, 而且又能正常编辑了 (saving 标记被摘掉)。
+        let mut b = vm_app(false);
+        b.handle_key(key(KeyCode::Down)); // model-opus
+        b.handle_key(key(KeyCode::Right));
+        b.handle_key(key(KeyCode::Char('J')));
+        let mutation_b = match b.handle_key(key(KeyCode::Char('s'))) {
+            Some(Action::Mutate(m)) => m,
+            other => panic!("{other:?}"),
+        };
+        b.update(Action::Mutate(mutation_b.clone()));
+        b.update(Action::MutationDone { mutation: mutation_b, barrier: 0, result: Err("网络错误".into()) });
+        // 失败会弹一条提到 "model-opus" 的 toast, 80 列下贴右边缘正好盖住 model-fable 那一行的右半边
+        // (第一个虚拟模型, 排在 model-opus 前面)——toast 文本本身包含 "model-opus" 这个子串, 会让
+        // `vm_list_row` 的朴素匹配误认成 model-opus 自己那一行。先画一帧让 toast 记住 `shown_at`,
+        // 再把时间推到它的生命周期之后, 干净地验证草稿状态, 不用跟 toast 抢地盘。
+        render(&mut b, 80, 24);
+        b.update(Action::Tick { now_ms: NOW + 4_000 });
+        let out_err = render(&mut b, 80, 24);
+        assert!(vm_list_row(&out_err, "model-opus").contains(" *"), "失败应该保留草稿\n{out_err}");
+        // 光标停在下标 1 (["2","1","3"] 的第二项); 再按一次 J (swap(1,2): ["2","3","1"]) 而不是 K
+        // (swap(0,1) 会换回 ["1","2","3"], 正好等于 base, 反而被 `Draft::edit` 判定为"改回原值"清空
+        // 草稿——不是这条用例想验证的东西, 只是想证明"失败之后又能正常编辑了")。
+        let action_after_err = b.handle_key(key(KeyCode::Char('J')));
+        assert_eq!(action_after_err, None, "J 应该正常执行 (不再被拒绝), 无返回值是这个键本身的正常语义");
+        let out_after_err_edit = render(&mut b, 80, 24);
+        assert!(vm_list_row(&out_after_err_edit, "model-opus").contains(" *"), "失败之后应该又能正常编辑\n{out_after_err_edit}");
+    }
 }
 
 #[test]
@@ -3089,6 +3290,30 @@ fn draft_survives_polling_and_clears_on_successful_save_only() {
     a.update(Action::MutationDone { mutation, barrier: 0, result: Ok(MutationOutcome::VirtualModelSaved) });
     let out_after_ok = render(&mut a, 80, 24);
     assert!(!out_after_ok.contains(" *"), "成功后草稿应该被清掉\n{out_after_ok}");
+}
+
+/// M1: `Store` 刚接受一份新的虚拟模型列表这一刻 (`Ok(FetchData::VirtualModels(..))` 分支只更新
+/// `Store`, 不会触发这个页面的 `Component::update()`) 就该立刻核对一遍草稿是否已经和它相等——不用
+/// 等下一次真正的 `update()` 调用 (最多要等 5 秒的轮询)。只喂 `vm_done`, 不额外调
+/// `Action::Refresh`: 如果 `on_store_changed` 没有立刻核对, 这里应该还看得到 `*`。
+#[test]
+fn vm_list_equal_to_the_draft_clears_dirty_immediately_on_arrival() {
+    let mut a = vm_app(false);
+    a.handle_key(key(KeyCode::Right)); // Members, model-fable ids=["1", ghost]
+    a.handle_key(key(KeyCode::Char('J'))); // -> ["ghost", "1"]
+    assert!(render(&mut a, 80, 24).contains(" *"));
+
+    let mut vms = vm_list();
+    vms[0].subscription_ids = vec!["ghost-legacy-sub-999".into(), "1".into()];
+    a.update(vm_done(2, vms));
+    let out = render(&mut a, 80, 24);
+    assert!(!out.contains(" *"), "新列表与草稿相等时应该立刻变干净, 不用等下一次真正的 update()\n{out}");
+
+    // 干净之后切页不该弹确认, 应该真的切过去。
+    a.update(Action::SwitchTab(Tab::Overview));
+    let out2 = render(&mut a, 80, 24);
+    assert!(!out2.contains(ZH.confirm_discard), "不脏时切页不该弹确认\n{out2}");
+    assert!(out2.contains(ZH.ov_today), "应该已经真的切到总览页\n{out2}");
 }
 
 #[test]
@@ -3208,7 +3433,7 @@ mod subscriptions_save_hint {
         render(&mut a, 80, 24);
         a.handle_key(key(KeyCode::Enter));
         a.handle_key(key(KeyCode::Enter));
-        a.update(Action::PickerDone { tag: PickerTag::SlotModel { slot: Slot::Fable }, choice: PickerChoice::Item("m3".into()) });
+        a.update(Action::PickerDone { tag: PickerTag::SlotModel { sub_id: "1".into(), slot: Slot::Fable }, choice: PickerChoice::Item("m3".into()) });
         let out = render(&mut a, 80, 24);
         let footer = out.lines().last().unwrap_or_else(|| panic!("{out}"));
         assert!(footer.contains(ZH.key_save), "脏页面 80 列下 s 保存不该被丢\n{footer}");

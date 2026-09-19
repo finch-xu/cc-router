@@ -228,8 +228,27 @@ impl App {
             }
         });
         for (kind, text) in notices {
+            // I5 (fix round final): `sub_gone` 是订阅详情页在"草稿对应的订阅这一刻从 Store 消失"
+            // 时产出的通知——如果这一刻正好有个弹窗开着 (通常是这条订阅的槽位/思考档位 picker),
+            // 它引用的订阅已经没有意义了, 不主动关掉的话弹窗会一直挂着 (`apply_picker_choice` 虽然
+            // 会因为 `sub_id` 对不上而静默忽略这次结果, 但用户还在对着一个死弹窗操作)。挑这条通知
+            // 本身当信号是最小的改动: 它已经是"这条订阅消失了"事件的权威来源, 不需要再新开一条
+            // `Action` 或 `Component` 方法专门传递"该关弹窗了"这件事。
+            if text == s.sub_gone {
+                self.close_popup();
+            }
             self.push_toast(Toast::new(kind, text));
         }
+    }
+
+    /// M1 (fix round final): `Store` 刚**接受**了一份订阅列表或虚拟模型列表 (不管内容变没变)——
+    /// 广播给全部页面, 让编辑类页面借这个时机核对一遍 `is_dirty()` 缓存, 不用等下一次真正的
+    /// `Component::update()` 调用 (轮询最多要等 5 秒)。与 `notify_subscriptions_changed` 分开:
+    /// 后者只在订阅列表**变化**时触发、带着"哪些 id 变了"的 diff (给闪烁用); 这个方法订阅列表和
+    /// 虚拟模型列表都触发、不需要 diff。
+    fn notify_store_changed(&mut self) {
+        let store = &self.store;
+        self.pages.for_each_mut(|page| page.on_store_changed(store));
     }
 
     /// 两处 toast 入口共用: 与最新排队的一条重复 (同 kind 同 text) 就丢弃, 否则挤掉最旧的排队项
@@ -295,6 +314,9 @@ impl App {
         if let BusyKey::Subscription(id) = &key {
             self.last_outcome.remove(id);
         }
+        // I1 (fix round final): 紧跟在忙碌表真的插入之后广播给全部页面——`on_mutation_started` 与
+        // `on_mutation_done` 成对, 让编辑类页面在这段窗口里拒绝任何会继续修改同一份草稿的按键。
+        self.pages.for_each_mut(|page| page.on_mutation_started(&m));
         vec![Cmd::Mutate(Box::new(m))]
     }
 
@@ -448,6 +470,8 @@ impl App {
                     let changed = self.store.apply_subscriptions(issued, subs);
                     if let Some(changed) = &changed {
                         self.notify_subscriptions_changed(changed);
+                        // M1: `Store` 接受了这份订阅列表, 广播给全部页面核对草稿。
+                        self.notify_store_changed();
                     }
                     let action = Action::FetchDone { fetch, issued, result: Ok(FetchData::Overview(data)) };
                     // 加载结果永远交给发起它的页面, 哪怕用户已经切走了; 总览页目前不产出通知,
@@ -462,6 +486,7 @@ impl App {
                     let changed = self.store.apply_subscriptions(issued, subs);
                     if let Some(changed) = &changed {
                         self.notify_subscriptions_changed(changed);
+                        self.notify_store_changed();
                     }
                     Vec::new()
                 }
@@ -469,7 +494,14 @@ impl App {
                 // 画的时候直接读 ctx.store, 与订阅列表同一套约定。
                 Ok(FetchData::VirtualModels(vms)) => {
                     debug_assert_eq!(fetch, Fetch::VirtualModels, "spawn_fetch 应该保证 FetchData::VirtualModels 只配 Fetch::VirtualModels");
-                    self.store.apply_virtual_models(issued, vms);
+                    let accepted = self.store.apply_virtual_models(issued, vms);
+                    if accepted {
+                        // M1: 虚拟模型页没有 `on_subscriptions_changed` 那条早通知路径 (那是给订阅
+                        // 列表用的), 这份广播是它唯一能立刻核对草稿的机会——不然要等下一次真正的
+                        // `Component::update()` 调用 (最多 5 秒轮询) 才会发现"新列表其实已经和
+                        // 草稿相等了"。
+                        self.notify_store_changed();
+                    }
                     Vec::new()
                 }
             },
@@ -771,7 +803,7 @@ mod tests {
         render(&mut a, 80, 24); // 再记一次, 这次是 Confirm 弹窗的 popup_area。
         assert!(a.popup_area.is_some());
         a.update(Action::OpenPicker(picker::PickerSpec {
-            tag: picker::PickerTag::VmAddSubscription,
+            tag: picker::PickerTag::VmAddSubscription { vm: "model-fable".into() },
             title: "选择".into(),
             items: vec![],
             allow_custom: false,

@@ -2,7 +2,7 @@
 
 use ratatui::layout::Rect;
 use ratatui::style::Style;
-use ratatui::widgets::{Block, BorderType, Clear, Paragraph};
+use ratatui::widgets::{Block, BorderType, Paragraph};
 use ratatui::Frame;
 use unicode_width::UnicodeWidthStr;
 
@@ -53,7 +53,10 @@ pub fn draw(frame: &mut Frame, area: Rect, toast: &Toast, theme: &Theme) {
     };
     let block = Block::bordered().border_type(BorderType::Rounded).border_style(Style::new().fg(color));
     let inner_width = area.width.saturating_sub(4) as usize;
-    frame.render_widget(Clear, area);
+    // M3 (fix round final): 裸 `Clear` 修不好紧贴 toast 左右边缘、横跨边界的宽字符 (CJK 等),
+    // 跟三个弹窗当初踩的是同一个坑 (`widgets::clear_popup_area` 的文档有完整解释)——toast 也贴着
+    // 屏幕内容画, 同样可能撞上这种情况, 复用弹窗那一套修复, 不再是单独一份裸 `Clear`。
+    crate::widgets::clear_popup_area(frame, area);
     frame.render_widget(Paragraph::new(format!(" {} ", fit(&toast.text, inner_width))).block(block), area);
 }
 

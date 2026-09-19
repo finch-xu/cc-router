@@ -123,6 +123,11 @@ pub struct Subscriptions {
     /// 规则收进 [`Draft`] 内部, 不再是页面自己要记得维护的约定 (`draft.is_some()` ⇔ `is_dirty()`
     /// 恒成立)。
     draft: Draft<SlotDraft>,
+    /// I1 (fix round final): 正在保存中的订阅 id (`Mutation::UpdateSlots` 从 `on_mutation_started`
+    /// 到对应 `on_mutation_done` 之间); `Some` 时拒绝任何会继续修改草稿的按键 (含再按一次 `s`),
+    /// 避免飞行中的编辑被落地的保存结果悄悄冲掉 (D1 只保证了草稿本身不丢, 但没有在编辑发生的那
+    /// 一刻提示用户"现在编辑不安全")。
+    saving: Option<String>,
     /// 页面在 `update()` 内部想弹的一条 toast, `App::update_page` 在调用 `update()` 之后轮询取走
     /// (`update()` 签名只能返回 `Vec<Cmd>`, 塞不进一个 `Action::Notify`)。
     pending_notice: Option<(ToastKind, String)>,
@@ -139,6 +144,7 @@ impl Default for Subscriptions {
             table_state: TableState::default(),
             flash_rows: Vec::new(),
             draft: Draft::default(),
+            saving: None,
             pending_notice: None,
         }
     }
@@ -214,6 +220,15 @@ impl Subscriptions {
         self.focus = Focus::Detail { slot: ALL_SLOTS[next] };
     }
 
+    /// I1: 当前选中的订阅是否正有一次 `UpdateSlots` 保存在飞行中。
+    fn is_saving(&self) -> bool {
+        self.saving.is_some()
+    }
+
+    fn saving_notice(s: &'static Strings) -> Action {
+        Action::Notify { kind: ToastKind::Info, text: s.saving_in_progress.to_string() }
+    }
+
     /// `⏎` (在 `Detail` 焦点下): 打开当前槽位的模型 picker, `initial` 是草稿 (没有就是 `Store`)
     /// 里该槽当前值; 兜底槽额外在最前面放一项「清空」。
     fn open_model_picker(&self, sub: &Subscription, slot: Slot, s: &'static Strings) -> Action {
@@ -226,7 +241,8 @@ impl Subscriptions {
             items.extend(cache.models.iter().map(|m| PickerItem { id: m.id.clone(), label: m.id.clone(), hint: m.display_name.clone() }));
         }
         Action::OpenPicker(PickerSpec {
-            tag: PickerTag::SlotModel { slot },
+            // I5: 带上这次弹窗是为哪条订阅开的, `PickerDone` 落地时据此核对是否还该应用。
+            tag: PickerTag::SlotModel { sub_id: sub.id.clone(), slot },
             title: (s.pick_model_title)(slot_label(slot, s)),
             items,
             allow_custom: true,
@@ -247,7 +263,7 @@ impl Subscriptions {
         let mut items = vec![PickerItem { id: String::new(), label: s.sub_effort_auto.to_string(), hint: None }];
         items.extend(EFFORT_CHOICES.iter().map(|e| PickerItem { id: (*e).to_string(), label: (*e).to_string(), hint: None }));
         Some(Action::OpenPicker(PickerSpec {
-            tag: PickerTag::SlotEffort { slot },
+            tag: PickerTag::SlotEffort { sub_id: sub.id.clone(), slot },
             title: (s.pick_effort_title)(slot_label(slot, s)),
             items,
             allow_custom: false,
@@ -255,21 +271,38 @@ impl Subscriptions {
         }))
     }
 
+    /// I5: 这个 `sub_id` 是否还该被当前页面接住——焦点必须在 `Detail`, 且等于**当前选中项**
+    /// (不是"草稿属于哪条订阅", 草稿本来就该跟着选中项走)。弹窗打开之后订阅可能已经被删除、
+    /// 焦点已经退回列表、或者 (理论上不该发生, 但防御性地) 选中项变成了另一条——都应该让调用方
+    /// 静默忽略这次 picker 结果, 不弹通知 (弹窗本身已经在这种情况下被 `App` 关掉了, 见
+    /// `App::notify_subscriptions_changed`)。
+    fn applies_to(&self, sub_id: &str) -> bool {
+        matches!(self.focus, Focus::Detail { .. }) && self.selected_id.as_deref() == Some(sub_id)
+    }
+
     /// `PickerDone` 落地: 按 `tag` 通过 [`Draft::edit`] 写进草稿 (首次编辑时惰性克隆, 结果等于
     /// `Store` 当前值就立刻丢弃, D2/D3 起这条规则收在 `Draft` 内部, 这里不用再手动核对一遍);
     /// 主槽的空白自定义值被拒绝 (拒绝时不碰草稿), 兜底槽的空白等于清空。跟自己无关的 tag
-    /// (虚拟模型页的 `VmAddSubscription`) 直接忽略。
+    /// (虚拟模型页的 `VmAddSubscription`) 直接忽略; I5: `sub_id` 对不上当前选中项 (或者焦点已经
+    /// 不在 `Detail`) 也直接忽略, 不弹通知; I1: 这条订阅正有保存在飞行中时拒绝, 弹
+    /// `saving_in_progress`。
     fn apply_picker_choice(&mut self, tag: &PickerTag, choice: &PickerChoice, store: &Store, s: &'static Strings) {
-        let Some(id) = self.selected_id.clone() else { return };
-        let Some(sub) = store.subscription(&id) else { return };
-        // 防御性: 草稿如果属于别的订阅 (理论上不该发生, `focus == Detail` 期间选中项不会变) 先
-        // 丢弃, 不把别的订阅的编辑内容当成这条订阅的基线。
-        if self.draft.get().is_some_and(|d| d.sub_id != sub.id) {
-            self.draft.clear();
-        }
-        let base = slot_draft_base(sub);
         match tag {
-            PickerTag::SlotModel { slot } => {
+            PickerTag::SlotModel { sub_id, slot } => {
+                if !self.applies_to(sub_id) {
+                    return;
+                }
+                let Some(sub) = store.subscription(sub_id) else { return };
+                if self.is_saving() {
+                    self.pending_notice = Some((ToastKind::Info, s.saving_in_progress.to_string()));
+                    return;
+                }
+                // 防御性: 草稿如果属于别的订阅 (不该发生, `applies_to` 已经确认 `sub_id` 等于当前
+                // 选中项, 草稿理应跟着选中项走) 先丢弃, 不把别的订阅的编辑内容当成这条订阅的基线。
+                if self.draft.get().is_some_and(|d| d.sub_id != *sub_id) {
+                    self.draft.clear();
+                }
+                let base = slot_draft_base(sub);
                 let value = match choice {
                     PickerChoice::Item(item_id) => item_id.clone(),
                     PickerChoice::Custom(text) => text.trim().to_string(),
@@ -280,7 +313,19 @@ impl Subscriptions {
                 }
                 self.draft.edit(&base, |d| d.model_slots.set(*slot, value));
             }
-            PickerTag::SlotEffort { slot } => {
+            PickerTag::SlotEffort { sub_id, slot } => {
+                if !self.applies_to(sub_id) {
+                    return;
+                }
+                let Some(sub) = store.subscription(sub_id) else { return };
+                if self.is_saving() {
+                    self.pending_notice = Some((ToastKind::Info, s.saving_in_progress.to_string()));
+                    return;
+                }
+                if self.draft.get().is_some_and(|d| d.sub_id != *sub_id) {
+                    self.draft.clear();
+                }
+                let base = slot_draft_base(sub);
                 let value = match choice {
                     PickerChoice::Item(item_id) if item_id.is_empty() => None,
                     PickerChoice::Item(item_id) => Some(item_id.clone()),
@@ -289,17 +334,22 @@ impl Subscriptions {
                 };
                 self.draft.edit(&base, |d| d.slot_efforts.set(*slot, value));
             }
-            PickerTag::VmAddSubscription => (),
+            PickerTag::VmAddSubscription { .. } => (),
         }
     }
 
     /// `s`: 不脏时无动作; 脏时产出 `Action::Mutate(UpdateSlots)`——断线由 `App::start_mutation`
-    /// 统一处理 (弹 `toast_offline`, 不真的发), 这里不用重复判断连接状态。
+    /// 统一处理 (弹 `toast_offline`, 不真的发), 这里不用重复判断连接状态。I5: 额外要求草稿的
+    /// `sub_id` 等于当前选中项, 否则拒绝、绝不发送——草稿理论上只可能属于当前选中项 (`focus ==
+    /// Detail` 期间选中项不会变), 但这是发往后端的最后一道关卡, 宁可防御性地多判一次。
     fn save_action(&self) -> Option<Action> {
         if !self.is_dirty() {
             return None;
         }
         let draft = self.draft.get()?;
+        if self.selected_id.as_deref() != Some(draft.sub_id.as_str()) {
+            return None;
+        }
         Some(Action::Mutate(Mutation::UpdateSlots {
             id: draft.sub_id.clone(),
             model_slots: draft.model_slots.clone(),
@@ -602,14 +652,30 @@ impl Component for Subscriptions {
                     }
                 }
                 KeyCode::Enter => {
+                    // I1/M5: 保存在飞行中时拒绝打开 picker——避免用户对着一份马上要被覆盖的草稿
+                    // 继续编辑, `apply_picker_choice` 里的同款守卫是给"picker 已经开着、保存才
+                    // 开始"这种更罕见的时序兜底, 这里挡的是更常见的"想再开一次 picker"。
+                    if self.is_saving() {
+                        return Some(Self::saving_notice(s));
+                    }
                     let i = idx?;
                     Some(self.open_model_picker(&subs[i], slot, s))
                 }
                 KeyCode::Char('o') => {
+                    if self.is_saving() {
+                        return Some(Self::saving_notice(s));
+                    }
                     let i = idx?;
                     self.open_effort_picker_or_refuse(&subs[i], slot, s)
                 }
-                KeyCode::Char('s') => self.save_action(),
+                KeyCode::Char('s') => {
+                    // M5: 再按一次 s (保存已经在飞行中) 不再被 `App::start_mutation` 的忙碌表悄悄
+                    // 吞掉——就地给个提示, 而不是让用户以为按键没生效。
+                    if self.is_saving() {
+                        return Some(Self::saving_notice(s));
+                    }
+                    self.save_action()
+                }
                 KeyCode::Char('e') => idx.map(|i| Action::Mutate(Mutation::SetEnabled { id: subs[i].id.clone(), enabled: !subs[i].enabled })),
                 KeyCode::Char('t') => idx.map(|i| Action::Mutate(Mutation::TestConnection { id: subs[i].id.clone() })),
                 KeyCode::Char('m') => idx.map(|i| Action::Mutate(Mutation::RefreshModels { id: subs[i].id.clone() })),
@@ -679,19 +745,25 @@ impl Component for Subscriptions {
                 // V1(b) (fix round P3b): 脏页面上 `s 保存` 排到 `↑↓ 选择` 右边第一个, 保证它是
                 // 最后才会被裁掉的那批——丢掉保存提示是所有裁剪结果里最糟的一种; 不脏时留在原位
                 // (跟在改模型/改档位后面, 视觉上更贴近它们描述的操作)。
+                // M6 (fix round final): 脏时精简成 `↑↓ 选择 / s 保存 / Esc 放弃 / ⏎ 改模型 / o
+                // 改档位` 这五个——e/t/m/b 此时全部被拒绝 (见 `handle_key` 顶部的守卫), 继续
+                // 提示它们只会让用户白按; `Esc 放弃` 是新增的, 紧跟在 `s` 后面 (同样是"保存/放弃
+                // 这次编辑"这组操作里最该保留的一批, 优先级仅次于 `s` 本身)。
                 let mut hints = vec![("↑↓", s.key_select)];
                 if self.is_dirty() {
                     hints.push(("s", s.key_save));
-                }
-                hints.push(("⏎", s.key_edit_model));
-                hints.push(("o", s.key_edit_effort));
-                if !self.is_dirty() {
+                    hints.push(("Esc", s.key_discard));
+                    hints.push(("⏎", s.key_edit_model));
+                    hints.push(("o", s.key_edit_effort));
+                } else {
+                    hints.push(("⏎", s.key_edit_model));
+                    hints.push(("o", s.key_edit_effort));
                     hints.push(("s", s.key_save));
+                    hints.push(("e", s.key_toggle));
+                    hints.push(("t", s.key_test));
+                    hints.push(("m", s.key_models));
+                    hints.push(("b", s.key_balance));
                 }
-                hints.push(("e", s.key_toggle));
-                hints.push(("t", s.key_test));
-                hints.push(("m", s.key_models));
-                hints.push(("b", s.key_balance));
                 hints
             }
         }
@@ -720,7 +792,22 @@ impl Component for Subscriptions {
         self.focus = Focus::List;
     }
 
+    fn on_mutation_started(&mut self, mutation: &Mutation) {
+        // I1: 记下这条订阅正有保存在飞行中——不看 `ok`/`err`, 那是 `on_mutation_done` 才知道的事;
+        // 这里只关心"发出去了", 从这一刻起到结果落地之间拒绝继续编辑这份草稿。
+        if let Mutation::UpdateSlots { id, .. } = mutation {
+            self.saving = Some(id.clone());
+        }
+    }
+
     fn on_mutation_done(&mut self, mutation: &Mutation, ok: bool) {
+        // I1: 不管成败, 先把"正在保存"标记摘掉——`ok=false` 时草稿要继续可编辑 (原有行为不变),
+        // `ok=true` 时下面才决定草稿本身要不要清空。
+        if let Mutation::UpdateSlots { id, .. } = mutation {
+            if self.saving.as_deref() == Some(id.as_str()) {
+                self.saving = None;
+            }
+        }
         if !ok {
             return;
         }
@@ -1171,11 +1258,70 @@ mod tests {
         };
         store.apply_subscriptions(1, vec![sub]);
         page.selected_id = Some("1".into());
+        // I5: `apply_picker_choice` 现在要求焦点在 `Detail` 且 `sub_id` 等于当前选中项才应用。
+        page.focus = Focus::Detail { slot: Slot::Fable };
 
-        page.apply_picker_choice(&PickerTag::SlotModel { slot: Slot::Fable }, &PickerChoice::Item("m3".into()), &store, &ZH);
+        page.apply_picker_choice(
+            &PickerTag::SlotModel { sub_id: "1".into(), slot: Slot::Fable },
+            &PickerChoice::Item("m3".into()),
+            &store,
+            &ZH,
+        );
         assert!(page.draft.get().is_some());
-        page.apply_picker_choice(&PickerTag::SlotModel { slot: Slot::Fable }, &PickerChoice::Custom("d".into()), &store, &ZH);
+        page.apply_picker_choice(
+            &PickerTag::SlotModel { sub_id: "1".into(), slot: Slot::Fable },
+            &PickerChoice::Custom("d".into()),
+            &store,
+            &ZH,
+        );
         assert!(page.draft.get().is_none(), "改回原值应该真的清空草稿, 不是只改 dirty 缓存");
+    }
+
+    fn minimal_sub(id: &str) -> crate::client::dto::Subscription {
+        crate::client::dto::Subscription {
+            id: id.into(),
+            display_name: id.into(),
+            provider_display_name: "p".into(),
+            enabled: true,
+            state: crate::client::dto::SubscriptionState::Healthy,
+            cooldown_until: None,
+            last_error_message: None,
+            is_dispatchable: true,
+            quota_usage: vec![],
+            provider_id: "p".into(),
+            base_url: "https://example.invalid".into(),
+            auth_type: "api_key".into(),
+            model_slots: ModelSlots { fable: "d".into(), opus: "a".into(), sonnet: "b".into(), haiku: "c".into(), fallback: String::new() },
+            slot_efforts: Default::default(),
+            referenced_by: vec![],
+            balance_supported: false,
+            balance_cache: None,
+            model_cache: None,
+        }
+    }
+
+    /// I5: `save_action` 额外要求草稿的 `sub_id` 等于当前选中项, 绝不把它发给屏幕上并没有显示的
+    /// 那一条订阅。这个不一致在正常的 `App` 驱动流程里走不到 (`focus == Detail` 期间选中项不会
+    /// 变, 草稿存在时 `resolve_selection` 也不会把它换成一个不同的、仍然存在的订阅)——这里直接
+    /// 摆一个理论上不该出现的内部状态, 覆盖这最后一道防线本身。
+    #[test]
+    fn save_never_sends_a_draft_for_a_subscription_that_is_not_on_screen() {
+        let mut page = Subscriptions::default();
+        let mut store = Store::default();
+        store.apply_subscriptions(1, vec![minimal_sub("1"), minimal_sub("2")]);
+        page.selected_id = Some("1".into());
+        page.focus = Focus::Detail { slot: Slot::Fable };
+        page.apply_picker_choice(
+            &PickerTag::SlotModel { sub_id: "1".into(), slot: Slot::Fable },
+            &PickerChoice::Item("m3".into()),
+            &store,
+            &ZH,
+        );
+        assert!(page.draft.get().is_some_and(|d| d.sub_id == "1"), "草稿应该属于 \"1\"");
+
+        // 理论上不该发生: 选中项被换成了另一条仍然存在的订阅, 草稿还留着 "1" 的编辑。
+        page.selected_id = Some("2".into());
+        assert_eq!(page.save_action(), None, "草稿的 sub_id 跟当前选中项不一致时不该发送");
     }
 
     /// M3: 上游错误信息没有长度上限, 旧版 `text.width() as u16` 会在超长字符串上静默环绕
