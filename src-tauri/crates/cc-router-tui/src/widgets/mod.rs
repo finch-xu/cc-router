@@ -1,6 +1,7 @@
 //! 跨页面复用的小部件。
 
 pub mod badge;
+pub mod confirm;
 pub mod gauge;
 pub mod help;
 pub mod keybar;

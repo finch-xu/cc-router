@@ -122,12 +122,25 @@ pub enum Cmd {
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum Action {
+    /// 来自 `q`: 当前页面有未保存修改时会先弹确认弹窗, 不直接退出——与 [`Action::ForceQuit`]
+    /// 的区别只在这一点, `Cmd::Quit` 本身不变。
     Quit,
+    /// 来自 `Ctrl+C`: 无论是否有弹窗打开、当前页面是否有未保存修改, 都立即退出, 不确认。
+    ForceQuit,
     SwitchTab(Tab),
     NextTab,
     PrevTab,
     ToggleHelp,
     ClosePopup,
+    /// 打开一个「是 / 否」确认弹窗; `on_yes` 是选「是」后真正要执行的 `Action`。页面自己想
+    /// 请求确认 (比如「放弃修改」) 时也可以从 `handle_key` 直接返回这个。
+    OpenConfirm { prompt: String, on_yes: Box<Action> },
+    /// 用户在确认弹窗里选了「是」: 先让当前页面丢弃草稿 (`Component::discard_changes`), 再执行
+    /// `inner`——`inner` 走一次普通 `App::update`, 但此时 dirty 已经被清空, 不会被再次拦截确认。
+    Confirmed(Box<Action>),
+    /// 页面主动清空自己的草稿 (比如按 Esc 放弃编辑) 时用; `App` 收到后调用当前页面的
+    /// `discard_changes()`, 不产出任何 `Cmd`。
+    DiscardDraft,
     Refresh,
     /// 250ms 一次。`now_ms` 是 Unix 毫秒 —— 冷却倒计时要和后端给的 `cooldown_until` 比。
     Tick { now_ms: i64 },

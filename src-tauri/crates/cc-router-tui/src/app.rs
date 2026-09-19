@@ -18,10 +18,11 @@ use crate::client::dto::{RefreshBalanceResult, RefreshModelsResult};
 use crate::fx::{self, Dir, Fx};
 use crate::i18n::Strings;
 use crate::pages::{Component, DrawCtx, Pages};
+use crate::popup::{ConfirmState, Popup};
 use crate::store::Store;
 use crate::theme::Theme;
 use crate::widgets::toast::{self, Toast, ToastKind};
-use crate::widgets::{help, keybar, spinner_state};
+use crate::widgets::{confirm, help, keybar, spinner_state};
 
 pub const MIN_WIDTH: u16 = 80;
 pub const MIN_HEIGHT: u16 = 24;
@@ -35,11 +36,6 @@ enum Conn {
     Connecting,
     Connected,
     Reconnecting,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum Popup {
-    Help,
 }
 
 /// 等下一帧知道几何信息之后才能触发的弹窗动效。
@@ -128,13 +124,24 @@ impl App {
         if key.kind != KeyEventKind::Press {
             return None;
         }
+        // Ctrl+C 永远立即退出, 不确认——弹窗打开、页面有未保存修改都不例外, 这是它与 `q`
+        // (`Action::Quit`, 会先检查 dirty / 被弹窗吞掉) 唯一的区别。
         if key.modifiers.contains(KeyModifiers::CONTROL) && key.code == KeyCode::Char('c') {
-            return Some(Action::Quit);
+            return Some(Action::ForceQuit);
         }
-        if self.popup.is_some() {
-            return match key.code {
-                KeyCode::Esc | KeyCode::Char('?') | KeyCode::Char('q') => Some(Action::ClosePopup),
-                _ => None,
+        // 弹窗打开时按变体各自决定按键含义; 键盘完全归弹窗, 到不了下面的全局键 / 页面。
+        if let Some(popup) = &self.popup {
+            return match popup {
+                Popup::Help => match key.code {
+                    KeyCode::Esc | KeyCode::Char('?') | KeyCode::Char('q') => Some(Action::ClosePopup),
+                    _ => None,
+                },
+                Popup::Confirm(state) => match key.code {
+                    KeyCode::Char('y') | KeyCode::Char('Y') => Some(Action::Confirmed(state.on_yes.clone())),
+                    // 默认 N: Esc / ⏎ 与显式的 n/N 一样只关弹窗, 不执行 on_yes。
+                    KeyCode::Char('n') | KeyCode::Char('N') | KeyCode::Esc | KeyCode::Enter => Some(Action::ClosePopup),
+                    _ => None,
+                },
             };
         }
         match key.code {
@@ -165,6 +172,25 @@ impl App {
     fn close_popup(&mut self) {
         if self.popup.take().is_some() {
             self.pending_popup_fx = self.popup_area.take().map(PopupFx::Close);
+        }
+    }
+
+    fn open_confirm(&mut self, prompt: String, on_yes: Box<Action>) {
+        self.popup = Some(Popup::Confirm(ConfirmState { prompt, on_yes }));
+        self.pending_popup_fx = Some(PopupFx::Open);
+    }
+
+    /// `Quit` / `SwitchTab` / `NextTab` / `PrevTab` 四个来源共用: 当前页面 `is_dirty()` 时不直接
+    /// 执行 `action`, 而是打开确认弹窗把它包进 `on_yes`; 否则调用 `run` 真正执行。`Action::Confirmed`
+    /// 里 `discard_changes()` 之后再 `update(*inner)`, 会重新走到这里, 但那时 `is_dirty()` 已经是
+    /// `false`——天然放行, 不需要另一条「不检查 dirty」的旁路。
+    fn guard_dirty(&mut self, action: Action, run: impl FnOnce(&mut Self) -> Vec<Cmd>) -> Vec<Cmd> {
+        if self.pages.get(self.tab).is_dirty() {
+            let prompt = self.s.confirm_discard.to_string();
+            self.open_confirm(prompt, Box::new(action));
+            Vec::new()
+        } else {
+            run(self)
         }
     }
 
@@ -280,13 +306,20 @@ impl App {
 
     pub fn update(&mut self, action: Action) -> Vec<Cmd> {
         match action {
-            Action::Quit => vec![Cmd::Quit],
-            Action::SwitchTab(to) => {
-                let dir = if to.index() > self.tab.index() { Dir::Forward } else { Dir::Backward };
-                self.switch_tab(to, dir)
-            }
-            Action::NextTab => self.switch_tab(self.tab.next(), Dir::Forward),
-            Action::PrevTab => self.switch_tab(self.tab.prev(), Dir::Backward),
+            Action::Quit => self.guard_dirty(Action::Quit, |_| vec![Cmd::Quit]),
+            Action::ForceQuit => vec![Cmd::Quit],
+            Action::SwitchTab(to) => self.guard_dirty(Action::SwitchTab(to), move |app| {
+                let dir = if to.index() > app.tab.index() { Dir::Forward } else { Dir::Backward };
+                app.switch_tab(to, dir)
+            }),
+            Action::NextTab => self.guard_dirty(Action::NextTab, |app| {
+                let to = app.tab.next();
+                app.switch_tab(to, Dir::Forward)
+            }),
+            Action::PrevTab => self.guard_dirty(Action::PrevTab, |app| {
+                let to = app.tab.prev();
+                app.switch_tab(to, Dir::Backward)
+            }),
             Action::ToggleHelp => {
                 if self.popup.is_some() {
                     self.close_popup();
@@ -298,6 +331,19 @@ impl App {
             }
             Action::ClosePopup => {
                 self.close_popup();
+                Vec::new()
+            }
+            Action::OpenConfirm { prompt, on_yes } => {
+                self.open_confirm(prompt, on_yes);
+                Vec::new()
+            }
+            Action::Confirmed(inner) => {
+                self.close_popup();
+                self.pages.get_mut(self.tab).discard_changes();
+                self.update(*inner)
+            }
+            Action::DiscardDraft => {
+                self.pages.get_mut(self.tab).discard_changes();
                 Vec::new()
             }
             Action::Tick { now_ms } => {
@@ -466,12 +512,23 @@ impl App {
 
         self.draw_toast(frame, screen, content.y);
 
-        if self.popup.is_some() {
+        if let Some(popup) = &self.popup {
             // 压暗背景用静态的 DIM 修饰符而不是动效: 16 色 / 无色终端下同样成立。
             frame.buffer_mut().set_style(screen, Style::new().add_modifier(Modifier::DIM));
-            let page_rows = self.pages.get(self.tab).help(s);
-            let area = help::area(screen, s, page_rows);
-            help::draw(frame, area, &self.theme, s, page_rows);
+            // 穷尽 match: 以后加新弹窗变体 (Task 3 的 Picker) 忘了在这里接住会编译失败。
+            let area = match popup {
+                Popup::Help => {
+                    let page_rows = self.pages.get(self.tab).help(s);
+                    let area = help::area(screen, s, page_rows);
+                    help::draw(frame, area, &self.theme, s, page_rows);
+                    area
+                }
+                Popup::Confirm(state) => {
+                    let area = confirm::area(screen, &state.prompt);
+                    confirm::draw(frame, area, state, &self.theme, s);
+                    area
+                }
+            };
             self.popup_area = Some(area);
         }
 
@@ -490,4 +547,96 @@ impl App {
         let dt = if was_running { elapsed } else { Duration::ZERO };
         self.fx.process(dt, frame.buffer_mut(), screen);
     }
+}
+
+// 「未保存修改 → 先确认」流程靠 `pages::placeholder::Placeholder` 的 `#[cfg(test)]` 专用钩子
+// (`set_force_dirty`) 验证——那个钩子只在编译本 crate 的单测时存在 (见该文件顶部的注释),
+// `tests/ui.rs` 这样的集成测试够不到它, 所以这批用例必须留在这个 `mod tests` 里, 不能挪到
+// `tests/ui.rs`。不需要这个钩子的弹窗测试 (帮助弹窗按键、确认弹窗渲染、帮助高度守卫、快照) 仍然
+// 放在 `tests/ui.rs`, 跟其它界面测试一起维护。
+#[cfg(test)]
+mod tests {
+    use ratatui::backend::TestBackend;
+    use ratatui::Terminal;
+
+    use super::*;
+    use crate::action::Tab;
+    use crate::i18n::ZH;
+
+    const NOW: i64 = 1_700_000_000_000;
+    const VERSION: &str = "9.9.9";
+
+    fn app() -> App {
+        App::new(AppOptions { strings: &ZH, theme: Theme::new(crate::theme::ColorMode::TrueColor), fx_enabled: false, now_ms: NOW, tui_version: VERSION })
+    }
+
+    /// 切到一个占位页 (`Tab::VirtualModels`) 并把它标记成 dirty——三个占位 tab 共用同一个
+    /// `Placeholder` 实例, 选哪个不影响测试意图。
+    fn dirty_app() -> App {
+        let mut a = app();
+        a.update(Action::SwitchTab(Tab::VirtualModels));
+        a.pages.placeholder.set_force_dirty(true);
+        a
+    }
+
+    fn key(code: KeyCode) -> KeyEvent {
+        KeyEvent::new(code, KeyModifiers::NONE)
+    }
+
+    fn ctrl_c() -> KeyEvent {
+        KeyEvent::new(KeyCode::Char('c'), KeyModifiers::CONTROL)
+    }
+
+    fn render(a: &mut App, width: u16, height: u16) -> String {
+        let mut terminal = Terminal::new(TestBackend::new(width, height)).unwrap();
+        terminal.draw(|f| a.draw(f, Duration::ZERO)).unwrap();
+        terminal.backend().to_string()
+    }
+
+    #[test]
+    fn ctrl_c_quits_even_when_dirty_or_with_a_popup_open() {
+        let mut a = dirty_app();
+        assert_eq!(a.handle_key(ctrl_c()), Some(Action::ForceQuit), "dirty 页面上 Ctrl+C 也不该问");
+        assert_eq!(a.update(Action::ForceQuit), vec![Cmd::Quit]);
+
+        // 弹窗打开时 (比如已经在问「要不要放弃」) Ctrl+C 依然立即退出, 不再多问一次。
+        let mut b = dirty_app();
+        b.update(Action::Quit);
+        assert!(b.popup.is_some(), "上一步应该已经弹出确认弹窗");
+        assert_eq!(b.handle_key(ctrl_c()), Some(Action::ForceQuit));
+        assert_eq!(b.update(Action::ForceQuit), vec![Cmd::Quit]);
+    }
+
+    #[test]
+    fn q_on_a_dirty_page_asks_first() {
+        let mut a = dirty_app();
+        assert_eq!(a.handle_key(key(KeyCode::Char('q'))), Some(Action::Quit));
+        assert!(a.update(Action::Quit).is_empty(), "dirty 页面上 q 不该立即退出");
+        let out = render(&mut a, 80, 24);
+        assert!(out.contains(ZH.confirm_discard), "应该弹出确认提示\n{out}");
+
+        assert_eq!(a.handle_key(key(KeyCode::Char('y'))), Some(Action::Confirmed(Box::new(Action::Quit))));
+        assert_eq!(a.update(Action::Confirmed(Box::new(Action::Quit))), vec![Cmd::Quit], "y 之后应该真的退出");
+
+        // 另起一局: n 应该只关掉弹窗, 页面仍然 dirty (草稿没被丢弃, 也没有退出)。
+        let mut b = dirty_app();
+        b.update(Action::Quit);
+        assert_eq!(b.handle_key(key(KeyCode::Char('n'))), Some(Action::ClosePopup));
+        assert!(b.update(Action::ClosePopup).is_empty());
+        assert!(b.popup.is_none(), "n 应该关掉弹窗");
+        assert!(b.pages.get(b.tab).is_dirty(), "n 不该丢弃草稿");
+    }
+
+    #[test]
+    fn switching_tabs_on_a_dirty_page_asks_first_and_yes_discards() {
+        let mut a = dirty_app();
+        assert!(a.update(Action::SwitchTab(Tab::Overview)).is_empty(), "dirty 时切页应该先确认");
+        assert_eq!(a.tab, Tab::VirtualModels, "确认之前不该真的切走");
+        assert!(a.pages.placeholder.is_dirty());
+
+        a.update(Action::Confirmed(Box::new(Action::SwitchTab(Tab::Overview))));
+        assert_eq!(a.tab, Tab::Overview, "y 之后应该真的切过去");
+        assert!(!a.pages.placeholder.is_dirty(), "y 之后原页面的草稿应该被丢弃");
+    }
+
 }

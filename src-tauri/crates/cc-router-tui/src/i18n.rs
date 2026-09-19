@@ -60,6 +60,12 @@ pub struct Strings {
     /// (键, 说明)
     pub help_rows: &'static [(&'static str, &'static str)],
 
+    pub confirm_title: &'static str,
+    /// 确认弹窗底部的键位提示 (y 是 / n 否)。
+    pub confirm_keys: &'static str,
+    /// 当前页面有未保存修改时, 退出 / 切页前弹出的确认文案。
+    pub confirm_discard: &'static str,
+
     pub too_small: &'static str,
     pub coming_soon: &'static str,
     pub loading: &'static str,
@@ -193,6 +199,10 @@ pub const ZH: Strings = Strings {
         ("Esc", "关闭弹窗"),
         ("q / Ctrl+C", "退出"),
     ],
+
+    confirm_title: "确认",
+    confirm_keys: "y 是   n 否",
+    confirm_discard: "有未保存的修改,确定放弃吗?",
 
     too_small: "请放大终端窗口（至少 80×24）",
     coming_soon: "此页面将在后续版本提供",

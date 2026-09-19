@@ -7,13 +7,14 @@
 use std::time::Duration;
 
 use cc_router_tui::action::{Action, Cmd, Fetch, FetchData, Mutation, MutationOutcome, OverviewData, Tab};
-use cc_router_tui::app::{App, AppOptions};
+use cc_router_tui::app::{App, AppOptions, MIN_HEIGHT};
 use cc_router_tui::client::dto::{
     BalanceCache, BalanceEntry, BalanceSeverity, BalanceSnapshot, ModelCache, ModelInfo, ModelSlots, OverallStats, ProxyStatus,
     QuotaPeriod, QuotaUsage, RefreshBalanceResult, RefreshModelsResult, SeriesPoint, Settings, SlotEfforts, Subscription,
     SubscriptionState, TestConnectionResult,
 };
 use cc_router_tui::i18n::ZH;
+use cc_router_tui::pages::Pages;
 use cc_router_tui::theme::{ColorMode, Theme};
 use ratatui::backend::TestBackend;
 use ratatui::crossterm::event::{KeyCode, KeyEvent, KeyEventKind, KeyEventState, KeyModifiers};
@@ -866,7 +867,11 @@ fn keys_map_to_actions() {
     assert_eq!(a.handle_key(key(KeyCode::BackTab)), Some(Action::PrevTab));
     assert_eq!(a.handle_key(key(KeyCode::Char('r'))), Some(Action::Refresh));
     assert_eq!(a.handle_key(key(KeyCode::Char('?'))), Some(Action::ToggleHelp));
-    assert_eq!(a.handle_key(KeyEvent::new(KeyCode::Char('c'), KeyModifiers::CONTROL)), Some(Action::Quit));
+    assert_eq!(
+        a.handle_key(KeyEvent::new(KeyCode::Char('c'), KeyModifiers::CONTROL)),
+        Some(Action::ForceQuit),
+        "Ctrl+C 应该映射到 ForceQuit, 不是会先确认的 Quit"
+    );
 }
 
 /// `'3'` 直达第三个标签 (`Tab::VirtualModels`, 0 起算下标 2); `'6'` 超出 5 个标签, 不产生 action。
@@ -888,15 +893,79 @@ fn key_release_events_are_ignored() {
     assert_eq!(loaded(false).handle_key(release), None);
 }
 
+/// Task 2: 帮助弹窗打开时页面键 (数字切页 / r 刷新) 被吞掉, 但 Esc / `?` / q 三个键仍然关闭它——
+/// 与确认弹窗不同 (确认弹窗里 q 不等于关闭, 会被吞掉)。Ctrl+C 无论如何都立即退出。
 #[test]
-fn an_open_popup_swallows_page_keys_but_not_ctrl_c() {
+fn help_popup_still_closes_with_esc_question_mark_and_q() {
     let mut a = loaded(false);
     a.update(Action::ToggleHelp);
     assert_eq!(a.handle_key(key(KeyCode::Char('2'))), None);
     assert_eq!(a.handle_key(key(KeyCode::Char('r'))), None);
     assert_eq!(a.handle_key(key(KeyCode::Esc)), Some(Action::ClosePopup));
+    assert_eq!(a.handle_key(key(KeyCode::Char('?'))), Some(Action::ClosePopup));
     assert_eq!(a.handle_key(key(KeyCode::Char('q'))), Some(Action::ClosePopup));
-    assert_eq!(a.handle_key(KeyEvent::new(KeyCode::Char('c'), KeyModifiers::CONTROL)), Some(Action::Quit));
+    assert_eq!(
+        a.handle_key(KeyEvent::new(KeyCode::Char('c'), KeyModifiers::CONTROL)),
+        Some(Action::ForceQuit),
+        "弹窗打开时 Ctrl+C 依然立即退出, 不确认"
+    );
+}
+
+/// Task 2: 确认弹窗与帮助弹窗的按键语义不同——`q` 在确认弹窗里不是「关闭」, 会被吞掉 (只有
+/// y/Y/n/N/Esc/⏎ 有意义); `Action::OpenConfirm` 是公开 API, 不需要页面真的变 dirty 就能触发。
+#[test]
+fn confirm_popup_swallows_other_keys() {
+    let mut a = loaded(false);
+    a.update(Action::OpenConfirm { prompt: "测试提示".into(), on_yes: Box::new(Action::Refresh) });
+    for code in [KeyCode::Char('2'), KeyCode::Char('r'), KeyCode::Char('q'), KeyCode::Char('?'), KeyCode::Tab, KeyCode::Char('x')] {
+        assert_eq!(a.handle_key(key(code)), None, "{code:?} 应该被确认弹窗吞掉");
+    }
+    assert_eq!(a.handle_key(key(KeyCode::Char('Y'))), Some(Action::Confirmed(Box::new(Action::Refresh))), "大写 Y 也算「是」");
+}
+
+/// Task 2: `n`/`N`/`Esc`/`⏎` 四个键都等同「否」(只关弹窗, 不执行 on_yes); ⏎ 不能被误实现成「是」的默认值。
+#[test]
+fn enter_defaults_to_no() {
+    let mut a = loaded(false);
+    for no_key in [KeyCode::Enter, KeyCode::Char('n'), KeyCode::Char('N'), KeyCode::Esc] {
+        a.update(Action::OpenConfirm { prompt: "测试提示".into(), on_yes: Box::new(Action::Refresh) });
+        assert_eq!(a.handle_key(key(no_key)), Some(Action::ClosePopup), "{no_key:?} 应该等同于「否」");
+        a.update(Action::ClosePopup);
+    }
+}
+
+/// Task 2: 干净页面 (`is_dirty()` 默认 `false`) 上 q / 切页应该直接执行, 不弹确认——`guard_dirty`
+/// 只在真的 dirty 时才拦截。
+#[test]
+fn a_clean_page_never_asks() {
+    let mut a = loaded(false);
+    assert_eq!(a.update(Action::Quit), vec![Cmd::Quit], "干净的总览页 q 应该直接退出, 不弹确认");
+
+    let mut b = loaded(false);
+    b.update(Action::SwitchTab(Tab::Subscriptions));
+    let out = render(&mut b, 80, 24);
+    assert!(out.contains(ZH.sub_col_name), "干净页面切页应该直接执行\n{out}");
+    assert!(!out.contains(ZH.confirm_discard), "不该弹确认\n{out}");
+}
+
+/// Task 2 新增守卫: 帮助弹窗高度 = 全局键 + 1 (分隔空行) + 页面键 + 4 (上下边框各 1 + 上下内距
+/// 各 1) 必须放得下最小终端高度 (24 行), 每个 `Tab` 各自的页面键都要满足——覆盖以后加新页面时
+/// 键位表写太长而在最小终端上把帮助弹窗顶穿的回归。
+#[test]
+fn every_page_help_fits_the_minimum_terminal() {
+    let pages = Pages::default();
+    for tab in Tab::ALL {
+        let rows = pages.get(tab).help(&ZH);
+        let total = ZH.help_rows.len() + 1 + rows.len() + 4;
+        assert!(total <= usize::from(MIN_HEIGHT), "{tab:?}: 帮助弹窗需要 {total} 行, 超过最小终端高度 {MIN_HEIGHT}\n{rows:?}");
+    }
+}
+
+#[test]
+fn confirm_popup_80x24() {
+    let mut a = loaded(false);
+    a.update(Action::OpenConfirm { prompt: ZH.confirm_discard.into(), on_yes: Box::new(Action::Quit) });
+    insta::assert_snapshot!(render(&mut a, 80, 24));
 }
 
 #[test]
@@ -1140,6 +1209,13 @@ fn drawing_the_same_state_twice_gives_the_same_frame() {
     let first = render(&mut e, 80, 24);
     let second = render(&mut e, 80, 24);
     assert_eq!(first, second, "详情面板显示上次操作结果时也应该幂等");
+
+    // Task 2: 确认弹窗打开的状态。
+    let mut f = loaded(false);
+    f.update(Action::OpenConfirm { prompt: ZH.confirm_discard.into(), on_yes: Box::new(Action::Quit) });
+    let first = render(&mut f, 80, 24);
+    let second = render(&mut f, 80, 24);
+    assert_eq!(first, second, "确认弹窗打开的状态应该幂等");
 }
 
 /// F3: 空列表加载时没有「旧」行可以比较, 不该把更早排队、还没画出来的闪烁带到后面某一帧。

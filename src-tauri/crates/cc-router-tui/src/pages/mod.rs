@@ -56,6 +56,15 @@ pub trait Component {
     }
     /// `Store` 刚接受了一份订阅列表, `changed` 是状态变了的 id。默认什么都不做。
     fn on_subscriptions_changed(&mut self, _changed: &[String]) {}
+
+    /// 是否有未保存的草稿。默认否——大多数页面只读展示后端数据; 编辑类页面 (P3b 起) 覆盖它。
+    /// 草稿只放页面自己的状态, 不进 `Store` (spec 全局约束)。
+    fn is_dirty(&self) -> bool {
+        false
+    }
+
+    /// 丢弃当前草稿, 回到与 `Store` 一致的状态。默认什么都不做 (配合 `is_dirty` 默认 `false`)。
+    fn discard_changes(&mut self) {}
 }
 
 /// 三个页面的集合, 取代散字段 + 两个手写的 `select_page` / `select_page_ref` helper。字段公开是

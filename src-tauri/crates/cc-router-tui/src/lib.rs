@@ -7,6 +7,7 @@ pub mod format;
 pub mod fx;
 pub mod i18n;
 pub mod pages;
+pub mod popup;
 pub mod runtime;
 pub mod store;
 pub mod theme;
