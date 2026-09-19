@@ -1,10 +1,12 @@
 //! 页面。每个页面是一个 [`Component`]: 官方 Component 模板的简化版 (spec §4.3)。
 
+use std::collections::HashMap;
+
 use ratatui::crossterm::event::KeyEvent;
 use ratatui::layout::Rect;
 use ratatui::Frame;
 
-use crate::action::{Action, Cmd};
+use crate::action::{Action, Cmd, Mutation};
 use crate::fx::Fx;
 use crate::i18n::Strings;
 use crate::store::Store;
@@ -27,6 +29,8 @@ pub struct DrawCtx<'a> {
     pub fx: &'a mut Fx,
     /// 多个页面共用的订阅列表, 只读。
     pub store: &'a Store,
+    /// 正在进行的就地操作, 键是订阅 id。订阅页拿它把忙碌行的状态符号换成 spinner。
+    pub busy: &'a HashMap<String, Mutation>,
 }
 
 pub trait Component {

@@ -51,6 +51,10 @@ pub struct Strings {
     pub key_select: &'static str,
     pub key_detail: &'static str,
     pub key_back: &'static str,
+    pub key_toggle: &'static str,
+    pub key_test: &'static str,
+    pub key_models: &'static str,
+    pub key_balance: &'static str,
 
     pub help_title: &'static str,
     /// (键, 说明)
@@ -91,6 +95,18 @@ pub struct Strings {
 
     pub toast_reconnected: &'static str,
     pub toast_load_failed: fn(reason: &str) -> String,
+    /// 断线时按 e/t/m/b 的提示。
+    pub toast_offline: &'static str,
+    pub toast_enabled: fn(name: &str) -> String,
+    pub toast_disabled: fn(name: &str) -> String,
+    /// `model` 为 `None` 时 (网络错误等测不出具体 model) 只显示前半句。
+    pub toast_test_ok: fn(name: &str, model: Option<&str>) -> String,
+    pub toast_test_failed: fn(name: &str, message: &str) -> String,
+    pub toast_models_ok: fn(name: &str, n: usize) -> String,
+    pub toast_models_manual: fn(name: &str, reason: &str) -> String,
+    pub toast_balance_ok: fn(name: &str) -> String,
+    pub toast_balance_failed: fn(name: &str, reason: &str) -> String,
+    pub toast_mutation_failed: fn(name: &str, message: &str) -> String,
 
     pub sub_title: fn(usize) -> String,
     pub sub_col_name: &'static str,
@@ -115,6 +131,11 @@ pub struct Strings {
     pub sub_models_never: &'static str,
     pub sub_unreferenced: &'static str,
     pub sub_help_rows: &'static [(&'static str, &'static str)],
+    /// 详情面板「状态」行后面追加的进行中文案 (busy 行)。
+    pub sub_busy_toggling: &'static str,
+    pub sub_busy_testing: &'static str,
+    pub sub_busy_models: &'static str,
+    pub sub_busy_balance: &'static str,
 }
 
 impl Strings {
@@ -154,6 +175,10 @@ pub const ZH: Strings = Strings {
     key_select: "选择",
     key_detail: "详情",
     key_back: "返回",
+    key_toggle: "启停",
+    key_test: "测试",
+    key_models: "模型",
+    key_balance: "余额",
 
     help_title: "键位",
     help_rows: &[
@@ -199,6 +224,19 @@ pub const ZH: Strings = Strings {
 
     toast_reconnected: "已重新连接",
     toast_load_failed: |reason| format!("加载失败：{reason}"),
+    toast_offline: "未连接,暂时无法操作",
+    toast_enabled: |name| format!("已启用 {name}"),
+    toast_disabled: |name| format!("已停用 {name}"),
+    toast_test_ok: |name, model| match model {
+        Some(model) => format!("{name}：连接正常 ({model})"),
+        None => format!("{name}：连接正常"),
+    },
+    toast_test_failed: |name, message| format!("{name}：{message}"),
+    toast_models_ok: |name, n| format!("{name}：获取到 {n} 个模型"),
+    toast_models_manual: |name, reason| format!("{name}：无法自动获取模型 ({reason})"),
+    toast_balance_ok: |name| format!("{name}：余额已刷新"),
+    toast_balance_failed: |name, reason| format!("{name}：余额查询失败 ({reason})"),
+    toast_mutation_failed: |name, message| format!("{name}：操作失败 ({message})"),
 
     sub_title: |n| format!("订阅 ({n})"),
     sub_col_name: "备注名",
@@ -227,7 +265,15 @@ pub const ZH: Strings = Strings {
         ("g / G", "第一条 / 最后一条"),
         ("PgUp / PgDn", "翻页"),
         ("⏎ / Esc", "进入 / 退出详情 (窄终端)"),
+        ("e", "启用 / 停用"),
+        ("t", "测试连接"),
+        ("m", "刷新模型列表"),
+        ("b", "刷新余额"),
     ],
+    sub_busy_toggling: "正在切换…",
+    sub_busy_testing: "正在测试连接…",
+    sub_busy_models: "正在获取模型…",
+    sub_busy_balance: "正在查询余额…",
 };
 
 pub fn strings(lang: Lang) -> &'static Strings {

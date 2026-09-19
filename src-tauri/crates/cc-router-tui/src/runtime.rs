@@ -12,9 +12,9 @@ use ratatui::crossterm::event::{Event, EventStream};
 use serde_json::json;
 use tokio::sync::mpsc::{unbounded_channel, UnboundedSender};
 
-use crate::action::{Action, Cmd, Fetch, FetchData, OverviewData};
+use crate::action::{Action, Cmd, Fetch, FetchData, Mutation, MutationOutcome, OverviewData};
 use crate::app::App;
-use crate::client::dto::Subscription;
+use crate::client::dto::{RefreshBalanceResult, RefreshModelsResult, Subscription, TestConnectionResult};
 use crate::client::{commands, Client, ClientError};
 
 const TICK: Duration = Duration::from_millis(250);
@@ -70,6 +70,45 @@ fn spawn_fetch(client: Arc<Client>, tx: UnboundedSender<Action>, fetch: Fetch, i
         };
         let result = result.map_err(|e: ClientError| e.to_string());
         let _ = tx.send(Action::FetchDone { fetch, issued, result });
+    });
+}
+
+/// 测试连接要真的打一次上游, 60 秒超时; 刷新模型 / 余额各给 30 秒。
+const TEST_CONNECTION_TIMEOUT: Duration = Duration::from_secs(60);
+const REFRESH_TIMEOUT: Duration = Duration::from_secs(30);
+
+/// 真正发出一次就地操作对应的 HTTP 调用, 按 [`Mutation`] 的种类分派到对应 command。
+async fn call_mutation(client: &Client, mutation: &Mutation) -> Result<MutationOutcome, ClientError> {
+    match mutation {
+        Mutation::SetEnabled { id, enabled } => {
+            client.call::<()>(commands::SET_SUBSCRIPTION_ENABLED, json!({ "id": id, "enabled": enabled })).await?;
+            Ok(MutationOutcome::EnabledSet)
+        }
+        Mutation::TestConnection { id } => {
+            let r: TestConnectionResult =
+                client.call_with_timeout(commands::TEST_CONNECTION, json!({ "id": id }), TEST_CONNECTION_TIMEOUT).await?;
+            Ok(MutationOutcome::Tested(r))
+        }
+        Mutation::RefreshModels { id } => {
+            let r: RefreshModelsResult =
+                client.call_with_timeout(commands::REFRESH_MODEL_LIST, json!({ "id": id }), REFRESH_TIMEOUT).await?;
+            Ok(MutationOutcome::Models(r))
+        }
+        Mutation::RefreshBalance { id } => {
+            let r: RefreshBalanceResult =
+                client.call_with_timeout(commands::REFRESH_SUBSCRIPTION_BALANCE, json!({ "id": id }), REFRESH_TIMEOUT).await?;
+            Ok(MutationOutcome::Balance(r))
+        }
+    }
+}
+
+/// **不去重、不补跑**: 每一个 `Cmd::Mutate` 都直接 `spawn` 一次 HTTP 调用, 不经过 [`Fetches`] ——
+/// 与就地操作「同一订阅同时只跑一个」的语义完全由 `App` 的忙碌表在更上游把关, 这里只管发送。
+/// 退出时仍在进行的变更不等待 (与加载一致, 任务被主循环结束时一并丢弃)。
+fn spawn_mutation(client: Arc<Client>, tx: UnboundedSender<Action>, mutation: Mutation) {
+    tokio::spawn(async move {
+        let result = call_mutation(&client, &mutation).await.map_err(|e: ClientError| e.to_string());
+        let _ = tx.send(Action::MutationDone { mutation, result });
     });
 }
 
@@ -194,6 +233,7 @@ fn process_action(
                     spawn_fetch(client.clone(), tx.clone(), fetch, issued.next());
                 }
             }
+            Cmd::Mutate(mutation) => spawn_mutation(client.clone(), tx.clone(), mutation),
         }
     }
     false
@@ -269,7 +309,7 @@ async fn event_loop(terminal: &mut ratatui::DefaultTerminal, client: Arc<Client>
 mod tests {
     use super::*;
     use crate::client::discovery::RUNTIME_FILE;
-    use wiremock::matchers::{method, path};
+    use wiremock::matchers::{body_json, method, path};
     use wiremock::{Mock, MockServer, ResponseTemplate};
 
     #[test]
@@ -466,5 +506,112 @@ mod tests {
 
         assert_eq!(lived, Duration::ZERO);
         assert!(!ever_connected);
+    }
+
+    /// 四种就地操作各自打对了 command、带对了 JSON 键名 (`id` / `enabled`, 与后端 `#[tauri::command]`
+    /// 的参数名同名, camelCase 下与蛇形写法一致), 并且把响应体正确包进对应的 `MutationOutcome`。
+    #[tokio::test]
+    async fn a_mutation_calls_the_right_command_and_reports_back() {
+        let server = MockServer::start().await;
+        Mock::given(method("POST"))
+            .and(path("/ui/api/cmd/set_subscription_enabled"))
+            .and(body_json(json!({"id": "1", "enabled": false})))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!(null)))
+            .mount(&server)
+            .await;
+        Mock::given(method("POST"))
+            .and(path("/ui/api/cmd/test_connection"))
+            .and(body_json(json!({"id": "1"})))
+            .respond_with(ResponseTemplate::new(200).set_body_json(
+                json!({"ok": true, "message": "连接正常", "http_status": 200, "model_used": "glm-4.6", "state_reset": true}),
+            ))
+            .mount(&server)
+            .await;
+        Mock::given(method("POST"))
+            .and(path("/ui/api/cmd/refresh_model_list"))
+            .and(body_json(json!({"id": "1"})))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({"kind": "auto", "models": [], "fetched_at": 1})))
+            .mount(&server)
+            .await;
+        Mock::given(method("POST"))
+            .and(path("/ui/api/cmd/refresh_subscription_balance"))
+            .and(body_json(json!({"id": "1"})))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({"kind": "unsupported"})))
+            .mount(&server)
+            .await;
+
+        let dir = tempfile::tempdir().unwrap();
+        write_runtime(dir.path(), server.address().port(), "s", "9.9.9-test");
+        let client = Arc::new(Client::connect(dir.path()).unwrap());
+        let (tx, mut rx) = unbounded_channel::<Action>();
+
+        spawn_mutation(client.clone(), tx.clone(), Mutation::SetEnabled { id: "1".into(), enabled: false });
+        assert_eq!(
+            rx.recv().await,
+            Some(Action::MutationDone {
+                mutation: Mutation::SetEnabled { id: "1".into(), enabled: false },
+                result: Ok(MutationOutcome::EnabledSet),
+            })
+        );
+
+        spawn_mutation(client.clone(), tx.clone(), Mutation::TestConnection { id: "1".into() });
+        assert_eq!(
+            rx.recv().await,
+            Some(Action::MutationDone {
+                mutation: Mutation::TestConnection { id: "1".into() },
+                result: Ok(MutationOutcome::Tested(TestConnectionResult {
+                    ok: true,
+                    message: "连接正常".into(),
+                    http_status: Some(200),
+                    model_used: Some("glm-4.6".into()),
+                    state_reset: true,
+                })),
+            })
+        );
+
+        spawn_mutation(client.clone(), tx.clone(), Mutation::RefreshModels { id: "1".into() });
+        assert_eq!(
+            rx.recv().await,
+            Some(Action::MutationDone {
+                mutation: Mutation::RefreshModels { id: "1".into() },
+                result: Ok(MutationOutcome::Models(RefreshModelsResult::Auto { models: vec![], fetched_at: 1 })),
+            })
+        );
+
+        spawn_mutation(client, tx, Mutation::RefreshBalance { id: "1".into() });
+        assert_eq!(
+            rx.recv().await,
+            Some(Action::MutationDone {
+                mutation: Mutation::RefreshBalance { id: "1".into() },
+                result: Ok(MutationOutcome::Balance(RefreshBalanceResult::Unsupported)),
+            })
+        );
+    }
+
+    /// 就地操作绝不经过 `Fetches` 的「同类只跑一个」去重: 同一个 `Cmd::Mutate` 连发两次必须真的
+    /// 打两次上游 (`.expect(2)` 在 `MockServer` drop 时校验)。忙碌表「同一订阅同时只跑一个」的
+    /// 语义是 `App` 更上游的把关, 与这里「runtime 层不去重」是两回事。
+    #[tokio::test]
+    async fn mutations_are_never_coalesced() {
+        let server = MockServer::start().await;
+        Mock::given(method("POST"))
+            .and(path("/ui/api/cmd/test_connection"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(
+                json!({"ok": true, "message": "ok", "http_status": 200, "model_used": null, "state_reset": false}),
+            ))
+            .expect(2)
+            .mount(&server)
+            .await;
+        let dir = tempfile::tempdir().unwrap();
+        write_runtime(dir.path(), server.address().port(), "s", "9.9.9-test");
+        let client = Arc::new(Client::connect(dir.path()).unwrap());
+        let (tx, mut rx) = unbounded_channel::<Action>();
+
+        let mutation = Mutation::TestConnection { id: "1".into() };
+        spawn_mutation(client.clone(), tx.clone(), mutation.clone());
+        spawn_mutation(client, tx, mutation);
+
+        assert!(rx.recv().await.is_some());
+        assert!(rx.recv().await.is_some());
     }
 }

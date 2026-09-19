@@ -1,5 +1,5 @@
-//! 订阅页 (只读): 列表 + 详情, 宽屏 (≥120 列) 双栏 / 窄屏进出详情。
-//! 四个原地操作 (编辑槽位 `e` / 测试连接 `t` / 刷新模型 `m` / 刷新余额 `b`) 留给 Task 4。
+//! 订阅页: 列表 + 详情 (宽屏 ≥120 列双栏 / 窄屏进出详情), 加四个就地操作——启停 `e` / 测试连接
+//! `t` / 刷新模型 `m` / 刷新余额 `b`, 列表态与详情态都生效, 作用于当前选中的订阅。
 
 use ratatui::crossterm::event::{KeyCode, KeyEvent};
 use ratatui::layout::{Constraint, Layout, Margin, Rect};
@@ -13,7 +13,7 @@ use throbber_widgets_tui::{Throbber, BRAILLE_SIX};
 use unicode_width::UnicodeWidthStr;
 
 use super::{Component, DrawCtx};
-use crate::action::{Action, Cmd, Fetch};
+use crate::action::{Action, Cmd, Fetch, Mutation};
 use crate::client::dto::{BalanceSeverity, QuotaUsage, Subscription};
 use crate::format::{compact, fit};
 use crate::i18n::Strings;
@@ -152,9 +152,17 @@ impl Subscriptions {
         let rows: Vec<Row> = subs
             .iter()
             .map(|sub| {
-                let b = badge(sub, ctx.theme, s);
+                // 忙碌的订阅: 第一列的状态符号换成 spinner (与总览页的加载态同一套 throbber_set),
+                // 不再显示 badge 的颜色/符号——正在跑的操作可能就是要把这个状态改掉。
+                let symbol = if ctx.busy.contains_key(&sub.id) {
+                    let glyph = Throbber::default().throbber_set(BRAILLE_SIX).to_symbol_span(&spinner_state(ctx.tick));
+                    Span::styled(fit(glyph.content.as_ref(), SYMBOL_COL as usize), ctx.theme.muted_style())
+                } else {
+                    let b = badge(sub, ctx.theme, s);
+                    Span::styled(fit(b.symbol, SYMBOL_COL as usize), Style::new().fg(b.color))
+                };
                 Row::new([
-                    Cell::from(Span::styled(fit(b.symbol, SYMBOL_COL as usize), Style::new().fg(b.color))),
+                    Cell::from(symbol),
                     Cell::from(fit(&sub.display_name, NAME_COL)),
                     Cell::from(fit(&sub.provider_display_name, PROVIDER_COL)),
                     Cell::from(fit(&sub.model_slots.sonnet, sonnet_col)),
@@ -253,25 +261,47 @@ impl Component for Subscriptions {
         let subs = store.subscriptions();
         let idx = self.resolve_selection(subs);
         match key.code {
-            KeyCode::Up | KeyCode::Char('k') => self.move_selection(subs, idx, -1),
-            KeyCode::Down | KeyCode::Char('j') => self.move_selection(subs, idx, 1),
-            KeyCode::Char('g') | KeyCode::Home => self.select_index(subs, 0),
+            KeyCode::Up | KeyCode::Char('k') => {
+                self.move_selection(subs, idx, -1);
+                None
+            }
+            KeyCode::Down | KeyCode::Char('j') => {
+                self.move_selection(subs, idx, 1);
+                None
+            }
+            KeyCode::Char('g') | KeyCode::Home => {
+                self.select_index(subs, 0);
+                None
+            }
             KeyCode::Char('G') | KeyCode::End => {
                 if !subs.is_empty() {
                     self.select_index(subs, subs.len() - 1);
                 }
+                None
             }
-            KeyCode::PageUp => self.move_selection(subs, idx, -(self.last_page_rows.max(1) as isize)),
-            KeyCode::PageDown => self.move_selection(subs, idx, self.last_page_rows.max(1) as isize),
+            KeyCode::PageUp => {
+                self.move_selection(subs, idx, -(self.last_page_rows.max(1) as isize));
+                None
+            }
+            KeyCode::PageDown => {
+                self.move_selection(subs, idx, self.last_page_rows.max(1) as isize);
+                None
+            }
             KeyCode::Enter | KeyCode::Right | KeyCode::Char('l') if !self.is_wide() && idx.is_some() => {
                 self.detail_open = true;
+                None
             }
             KeyCode::Esc | KeyCode::Left | KeyCode::Char('h') => {
                 self.detail_open = false;
+                None
             }
-            _ => {}
+            // 四个就地操作: 列表态 / 详情态都生效, 作用于当前选中的订阅; 没有选中项 (空列表) 不动作。
+            KeyCode::Char('e') => idx.map(|i| Action::Mutate(Mutation::SetEnabled { id: subs[i].id.clone(), enabled: !subs[i].enabled })),
+            KeyCode::Char('t') => idx.map(|i| Action::Mutate(Mutation::TestConnection { id: subs[i].id.clone() })),
+            KeyCode::Char('m') => idx.map(|i| Action::Mutate(Mutation::RefreshModels { id: subs[i].id.clone() })),
+            KeyCode::Char('b') => idx.map(|i| Action::Mutate(Mutation::RefreshBalance { id: subs[i].id.clone() })),
+            _ => None,
         }
-        None
     }
 
     fn update(&mut self, action: &Action, _store: &Store) -> Vec<Cmd> {
@@ -317,6 +347,10 @@ impl Component for Subscriptions {
                 hints.push(("⏎", s.key_detail));
             }
         }
+        hints.push(("e", s.key_toggle));
+        hints.push(("t", s.key_test));
+        hints.push(("m", s.key_models));
+        hints.push(("b", s.key_balance));
         hints
     }
 
@@ -435,9 +469,21 @@ fn detail_rows(sub: &Subscription, ctx: &DrawCtx, width: u16) -> Vec<DetailRow> 
     let mut rows = Vec::new();
 
     // 状态: `badge()` 的符号 + 文案, 冷却倒计时规则与总览页共用 (`widgets::badge::status_text`)。
+    // 这条订阅正有就地操作在跑时, 后面追加一条 muted 的进行中文案 ——哪个操作就显示哪句。
     let b = badge(sub, theme, s);
     let status = format!("{} {}", b.symbol, status_text(sub, &b, ctx.now_ms));
-    rows.push(DetailRow::Line(field_line(s.sub_f_state, vec![Span::styled(status, Style::new().fg(b.color))])));
+    let mut status_spans = vec![Span::styled(status, Style::new().fg(b.color))];
+    if let Some(m) = ctx.busy.get(&sub.id) {
+        let busy_text = match m {
+            Mutation::SetEnabled { .. } => s.sub_busy_toggling,
+            Mutation::TestConnection { .. } => s.sub_busy_testing,
+            Mutation::RefreshModels { .. } => s.sub_busy_models,
+            Mutation::RefreshBalance { .. } => s.sub_busy_balance,
+        };
+        status_spans.push(Span::raw(" · "));
+        status_spans.push(Span::styled(busy_text, theme.muted_style()));
+    }
+    rows.push(DetailRow::Line(field_line(s.sub_f_state, status_spans)));
 
     // 厂商
     rows.push(DetailRow::Line(field_line(

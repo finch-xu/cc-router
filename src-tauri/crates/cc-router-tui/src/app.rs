@@ -2,7 +2,7 @@
 //! `handle_key` / `update` 是同步纯逻辑, `draw` 只写 `Frame` —— 所以整个文件可以用 `TestBackend` 测。
 //! 把它接到键盘、定时器、HTTP 上的是 `runtime.rs`。
 
-use std::collections::VecDeque;
+use std::collections::{HashMap, VecDeque};
 use std::time::Duration;
 
 use ratatui::crossterm::event::{KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
@@ -13,7 +13,8 @@ use ratatui::widgets::{Block, BorderType, Tabs};
 use ratatui::Frame;
 use throbber_widgets_tui::{Throbber, BRAILLE_SIX};
 
-use crate::action::{Action, Cmd, Fetch, FetchData, Tab};
+use crate::action::{Action, Cmd, Fetch, FetchData, Mutation, MutationOutcome, Tab};
+use crate::client::dto::{RefreshBalanceResult, RefreshModelsResult};
 use crate::fx::{self, Dir, Fx};
 use crate::i18n::Strings;
 use crate::pages::overview::Overview;
@@ -81,6 +82,9 @@ pub struct App {
     app_version: Option<String>,
     now_ms: i64,
     tick: u64,
+    /// 正在进行的就地操作, 键是订阅 id。**按订阅 id 判重, 不按 `Mutation` 整体** —— 同一条订阅
+    /// 同时只能有一个操作在跑, 但不同操作 (比如先 `t` 再 `e`) 仍然互斥, 不是各自独立排队。
+    busy: HashMap<String, Mutation>,
 }
 
 impl App {
@@ -105,6 +109,7 @@ impl App {
             app_version: None,
             now_ms: opts.now_ms,
             tick: 0,
+            busy: HashMap::new(),
         }
     }
 
@@ -216,6 +221,76 @@ impl App {
         }
     }
 
+    /// 订阅备注名, 取不到 (结果回来时订阅已经不在 `Store` 里了) 就退回用 id。
+    fn subscription_name(&self, id: &str) -> String {
+        self.store.subscription(id).map(|s| s.display_name.clone()).unwrap_or_else(|| id.to_string())
+    }
+
+    /// `Action::Mutate` 落地成真正要发的 `Cmd`: 同一订阅已经有操作在跑 → 丢弃; 断线 → 弹 toast
+    /// 拒绝; 余额刷新在不支持的 provider 上 → 就地回答, 不发请求。三条判定都不进忙碌表, 只有真的
+    /// 要发的那条才 `insert`。
+    fn start_mutation(&mut self, m: Mutation) -> Vec<Cmd> {
+        let id = m.subscription_id();
+        if self.busy.contains_key(id) {
+            return Vec::new();
+        }
+        if self.conn != Conn::Connected {
+            self.push_toast(Toast::new(ToastKind::Error, self.s.toast_offline));
+            return Vec::new();
+        }
+        if matches!(m, Mutation::RefreshBalance { .. }) {
+            // 订阅不在 Store 里 (理论上不该发生, 因为发起方是页面自己选中的一条) 时保守放行,
+            // 交给后端去报错, 不在这里就地拦。
+            let supported = self.store.subscription(id).is_none_or(|s| s.balance_supported);
+            if !supported {
+                self.push_toast(Toast::new(ToastKind::Info, self.s.sub_balance_unsupported));
+                return Vec::new();
+            }
+        }
+        self.busy.insert(id.to_string(), m.clone());
+        vec![Cmd::Mutate(m)]
+    }
+
+    /// `Action::MutationDone`: 从忙碌表移除, 按结果弹一条 toast, **无论成败都追加一次订阅列表
+    /// 刷新** —— 状态 / 缓存 / 错误信息可能都变了。
+    fn finish_mutation(&mut self, mutation: Mutation, result: Result<MutationOutcome, String>) -> Vec<Cmd> {
+        let id = mutation.subscription_id().to_string();
+        self.busy.remove(&id);
+        let name = self.subscription_name(&id);
+        match result {
+            Ok(MutationOutcome::EnabledSet) => {
+                let enabled = matches!(mutation, Mutation::SetEnabled { enabled: true, .. });
+                let text = if enabled { (self.s.toast_enabled)(&name) } else { (self.s.toast_disabled)(&name) };
+                self.push_toast(Toast::new(ToastKind::Success, text));
+            }
+            Ok(MutationOutcome::Tested(r)) if r.ok => {
+                self.push_toast(Toast::new(ToastKind::Success, (self.s.toast_test_ok)(&name, r.model_used.as_deref())));
+            }
+            Ok(MutationOutcome::Tested(r)) => {
+                self.push_toast(Toast::new(ToastKind::Error, (self.s.toast_test_failed)(&name, &r.message)));
+            }
+            Ok(MutationOutcome::Models(RefreshModelsResult::Auto { models, .. })) => {
+                self.push_toast(Toast::new(ToastKind::Success, (self.s.toast_models_ok)(&name, models.len())));
+            }
+            Ok(MutationOutcome::Models(RefreshModelsResult::ManualFallback { reason })) => {
+                self.push_toast(Toast::new(ToastKind::Info, (self.s.toast_models_manual)(&name, &reason)));
+            }
+            Ok(MutationOutcome::Balance(RefreshBalanceResult::Success { .. })) => {
+                self.push_toast(Toast::new(ToastKind::Success, (self.s.toast_balance_ok)(&name)));
+            }
+            Ok(MutationOutcome::Balance(RefreshBalanceResult::Failed { reason })) => {
+                self.push_toast(Toast::new(ToastKind::Error, (self.s.toast_balance_failed)(&name, &reason)));
+            }
+            Ok(MutationOutcome::Balance(RefreshBalanceResult::Unsupported)) => {
+                self.push_toast(Toast::new(ToastKind::Info, self.s.sub_balance_unsupported));
+            }
+            Err(message) => {
+                self.push_toast(Toast::new(ToastKind::Error, (self.s.toast_mutation_failed)(&name, &message)));
+            }
+        }
+        vec![Cmd::Fetch(Fetch::Subscriptions)]
+    }
+
     pub fn update(&mut self, action: Action) -> Vec<Cmd> {
         match action {
             Action::Quit => vec![Cmd::Quit],
@@ -299,6 +374,8 @@ impl App {
             Action::Refresh | Action::Sse { .. } => {
                 Self::select_page(self.tab, &mut self.overview, &mut self.subscriptions, &mut self.placeholder).update(&action, &self.store)
             }
+            Action::Mutate(m) => self.start_mutation(m),
+            Action::MutationDone { mutation, result } => self.finish_mutation(mutation, result),
         }
     }
 
@@ -386,7 +463,8 @@ impl App {
         }
 
         let s = self.s;
-        let mut ctx = DrawCtx { theme: &self.theme, s, now_ms: self.now_ms, tick: self.tick, fx: &mut self.fx, store: &self.store };
+        let mut ctx =
+            DrawCtx { theme: &self.theme, s, now_ms: self.now_ms, tick: self.tick, fx: &mut self.fx, store: &self.store, busy: &self.busy };
         let page = Self::select_page(self.tab, &mut self.overview, &mut self.subscriptions, &mut self.placeholder);
         page.draw(frame, content, &mut ctx);
         let mut left = page.hints(s);

@@ -6,11 +6,12 @@
 
 use std::time::Duration;
 
-use cc_router_tui::action::{Action, Cmd, Fetch, FetchData, OverviewData, Tab};
+use cc_router_tui::action::{Action, Cmd, Fetch, FetchData, Mutation, MutationOutcome, OverviewData, Tab};
 use cc_router_tui::app::{App, AppOptions};
 use cc_router_tui::client::dto::{
     BalanceCache, BalanceEntry, BalanceSeverity, BalanceSnapshot, ModelCache, ModelInfo, ModelSlots, OverallStats, ProxyStatus,
-    QuotaPeriod, QuotaUsage, SeriesPoint, Settings, SlotEfforts, Subscription, SubscriptionState,
+    QuotaPeriod, QuotaUsage, RefreshBalanceResult, RefreshModelsResult, SeriesPoint, Settings, SlotEfforts, Subscription,
+    SubscriptionState, TestConnectionResult,
 };
 use cc_router_tui::i18n::ZH;
 use cc_router_tui::theme::{ColorMode, Theme};
@@ -1040,4 +1041,216 @@ fn empty_subscription_list_and_listen_all_are_shown() {
     let out2 = render(&mut b, 80, 24);
     assert!(out2.contains("https://127.0.0.1:23457"), "{out2}");
     assert!(out2.contains("监听 0.0.0.0"), "{out2}");
+}
+
+// ---------- 订阅页就地操作 (Task 4) ----------
+
+/// `e` 在已启用的订阅上发「停用」, 在已停用的上发「启用」(目标值 = 当前 `enabled` 取反);
+/// `t` / `m` / `b` 各自映射到对应的 `Mutation`。`detail_subs()` 的第一条 (id "1", 智谱主号) 默认启用。
+#[test]
+fn keys_on_the_subscriptions_page_map_to_mutations() {
+    let mut a = subs_app(false);
+    assert_eq!(
+        a.handle_key(key(KeyCode::Char('e'))),
+        Some(Action::Mutate(Mutation::SetEnabled { id: "1".into(), enabled: false })),
+        "已启用的订阅上 e 应该发「停用」"
+    );
+    assert_eq!(a.handle_key(key(KeyCode::Char('t'))), Some(Action::Mutate(Mutation::TestConnection { id: "1".into() })));
+    assert_eq!(a.handle_key(key(KeyCode::Char('m'))), Some(Action::Mutate(Mutation::RefreshModels { id: "1".into() })));
+    assert_eq!(a.handle_key(key(KeyCode::Char('b'))), Some(Action::Mutate(Mutation::RefreshBalance { id: "1".into() })));
+
+    // 停用后再按 e 应该发「启用」。
+    let mut subs = detail_subs();
+    subs[0].enabled = false;
+    a.update(subs_done(2, subs));
+    assert_eq!(
+        a.handle_key(key(KeyCode::Char('e'))),
+        Some(Action::Mutate(Mutation::SetEnabled { id: "1".into(), enabled: true })),
+        "已停用的订阅上 e 应该发「启用」"
+    );
+}
+
+/// 同一订阅的操作同时只跑一个 (按订阅 id 判重, 不按 `Mutation` 整体): 连按两次 `t` 第二次被丢弃;
+/// 另一条订阅同时 `t` 照发; `MutationDone` 之后可以再发。
+#[test]
+fn a_mutation_is_issued_once_per_subscription_until_it_finishes() {
+    let mut a = subs_app(false);
+    let m1 = Mutation::TestConnection { id: "1".into() };
+    assert_eq!(a.update(Action::Mutate(m1.clone())), vec![Cmd::Mutate(m1.clone())]);
+    assert!(a.update(Action::Mutate(m1.clone())).is_empty(), "同一订阅的第二次 t 应该被丢弃");
+
+    // 忙碌表按订阅 id 判重, 不是按 `Mutation` 整体判重: 同一条订阅上换一种操作 (t 还在跑时按 e)
+    // 也该被拒绝, 不能因为 Mutation 值不同就放过去。
+    assert!(
+        a.update(Action::Mutate(Mutation::SetEnabled { id: "1".into(), enabled: false })).is_empty(),
+        "同一条订阅上, 另一种操作也该被忙碌表拒绝"
+    );
+
+    let m2 = Mutation::TestConnection { id: "2".into() };
+    assert_eq!(a.update(Action::Mutate(m2)), vec![Cmd::Mutate(Mutation::TestConnection { id: "2".into() })], "另一条订阅应该照发");
+
+    let result = Ok(MutationOutcome::Tested(TestConnectionResult {
+        ok: true,
+        message: "ok".into(),
+        http_status: Some(200),
+        model_used: None,
+        state_reset: false,
+    }));
+    a.update(Action::MutationDone { mutation: m1.clone(), result });
+    assert_eq!(a.update(Action::Mutate(m1.clone())), vec![Cmd::Mutate(m1)], "MutationDone 之后应该可以再发");
+}
+
+#[test]
+fn mutations_are_refused_while_offline() {
+    let mut a = app(false); // 还没连上 (Conn::Connecting), 不是 Connected
+    assert!(a.update(Action::Mutate(Mutation::TestConnection { id: "1".into() })).is_empty());
+    let out = render(&mut a, 80, 24);
+    assert!(out.contains(ZH.toast_offline), "{out}");
+}
+
+/// 「示例中转」(id "3") 的 `balance_supported = false`: `b` 应该就地回答, 不产生 `Cmd`。
+#[test]
+fn balance_refresh_on_an_unsupported_provider_is_answered_locally() {
+    let mut a = subs_app(false);
+    let cmds = a.update(Action::Mutate(Mutation::RefreshBalance { id: "3".into() }));
+    assert!(cmds.is_empty(), "不支持余额查询的 provider 上 b 不该发请求");
+    let out = render(&mut a, 80, 24);
+    assert!(out.contains(ZH.sub_balance_unsupported), "{out}");
+}
+
+/// toast 文案表里的每一行各一个用例: 断言渲染里出现对应文案, 且都追加了 `Cmd::Fetch(Subscriptions)`。
+#[test]
+fn every_mutation_outcome_toasts_and_refetches() {
+    let cases: Vec<(Mutation, Result<MutationOutcome, String>, &str)> = vec![
+        (
+            Mutation::SetEnabled { id: "1".into(), enabled: true },
+            Ok(MutationOutcome::EnabledSet),
+            "已启用 智谱主号",
+        ),
+        (
+            Mutation::SetEnabled { id: "1".into(), enabled: false },
+            Ok(MutationOutcome::EnabledSet),
+            "已停用 智谱主号",
+        ),
+        (
+            Mutation::TestConnection { id: "1".into() },
+            Ok(MutationOutcome::Tested(TestConnectionResult {
+                ok: true,
+                message: "ok".into(),
+                http_status: Some(200),
+                model_used: Some("glm-4.6".into()),
+                state_reset: true,
+            })),
+            "智谱主号：连接正常 (glm-4.6)",
+        ),
+        (
+            Mutation::TestConnection { id: "1".into() },
+            Ok(MutationOutcome::Tested(TestConnectionResult {
+                ok: true,
+                message: "ok".into(),
+                http_status: Some(200),
+                model_used: None,
+                state_reset: true,
+            })),
+            "智谱主号：连接正常",
+        ),
+        (
+            Mutation::TestConnection { id: "1".into() },
+            Ok(MutationOutcome::Tested(TestConnectionResult {
+                ok: false,
+                message: "上游拒绝".into(),
+                http_status: Some(401),
+                model_used: Some("glm-4.6".into()),
+                state_reset: false,
+            })),
+            "智谱主号：上游拒绝",
+        ),
+        (
+            Mutation::RefreshModels { id: "1".into() },
+            Ok(MutationOutcome::Models(RefreshModelsResult::Auto {
+                models: vec![ModelInfo { id: "a".into(), display_name: None }, ModelInfo { id: "b".into(), display_name: None }],
+                fetched_at: NOW,
+            })),
+            "智谱主号：获取到 2 个模型",
+        ),
+        (
+            Mutation::RefreshModels { id: "1".into() },
+            Ok(MutationOutcome::Models(RefreshModelsResult::ManualFallback { reason: "无 model_discovery".into() })),
+            "智谱主号：无法自动获取模型 (无 model_discovery)",
+        ),
+        (
+            Mutation::RefreshBalance { id: "1".into() },
+            Ok(MutationOutcome::Balance(RefreshBalanceResult::Success {
+                snapshot: BalanceSnapshot { is_available: None, entries: vec![] },
+                fetched_at: NOW,
+            })),
+            "智谱主号：余额已刷新",
+        ),
+        (
+            Mutation::RefreshBalance { id: "1".into() },
+            Ok(MutationOutcome::Balance(RefreshBalanceResult::Failed { reason: "超时".into() })),
+            "智谱主号：余额查询失败 (超时)",
+        ),
+        (
+            Mutation::RefreshBalance { id: "1".into() },
+            Ok(MutationOutcome::Balance(RefreshBalanceResult::Unsupported)),
+            ZH.sub_balance_unsupported,
+        ),
+        (
+            Mutation::TestConnection { id: "1".into() },
+            Err("网络错误".into()),
+            "智谱主号：操作失败 (网络错误)",
+        ),
+    ];
+    for (mutation, result, expect) in cases {
+        let mut a = subs_app(false);
+        a.update(Action::Mutate(mutation.clone()));
+        let cmds = a.update(Action::MutationDone { mutation, result });
+        assert_eq!(cmds, vec![Cmd::Fetch(Fetch::Subscriptions)], "无论成败都该追加一次订阅列表刷新");
+        let out = render(&mut a, 80, 24);
+        assert!(out.contains(expect), "缺 {expect:?}\n{out}");
+    }
+}
+
+#[test]
+fn a_busy_row_shows_a_spinner_and_the_detail_says_what_is_running() {
+    let mut a = subs_app(false);
+    let before = render(&mut a, 80, 24); // 列表态, 智谱主号选中 (健康, "●")
+    a.update(Action::Mutate(Mutation::TestConnection { id: "1".into() }));
+    let busy_list = render(&mut a, 80, 24);
+    assert_ne!(before, busy_list, "忙碌时列表第一列应该换成 spinner");
+
+    a.handle_key(key(KeyCode::Enter));
+    let out = render(&mut a, 80, 24);
+    assert!(out.contains(ZH.sub_busy_testing), "详情面板的状态行应该追加进行中文案\n{out}");
+}
+
+/// 结果回来时订阅已经不在 `Store` 里了 (比如用户在别处删掉了这条订阅) —— toast 应该退回用 id。
+#[test]
+fn subscription_name_falls_back_to_the_id_in_toasts() {
+    let mut a = subs_app(false);
+    let mutation = Mutation::TestConnection { id: "1".into() };
+    a.update(Action::Mutate(mutation.clone()));
+
+    let mut subs = detail_subs();
+    subs.remove(0); // id "1" 没了
+    a.update(subs_done(2, subs));
+
+    let result = Ok(MutationOutcome::Tested(TestConnectionResult {
+        ok: true,
+        message: "ok".into(),
+        http_status: Some(200),
+        model_used: None,
+        state_reset: true,
+    }));
+    a.update(Action::MutationDone { mutation, result });
+    let out = render(&mut a, 80, 24);
+    assert!(out.contains("1：连接正常"), "订阅不在 Store 里时应该退回用 id\n{out}");
+}
+
+/// 80 列下页面键位 (e/t/m/b 等) 放不下时应该被裁掉, 但全局的 `?` 帮助 / `q` 退出必须一直在。
+#[test]
+fn global_keys_survive_at_80_columns_on_the_subscriptions_page() {
+    let out = render(&mut subs_app(false), 80, 24);
+    assert!(out.contains(ZH.key_help) && out.contains(ZH.key_quit), "{out}");
 }
