@@ -4,7 +4,7 @@ use ratatui::crossterm::event::KeyEvent;
 use ratatui::layout::{Constraint, Layout, Rect};
 use ratatui::style::Style;
 use ratatui::text::{Line, Span};
-use ratatui::widgets::{Block, BorderType, LineGauge, Padding, Paragraph, Sparkline};
+use ratatui::widgets::{Block, BorderType, Padding, Paragraph, Sparkline};
 use ratatui::Frame;
 use throbber_widgets_tui::{Throbber, BRAILLE_SIX};
 use tui_big_text::{BigText, PixelSize};
@@ -12,10 +12,11 @@ use tui_big_text::{BigText, PixelSize};
 use super::{Component, DrawCtx};
 use crate::action::{Action, Cmd, Fetch, FetchData, OverviewData};
 use crate::client::dto::{hourly_buckets, OverallStats, ProxyStatus, Subscription};
-use crate::format::{compact, fit, mmss, percent, thousands};
+use crate::format::{compact, fit, percent, thousands};
 use crate::i18n::Strings;
 use crate::store::Store;
-use crate::widgets::badge::{badge, severity};
+use crate::widgets::badge::{badge, severity, status_text};
+use crate::widgets::gauge::quota_gauge;
 use crate::widgets::keybar::Hint;
 use crate::widgets::spinner_state;
 
@@ -200,10 +201,7 @@ impl Overview {
         for (i, sub) in subs.iter().take(shown).enumerate() {
             let row = Rect::new(inner.x, inner.y + i as u16, inner.width, 1);
             let b = badge(sub, ctx.theme, s);
-            let status = match sub.cooldown_until.filter(|until| *until > ctx.now_ms && sub.enabled) {
-                Some(until) => format!("{} · {}", b.label, mmss(until - ctx.now_ms)),
-                None => b.label.to_string(),
-            };
+            let status = status_text(sub, &b, ctx.now_ms);
             let left_width = (2 + name_col + 2 + STATUS_COL + 2) as u16;
             let [left, label, gauge, pct] = Layout::horizontal([
                 Constraint::Length(left_width),
@@ -224,18 +222,8 @@ impl Overview {
             );
             match sub.tightest_quota().and_then(|q| q.ratio().map(|r| (q, r))) {
                 Some((q, ratio)) => {
-                    let color = ctx.theme.quota_color(ratio);
                     frame.render_widget(Line::styled(s.quota_period(q.period), ctx.theme.muted_style()), label);
-                    frame.render_widget(
-                        LineGauge::default()
-                            .ratio(ratio)
-                            .label("")
-                            .filled_symbol("━")
-                            .unfilled_symbol("─")
-                            .filled_style(Style::new().fg(color))
-                            .unfilled_style(ctx.theme.border_style()),
-                        gauge,
-                    );
+                    frame.render_widget(quota_gauge(ratio, ctx.theme), gauge);
                     frame.render_widget(Line::raw(format!("{:.0}%", ratio * 100.0)).right_aligned(), pct);
                 }
                 None => frame.render_widget(Line::styled("—", ctx.theme.muted_style()), label),
@@ -301,6 +289,8 @@ impl Component for Overview {
     }
 
     fn on_subscriptions_changed(&mut self, changed: &[String]) {
-        self.flash_rows.extend(changed.iter().cloned());
+        // 整体替换而不是往后追加: 页面不可见时攒了好几拨变化, 回来只该闪最新一拨 (Fix round 1, #10,
+        // 与订阅页同一处改动)。
+        self.flash_rows = changed.to_vec();
     }
 }

@@ -3,6 +3,7 @@
 use ratatui::style::Color;
 
 use crate::client::dto::{Subscription, SubscriptionState};
+use crate::format::mmss;
 use crate::i18n::Strings;
 use crate::theme::{state_symbol, Theme};
 
@@ -28,6 +29,15 @@ pub fn badge(sub: &Subscription, theme: &Theme, s: &Strings) -> Badge {
         sub.state
     };
     Badge { symbol: state_symbol(state), label: s.state(state), color: theme.state_color(state) }
+}
+
+/// `badge()` 选出的文案再叠一条冷却规则: `enabled && cooldown_until > now` 才追加 ` · mm:ss`
+/// 倒计时。总览页 (健康度面板一行) 与订阅页 (详情面板「状态」行) 共用同一条判定, 不要各写一份。
+pub fn status_text(sub: &Subscription, badge: &Badge, now_ms: i64) -> String {
+    match sub.cooldown_until.filter(|until| *until > now_ms && sub.enabled) {
+        Some(until) => format!("{} · {}", badge.label, mmss(until - now_ms)),
+        None => badge.label.to_string(),
+    }
 }
 
 /// 排序用: 出问题的排最前 (0), 可调度的居中 (1), 用户自己停用的排最后 (2)。

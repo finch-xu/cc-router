@@ -6,7 +6,7 @@ use ratatui::layout::{Constraint, Layout, Margin, Rect};
 use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{
-    Block, BorderType, Cell, LineGauge, Padding, Paragraph, Row, Scrollbar, ScrollbarOrientation, ScrollbarState, Table, TableState, Wrap,
+    Block, BorderType, Cell, Padding, Paragraph, Row, Scrollbar, ScrollbarOrientation, ScrollbarState, Table, TableState, Wrap,
 };
 use ratatui::Frame;
 use throbber_widgets_tui::{Throbber, BRAILLE_SIX};
@@ -15,11 +15,12 @@ use unicode_width::UnicodeWidthStr;
 use super::{Component, DrawCtx};
 use crate::action::{Action, Cmd, Fetch};
 use crate::client::dto::{BalanceSeverity, QuotaUsage, Subscription};
-use crate::format::{compact, fit, mmss};
+use crate::format::{compact, fit};
 use crate::i18n::Strings;
 use crate::store::Store;
 use crate::theme::Theme;
-use crate::widgets::badge::badge;
+use crate::widgets::badge::{badge, status_text};
+use crate::widgets::gauge::quota_gauge;
 use crate::widgets::keybar::Hint;
 use crate::widgets::spinner_state;
 
@@ -31,23 +32,28 @@ const HIGHLIGHT_COL: u16 = 2;
 const SYMBOL_COL: u16 = 2;
 const NAME_COL: usize = 20;
 const PROVIDER_COL: usize = 12;
+/// 列表左右各留一列空白, 不让内容贴着边框 (block 用 `Padding::horizontal`)。
+const LIST_PADDING: u16 = 1;
 const FIELD_LABEL_COL: usize = 10;
 const SLOT_NAME_COL: usize = 8;
 const SLOT_MODEL_COL: usize = 24;
-/// 「最近错误」占的固定行数, 超出的部分被 `Wrap` 裁掉。
+/// 「最近错误」最多占的行数, 是上限不是固定分配 (`row_height` 按实际折行数留空间)。
 const LAST_ERROR_ROWS: u16 = 4;
 /// 两步向导没走完时槽位留下的占位模型名。
 const PENDING_MODEL: &str = "(pending)";
+/// `PageUp` / `PageDown` 在第一帧画出来之前没有真实的可视行数可用, 先给个不至于原地不动的默认值。
+const DEFAULT_PAGE_ROWS: usize = 10;
 
 const SSE_REFETCH: [&str; 2] = ["subscription_state_changed", "subscription_quota_reached"];
 
-/// 详情面板的一行: 大多数是普通文本, 限额行要嵌一个真正的 `LineGauge` widget, 不是文本能表示的。
+/// 详情面板的一行: 大多数是普通文本, 限额行要嵌一个真正的 `LineGauge` widget (不是文本能表示
+/// 的), 最近错误可能折成 1..=4 行 (`Wrapped`, 永远是最后一条)。
 enum DetailRow {
     Line(Line<'static>),
     Quota { label: &'static str, quota: QuotaUsage },
+    Wrapped { label: &'static str, text: String },
 }
 
-#[derive(Default)]
 pub struct Subscriptions {
     selected_id: Option<String>,
     /// `selected_id` 在新列表里找不到时, 用这个 (钳制到新列表长度后) 兜底, 而不是简单地弹回第一条。
@@ -57,11 +63,26 @@ pub struct Subscriptions {
     detail_open: bool,
     /// 上一帧的宽度: `handle_key` 判断 `⏎` 该不该进详情要用得到, 但按键发生时还不知道这一帧的几何。
     last_width: u16,
-    /// 上一帧表体的可视行数, `PageUp` / `PageDown` 按这个翻页。
+    /// 上一帧表体的可视行数, `PageUp` / `PageDown` 按这个翻页; 首帧之前用 [`DEFAULT_PAGE_ROWS`]
+    /// 兜底, 不然第一次按键 (还没画过) 只会移动 0 格 (F8 教训: 步长绝不能默认成 0)。
     last_page_rows: usize,
     table_state: TableState,
     /// 下一帧要闪一下的订阅 id; `draw` 取走。
     flash_rows: Vec<String>,
+}
+
+impl Default for Subscriptions {
+    fn default() -> Self {
+        Self {
+            selected_id: None,
+            last_index: 0,
+            detail_open: false,
+            last_width: 0,
+            last_page_rows: DEFAULT_PAGE_ROWS,
+            table_state: TableState::default(),
+            flash_rows: Vec::new(),
+        }
+    }
 }
 
 impl Subscriptions {
@@ -113,8 +134,9 @@ impl Subscriptions {
         self.table_state.select(Some(idx));
 
         // 手算每列的显示宽度, 好让 `format::fit` 与 Table 实际分配的列宽严格一致:
-        // 边框(2) + 选中前缀(HIGHLIGHT_COL) + [符号 + 备注名 + 厂商 + sonnet] (三个列间距各 1)。
-        let inner_width = area.width.saturating_sub(2);
+        // 边框(2) + 左右留白(2×LIST_PADDING) + 选中前缀(HIGHLIGHT_COL) +
+        // [符号 + 备注名 + 厂商 + sonnet] (三个列间距各 1)。
+        let inner_width = area.width.saturating_sub(2 + 2 * LIST_PADDING);
         let columns_width = inner_width.saturating_sub(HIGHLIGHT_COL);
         let fixed = SYMBOL_COL + 1 + NAME_COL as u16 + 1 + PROVIDER_COL as u16 + 1;
         let sonnet_col = columns_width.saturating_sub(fixed) as usize;
@@ -145,7 +167,8 @@ impl Subscriptions {
             .border_type(BorderType::Rounded)
             .border_style(ctx.theme.border_style())
             .title_top(format!(" {} ", (s.sub_title)(total)))
-            .title_bottom(Line::from(format!(" {}/{} ", idx + 1, total)).right_aligned().style(ctx.theme.muted_style()));
+            .title_bottom(Line::from(format!(" {}/{} ", idx + 1, total)).right_aligned().style(ctx.theme.muted_style()))
+            .padding(Padding::horizontal(LIST_PADDING));
 
         let table = Table::new(
             rows,
@@ -163,11 +186,12 @@ impl Subscriptions {
 
         frame.render_stateful_widget(&table, area, &mut self.table_state);
 
-        // 表体可视行数 = 内高 - 边框(2) - 表头(1); 只有超出这个数才需要滚动条 / 用来翻页。
+        // 表体可视行数 = 内高 - 边框(2) - 表头(1); 左右留白不占高度。只有超出这个数才需要滚动条 /
+        // 用来翻页。
         let capacity = area.height.saturating_sub(3) as usize;
         self.last_page_rows = capacity.max(1);
         if total > capacity {
-            let mut sb_state = ScrollbarState::new(total).position(self.table_state.offset());
+            let mut sb_state = ScrollbarState::new(total.saturating_sub(capacity)).position(self.table_state.offset());
             frame.render_stateful_widget(
                 Scrollbar::new(ScrollbarOrientation::VerticalRight),
                 area.inner(Margin { vertical: 1, horizontal: 0 }),
@@ -177,10 +201,12 @@ impl Subscriptions {
 
         // 只对这一帧实际画出来的行触发闪烁, 滚出视野的丢弃 (与总览页同一套「每帧开头取走」写法)。
         let offset = self.table_state.offset();
+        let content_x = area.x + 1 + LIST_PADDING;
+        let content_width = inner_width;
         for (i, sub) in subs.iter().enumerate().skip(offset).take(capacity) {
             if flash_rows.contains(&sub.id) {
                 let row_y = area.y + 2 + (i - offset) as u16;
-                let row_rect = Rect::new(area.x + 1, row_y, area.width.saturating_sub(2), 1);
+                let row_rect = Rect::new(content_x, row_y, content_width, 1);
                 let b = badge(sub, ctx.theme, s);
                 ctx.fx.row_changed(&sub.id, row_rect, b.color);
             }
@@ -200,19 +226,8 @@ impl Subscriptions {
         let inner = block.inner(area);
         frame.render_widget(block, area);
 
-        let rows = detail_rows(sub, ctx);
-
-        let error_text = match &sub.last_error_message {
-            Some(msg) => msg.clone(),
-            None => "—".into(),
-        };
-        let error_line = format!("{}{error_text}", fit(s.sub_f_last_error, FIELD_LABEL_COL));
-        // 「最多占 4 行」是上限, 不是固定分配: 没有错误 (占位符「—」) 只需要 1 行, 把剩下的让给
-        // 上面的字段, 免得在矮终端上把「被引用」这类靠后的行硬生生挤没了。
-        let error_rows = wrapped_line_count(&error_line, inner.width).clamp(1, LAST_ERROR_ROWS);
-        let [rows_area, error_area] = Layout::vertical([Constraint::Min(0), Constraint::Length(error_rows)]).areas(inner);
-        draw_detail_rows(frame, rows_area, ctx, &rows);
-        frame.render_widget(Paragraph::new(error_line).wrap(Wrap { trim: true }), error_area);
+        let rows = detail_rows(sub, ctx, inner.width);
+        draw_detail_rows(frame, inner, ctx, &rows);
     }
 
     fn draw_placeholder(&self, frame: &mut Frame, area: Rect, ctx: &mut DrawCtx, loading: bool) {
@@ -280,7 +295,7 @@ impl Component for Subscriptions {
             self.draw_placeholder(frame, area, ctx, false);
             return;
         }
-        let idx = self.resolve_selection(subs).expect("subs 非空时 resolve_selection 总返回 Some");
+        let Some(idx) = self.resolve_selection(subs) else { return };
 
         if self.is_wide() {
             let [left, right] = Layout::horizontal([Constraint::Length(LIST_WIDTH), Constraint::Min(0)]).areas(area);
@@ -310,7 +325,9 @@ impl Component for Subscriptions {
     }
 
     fn on_subscriptions_changed(&mut self, changed: &[String]) {
-        self.flash_rows.extend(changed.iter().cloned());
+        // 整体替换而不是往后追加: 页面不可见时攒了好几拨变化, 回来只该闪最新一拨——旧的早就过时了,
+        // 而且不去重的 `extend` 会让积压的重复 id 在 `flash_rows.contains` 里白跑好几遍 (I10)。
+        self.flash_rows = changed.to_vec();
     }
 }
 
@@ -320,8 +337,21 @@ fn field_line(label: &'static str, mut value: Vec<Span<'static>>) -> Line<'stati
     Line::from(spans)
 }
 
+/// 长文本超宽时截断成省略号收尾, 但不像 `format::fit` 那样把短文本右补空格到定宽——这几处
+/// (URL / 被引用列表 / 余额条目) 是自由文本行, 不是要跟表格对齐的列; 补出来的空格会把跟在
+/// 后面的别的 span (比如余额条目的 hint) 顶到可视宽度以外, 平白消失 (Fix round 1, #5 的教训)。
+fn clip(text: &str, width: usize) -> String {
+    if text.width() <= width {
+        text.to_string()
+    } else {
+        fit(text, width)
+    }
+}
+
 fn model_style(model: &str, theme: &Theme) -> Style {
-    if model == PENDING_MODEL {
+    // 后端字段, 保险起见按 trim 后的值比较 (与 `ping.rs::pick_test_model` 同规则), 不因为多一个
+    // 空格就把该有的 warn 色漏掉。
+    if model.trim() == PENDING_MODEL {
         Style::new().fg(theme.warn)
     } else {
         Style::default()
@@ -350,7 +380,9 @@ fn fallback_slot_line(model: &str, theme: &Theme, s: &'static Strings) -> Line<'
     }
 }
 
-fn balance_rows(sub: &Subscription, theme: &Theme, s: &'static Strings) -> Vec<DetailRow> {
+/// `value_width`: 字段值那一列还剩多少显示宽度 (详情内宽 - `FIELD_LABEL_COL`), 长文本 (URL /
+/// 被引用列表 / 余额条目) 超出时截断成省略号收尾, 不能硬裁到贴着边框。
+fn balance_rows(sub: &Subscription, theme: &Theme, s: &'static Strings, value_width: usize) -> Vec<DetailRow> {
     let mut out = Vec::new();
     if !sub.balance_supported {
         out.push(DetailRow::Line(field_line(s.sub_f_balance, vec![Span::styled(s.sub_balance_unsupported, theme.muted_style())])));
@@ -381,7 +413,8 @@ fn balance_rows(sub: &Subscription, theme: &Theme, s: &'static Strings) -> Vec<D
             BalanceSeverity::Critical => Some(theme.err),
             BalanceSeverity::Normal | BalanceSeverity::Unknown => None,
         };
-        let mut spans = vec![Span::raw(format!("{} {} {}", entry.label, entry.value_text, entry.unit))];
+        let text = clip(&format!("{} {} {}", entry.label, entry.value_text, entry.unit), value_width);
+        let mut spans = vec![Span::raw(text)];
         if let Some(color) = color {
             spans[0].style = Style::new().fg(color);
         }
@@ -394,19 +427,17 @@ fn balance_rows(sub: &Subscription, theme: &Theme, s: &'static Strings) -> Vec<D
     out
 }
 
-fn detail_rows(sub: &Subscription, ctx: &DrawCtx) -> Vec<DetailRow> {
+/// `width`: 详情面板内宽 (block 边框 + 内边距之后), 用来给长字段截断、给「最近错误」估折行数。
+fn detail_rows(sub: &Subscription, ctx: &DrawCtx, width: u16) -> Vec<DetailRow> {
     let s = ctx.s;
     let theme = ctx.theme;
+    let value_width = width.saturating_sub(FIELD_LABEL_COL as u16) as usize;
     let mut rows = Vec::new();
 
-    // 状态: `badge()` 的符号 + 文案, 与总览页同一条冷却规则 (`enabled && cooldown_until > now`
-    // 才追加倒计时)。
+    // 状态: `badge()` 的符号 + 文案, 冷却倒计时规则与总览页共用 (`widgets::badge::status_text`)。
     let b = badge(sub, theme, s);
-    let status_text = match sub.cooldown_until.filter(|until| *until > ctx.now_ms && sub.enabled) {
-        Some(until) => format!("{} {} · {}", b.symbol, b.label, mmss(until - ctx.now_ms)),
-        None => format!("{} {}", b.symbol, b.label),
-    };
-    rows.push(DetailRow::Line(field_line(s.sub_f_state, vec![Span::styled(status_text, Style::new().fg(b.color))])));
+    let status = format!("{} {}", b.symbol, status_text(sub, &b, ctx.now_ms));
+    rows.push(DetailRow::Line(field_line(s.sub_f_state, vec![Span::styled(status, Style::new().fg(b.color))])));
 
     // 厂商
     rows.push(DetailRow::Line(field_line(
@@ -415,7 +446,7 @@ fn detail_rows(sub: &Subscription, ctx: &DrawCtx) -> Vec<DetailRow> {
     )));
 
     // 端点
-    rows.push(DetailRow::Line(field_line(s.sub_f_endpoint, vec![Span::raw(sub.base_url.clone())])));
+    rows.push(DetailRow::Line(field_line(s.sub_f_endpoint, vec![Span::raw(clip(&sub.base_url, value_width))])));
 
     // 槽位: 标签独占一行, 四个槽 + 兜底各自缩进一行 (兜底没有 effort 列)。
     rows.push(DetailRow::Line(Line::from(Span::raw(fit(s.sub_f_slots, FIELD_LABEL_COL)))));
@@ -442,7 +473,7 @@ fn detail_rows(sub: &Subscription, ctx: &DrawCtx) -> Vec<DetailRow> {
     }
 
     // 余额
-    rows.extend(balance_rows(sub, theme, s));
+    rows.extend(balance_rows(sub, theme, s, value_width));
 
     // 模型
     let models_text = match &sub.model_cache {
@@ -455,63 +486,110 @@ fn detail_rows(sub: &Subscription, ctx: &DrawCtx) -> Vec<DetailRow> {
     let referenced = if sub.referenced_by.is_empty() {
         Span::styled(s.sub_unreferenced, theme.muted_style())
     } else {
-        Span::raw(sub.referenced_by.join(", "))
+        Span::raw(clip(&sub.referenced_by.join(", "), value_width))
     };
     rows.push(DetailRow::Line(field_line(s.sub_f_referenced, vec![referenced])));
+
+    // 最近错误: 永远是最后一条, 按实际折行数占 1..=4 行 (见 `row_height`), 不再单独占死 4 行。
+    let error_text = match &sub.last_error_message {
+        Some(msg) => msg.clone(),
+        None => "—".into(),
+    };
+    rows.push(DetailRow::Wrapped { label: s.sub_f_last_error, text: error_text });
 
     rows
 }
 
-fn draw_detail_rows(frame: &mut Frame, area: Rect, ctx: &DrawCtx, rows: &[DetailRow]) {
-    for (i, row) in rows.iter().enumerate() {
-        if i as u16 >= area.height {
-            break;
-        }
-        let rect = Rect::new(area.x, area.y + i as u16, area.width, 1);
-        match row {
-            DetailRow::Line(line) => frame.render_widget(line.clone(), rect),
-            DetailRow::Quota { label, quota } => draw_quota_row(frame, rect, ctx, label, quota),
+/// 这一行需要几个显示行。除「最近错误」外都是定高 1 行, 「最近错误」按 [`wrapped_line_count`]
+/// 估出的折行数 (已经在那个函数里 clamp 到 `[1, LAST_ERROR_ROWS]`)。
+fn row_height(row: &DetailRow, width: u16) -> u16 {
+    match row {
+        DetailRow::Line(_) | DetailRow::Quota { .. } => 1,
+        DetailRow::Wrapped { label, text } => {
+            let full = format!("{}{text}", fit(label, FIELD_LABEL_COL));
+            wrapped_line_count(&full, width)
         }
     }
 }
 
-/// 粗略估算 `Wrap { trim: true }` 会把这段文本折成几行: 按显示宽度整除, 不模拟真正的按词换行
-/// (中文本来就没有词边界), 够用来给「最近错误」留够行数、不需要逐字符复刻 ratatui 的折行算法。
+/// 从上到下依次画每一行; 高度不够全部画完时, 最后一行改画「(s.ov_more_rows)(hidden)」(与总览页
+/// 健康度面板超出可视高度时同一个词条, `hidden` 是没画出来的字段条数, 不是行数)。
+fn draw_detail_rows(frame: &mut Frame, area: Rect, ctx: &DrawCtx, rows: &[DetailRow]) {
+    let s = ctx.s;
+    let heights: Vec<u16> = rows.iter().map(|r| row_height(r, area.width)).collect();
+    let total: u16 = heights.iter().sum();
+    let overflow = total > area.height;
+    // 溢出时给最后一行的提示让位; 没溢出就用满整个 area。
+    let capacity = if overflow { area.height.saturating_sub(1) } else { area.height };
+
+    let mut y = area.y;
+    let mut shown = 0usize;
+    for (row, h) in rows.iter().zip(&heights) {
+        if y + h > area.y + capacity {
+            break;
+        }
+        draw_detail_row(frame, Rect::new(area.x, y, area.width, *h), ctx, row);
+        y += h;
+        shown += 1;
+    }
+    if overflow {
+        let hidden = rows.len() - shown;
+        let rect = Rect::new(area.x, area.y + area.height.saturating_sub(1), area.width, 1);
+        frame.render_widget(Line::styled((s.ov_more_rows)(hidden), ctx.theme.muted_style()), rect);
+    }
+}
+
+fn draw_detail_row(frame: &mut Frame, rect: Rect, ctx: &DrawCtx, row: &DetailRow) {
+    match row {
+        DetailRow::Line(line) => frame.render_widget(line.clone(), Rect::new(rect.x, rect.y, rect.width, 1)),
+        DetailRow::Quota { label, quota } => draw_quota_row(frame, Rect::new(rect.x, rect.y, rect.width, 1), ctx, label, quota),
+        DetailRow::Wrapped { label, text } => {
+            let line = format!("{}{text}", fit(label, FIELD_LABEL_COL));
+            frame.render_widget(Paragraph::new(line).wrap(Wrap { trim: true }), rect);
+        }
+    }
+}
+
+/// 粗略估算 `Wrap { trim: true }` 会把这段文本折成几行: 按显示宽度整除是「贴着最后一列才换行」
+/// 的下界, 真实的按词 / 标点换行几乎总是提前收尾, 常见比整除结果多用一行——所以在整除结果上
+/// +1 兜底, 宁可多留一行空白也不要把最后一行文字挤没 (Fix round 1, #6)。
 fn wrapped_line_count(text: &str, width: u16) -> u16 {
     let width = width.max(1);
     let text_width = text.width() as u16;
-    text_width.div_ceil(width).max(1)
+    (text_width.div_ceil(width) + 1).clamp(1, LAST_ERROR_ROWS)
 }
 
 fn draw_quota_row(frame: &mut Frame, area: Rect, ctx: &DrawCtx, label: &str, q: &QuotaUsage) {
     let s = ctx.s;
     let theme = ctx.theme;
-    let ratio = q.ratio().unwrap_or(0.0);
-    let color = theme.quota_color(ratio);
-    let [label_area, period_area, gauge_area, pct_area, used_area] = Layout::horizontal([
-        Constraint::Length(FIELD_LABEL_COL as u16),
-        Constraint::Length(8),
-        Constraint::Min(6),
-        Constraint::Length(5),
-        Constraint::Length(16),
-    ])
-    .spacing(1)
-    .areas(area);
+    // 先把标签切出来 (不带 spacing, 与 `field_line` 的值列起点严格一致), 再在剩下的宽度里给
+    // 周期名/进度条/百分比/用量四段各自留一点呼吸间距 (Fix round 1, #1: 之前把标签也算进
+    // `.spacing(1)` 里, 所有字段行的值都会因此错位一列)。
+    let [label_area, value_area] = Layout::horizontal([Constraint::Length(FIELD_LABEL_COL as u16), Constraint::Min(0)]).areas(area);
     frame.render_widget(Line::raw(fit(label, FIELD_LABEL_COL)), label_area);
+
+    let ratio = q.ratio().unwrap_or(0.0);
+    let [period_area, gauge_area, pct_area, used_area] =
+        Layout::horizontal([Constraint::Length(8), Constraint::Min(6), Constraint::Length(5), Constraint::Length(16)])
+            .spacing(1)
+            .areas(value_area);
     frame.render_widget(Line::styled(s.quota_period(q.period), theme.muted_style()), period_area);
-    frame.render_widget(
-        LineGauge::default()
-            .ratio(ratio)
-            .label("")
-            .filled_symbol("━")
-            .unfilled_symbol("─")
-            .filled_style(Style::new().fg(color))
-            .unfilled_style(theme.border_style()),
-        gauge_area,
-    );
+    frame.render_widget(quota_gauge(ratio, theme), gauge_area);
     frame.render_widget(Line::raw(format!("{:.0}%", ratio * 100.0)).right_aligned(), pct_area);
-    frame.render_widget(
-        Line::raw(format!("{} / {}", compact(q.used() as i64), compact(q.limit.unwrap_or(0) as i64))),
-        used_area,
-    );
+    frame.render_widget(Line::raw(format!("{} / {}", compact(q.used() as i64), compact(q.limit.unwrap_or(0) as i64))), used_area);
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Fix round 1, #10: 页面不可见时攒了好几拨订阅变化, 回来只该闪最新一拨——`extend` 会把
+    /// 旧的也留着, 之后每帧都要多扫一遍这些早就过时的 id。
+    #[test]
+    fn on_subscriptions_changed_replaces_the_queue_not_appends() {
+        let mut page = Subscriptions::default();
+        page.on_subscriptions_changed(&["a".to_string(), "b".to_string()]);
+        page.on_subscriptions_changed(&["c".to_string()]);
+        assert_eq!(page.flash_rows, vec!["c".to_string()], "第三次通知应该整体替换队列, 不是往后追加");
+    }
 }

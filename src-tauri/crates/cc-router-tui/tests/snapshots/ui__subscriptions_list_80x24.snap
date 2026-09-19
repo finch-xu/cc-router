@@ -6,10 +6,10 @@ expression: "render(&mut subs_app(false), 80, 24)"
 "│ 1 总览   2 订阅   3 虚拟模型   4 实时路由   5 日志                           │" Hidden by multi-width symbols: [(5, " "), (7, " "), (14, " "), (16, " "), (23, " "), (25, " "), (27, " "), (29, " "), (36, " "), (38, " "), (40, " "), (42, " "), (49, " "), (51, " ")]
 "╰──────────────────────────────────────────────────────────────────────────────╯"
 "╭ 订阅 (3) ────────────────────────────────────────────────────────────────────╮" Hidden by multi-width symbols: [(3, " "), (5, " ")]
-"│     备注名               厂商         sonnet                                 │" Hidden by multi-width symbols: [(7, " "), (9, " "), (11, " "), (28, " "), (30, " ")]
-"│▌ ●  智谱主号             智谱         glm-4.6                                │" Hidden by multi-width symbols: [(7, " "), (9, " "), (11, " "), (13, " "), (28, " "), (30, " ")]
-"│  ◐  Kimi 备用            Moonshot     (pending)                              │" Hidden by multi-width symbols: [(12, " "), (14, " ")]
-"│  ✕  示例中转             自定义中转   claude-sonnet-4-5                      │" Hidden by multi-width symbols: [(7, " "), (9, " "), (11, " "), (13, " "), (28, " "), (30, " "), (32, " "), (34, " "), (36, " ")]
+"│      备注名               厂商         sonnet                                │" Hidden by multi-width symbols: [(8, " "), (10, " "), (12, " "), (29, " "), (31, " ")]
+"│ ▌ ●  智谱主号             智谱         glm-4.6                               │" Hidden by multi-width symbols: [(8, " "), (10, " "), (12, " "), (14, " "), (29, " "), (31, " ")]
+"│   ◐  Kimi 备用            Moonshot     (pending)                             │" Hidden by multi-width symbols: [(13, " "), (15, " ")]
+"│   ✕  示例中转             自定义中转   claude-sonnet-4-5                     │" Hidden by multi-width symbols: [(8, " "), (10, " "), (12, " "), (14, " "), (29, " "), (31, " "), (33, " "), (35, " "), (37, " ")]
 "│                                                                              │"
 "│                                                                              │"
 "│                                                                              │"

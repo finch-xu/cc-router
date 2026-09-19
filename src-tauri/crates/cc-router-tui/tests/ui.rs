@@ -17,6 +17,7 @@ use cc_router_tui::theme::{ColorMode, Theme};
 use ratatui::backend::TestBackend;
 use ratatui::crossterm::event::{KeyCode, KeyEvent, KeyEventKind, KeyEventState, KeyModifiers};
 use ratatui::Terminal;
+use unicode_width::UnicodeWidthStr;
 
 const NOW: i64 = 1_700_000_000_000;
 const VERSION: &str = "9.9.9";
@@ -341,11 +342,16 @@ fn detail_survives_widening() {
     assert!(wide.contains(ZH.sub_col_name) && wide.contains(ZH.sub_f_endpoint), "拉宽后左表右详情都该在\n{wide}");
 }
 
+/// Fix round 1, #7: 120×40 双栏下列表的 sonnet 列本来就会显示 "(pending)"（Kimi 那一行的槽位
+/// 名字本身就是 "(pending)"), 断言 `out.contains("(pending)")` 不管选没选中 Kimi 都成立, 咬不住
+/// "详情面板真的把它当 pending 槽位处理"这件事。改成窄屏 + 进详情, 让输出只有详情面板的内容。
 #[test]
 fn detail_shows_every_limited_period_and_pending_slots() {
     let mut a = subs_app(false);
+    render(&mut a, 80, 24); // 记住这是窄屏。
     a.handle_key(key(KeyCode::Char('j'))); // Kimi: 两个限额周期 + pending 槽
-    let out = render(&mut a, 120, 40);
+    a.handle_key(key(KeyCode::Enter));
+    let out = render(&mut a, 80, 24);
     assert!(out.contains(ZH.q_daily) && out.contains(ZH.q_monthly), "两个设了上限的周期都该有一条 gauge\n{out}");
     assert!(out.contains("(pending)"), "{out}");
 }
@@ -419,6 +425,160 @@ fn help_popup_shows_page_keys_on_the_subscriptions_page() {
         assert!(out.contains(desc), "缺 {desc:?}\n{out}");
     }
     assert!(out.contains("PgUp / PgDn"), "{out}");
+}
+
+/// 在一行里找到 `label` 之后, 数出它后面显示宽度上的列号 (border/pad/label 本身的宽度 + 紧跟着
+/// 的空格数), 不依赖页面内部的 `FIELD_LABEL_COL` 常量——用渲染出来的文字反推, 这样如果实现改了
+/// 对齐方式但没有真的对齐, 测试也不会跟着"配合"通过。
+fn value_column(line: &str, label: &str) -> usize {
+    let idx = line.find(label).unwrap_or_else(|| panic!("缺 {label:?} 这一行\n{line}"));
+    let prefix_width = line[..idx].width();
+    let after = &line[idx + label.len()..];
+    let spaces = after.chars().take_while(|c| *c == ' ').count();
+    prefix_width + label.width() + spaces
+}
+
+/// `render()` 返回的是 `TestBackend` 自己的 `Display` 格式, 每行形如
+/// `"<可见内容>" Hidden by multi-width symbols: [...]` (宽字符的占位单元被跳过时才带这段调试
+/// 信息)——不是原始终端行。逐字符对齐相关的断言得先剥掉这层包装, 拿到真正的可见内容再量列号,
+/// 不然每行开头那个字面双引号会把 `trim_start_matches('│')` 之类的结构性判断全部带偏。
+fn plain(line: &str) -> &str {
+    let body = line.split(" Hidden by multi-width symbols:").next().unwrap_or(line);
+    body.trim_matches('"')
+}
+
+/// 找到"去掉边框和内边距之后以 `label` 开头"的那一行——比 `l.contains(label)` 更严格, 避免
+/// 「限额」这个标签被同一行里「日限额」这种周期名的子串抢先命中。
+fn find_field_row<'a>(out: &'a str, label: &str) -> &'a str {
+    out.lines()
+        .map(plain)
+        .find(|l| l.trim_start_matches('│').trim_start().starts_with(label))
+        .unwrap_or_else(|| panic!("缺 {label:?} 这一行\n{out}"))
+}
+
+/// Fix round 1, #1: 限额行的 `Layout::horizontal(...).spacing(1)` 把标签也算进了间距里, 值比其它
+/// 字段行的值多缩进一列。这里挑 7 个覆盖普通行 (状态/端点/模型/被引用) 与特殊渲染路径 (限额用
+/// `LineGauge`、余额是多行里的第一行、最近错误是 `Wrap` 过的段落) 的字段, 断言它们的值列完全相同。
+#[test]
+fn detail_field_values_share_one_column() {
+    let mut a = subs_app(false);
+    render(&mut a, 80, 24);
+    a.handle_key(key(KeyCode::Enter));
+    let out = render(&mut a, 80, 24);
+
+    let labels = [ZH.sub_f_state, ZH.sub_f_endpoint, ZH.sub_f_quota, ZH.sub_f_balance, ZH.sub_f_models, ZH.sub_f_referenced, ZH.sub_f_last_error];
+    let columns: Vec<(&str, usize)> = labels.iter().map(|label| (*label, value_column(find_field_row(&out, label), label))).collect();
+    let first = columns[0].1;
+    for (label, col) in &columns {
+        assert_eq!(*col, first, "「{label}」的值列错位: {columns:?}\n{out}");
+    }
+}
+
+/// Fix round 1, #3: 详情面板装不下所有字段时, 之前是直接把靠后的字段 (比如"被引用") 悄悄丢掉;
+/// 现在最后一行必须换成总览页同款的"还有 N 个"提示, 而且不能把底边框顶飞。
+#[test]
+fn detail_overflow_is_announced() {
+    let mut a = app(false);
+    a.update(Action::Connected { app_version: VERSION.into() });
+    a.update(Action::SwitchTab(Tab::Subscriptions));
+
+    let mut overflowing = detail_subs().into_iter().next().unwrap(); // 智谱主号, 已经带槽位/effort
+    overflowing.quota_usage = vec![
+        quota_period(QuotaPeriod::Daily, 100, 90),
+        quota_period(QuotaPeriod::Weekly, 100, 90),
+        quota_period(QuotaPeriod::Monthly, 100, 90),
+        quota_period(QuotaPeriod::Total, 100, 90),
+    ];
+    overflowing.balance_cache = Some(BalanceCache {
+        fetched_at: NOW,
+        snapshot: BalanceSnapshot {
+            is_available: None,
+            entries: (0..3)
+                .map(|i| BalanceEntry {
+                    label: format!("余额{i}"),
+                    value_text: "1.00".into(),
+                    unit: "CNY".into(),
+                    hint: None,
+                    severity: BalanceSeverity::Normal,
+                })
+                .collect(),
+        },
+    });
+    overflowing.last_error_message = Some("x".repeat(90)); // 够长, 折成好几行
+    a.update(subs_done(1, vec![overflowing]));
+
+    render(&mut a, 80, 24);
+    a.handle_key(key(KeyCode::Enter));
+    let out = render(&mut a, 80, 24);
+    assert!(out.contains("… 还有"), "装不下时最后一行应该提示还有多少字段没显示\n{out}");
+
+    let lines: Vec<&str> = out.lines().collect();
+    let block_bottom = lines[lines.len() - 2]; // 最后一行是底部键位栏, 倒数第二行才是详情面板的下边框。
+    assert!(block_bottom.contains('╰') && block_bottom.contains('╯'), "溢出提示不该把面板的下边框顶飞\n{out}");
+}
+
+/// Fix round 1, #5: `base_url` 之前直接整串塞进 Line, 超宽时被无声硬裁 (没有省略号), 也可能顶到
+/// 边框外面。给一段正好 70 列宽的端点 (比窄屏详情面板留给值的宽度还长), 断言渲染结果以省略号收尾。
+#[test]
+fn detail_long_base_url_is_truncated_with_ellipsis() {
+    let mut a = subs_app(false);
+    let mut subs = detail_subs();
+    let prefix = "https://example.invalid/";
+    subs[0].base_url = format!("{prefix}{}", "x".repeat(70 - prefix.width()));
+    assert_eq!(subs[0].base_url.width(), 70, "测试串本身要保证正好 70 列宽");
+    a.update(subs_done(2, subs));
+
+    render(&mut a, 80, 24);
+    a.handle_key(key(KeyCode::Enter));
+    let out = render(&mut a, 80, 24);
+    let row = find_field_row(&out, ZH.sub_f_endpoint);
+    let trimmed = row.trim_end_matches('│').trim_end();
+    assert!(trimmed.ends_with('…'), "超长端点应该截断成省略号收尾, 不能硬裁\n{row}");
+}
+
+/// 从 " n/total " 标题里读出当前是第几条, 用来在不重复实现分页算法的前提下断言 `PageUp` /
+/// `PageDown` 翻的是"一整屏", 不是固定步长 1。
+fn parse_current_of(out: &str, total: usize) -> usize {
+    let needle = format!("/{total} ");
+    let idx = out.find(&needle).unwrap_or_else(|| panic!("缺 .../{total} 这段\n{out}"));
+    let mut start = idx;
+    while start > 0 && out.as_bytes()[start - 1].is_ascii_digit() {
+        start -= 1;
+    }
+    out[start..idx].parse().unwrap_or_else(|_| panic!("解析不出当前行号: {:?}\n{out}", &out[start..idx]))
+}
+
+/// Fix round 1, #8: 第一帧画出来之前 `last_page_rows` 不该是 0 (那样 `PageDown` 只会移动 0 格,
+/// 跟没按一样)；画过一帧之后, `PageDown` / `PageUp` 应该按可视行数整屏翻页, 并且在两端钳制。
+#[test]
+fn page_keys_move_by_the_visible_row_count() {
+    let mut a = app(false);
+    a.update(Action::Connected { app_version: VERSION.into() });
+    a.update(Action::SwitchTab(Tab::Subscriptions));
+    let subs: Vec<Subscription> = (0..30).map(|i| sub(&i.to_string(), &format!("sub-{i:02}"), SubscriptionState::Healthy)).collect();
+    a.update(subs_done(1, subs));
+    render(&mut a, 80, 24); // 画一帧, 让 `last_page_rows` 从默认值更新成真实可视行数。
+
+    a.handle_key(key(KeyCode::PageDown));
+    let after_down = render(&mut a, 80, 24);
+    let landed = parse_current_of(&after_down, 30);
+    assert!(landed > 1 && landed < 30, "PageDown 应该往下翻一整屏, 不是移动 1 格 (落在第 {landed} 条)\n{after_down}");
+
+    a.handle_key(key(KeyCode::PageUp));
+    let after_up = render(&mut a, 80, 24);
+    assert_eq!(parse_current_of(&after_up, 30), 1, "PageUp 应该翻回同样的距离\n{after_up}");
+
+    for _ in 0..5 {
+        a.handle_key(key(KeyCode::PageDown));
+    }
+    let bottom = render(&mut a, 80, 24);
+    assert!(bottom.contains(" 30/30 "), "多次 PageDown 应该钳制在最后一条, 不越界\n{bottom}");
+
+    for _ in 0..5 {
+        a.handle_key(key(KeyCode::PageUp));
+    }
+    let top = render(&mut a, 80, 24);
+    assert!(top.contains(" 1/30 "), "多次 PageUp 应该钳制在第一条, 不越界\n{top}");
 }
 
 // ---------- 渲染内容 ----------
