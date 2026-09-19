@@ -180,7 +180,18 @@ impl App {
     }
 
     fn open_confirm(&mut self, prompt: String, on_yes: Box<Action>) {
+        // Fix round C: 先走正常的关闭路径——如果已经有另一个弹窗开着, 这样才会清掉它的
+        // `popup_area` (不清的话, 如果新弹窗在第一次 draw() 之前就被关掉, 关闭动效会拿旧弹窗的
+        // 几何去播), 而不是直接覆盖 `self.popup` 留下不一致的状态。
+        self.close_popup();
         self.popup = Some(Popup::Confirm(ConfirmState { prompt, on_yes }));
+        self.pending_popup_fx = Some(PopupFx::Open);
+    }
+
+    /// `Action::OpenPicker` 与 `open_confirm` 共用同一条「替换掉已经打开的弹窗」规则 (Fix round C)。
+    fn open_picker(&mut self, spec: picker::PickerSpec) {
+        self.close_popup();
+        self.popup = Some(Popup::Picker(PickerState::new(spec)));
         self.pending_popup_fx = Some(PopupFx::Open);
     }
 
@@ -254,7 +265,7 @@ impl App {
         if let BusyKey::Subscription(id) = &key {
             self.last_outcome.remove(id);
         }
-        vec![Cmd::Mutate(m)]
+        vec![Cmd::Mutate(Box::new(m))]
     }
 
     /// `Action::MutationDone`: 从忙碌表移除, 先对 `mutation.refetch()` 里每个目标调对应的
@@ -430,8 +441,7 @@ impl App {
             Action::Mutate(m) => self.start_mutation(m),
             Action::MutationDone { mutation, barrier, result } => self.finish_mutation(mutation, barrier, result),
             Action::OpenPicker(spec) => {
-                self.popup = Some(Popup::Picker(PickerState::new(spec)));
-                self.pending_popup_fx = Some(PopupFx::Open);
+                self.open_picker(spec);
                 Vec::new()
             }
             Action::PickerDone { tag, choice } => {
@@ -675,4 +685,58 @@ mod tests {
         assert!(!a.pages.placeholder.is_dirty(), "y 之后原页面的草稿应该被丢弃");
     }
 
+    /// Fix round E: `guard_dirty` 之前只有 `Quit` / `SwitchTab` 两条路径被测过, `NextTab` /
+    /// `PrevTab` 走的是同一个 `guard_dirty` helper, 但从没被单独断言过。
+    #[test]
+    fn next_tab_and_prev_tab_on_a_dirty_page_ask_first_and_yes_discards() {
+        let mut a = dirty_app(); // tab = VirtualModels (index 2)
+        assert!(a.update(Action::NextTab).is_empty(), "dirty 时 NextTab 应该先确认");
+        assert_eq!(a.tab, Tab::VirtualModels, "确认之前不该真的切走");
+        a.update(Action::Confirmed(Box::new(Action::NextTab)));
+        assert_eq!(a.tab, Tab::Live, "y 之后应该真的切到下一页");
+
+        let mut b = dirty_app();
+        assert!(b.update(Action::PrevTab).is_empty(), "dirty 时 PrevTab 应该先确认");
+        assert_eq!(b.tab, Tab::VirtualModels);
+        b.update(Action::Confirmed(Box::new(Action::PrevTab)));
+        assert_eq!(b.tab, Tab::Subscriptions, "y 之后应该真的切到上一页");
+    }
+
+    /// Fix round E: `Action::DiscardDraft` (页面自己按 Esc 放弃编辑时用) 应该直接调用当前页面的
+    /// `discard_changes()`, 不产出任何 `Cmd`, 也不需要经过确认弹窗——这条路径以前没有专门测过。
+    #[test]
+    fn discard_draft_clears_the_current_pages_dirty_flag_without_a_cmd() {
+        let mut a = dirty_app();
+        assert!(a.pages.placeholder.is_dirty());
+        assert!(a.update(Action::DiscardDraft).is_empty(), "不应该产出任何 Cmd");
+        assert!(!a.pages.placeholder.is_dirty(), "草稿应该被丢弃");
+    }
+
+    /// Fix round C: 打开一个新弹窗 (确认 / picker) 时, 如果已经有另一个弹窗开着, 应该直接替换它,
+    /// 并且清掉旧弹窗的 `popup_area`——不清的话, 如果新弹窗在第一次 `draw()` 之前就被关掉, 关闭
+    /// 动效会拿旧弹窗的几何去播。
+    #[test]
+    fn opening_a_popup_while_another_is_open_replaces_it_and_resets_popup_area() {
+        let mut a = app();
+        a.update(Action::ToggleHelp);
+        assert!(matches!(a.popup, Some(Popup::Help)));
+        render(&mut a, 80, 24); // 让 App 记住 Help 弹窗的 popup_area。
+        assert!(a.popup_area.is_some());
+
+        a.update(Action::OpenConfirm { prompt: "测试".into(), on_yes: Box::new(Action::Refresh) });
+        assert!(matches!(a.popup, Some(Popup::Confirm(_))), "应该直接替换成确认弹窗");
+        assert!(a.popup_area.is_none(), "替换时应该清掉旧弹窗的 popup_area, 不留到下一次关闭时误用");
+
+        render(&mut a, 80, 24); // 再记一次, 这次是 Confirm 弹窗的 popup_area。
+        assert!(a.popup_area.is_some());
+        a.update(Action::OpenPicker(picker::PickerSpec {
+            tag: picker::PickerTag::VmAddSubscription,
+            title: "选择".into(),
+            items: vec![],
+            allow_custom: false,
+            initial: String::new(),
+        }));
+        assert!(matches!(a.popup, Some(Popup::Picker(_))), "应该直接替换成 picker 弹窗");
+        assert!(a.popup_area.is_none(), "同样应该清掉 Confirm 弹窗的 popup_area");
+    }
 }

@@ -17,10 +17,11 @@ use cc_router_tui::i18n::ZH;
 use cc_router_tui::pages::Pages;
 use cc_router_tui::theme::{ColorMode, Theme};
 use cc_router_tui::widgets::picker::{self, PickerChoice, PickerItem, PickerSpec, PickerTag, Slot};
+use cc_router_tui::widgets::{confirm, help};
 use ratatui::backend::TestBackend;
 use ratatui::crossterm::event::{KeyCode, KeyEvent, KeyEventKind, KeyEventState, KeyModifiers};
 use ratatui::Terminal;
-use unicode_width::UnicodeWidthStr;
+use unicode_width::{UnicodeWidthChar, UnicodeWidthStr};
 
 const NOW: i64 = 1_700_000_000_000;
 const VERSION: &str = "9.9.9";
@@ -1023,6 +1024,13 @@ fn picker_swallows_global_keys() {
     }
     let out = render(&mut a, 80, 24);
     assert!(out.contains("q2r?"), "四个字符应该都进了输入框\n{out}");
+
+    // Fix round H: Tab / Shift+Tab 平时是 NextTab / PrevTab, 弹窗打开时同样归 picker 管 (tui-input
+    // 自己认得 Tab 键, 返回 None 不改输入框内容), 不该冒出 SwitchTab 的 Action。
+    assert_eq!(a.handle_key(key(KeyCode::Tab)), None, "Tab 不该在 picker 打开时切页");
+    assert_eq!(a.handle_key(key(KeyCode::BackTab)), None, "BackTab 不该在 picker 打开时切页");
+    let out_after_tab = render(&mut a, 80, 24);
+    assert!(out_after_tab.contains("选择模型"), "picker 应该还开着, 没有被 Tab 意外关掉或切走\n{out_after_tab}");
 }
 
 /// Task 3: 光标只在 picker 弹窗打开时才出现 (ratatui 默认隐藏, 只有 `set_cursor_position` 当帧
@@ -1062,6 +1070,56 @@ fn picker_done_reaches_the_current_page() {
     assert!(a.update(Action::PickerDone { tag, choice }).is_empty(), "占位页面的 update 应该忽略它");
     let closed = render(&mut a, 80, 24);
     assert!(!closed.contains("选择模型"), "PickerDone 之后弹窗应该已经关闭\n{closed}");
+}
+
+/// Fix round A: `Clear` 本身不修复紧贴弹窗左右边缘、横跨边界的宽字符 (CJK) ——三个弹窗都要经过
+/// `widgets::clear_popup_area` 才能保证边框在这种情况下依然完整。总览页的健康度面板里就有会撞上
+/// 80×24 下 picker 弹窗左边缘的 "Kimi 备用" (`ui__picker_popup_80x24.snap` 曾经因为这个缺了左边
+/// 框), 拿它做背景, 对 Help / Confirm / Picker 三种弹窗分别断言: 弹窗矩形每一行的第一列是左边框
+/// 字符、最后一列是右边框字符。
+#[test]
+fn popup_borders_survive_wide_glyphs_underneath() {
+    // 按**显示列**取字符, 不能按 `Vec<char>` 下标——这一行左边可能有 CJK 文本 (比如总览页的订阅
+    // 名), 字符数和显示列数不是一回事, 按字符下标取会系统性偏移 (`format::fit` 同一个道理)。
+    fn char_at_column(line: &str, target_col: usize) -> char {
+        let mut col = 0usize;
+        for c in line.chars() {
+            let w = c.width().unwrap_or(0).max(1);
+            if target_col < col + w {
+                return c;
+            }
+            col += w;
+        }
+        ' '
+    }
+
+    fn assert_borders_intact(out: &str, popup: ratatui::layout::Rect, label: &str) {
+        let lines: Vec<&str> = out.lines().map(plain).collect();
+        for y in popup.top()..popup.bottom() {
+            let line = lines[y as usize];
+            let left = char_at_column(line, popup.left() as usize);
+            let right = char_at_column(line, popup.right() as usize - 1);
+            assert!(['│', '╭', '╰'].contains(&left), "{label} 第 {y} 行左边框缺失 (实际 {left:?})\n{out}");
+            assert!(['│', '╮', '╯'].contains(&right), "{label} 第 {y} 行右边框缺失 (实际 {right:?})\n{out}");
+        }
+    }
+
+    let screen = ratatui::layout::Rect::new(0, 0, 80, 24);
+
+    let mut help_app = loaded(false);
+    help_app.update(Action::ToggleHelp);
+    let help_area = help::area(screen, &ZH, &[]); // 总览页 (Tab::Overview) 没有自己的页面键位
+    assert_borders_intact(&render(&mut help_app, 80, 24), help_area, "Help");
+
+    let mut confirm_app = loaded(false);
+    confirm_app.update(Action::OpenConfirm { prompt: ZH.confirm_discard.into(), on_yes: Box::new(Action::Quit) });
+    let confirm_area = confirm::area(screen, ZH.confirm_discard);
+    assert_borders_intact(&render(&mut confirm_app, 80, 24), confirm_area, "Confirm");
+
+    let mut picker_app = loaded(false);
+    picker_app.update(Action::OpenPicker(picker_spec()));
+    let picker_area = picker::area(screen);
+    assert_borders_intact(&render(&mut picker_app, 80, 24), picker_area, "Picker");
 }
 
 #[test]
@@ -1496,7 +1554,7 @@ fn a_second_toggle_right_after_the_first_goes_the_other_way() {
     );
     assert_eq!(
         a.update(Action::Mutate(Mutation::SetEnabled { id: "1".into(), enabled: true })),
-        vec![Cmd::Mutate(Mutation::SetEnabled { id: "1".into(), enabled: true })],
+        vec![Cmd::Mutate(Box::new(Mutation::SetEnabled { id: "1".into(), enabled: true }))],
         "这次应该真的发出去, 不是 no-op"
     );
 }
@@ -1556,7 +1614,7 @@ fn a_list_issued_before_a_mutation_finished_cannot_revert_it() {
 fn a_mutation_is_issued_once_per_subscription_until_it_finishes() {
     let mut a = subs_app(false);
     let m1 = Mutation::TestConnection { id: "1".into() };
-    assert_eq!(a.update(Action::Mutate(m1.clone())), vec![Cmd::Mutate(m1.clone())]);
+    assert_eq!(a.update(Action::Mutate(m1.clone())), vec![Cmd::Mutate(Box::new(m1.clone()))]);
     assert!(a.update(Action::Mutate(m1.clone())).is_empty(), "同一订阅的第二次 t 应该被丢弃");
 
     // 忙碌表按订阅 id 判重, 不是按 `Mutation` 整体判重: 同一条订阅上换一种操作 (t 还在跑时按 e)
@@ -1567,7 +1625,7 @@ fn a_mutation_is_issued_once_per_subscription_until_it_finishes() {
     );
 
     let m2 = Mutation::TestConnection { id: "2".into() };
-    assert_eq!(a.update(Action::Mutate(m2)), vec![Cmd::Mutate(Mutation::TestConnection { id: "2".into() })], "另一条订阅应该照发");
+    assert_eq!(a.update(Action::Mutate(m2)), vec![Cmd::Mutate(Box::new(Mutation::TestConnection { id: "2".into() }))], "另一条订阅应该照发");
 
     let result = Ok(MutationOutcome::Tested(TestConnectionResult {
         ok: true,
@@ -1577,7 +1635,7 @@ fn a_mutation_is_issued_once_per_subscription_until_it_finishes() {
         state_reset: false,
     }));
     a.update(Action::MutationDone { mutation: m1.clone(), barrier: 0, result });
-    assert_eq!(a.update(Action::Mutate(m1.clone())), vec![Cmd::Mutate(m1)], "MutationDone 之后应该可以再发");
+    assert_eq!(a.update(Action::Mutate(m1.clone())), vec![Cmd::Mutate(Box::new(m1))], "MutationDone 之后应该可以再发");
 }
 
 #[test]

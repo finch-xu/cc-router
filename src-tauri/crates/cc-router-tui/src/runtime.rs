@@ -274,10 +274,30 @@ fn process_action(
                     spawn_fetch(client.clone(), tx.clone(), fetch, issued.next());
                 }
             }
-            Cmd::Mutate(mutation) => spawn_mutation(client.clone(), tx.clone(), mutation),
+            // `Cmd::Mutate` 的负载是 `Box<Mutation>` (Fix round I, 消掉 clippy 的
+            // `large_enum_variant`); `spawn_mutation` 本身不需要跟着改签名, 这里解引用一次拿回
+            // 所有权就够了。
+            Cmd::Mutate(mutation) => spawn_mutation(client.clone(), tx.clone(), *mutation),
         }
     }
     false
+}
+
+/// `keys.next()` 的结果 → 要喂给 `App::update` 的 `Action` (`None` = 这一轮不产生动作, 比如
+/// Resize 事件)。真正的按键交给 `app.handle_key` (有状态, 不是纯函数), 但「流终结了该怎么办」这
+/// 条规则单独抽出来, 不用真的驱动一整个 `event_loop` 就能测 (Fix round B)。
+///
+/// **`None`/`Err` 必须映射到 [`Action::ForceQuit`], 不能是 [`Action::Quit`]**: `EventStream`
+/// 返回 `None`/`Err` 说明键盘流已经终结 (典型场景是 tty 被关掉), 循环还在空转——`keys.next()`
+/// 立刻又会返回同一个终结结果。如果映射成会先弹确认框的 `Quit`, 一旦当前页面 dirty, 就会弹出一个
+/// 没有终端可以回答的确认弹窗, 而 `select!` 那一分支从此永远就绪, 主循环 100% CPU 空转, 永远退不
+/// 出去。`ForceQuit` 跳过确认, 直接退出, 才是安全的。
+fn key_action(ev: Option<Result<Event, std::io::Error>>, app: &mut App) -> Option<Action> {
+    match ev {
+        Some(Ok(Event::Key(key))) => app.handle_key(key),
+        Some(Ok(_)) => None, // Resize 等: 回到循环顶部重画即可
+        Some(Err(_)) | None => Some(Action::ForceQuit),
+    }
 }
 
 async fn event_loop(terminal: &mut ratatui::DefaultTerminal, client: Arc<Client>, app: &mut App) -> std::io::Result<()> {
@@ -306,11 +326,7 @@ async fn event_loop(terminal: &mut ratatui::DefaultTerminal, client: Arc<Client>
 
         let fast = app.wants_fast_frames();
         let action = tokio::select! {
-            ev = keys.next() => match ev {
-                Some(Ok(Event::Key(key))) => app.handle_key(key),
-                Some(Ok(_)) => None, // Resize 等: 回到循环顶部重画即可
-                Some(Err(_)) | None => Some(Action::Quit),
-            },
+            ev = keys.next() => key_action(ev, app),
             _ = tick.tick() => Some(Action::Tick { now_ms: unix_ms() }),
             Some(action) = rx.recv() => Some(action),
             res = &mut sse, if sse_alive => {
@@ -358,6 +374,42 @@ mod tests {
     fn backoff_is_1_2_5_then_flat() {
         let secs: Vec<u64> = (0..6).map(|a| backoff(a).as_secs()).collect();
         assert_eq!(secs, [1, 2, 5, 5, 5, 5]);
+    }
+
+    fn test_app() -> App {
+        App::new(crate::app::AppOptions {
+            strings: &crate::i18n::ZH,
+            theme: crate::theme::Theme::new(crate::theme::ColorMode::TrueColor),
+            fx_enabled: false,
+            now_ms: 0,
+            tui_version: "9.9.9-test",
+        })
+    }
+
+    /// Fix round B: 键盘流终结 (`None`/`Err`, 典型场景是 tty 被关掉) 必须映射到 `ForceQuit`,
+    /// 不能是会先弹确认框的 `Quit`——否则一旦有页面 dirty, 会弹出一个没有终端能回答的确认弹窗,
+    /// 而 `keys.next()` 立刻又会返回同一个终结结果, 主循环从此 100% CPU 空转、永远退不出去。
+    #[test]
+    fn key_stream_ending_forces_quit_not_quit() {
+        let mut app = test_app();
+        assert_eq!(key_action(None, &mut app), Some(Action::ForceQuit), "流结束 (None) 应该强制退出");
+
+        let mut app = test_app();
+        let io_err = std::io::Error::other("boom");
+        assert_eq!(key_action(Some(Err(io_err)), &mut app), Some(Action::ForceQuit), "读键盘出错应该强制退出");
+    }
+
+    /// `key_action` 对正常的按键 / 非按键事件不该干预, 分别交给 `app.handle_key` 或原样吞掉——
+    /// 只有「流终结」这一种情况被这个函数特殊处理 (与上面那条测试对照, 确认没有过度拦截)。
+    #[test]
+    fn key_action_passes_real_key_events_through_to_the_app() {
+        let mut app = test_app();
+        let key = ratatui::crossterm::event::KeyEvent::new(
+            ratatui::crossterm::event::KeyCode::Char('q'),
+            ratatui::crossterm::event::KeyModifiers::NONE,
+        );
+        assert_eq!(key_action(Some(Ok(Event::Key(key))), &mut app), Some(Action::Quit), "正常按键应该照常交给 app.handle_key");
+        assert_eq!(key_action(Some(Ok(Event::FocusGained)), &mut app), None, "非按键事件不该产生动作");
     }
 
     #[test]

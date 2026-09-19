@@ -133,7 +133,14 @@ pub enum MutationOutcome {
 pub enum Cmd {
     Quit,
     Fetch(Fetch),
-    Mutate(Mutation),
+    /// `Box`: `Mutation::UpdateSlots`/`UpdateVirtualModel` (Task 4) 带 `ModelSlots` + `SlotEfforts`
+    /// 这类整块负载, 让 `Cmd` 最大变体比其它变体 (`Quit` 零字节、`Fetch` 几字节) 大出一大截,
+    /// clippy 的 `large_enum_variant` 会警告——`Vec<Cmd>` 到处传递 (`App::update` 的返回值), 每个
+    /// 元素都按最大变体的尺寸分配。只在这一层加一层间接, 不改 `Mutation` / `Action::Mutate` /
+    /// `Action::MutationDone` 里任何字段的名字或形状——那两处没有触发这条 lint (`Action` 本来就
+    /// 因为别的变体, 比如 `OpenConfirm { prompt: String, .. }`, 已经不算"小"), 挑最小的改动消掉
+    /// 警告就够了 (Fix round I)。
+    Mutate(Box<Mutation>),
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -149,10 +156,16 @@ pub enum Action {
     ToggleHelp,
     ClosePopup,
     /// 打开一个「是 / 否」确认弹窗; `on_yes` 是选「是」后真正要执行的 `Action`。页面自己想
-    /// 请求确认 (比如「放弃修改」) 时也可以从 `handle_key` 直接返回这个。
+    /// 请求确认 (比如「放弃修改」) 时也可以从 `handle_key` 直接返回这个。**如果已经有另一个弹窗
+    /// 打开着 (哪怕是另一个 `Confirm` 或 `Picker`), 会直接替换它**——不播放旧弹窗的关闭动效,
+    /// 也不留旧弹窗的几何 (Fix round C)。
     OpenConfirm { prompt: String, on_yes: Box<Action> },
     /// 用户在确认弹窗里选了「是」: 先让当前页面丢弃草稿 (`Component::discard_changes`), 再执行
     /// `inner`——`inner` 走一次普通 `App::update`, 但此时 dirty 已经被清空, 不会被再次拦截确认。
+    /// **这个丢弃草稿是无条件的、不看 `inner` 是什么**: `Confirmed` 只应该用来包「放弃当前页面的
+    /// 修改」这一类确认 (`App::guard_dirty` 自动包出来的那种就是), 不要拿它包一个跟"要不要丢弃
+    /// 当前页面草稿"无关的确认——哪怕 `inner` 本身跟草稿毫无关系, `discard_changes()` 依然会先被
+    /// 调用一次 (Fix round E)。
     Confirmed(Box<Action>),
     /// 页面主动清空自己的草稿 (比如按 Esc 放弃编辑) 时用; `App` 收到后调用当前页面的
     /// `discard_changes()`, 不产出任何 `Cmd`。
@@ -176,6 +189,7 @@ pub enum Action {
     /// 变更完成前就已经发起、内容还是变更前旧值的加载晚到时把乐观更新冲回去。
     MutationDone { mutation: Mutation, barrier: u64, result: Result<MutationOutcome, String> },
     /// 打开一个过滤选择弹窗 (Task 5/6 起从页面发起: 选模型 / 选 effort / 给虚拟模型加订阅)。
+    /// **如果已经有另一个弹窗打开着, 会直接替换它**——语义与 `OpenConfirm` 相同 (Fix round C)。
     OpenPicker(PickerSpec),
     /// 用户在选择弹窗里选定了一行 (或输入了自定义值)。`App` 收到后先关弹窗 (带关闭动效), 再原样
     /// 转给当前页面的 `update`——页面据 `tag` 知道该把 `choice` 填到哪。Task 5 之前没有真正的消费者,

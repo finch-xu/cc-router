@@ -1,6 +1,6 @@
 ---
 source: crates/cc-router-tui/tests/ui.rs
-assertion_line: 1011
+assertion_line: 1012
 expression: "render(&mut a, 80, 24)"
 ---
 "╭ cc-router ──────────────────────────────────────────────── ● 已连接 · v9.9.9 ╮" Hidden by multi-width symbols: [(64, " "), (66, " "), (68, " ")]
@@ -16,7 +16,7 @@ expression: "render(&mut a, 80, 24)"
 "│ Token   │   GLM 4.5                                                │         │"
 "╰─────────│   GLM 4.5 Flash                                          │─────────╯"
 "╭ 订阅健康│                                                          │─────────╮" Hidden by multi-width symbols: [(3, " "), (5, " "), (7, " "), (9, " ")]
-"│ ◐ Kimi 备                                                          │──   91% │" Hidden by multi-width symbols: [(10, " ")]
+"│ ◐ Kimi  │                                                          │──   91% │"
 "│ ✕ 示例中│                                                          │         │" Hidden by multi-width symbols: [(5, " "), (7, " "), (9, " ")]
 "│ ● 智谱主│                                                          │──   62% │" Hidden by multi-width symbols: [(5, " "), (7, " "), (9, " ")]
 "│ ○ 停用的│                                                          │         │" Hidden by multi-width symbols: [(5, " "), (7, " "), (9, " ")]

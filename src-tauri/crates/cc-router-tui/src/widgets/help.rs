@@ -2,7 +2,7 @@
 
 use ratatui::layout::{Constraint, Rect};
 use ratatui::text::{Line, Span};
-use ratatui::widgets::{Block, BorderType, Clear, Padding, Paragraph};
+use ratatui::widgets::{Block, BorderType, Padding, Paragraph};
 use ratatui::Frame;
 
 use crate::format::fit;
@@ -39,6 +39,22 @@ pub fn draw(frame: &mut Frame, area: Rect, theme: &Theme, s: &Strings, page_rows
         .title_top(format!(" {} ", s.help_title))
         .title_bottom(Line::from(format!(" Esc {} ", s.key_close)).right_aligned())
         .padding(Padding::new(2, 2, 1, 1));
-    frame.render_widget(Clear, area);
+    super::clear_popup_area(frame, area);
     frame.render_widget(Paragraph::new(lines).block(block), area);
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::i18n::ZH;
+
+    /// Fix round D: `area()` 只用常量 `WIDTH` (无 `clamp`), 本身不会因为屏幕太小而 panic
+    /// (`Rect::centered` 内部的 `Layout` 约束求解器会把结果夹到父矩形自己的宽度以内); 这里补一条
+    /// 回归测试锁住这个事实, 呼应 `confirm::area` / `picker::area` 的同类检查。
+    #[test]
+    fn area_does_not_panic_on_a_tiny_screen() {
+        let tiny = Rect::new(0, 0, 20, 10);
+        let a = area(tiny, &ZH, &[]);
+        assert!(a.width <= tiny.width, "不该比屏幕本身更宽, 实际 {}", a.width);
+    }
 }

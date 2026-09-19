@@ -10,7 +10,7 @@ use ratatui::crossterm::event::{Event, KeyCode, KeyEvent, KeyModifiers};
 use ratatui::layout::{Constraint, Layout, Rect};
 use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};
-use ratatui::widgets::{Block, BorderType, Clear, List, ListItem, ListState, Padding, Paragraph};
+use ratatui::widgets::{Block, BorderType, List, ListItem, ListState, Padding, Paragraph};
 use ratatui::Frame;
 use tui_input::backend::crossterm::EventHandler;
 use tui_input::Input;
@@ -20,9 +20,9 @@ pub use crate::client::dto::Slot;
 use crate::i18n::Strings;
 use crate::theme::Theme;
 
-/// `PageUp` / `PageDown` 一次移动的行数。`PickerState` 本身不知道渲染出来的可视高度 (`draw` 才
-/// 知道几何), 用一个近似弹窗默认可视行数的常量, 不追求跟真实高度像订阅页那样逐帧同步。
-const PAGE_STEP: usize = 8;
+/// `PageUp` / `PageDown` 在第一帧画出来之前没有真实的可视行数可用, 先给个不至于原地不动的默认值
+/// (仿 `pages::subscriptions::DEFAULT_PAGE_ROWS` 同款写法, Fix round G)。
+const DEFAULT_LIST_ROWS: usize = 10;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PickerItem {
@@ -72,12 +72,15 @@ pub struct PickerState {
     dirty: bool,
     selected: usize,
     list_state: ListState,
+    /// 上一帧列表区域的可视行数, `PageUp`/`PageDown` 按这个翻页; 第一帧画出来之前用
+    /// `DEFAULT_LIST_ROWS` 兜底 (Fix round G, 不再是猜的固定步长)。
+    last_list_rows: usize,
 }
 
 // `tui_input::Input` 不实现 `PartialEq` (它的内部还有 yank 缓冲等实现细节, 不适合参与相等比较),
 // 所以不能整体 `#[derive(PartialEq)]`——按「逻辑上是同一个状态」手写: 规格、输入框的文本与光标
-// 位置、是否已编辑、选中下标。`list_state` 只是画面滚动偏移的缓存, 不参与相等判断 (与 `Fx` /
-// `TableState` 同一条道理: 不是业务状态)。
+// 位置、是否已编辑、选中下标。`list_state` (滚动偏移缓存) 与 `last_list_rows` (上一帧量出来的
+// 几何) 都不参与相等判断, 跟 `Fx` / `TableState` 同一条道理: 不是业务状态。
 impl PartialEq for PickerState {
     fn eq(&self, other: &Self) -> bool {
         self.spec == other.spec
@@ -91,7 +94,8 @@ impl PartialEq for PickerState {
 impl PickerState {
     pub fn new(spec: PickerSpec) -> Self {
         let input = Input::new(spec.initial.clone());
-        let mut state = Self { spec, input, dirty: false, selected: 0, list_state: ListState::default() };
+        let mut state =
+            Self { spec, input, dirty: false, selected: 0, list_state: ListState::default(), last_list_rows: DEFAULT_LIST_ROWS };
         let rows = state.visible();
         state.selected = rows
             .iter()
@@ -156,11 +160,11 @@ impl PickerState {
                 None
             }
             KeyCode::PageUp => {
-                self.move_selection(-(PAGE_STEP as isize));
+                self.move_selection(-(self.last_list_rows.max(1) as isize));
                 None
             }
             KeyCode::PageDown => {
-                self.move_selection(PAGE_STEP as isize);
+                self.move_selection(self.last_list_rows.max(1) as isize);
                 None
             }
             // 列表导航的 Home/End, 不是输入框光标的 Home/End (那个交给 tui-input 会跳去 `_` 分支,
@@ -224,8 +228,6 @@ pub fn area(screen: Rect) -> Rect {
 }
 
 pub fn draw(frame: &mut Frame, area: Rect, state: &mut PickerState, theme: &Theme, s: &Strings) {
-    frame.render_widget(Clear, area);
-
     let rows = state.visible();
     let total = rows.len();
     let current = if total == 0 { 0 } else { state.selected + 1 };
@@ -237,11 +239,21 @@ pub fn draw(frame: &mut Frame, area: Rect, state: &mut PickerState, theme: &Them
         .title_bottom(Line::from(format!(" {current}/{total} ")).right_aligned().style(theme.muted_style()))
         .padding(Padding::new(1, 1, 1, 1));
     let inner = block.inner(area);
+    // Fix round A: `Clear` 本身修不好紧贴弹窗边缘、横跨边界的宽字符, 必须在弹窗画任何内容之前
+    // (含 `Clear` 自己) 先跑一遍 `clear_popup_area` 里的修复——它内部才会真的调 `Clear`。
+    crate::widgets::clear_popup_area(frame, area);
     frame.render_widget(block, area);
 
     let [input_area, list_area] = Layout::vertical([Constraint::Length(1), Constraint::Min(0)]).areas(inner);
+    // Fix round G: 记录这一帧真实画出来的可视行数, 供 `PageUp`/`PageDown` 下次按键时使用——
+    // 只是记几何, 不改业务状态, 符合「同一状态画两次得到同一帧」的约束 (仿
+    // `pages::subscriptions::Subscriptions::last_page_rows` 同款写法)。
+    state.last_list_rows = list_area.height.max(1) as usize;
 
-    let scroll = state.input.visual_scroll(input_area.width.max(1) as usize);
+    // Fix round F: 留一列给光标——用输入框可视宽度减 1 去算 `visual_scroll`, 否则文本正好填满
+    // 输入框时光标会画在最后一个字符上面 (盖住它), 而不是紧跟在它后面的空位。
+    let visual_width = input_area.width.max(1).saturating_sub(1) as usize;
+    let scroll = state.input.visual_scroll(visual_width);
     frame.render_widget(Paragraph::new(state.input.value()).scroll((0, scroll as u16)), input_area);
     let cursor_x = input_area.x + state.input.visual_cursor().saturating_sub(scroll) as u16;
     frame.set_cursor_position((cursor_x.min(input_area.right().saturating_sub(1)), input_area.y));
@@ -329,9 +341,23 @@ mod tests {
         type_str(&mut exact, "a");
         assert!(!exact.visible().iter().any(|r| matches!(r, PickerRow::UseTyped(_))), "精确匹配 id 时不出现");
 
-        let mut custom = PickerState::new(spec(items, true, ""));
+        let mut custom = PickerState::new(spec(items.clone(), true, ""));
         type_str(&mut custom, "zzz");
         assert_eq!(custom.visible().first(), Some(&PickerRow::UseTyped("zzz".into())), "非空且不精确匹配时应该置顶");
+
+        // Fix round H: initial 非空的两种边界情况——同样的判定规则, 但这次是打开弹窗那一刻就该
+        // 生效, 不需要用户先敲一个字符。
+        let initial_matches = PickerState::new(spec(items.clone(), true, "a"));
+        assert!(
+            !initial_matches.visible().iter().any(|r| matches!(r, PickerRow::UseTyped(_))),
+            "initial 精确等于某个 item 的 id 时, 打开就不该有自定义行"
+        );
+        let initial_custom = PickerState::new(spec(items, true, "zzz"));
+        assert_eq!(
+            initial_custom.visible().first(),
+            Some(&PickerRow::UseTyped("zzz".into())),
+            "initial 不是任何 item 的 id 时, 打开就该看到自定义行, 不用等用户先编辑"
+        );
     }
 
     #[test]
@@ -441,6 +467,15 @@ mod tests {
         assert_eq!((tiny.width, tiny.height), (36, 16), "宽度应该夹到 screen-4");
     }
 
+    /// Fix round D: `area()` 用的是 `.min()` 不是 `.clamp()`, 天生不会因为屏幕比 `SCREEN_MARGIN`
+    /// 还小而 panic (`saturating_sub` 兜底), 但补一条回归测试锁住这个事实——万一以后有人手滑把
+    /// `.min()` 改成 `.clamp(下限, ...)`, 这里会立刻炸。
+    #[test]
+    fn area_does_not_panic_on_a_tiny_screen() {
+        let a = area(Rect::new(0, 0, 2, 2));
+        assert_eq!((a.width, a.height), (0, 0));
+    }
+
     /// 冒烟: 一次完整渲染不 panic (弹窗的画法细节由 `tests/ui.rs` 的快照覆盖)。
     #[test]
     fn draw_does_not_panic() {
@@ -459,5 +494,55 @@ mod tests {
                 draw(frame, a, &mut state, &theme, s);
             })
             .unwrap();
+    }
+
+    /// Fix round F: 文本正好填满输入框可视宽度时, 光标应该落在最后一个字符之后的空位 (一个空格),
+    /// 不能盖在字符本身上面。用一个好辨认的收尾字符 'Z', 直接检查光标那一格画出来的符号是不是空格
+    /// ——只看光标坐标本身在修复前后可能是同一个数字 (被 clamp 到同一列), 咬不住这个回归。
+    #[test]
+    fn cursor_reserves_a_column_when_text_exactly_fills_the_box() {
+        use ratatui::backend::TestBackend;
+        use ratatui::Terminal;
+
+        let items = vec![item("a", "Alpha")];
+        let mut state = PickerState::new(spec(items, false, ""));
+        // 60 列弹窗 - 2 边框 - 2 padding = 56 列输入框; 填 56 个字符正好撑满"旧版不预留光标列"的
+        // 宽度, 最后一个字符用 'Z' 收尾, 方便识别它有没有被光标盖住。
+        type_str(&mut state, &"a".repeat(55));
+        state.handle_key(key(KeyCode::Char('Z')));
+
+        let theme = Theme::new(ColorMode::TrueColor);
+        let s = &crate::i18n::ZH;
+        let mut terminal = Terminal::new(TestBackend::new(80, 24)).unwrap();
+        let popup = area(Rect::new(0, 0, 80, 24));
+        terminal.draw(|frame| draw(frame, popup, &mut state, &theme, s)).unwrap();
+
+        let cursor = terminal.backend().cursor_position();
+        let at_cursor = terminal.backend().buffer()[(cursor.x, cursor.y)].symbol().to_string();
+        assert_eq!(at_cursor, " ", "光标应该落在 'Z' 之后的空位, 不是盖在 'Z' 上面 (实际那一格是 {at_cursor:?})");
+    }
+
+    /// Fix round G: 画过一帧之后, `PageUp`/`PageDown` 应该按真实量出来的可视行数翻页, 不再是
+    /// 猜的固定步长。
+    #[test]
+    fn page_step_follows_the_last_drawn_list_height() {
+        use ratatui::backend::TestBackend;
+        use ratatui::Terminal;
+
+        let items: Vec<PickerItem> = (0..30).map(|i| item(&i.to_string(), &format!("Item {i}"))).collect();
+        let mut state = PickerState::new(spec(items, false, ""));
+        assert_eq!(state.last_list_rows, DEFAULT_LIST_ROWS, "画第一帧之前应该是默认兜底值");
+
+        let theme = Theme::new(ColorMode::TrueColor);
+        let s = &crate::i18n::ZH;
+        let mut terminal = Terminal::new(TestBackend::new(80, 24)).unwrap();
+        let popup = area(Rect::new(0, 0, 80, 24));
+        terminal.draw(|frame| draw(frame, popup, &mut state, &theme, s)).unwrap();
+
+        let real_rows = state.last_list_rows;
+        assert_ne!(real_rows, 0, "画过一帧之后应该是真实的可视行数");
+
+        state.handle_key(key(KeyCode::PageDown));
+        assert_eq!(state.selected, real_rows.min(29), "PageDown 应该按真实画出来的可视行数翻页, 不是固定步长");
     }
 }
