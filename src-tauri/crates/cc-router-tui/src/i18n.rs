@@ -120,6 +120,8 @@ pub struct Strings {
     pub toast_balance_ok: fn(name: &str) -> String,
     pub toast_balance_failed: fn(name: &str, reason: &str) -> String,
     pub toast_mutation_failed: fn(name: &str, message: &str) -> String,
+    pub toast_slots_saved: fn(name: &str) -> String,
+    pub toast_vm_saved: fn(vm: &str) -> String,
 
     pub sub_title: fn(usize) -> String,
     pub sub_col_name: &'static str,
@@ -153,6 +155,9 @@ pub struct Strings {
     pub sub_busy_testing: &'static str,
     pub sub_busy_models: &'static str,
     pub sub_busy_balance: &'static str,
+    /// `Mutation::UpdateSlots` (Task 5 起从订阅详情页发起) 的进行中文案; 与四个既有就地操作用同一套
+    /// 「状态行后追加 busy 文案」机制。
+    pub sub_busy_saving: &'static str,
 }
 
 impl Strings {
@@ -262,6 +267,8 @@ pub const ZH: Strings = Strings {
     toast_balance_ok: |name| format!("{name}：余额已刷新"),
     toast_balance_failed: |name, reason| format!("{name}：余额查询失败 ({reason})"),
     toast_mutation_failed: |name, message| format!("{name}：操作失败 ({message})"),
+    toast_slots_saved: |name| format!("{name}：槽位已保存"),
+    toast_vm_saved: |vm| format!("{vm}：已保存"),
 
     sub_title: |n| format!("订阅 ({n})"),
     sub_col_name: "备注名",
@@ -301,6 +308,7 @@ pub const ZH: Strings = Strings {
     sub_busy_testing: "正在测试连接…",
     sub_busy_models: "正在获取模型…",
     sub_busy_balance: "正在查询余额…",
+    sub_busy_saving: "正在保存…",
 };
 
 pub fn strings(lang: Lang) -> &'static Strings {

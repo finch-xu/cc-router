@@ -3,7 +3,7 @@
 //! 本 crate 作为 dev-dependency, 用真实 DTO 序列化后反序列化进这里的结构体。
 //! 后端改字段名 / 枚举值 → 那边的测试当场失败。给 TUI 加新字段时同步在那边加一条断言。
 
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Deserialize, PartialEq, Eq)]
 pub struct ProxyStatus {
@@ -98,7 +98,9 @@ pub struct Subscription {
     pub model_cache: Option<ModelCache>,
 }
 
-#[derive(Debug, Clone, Deserialize, PartialEq, Eq)]
+/// 与后端 `SubscriptionPatch::model_slots` 整块替换: `fallback` 空串 = 未配置, 与其它槽位一样
+/// **总是**序列化 (后端字段是普通 `String` + `#[serde(default)]`, 不是 `Option`)。
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Hash)]
 pub struct ModelSlots {
     pub fable: String,
     pub opus: String,
@@ -109,8 +111,9 @@ pub struct ModelSlots {
 }
 
 /// 五个模型槽位, 与 [`ModelSlots`] 的字段一一对应。`widgets::picker::PickerTag` 用它区分「给哪个
-/// 槽位选值」(Task 5 起); Task 4 会在这里紧挨着加 `ModelSlots::get(Slot)`。放在 dto.rs 而不是
-/// action.rs, 因为它描述的是后端数据形状 (槽位这个概念), 不是某一次 UI 交互。
+/// 槽位选值」(Task 5 起)。放在 dto.rs 而不是 action.rs, 因为它描述的是后端数据形状 (槽位这个
+/// 概念), 不是某一次 UI 交互。`Fallback` 不参与 `SlotEfforts` (后端 `SlotEfforts::get` 同样不含
+/// fallback), `get`/`set` 对它分别恒返回 `None` / 忽略写入。
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum Slot {
     Fable,
@@ -120,17 +123,115 @@ pub enum Slot {
     Fallback,
 }
 
-/// 每个模型槽位的 reasoning effort 覆盖。字段缺失 (老数据 `'{}'`) = 全 auto。
-#[derive(Debug, Clone, Default, Deserialize, PartialEq, Eq)]
+impl ModelSlots {
+    pub fn get(&self, slot: Slot) -> &str {
+        match slot {
+            Slot::Fable => &self.fable,
+            Slot::Opus => &self.opus,
+            Slot::Sonnet => &self.sonnet,
+            Slot::Haiku => &self.haiku,
+            Slot::Fallback => &self.fallback,
+        }
+    }
+
+    pub fn set(&mut self, slot: Slot, value: String) {
+        match slot {
+            Slot::Fable => self.fable = value,
+            Slot::Opus => self.opus = value,
+            Slot::Sonnet => self.sonnet = value,
+            Slot::Haiku => self.haiku = value,
+            Slot::Fallback => self.fallback = value,
+        }
+    }
+}
+
+/// 每个模型槽位的 reasoning effort 覆盖。字段缺失 (老数据 `'{}'`) = 全 auto。**auto = 该键不序列化**
+/// (`skip_serializing_if`, 与后端 `SlotEfforts` 的 `Option<String>` + `skip_serializing_if` 同一套
+/// 编码), 绝不发 `null` 或 `""`。
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq, Hash)]
 pub struct SlotEfforts {
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub fable: Option<String>,
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub opus: Option<String>,
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub sonnet: Option<String>,
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub haiku: Option<String>,
+}
+
+impl SlotEfforts {
+    pub fn get(&self, slot: Slot) -> Option<&str> {
+        match slot {
+            Slot::Fable => self.fable.as_deref(),
+            Slot::Opus => self.opus.as_deref(),
+            Slot::Sonnet => self.sonnet.as_deref(),
+            Slot::Haiku => self.haiku.as_deref(),
+            Slot::Fallback => None,
+        }
+    }
+
+    pub fn set(&mut self, slot: Slot, value: Option<String>) {
+        match slot {
+            Slot::Fable => self.fable = value,
+            Slot::Opus => self.opus = value,
+            Slot::Sonnet => self.sonnet = value,
+            Slot::Haiku => self.haiku = value,
+            Slot::Fallback => {}
+        }
+    }
+}
+
+/// 允许的槽位 effort 档位; 必须与后端 `commands::subscriptions::ALLOWED_SLOT_EFFORTS` 相等
+/// (契约测试 `tui_effort_choices_equal_the_backend_allowlist` 锁住)。刻意不含 `minimal`
+/// (OpenAI 系专有档, 理由见后端同名常量的注释)。
+pub const EFFORT_CHOICES: [&str; 5] = ["low", "medium", "high", "xhigh", "max"];
+
+/// 虚拟模型的调度模式。与后端 `virtual_model::model::RoutingMode` 对应 (`rename_all = "snake_case"`)。
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum RoutingMode {
+    Sequential,
+    RoundRobin,
+    Sticky,
+    /// 后端将来加了新模式时, 旧 TUI 不应该整个列表解析失败。
+    #[serde(other)]
+    Unknown,
+}
+
+impl RoutingMode {
+    /// 虚拟模型页按 `m` 循环切换模式用: `Unknown` (旧 TUI 不认得的新模式) 落回 `Sequential`,
+    /// 不在三个已知模式之间瞎绕。
+    pub fn next(self) -> Self {
+        match self {
+            RoutingMode::Sequential => RoutingMode::RoundRobin,
+            RoutingMode::RoundRobin => RoutingMode::Sticky,
+            RoutingMode::Sticky => RoutingMode::Sequential,
+            RoutingMode::Unknown => RoutingMode::Sequential,
+        }
+    }
+
+    /// 发给后端的线上名字。与后端 `#[serde(rename_all = "snake_case")]` 的输出必须逐字相同——
+    /// `tui_contract.rs::routing_mode_wire_names_round_trip` 锁住这一点, 这里手写而不是复用
+    /// `serde` 派生是因为 `runtime.rs` 直接拿这个函数的返回值拼 JSON, 不经过 `Serialize`。
+    pub fn as_wire(self) -> &'static str {
+        match self {
+            RoutingMode::Sequential => "sequential",
+            RoutingMode::RoundRobin => "round_robin",
+            RoutingMode::Sticky => "sticky",
+            // Unknown 不该被发回后端 (只应该出现在「读到了不认识的模式」这一刻); 给个安全的
+            // 缺省值而不是 panic, 与 `next()` 的兜底一致。
+            RoutingMode::Unknown => "sequential",
+        }
+    }
+}
+
+/// `list_virtual_models` 的一项。
+#[derive(Debug, Clone, Deserialize, PartialEq, Eq)]
+pub struct VirtualModel {
+    pub name: String,
+    pub mode: RoutingMode,
+    pub subscription_ids: Vec<String>,
 }
 
 #[derive(Debug, Clone, Deserialize, PartialEq, Eq)]

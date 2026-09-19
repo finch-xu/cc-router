@@ -10,7 +10,7 @@ use cc_router_tui::action::{Action, Cmd, Fetch, FetchData, Mutation, MutationOut
 use cc_router_tui::app::{App, AppOptions, MIN_HEIGHT};
 use cc_router_tui::client::dto::{
     BalanceCache, BalanceEntry, BalanceSeverity, BalanceSnapshot, ModelCache, ModelInfo, ModelSlots, OverallStats, ProxyStatus,
-    QuotaPeriod, QuotaUsage, RefreshBalanceResult, RefreshModelsResult, SeriesPoint, Settings, SlotEfforts, Subscription,
+    QuotaPeriod, QuotaUsage, RefreshBalanceResult, RefreshModelsResult, RoutingMode, SeriesPoint, Settings, SlotEfforts, Subscription,
     SubscriptionState, TestConnectionResult,
 };
 use cc_router_tui::i18n::ZH;
@@ -1704,6 +1704,35 @@ fn every_mutation_outcome_toasts_and_refetches() {
         let out = render(&mut a, 80, 24);
         assert!(out.contains(expect), "缺 {expect:?}\n{out}");
     }
+}
+
+/// Task 4: 两个新的保存类操作各自弹对了 toast, 并按 `Mutation::refetch()` 声明的目标追加
+/// `Cmd`——`UpdateSlots` 只影响订阅 (`BusyKey::Subscription`, 与其它四个就地操作同一套 refetch);
+/// `UpdateVirtualModel` 额外影响虚拟模型列表本身 (`BusyKey::VirtualModel`, refetch 顺序恰好是
+/// `[VirtualModels, Subscriptions]`, 不含别的 `Cmd`)。
+#[test]
+fn saving_outcomes_toast_and_refetch_what_they_declare() {
+    let mut a = subs_app(false);
+    let slots_mutation = Mutation::UpdateSlots {
+        id: "1".into(),
+        model_slots: ModelSlots { fable: "f".into(), opus: "o".into(), sonnet: "s".into(), haiku: "h".into(), fallback: String::new() },
+        slot_efforts: SlotEfforts::default(),
+    };
+    assert!(!a.update(Action::Mutate(slots_mutation.clone())).is_empty(), "应该真的发出去");
+    let cmds = a.update(Action::MutationDone { mutation: slots_mutation, barrier: 0, result: Ok(MutationOutcome::SlotsSaved) });
+    assert_eq!(cmds, vec![Cmd::Fetch(Fetch::Subscriptions)]);
+    let out = render(&mut a, 80, 24);
+    assert!(out.contains("智谱主号：槽位已保存"), "{out}");
+
+    let mut b = app(false);
+    assert_eq!(b.update(Action::Connected { app_version: VERSION.into() }), vec![Cmd::Fetch(Fetch::Overview)]);
+    let vm_mutation =
+        Mutation::UpdateVirtualModel { name: "model-sonnet".into(), mode: RoutingMode::RoundRobin, subscription_ids: vec!["1".into()] };
+    assert!(!b.update(Action::Mutate(vm_mutation.clone())).is_empty(), "应该真的发出去");
+    let cmds = b.update(Action::MutationDone { mutation: vm_mutation, barrier: 0, result: Ok(MutationOutcome::VirtualModelSaved) });
+    assert_eq!(cmds, vec![Cmd::Fetch(Fetch::VirtualModels), Cmd::Fetch(Fetch::Subscriptions)], "顺序应该是先虚拟模型后订阅");
+    let out = render(&mut b, 80, 24);
+    assert!(out.contains("model-sonnet：已保存"), "{out}");
 }
 
 #[test]

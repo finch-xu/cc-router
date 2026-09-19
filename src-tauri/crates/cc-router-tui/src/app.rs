@@ -262,29 +262,36 @@ impl App {
     /// **无论成败都追加一次 `mutation.refetch()` 声明的重拉** —— 状态 / 缓存 / 错误信息可能都变了。
     /// toast 与 `last_outcome`（I1 fix）**共用同一份文本**: toast 只能显示一行 (≤72 列, 3 秒就
     /// 消失), 详情面板的「上次操作」行拿 `last_outcome` 展示完整文案, 不受 toast 单行截断的限制。
-    /// `last_outcome` 只对 `BusyKey::Subscription` 的变更写——目前四种就地操作都是, 但这里写成
-    /// 显式判断而不是假设, 为将来的 `BusyKey::VirtualModel` 变更 (Task 4 起) 留好退路。
+    /// `last_outcome` 只对 `BusyKey::Subscription` 的变更写 (虚拟模型页没有这块面板);
+    /// `BusyKey::VirtualModel` 的变更 (Task 4 起) 仍然照常弹 toast、照常重拉, 只是不进这份存档。
     fn finish_mutation(&mut self, mutation: Mutation, barrier: u64, result: Result<MutationOutcome, String>) -> Vec<Cmd> {
         let key = mutation.busy_key();
         self.busy.remove(&key);
         for fetch in mutation.refetch() {
             match fetch {
-                Fetch::Subscriptions => self.store.set_subscriptions_barrier(barrier),
-                Fetch::Overview => {}
+                // 总览一次整页加载也带着订阅列表 (`Action::FetchDone` 的 `FetchData::Overview`
+                // 分支同样喂给 `Store::apply_subscriptions`), 所以必须和 `Fetch::Subscriptions`
+                // 一样推进订阅屏障——目前没有 `Mutation` 会把 `Fetch::Overview` 放进 `refetch()`,
+                // 但空着这个分支是一个等真用上才会炸的洞, 先堵上。
+                Fetch::Subscriptions | Fetch::Overview => self.store.set_subscriptions_barrier(barrier),
+                Fetch::VirtualModels => self.store.set_virtual_models_barrier(barrier),
             }
         }
         let refetch_cmds: Vec<Cmd> = mutation.refetch().iter().copied().map(Cmd::Fetch).collect();
-        let BusyKey::Subscription(id) = key else {
-            return refetch_cmds;
+
+        let name = match &key {
+            BusyKey::Subscription(id) => self.subscription_name(id),
+            BusyKey::VirtualModel(vm_name) => vm_name.clone(),
         };
-        let name = self.subscription_name(&id);
         let (kind, text) = match &result {
             Ok(MutationOutcome::EnabledSet) => {
                 let enabled = matches!(mutation, Mutation::SetEnabled { enabled: true, .. });
                 // 乐观更新 Store, 不等下一次 Fetch::Subscriptions 落地: 否则「按 e、还没刷新完又按
                 // 一次 e」会从 Store 读到没改过的旧 enabled, 算出同一个目标值发给后端 (no-op),
                 // 且第二条 toast 文案与第一条相同, 被 push_toast 的去重规则吞掉, 用户毫无反馈。
-                self.store.set_enabled(&id, enabled);
+                if let BusyKey::Subscription(id) = &key {
+                    self.store.set_enabled(id, enabled);
+                }
                 let text = if enabled { (self.s.toast_enabled)(&name) } else { (self.s.toast_disabled)(&name) };
                 (ToastKind::Success, text)
             }
@@ -301,10 +308,14 @@ impl App {
                 (ToastKind::Error, (self.s.toast_balance_failed)(&name, reason))
             }
             Ok(MutationOutcome::Balance(RefreshBalanceResult::Unsupported)) => (ToastKind::Info, self.s.sub_balance_unsupported.to_string()),
+            Ok(MutationOutcome::SlotsSaved) => (ToastKind::Success, (self.s.toast_slots_saved)(&name)),
+            Ok(MutationOutcome::VirtualModelSaved) => (ToastKind::Success, (self.s.toast_vm_saved)(&name)),
             Err(message) => (ToastKind::Error, (self.s.toast_mutation_failed)(&name, message)),
         };
         self.push_toast(Toast::new(kind, text.clone()));
-        self.last_outcome.insert(id, (kind, text));
+        if let BusyKey::Subscription(id) = key {
+            self.last_outcome.insert(id, (kind, text));
+        }
         refetch_cmds
     }
 
@@ -405,6 +416,13 @@ impl App {
                     if let Some(changed) = &changed {
                         self.notify_subscriptions_changed(changed);
                     }
+                    Vec::new()
+                }
+                // 虚拟模型列表刷新: 只进 Store, 不需要转给任何页面的 update ——虚拟模型页 (Task 6 起)
+                // 画的时候直接读 ctx.store, 与订阅列表同一套约定。
+                Ok(FetchData::VirtualModels(vms)) => {
+                    debug_assert_eq!(fetch, Fetch::VirtualModels, "spawn_fetch 应该保证 FetchData::VirtualModels 只配 Fetch::VirtualModels");
+                    self.store.apply_virtual_models(issued, vms);
                     Vec::new()
                 }
             },

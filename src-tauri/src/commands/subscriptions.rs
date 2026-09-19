@@ -104,7 +104,10 @@ pub struct CreateSubscriptionInput {
 ///
 /// 与 `providers/_schema.json` 里 6 值 enum 的不对称是有意的: 那个 enum 约束 provider yaml
 /// 默认值 (provider 作者清楚自家协议), 本白名单约束用户在 UI 选的跨协议统一值。
-const ALLOWED_SLOT_EFFORTS: &[&str] = &["low", "medium", "high", "xhigh", "max"];
+/// `pub(crate)` (而不是私有) 只是为了让 `tui_contract.rs` 的
+/// `tui_effort_choices_equal_the_backend_allowlist` 能核对 TUI 侧的 `EFFORT_CHOICES` 常量仍然
+/// 逐字相同——这是本 Task 唯一允许的后端改动, 不改变任何行为。
+pub(crate) const ALLOWED_SLOT_EFFORTS: &[&str] = &["low", "medium", "high", "xhigh", "max"];
 
 /// 校验 patch 里的槽位 effort 都在白名单内 (空/缺失 = auto, 合法)。
 /// 显式列四个槽位而不是遍历: 将来给 ModelSlots 加槽位时这里会因缺字段而被注意到。

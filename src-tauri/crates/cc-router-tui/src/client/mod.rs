@@ -17,6 +17,9 @@ pub mod commands {
     pub const TEST_CONNECTION: &str = "test_connection";
     pub const REFRESH_MODEL_LIST: &str = "refresh_model_list";
     pub const REFRESH_SUBSCRIPTION_BALANCE: &str = "refresh_subscription_balance";
+    pub const UPDATE_SUBSCRIPTION: &str = "update_subscription";
+    pub const LIST_VIRTUAL_MODELS: &str = "list_virtual_models";
+    pub const UPDATE_VIRTUAL_MODEL: &str = "update_virtual_model";
     /// 契约测试遍历这张表; 加新 command 时同时加进来。
     pub const ALL: &[&str] = &[
         PROXY_STATUS,
@@ -28,5 +31,8 @@ pub mod commands {
         TEST_CONNECTION,
         REFRESH_MODEL_LIST,
         REFRESH_SUBSCRIPTION_BALANCE,
+        UPDATE_SUBSCRIPTION,
+        LIST_VIRTUAL_MODELS,
+        UPDATE_VIRTUAL_MODEL,
     ];
 }

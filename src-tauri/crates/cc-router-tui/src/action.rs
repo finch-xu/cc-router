@@ -2,7 +2,8 @@
 //! `App::update` 是 `(状态, Action) → (新状态, Vec<Cmd>)` 的同步函数, 不碰网络也不碰终端, 所以能直接单测。
 
 use crate::client::dto::{
-    OverallStats, ProxyStatus, RefreshBalanceResult, RefreshModelsResult, SeriesPoint, Settings, Subscription, TestConnectionResult,
+    ModelSlots, OverallStats, ProxyStatus, RefreshBalanceResult, RefreshModelsResult, RoutingMode, SeriesPoint, Settings, SlotEfforts,
+    Subscription, TestConnectionResult, VirtualModel,
 };
 use crate::widgets::picker::{PickerChoice, PickerSpec, PickerTag};
 
@@ -61,15 +62,17 @@ pub struct OverviewData {
 pub enum Fetch {
     Overview,
     Subscriptions,
+    VirtualModels,
 }
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum FetchData {
     Overview(Box<OverviewData>),
     Subscriptions(Vec<Subscription>),
+    VirtualModels(Vec<VirtualModel>),
 }
 
-/// 订阅页的四个就地操作。**永不去重、永不补跑** (与 [`Fetch`] 相反): `runtime.rs` 对每一个
+/// 订阅页/虚拟模型页的就地操作。**永不去重、永不补跑** (与 [`Fetch`] 相反): `runtime.rs` 对每一个
 /// `Cmd::Mutate` 都直接 `spawn`, 不经过 `Fetches`。
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum Mutation {
@@ -77,10 +80,14 @@ pub enum Mutation {
     TestConnection { id: String },
     RefreshModels { id: String },
     RefreshBalance { id: String },
+    /// 保存一条订阅的模型槽位 + 槽位 effort (Task 5)。两块都整块替换。
+    UpdateSlots { id: String, model_slots: ModelSlots, slot_efforts: SlotEfforts },
+    /// 保存一个虚拟模型的调度模式 + 订阅列表 (Task 6)。
+    UpdateVirtualModel { name: String, mode: RoutingMode, subscription_ids: Vec<String> },
 }
 
-/// 忙碌表 (`App::busy`) 判重用的键。目前四种就地操作都作用于订阅, 只产生 `Subscription` 变体;
-/// `VirtualModel` 留给虚拟模型页的编辑操作 (Task 4 起) 用, 本 Task 只定义不产出。
+/// 忙碌表 (`App::busy`) 判重用的键。订阅相关的就地操作 (含 `UpdateSlots`) 产生 `Subscription`
+/// 变体; 虚拟模型页的编辑操作 (`UpdateVirtualModel`, Task 6 起消费) 产生 `VirtualModel` 变体。
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum BusyKey {
     Subscription(String),
@@ -95,13 +102,19 @@ impl Mutation {
             Mutation::SetEnabled { id, .. }
             | Mutation::TestConnection { id }
             | Mutation::RefreshModels { id }
-            | Mutation::RefreshBalance { id } => BusyKey::Subscription(id.clone()),
+            | Mutation::RefreshBalance { id }
+            | Mutation::UpdateSlots { id, .. } => BusyKey::Subscription(id.clone()),
+            Mutation::UpdateVirtualModel { name, .. } => BusyKey::VirtualModel(name.clone()),
         }
     }
 
-    /// 这次变更完成后该重新拉取哪些加载。现有四种都只影响订阅列表。
+    /// 这次变更完成后该重新拉取哪些加载。`UpdateVirtualModel` 额外影响虚拟模型列表本身 (顺序:
+    /// 先虚拟模型后订阅, 与 `runtime.rs`/`tests/ui.rs` 断言的顺序一致); 其余都只影响订阅列表。
     pub fn refetch(&self) -> &'static [Fetch] {
-        &[Fetch::Subscriptions]
+        match self {
+            Mutation::UpdateVirtualModel { .. } => &[Fetch::VirtualModels, Fetch::Subscriptions],
+            _ => &[Fetch::Subscriptions],
+        }
     }
 }
 
@@ -112,6 +125,8 @@ pub enum MutationOutcome {
     Tested(TestConnectionResult),
     Models(RefreshModelsResult),
     Balance(RefreshBalanceResult),
+    SlotsSaved,
+    VirtualModelSaved,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -172,18 +187,27 @@ pub enum Action {
 mod tests {
     use super::*;
 
+    fn slots() -> ModelSlots {
+        ModelSlots { fable: String::new(), opus: String::new(), sonnet: String::new(), haiku: String::new(), fallback: String::new() }
+    }
+
     #[test]
     fn every_mutation_declares_its_busy_key_and_refetch() {
-        let cases = [
+        let subscription_scoped = [
             Mutation::SetEnabled { id: "1".into(), enabled: true },
             Mutation::TestConnection { id: "1".into() },
             Mutation::RefreshModels { id: "1".into() },
             Mutation::RefreshBalance { id: "1".into() },
+            Mutation::UpdateSlots { id: "1".into(), model_slots: slots(), slot_efforts: SlotEfforts::default() },
         ];
-        for m in cases {
+        for m in subscription_scoped {
             assert_eq!(m.busy_key(), BusyKey::Subscription("1".into()), "{m:?} 应该产出 Subscription 忙碌键");
             assert_eq!(m.refetch(), &[Fetch::Subscriptions], "{m:?} 完成后应该重拉订阅列表");
         }
+
+        let vm = Mutation::UpdateVirtualModel { name: "model-sonnet".into(), mode: RoutingMode::Sequential, subscription_ids: vec![] };
+        assert_eq!(vm.busy_key(), BusyKey::VirtualModel("model-sonnet".into()), "虚拟模型编辑应该产出 VirtualModel 忙碌键");
+        assert_eq!(vm.refetch(), &[Fetch::VirtualModels, Fetch::Subscriptions], "完成后应该先重拉虚拟模型再重拉订阅");
     }
 
     #[test]

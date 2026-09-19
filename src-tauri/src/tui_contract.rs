@@ -9,7 +9,10 @@ use serde::{de::DeserializeOwned, Serialize};
 
 use crate::commands::proxy::ProxyStatus;
 use crate::commands::statistics::{DailySeriesPointDto, OverallStatsDto, StatsRange};
-use crate::commands::subscriptions::{RefreshBalanceResult, RefreshModelListResult, TestConnectionResult};
+use crate::commands::subscriptions::{
+    RefreshBalanceResult, RefreshModelListResult, SubscriptionPatch, TestConnectionResult, ALLOWED_SLOT_EFFORTS,
+};
+use crate::commands::virtual_models::{UpdateVirtualModelInput, VirtualModelDto};
 use crate::provider::model::AuthType;
 use crate::runtime_file::RuntimeFile;
 use crate::settings::model::{ProxyMode, Settings};
@@ -18,6 +21,7 @@ use crate::subscription::model::{
     SubscriptionState,
 };
 use crate::subscription::quota::{TokenQuotas, ALL_PERIODS};
+use crate::virtual_model::model::RoutingMode;
 
 fn through_json<T: Serialize, V: DeserializeOwned>(value: &T) -> V {
     let json = serde_json::to_value(value).unwrap();
@@ -332,6 +336,106 @@ fn every_backend_state_is_known_to_the_tui() {
         let view: dto::SubscriptionState = through_json(&state);
         assert_ne!(view, dto::SubscriptionState::Unknown, "{state:?}");
     }
+}
+
+/// 三种调度模式各自序列化后能被 TUI 的 `dto::VirtualModel` 解析, 字段值原样保留。
+#[test]
+fn virtual_model_dto_matches() {
+    for (mode, expected) in [
+        (RoutingMode::Sequential, dto::RoutingMode::Sequential),
+        (RoutingMode::RoundRobin, dto::RoutingMode::RoundRobin),
+        (RoutingMode::Sticky, dto::RoutingMode::Sticky),
+    ] {
+        let real = VirtualModelDto {
+            name: "model-sonnet".into(),
+            mode,
+            subscription_ids: vec!["11111111-1111-1111-1111-111111111111".into()],
+        };
+        let view: dto::VirtualModel = through_json(&real);
+        assert_eq!(view.name, "model-sonnet");
+        assert_eq!(view.mode, expected, "{mode:?}");
+        assert_eq!(view.subscription_ids, vec!["11111111-1111-1111-1111-111111111111".to_string()]);
+    }
+}
+
+/// 后端的每一个调度模式, TUI 都必须认得 —— 落到 `Unknown` 说明 TUI 的枚举漏了一个。
+#[test]
+fn every_backend_routing_mode_is_known_to_the_tui() {
+    for mode in [RoutingMode::Sequential, RoutingMode::RoundRobin, RoutingMode::Sticky] {
+        let view: dto::RoutingMode = through_json(&mode);
+        assert_ne!(view, dto::RoutingMode::Unknown, "{mode:?}");
+    }
+}
+
+/// `runtime.rs` 直接拿 `RoutingMode::as_wire()` 的返回值 (而不是走 `Serialize`) 拼请求体
+/// (见该文件 `call_mutation` 里 `Mutation::UpdateVirtualModel` 分支的注释) —— 这条测试锁住
+/// `as_wire()` 吐出来的字符串仍然是后端 `RoutingMode` 认得的线上名字。「咬合检查」: 把
+/// `RoutingMode::RoundRobin::as_wire()` 临时改成 "roundrobin" 应该让这条测试炸。
+#[test]
+fn routing_mode_wire_names_round_trip() {
+    for (tui_mode, expected_real) in [
+        (dto::RoutingMode::Sequential, RoutingMode::Sequential),
+        (dto::RoutingMode::RoundRobin, RoutingMode::RoundRobin),
+        (dto::RoutingMode::Sticky, RoutingMode::Sticky),
+    ] {
+        let wire = tui_mode.as_wire();
+        let real: RoutingMode = serde_json::from_value(serde_json::Value::String(wire.to_string()))
+            .unwrap_or_else(|e| panic!("后端 RoutingMode 读不了 TUI 发的线上名字 {wire:?}: {e}"));
+        assert_eq!(
+            serde_json::to_value(real).unwrap(),
+            serde_json::to_value(expected_real).unwrap(),
+            "{wire:?} 应该解析回 {expected_real:?}"
+        );
+    }
+}
+
+/// 用 TUI 的 `dto::ModelSlots` / `dto::SlotEfforts` 序列化出一份 `update_subscription` 的 patch,
+/// 后端 `SubscriptionPatch` 必须原样反序列化——auto 槽位 (字段缺失) 读成 `None`, 带值的槽位原样,
+/// `fallback` 空串照常出现 (不是 `Option`)。
+#[test]
+fn update_subscription_patch_from_the_tui_deserializes() {
+    let model_slots = dto::ModelSlots { fable: "f".into(), opus: "o".into(), sonnet: "s".into(), haiku: "h".into(), fallback: String::new() };
+    let mut slot_efforts = dto::SlotEfforts::default();
+    slot_efforts.set(dto::Slot::Opus, Some("high".into()));
+
+    let patch_json = serde_json::json!({ "model_slots": model_slots, "slot_efforts": slot_efforts });
+    let patch: SubscriptionPatch = serde_json::from_value(patch_json).unwrap();
+
+    let slots = patch.model_slots.expect("model_slots 应该有值");
+    assert_eq!(slots.fable, "f");
+    assert_eq!(slots.opus, "o");
+    assert_eq!(slots.sonnet, "s");
+    assert_eq!(slots.haiku, "h");
+    assert_eq!(slots.fallback, "", "fallback 是普通 String, 空值也该照常出现");
+
+    let efforts = patch.slot_efforts.expect("slot_efforts 应该有值");
+    assert_eq!(efforts.opus.as_deref(), Some("high"));
+    assert_eq!(efforts.fable, None, "auto 槽位应该读成 None");
+    assert_eq!(efforts.sonnet, None);
+    assert_eq!(efforts.haiku, None);
+}
+
+/// `update_virtual_model` 的 `input` 用 TUI 侧的 `as_wire()` 拼出来, 后端 `UpdateVirtualModelInput`
+/// 必须原样反序列化。
+#[test]
+fn update_virtual_model_input_from_the_tui_deserializes() {
+    let input_json = serde_json::json!({
+        "mode": dto::RoutingMode::RoundRobin.as_wire(),
+        "subscription_ids": ["11111111-1111-1111-1111-111111111111"],
+    });
+    let input: UpdateVirtualModelInput = serde_json::from_value(input_json).unwrap();
+    assert_eq!(
+        serde_json::to_value(input.mode).unwrap(),
+        serde_json::to_value(RoutingMode::RoundRobin).unwrap()
+    );
+    assert_eq!(input.subscription_ids, vec!["11111111-1111-1111-1111-111111111111".to_string()]);
+}
+
+/// TUI 的槽位 effort 选项必须与后端白名单逐字相同, 否则 TUI 会提供一个后端拒绝的档位
+/// (或者漏掉一个后端接受的档位)。
+#[test]
+fn tui_effort_choices_equal_the_backend_allowlist() {
+    assert_eq!(dto::EFFORT_CHOICES.as_slice(), ALLOWED_SLOT_EFFORTS);
 }
 
 /// TUI 调用的每个 command 名都必须还在 web_commands! 表里 —— 改名会在这里炸, 而不是在用户终端里变成 unknown_command。

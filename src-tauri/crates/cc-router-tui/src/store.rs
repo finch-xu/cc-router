@@ -2,7 +2,7 @@
 //! 互相不同步的副本。加载结果按 [`crate::action::Fetch`] 共用同一条单调递增的 `issued` 序号
 //! (`runtime.rs` 里的计数器横跨 `Fetch::Overview` 与 `Fetch::Subscriptions`), 晚到的旧结果据此丢弃。
 
-use crate::client::dto::Subscription;
+use crate::client::dto::{Subscription, VirtualModel};
 
 /// 一份带发起序号的后端数据。晚到的旧结果 (`issued` 小于已接受的序号) 与不晚于屏障的结果
 /// (`issued` <= `barrier`) 都丢弃。`barrier` 是就地操作 (Task 4 的 `Mutation`) 完成那一刻盖的一条
@@ -63,6 +63,8 @@ impl<T> Versioned<T> {
 pub struct Store {
     /// 后端给的原始顺序; 排序由各页面在画的时候按需要的口径自己排。
     subscriptions: Versioned<Vec<Subscription>>,
+    /// 5 项, 后端固定顺序 fable/opus/sonnet/haiku/fallback (虚拟模型页, Task 6 起消费)。
+    virtual_models: Versioned<Vec<VirtualModel>>,
 }
 
 impl Store {
@@ -122,12 +124,35 @@ impl Store {
     pub fn set_subscriptions_barrier(&mut self, barrier: u64) {
         self.subscriptions.set_barrier(barrier);
     }
+
+    pub fn virtual_models(&self) -> &[VirtualModel] {
+        self.virtual_models.get()
+    }
+
+    pub fn virtual_models_loaded(&self) -> bool {
+        self.virtual_models.loaded()
+    }
+
+    /// 接受一份虚拟模型列表。晚到的旧结果或不晚于屏障的结果 → 丢弃, 返回 `false`。
+    pub fn apply_virtual_models(&mut self, issued: u64, vms: Vec<VirtualModel>) -> bool {
+        self.virtual_models.accept(issued, vms).is_some()
+    }
+
+    /// 一次虚拟模型编辑就地操作完成时调用: 语义与 `set_subscriptions_barrier` 相同, 只是挡住的是
+    /// 虚拟模型列表的加载。
+    pub fn set_virtual_models_barrier(&mut self, barrier: u64) {
+        self.virtual_models.set_barrier(barrier);
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::client::dto::{ModelSlots, SubscriptionState};
+    use crate::client::dto::{ModelSlots, RoutingMode, SubscriptionState};
+
+    fn vm(name: &str, mode: RoutingMode, subscription_ids: Vec<String>) -> VirtualModel {
+        VirtualModel { name: name.into(), mode, subscription_ids }
+    }
 
     fn sub(id: &str, state: SubscriptionState) -> Subscription {
         Subscription {
@@ -271,6 +296,32 @@ mod tests {
         v.accept(1, 10);
         assert_eq!(v.accept(2, 20), Some(10));
         assert_eq!(*v.get(), 20);
+    }
+
+    /// Task 4: `Store::virtual_models` 是独立的一份 `Versioned`, 与订阅列表的序号 / 屏障互不
+    /// 影响, 但同一套「晚到丢弃 / 屏障挡住」规则照样成立。
+    #[test]
+    fn virtual_models_apply_respects_versioning_and_its_own_barrier() {
+        let mut store = Store::default();
+        assert!(!store.virtual_models_loaded());
+        assert!(store.virtual_models().is_empty());
+
+        assert!(store.apply_virtual_models(1, vec![vm("model-sonnet", RoutingMode::Sequential, vec![])]));
+        assert!(store.virtual_models_loaded());
+        assert_eq!(store.virtual_models().len(), 1);
+
+        // 晚到的旧结果被丢弃。
+        assert!(!store.apply_virtual_models(0, vec![]));
+        assert_eq!(store.virtual_models()[0].mode, RoutingMode::Sequential);
+
+        // 屏障只挡虚拟模型列表, 不影响订阅列表 (两份 Versioned 互相独立)。
+        store.apply_subscriptions(10, vec![]);
+        store.set_virtual_models_barrier(5);
+        assert!(!store.apply_virtual_models(5, vec![vm("model-sonnet", RoutingMode::RoundRobin, vec![])]));
+        assert_eq!(store.virtual_models()[0].mode, RoutingMode::Sequential, "不晚于屏障的结果应该被丢弃");
+        assert!(store.apply_virtual_models(6, vec![vm("model-sonnet", RoutingMode::RoundRobin, vec!["x".into()])]));
+        assert_eq!(store.virtual_models()[0].mode, RoutingMode::RoundRobin);
+        assert_eq!(store.virtual_models()[0].subscription_ids, vec!["x".to_string()]);
     }
 
     #[test]

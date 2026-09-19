@@ -14,7 +14,7 @@ use tokio::sync::mpsc::{unbounded_channel, UnboundedSender};
 
 use crate::action::{Action, Cmd, Fetch, FetchData, Mutation, MutationOutcome, OverviewData};
 use crate::app::App;
-use crate::client::dto::{RefreshBalanceResult, RefreshModelsResult, Subscription, TestConnectionResult};
+use crate::client::dto::{RefreshBalanceResult, RefreshModelsResult, Subscription, TestConnectionResult, VirtualModel};
 use crate::client::{commands, Client, ClientError};
 
 const TICK: Duration = Duration::from_millis(250);
@@ -67,6 +67,10 @@ fn spawn_fetch(client: Arc<Client>, tx: UnboundedSender<Action>, fetch: Fetch, i
                 .call::<Vec<Subscription>>(commands::LIST_SUBSCRIPTIONS, json!({}))
                 .await
                 .map(FetchData::Subscriptions),
+            Fetch::VirtualModels => client
+                .call::<Vec<VirtualModel>>(commands::LIST_VIRTUAL_MODELS, json!({}))
+                .await
+                .map(FetchData::VirtualModels),
         };
         let result = result.map_err(|e: ClientError| e.to_string());
         let _ = tx.send(Action::FetchDone { fetch, issued, result });
@@ -98,6 +102,20 @@ async fn call_mutation(client: &Client, mutation: &Mutation) -> Result<MutationO
             let r: RefreshBalanceResult =
                 client.call_with_timeout(commands::REFRESH_SUBSCRIPTION_BALANCE, json!({ "id": id }), REFRESH_TIMEOUT).await?;
             Ok(MutationOutcome::Balance(r))
+        }
+        Mutation::UpdateSlots { id, model_slots, slot_efforts } => {
+            // 两块都整块替换 (与后端 `SubscriptionPatch` 的语义一致); 返回值是完整 `SubscriptionDto`,
+            // 丢弃它——保存成功后 `refetch()` 会重拉订阅列表, 权威值来自那份结果。
+            let patch = json!({ "model_slots": model_slots, "slot_efforts": slot_efforts });
+            client.call::<serde_json::Value>(commands::UPDATE_SUBSCRIPTION, json!({ "id": id, "patch": patch })).await?;
+            Ok(MutationOutcome::SlotsSaved)
+        }
+        Mutation::UpdateVirtualModel { name, mode, subscription_ids } => {
+            // `mode.as_wire()` 而不是 `Serialize`: 这就是 `tui_contract.rs::routing_mode_wire_names_round_trip`
+            // 与「咬合检查」盯着的那个字符串, 改错了应该在这里就炸, 不是在某个隐藏的 serde 派生里。
+            let input = json!({ "mode": mode.as_wire(), "subscription_ids": subscription_ids });
+            client.call::<()>(commands::UPDATE_VIRTUAL_MODEL, json!({ "name": name, "input": input })).await?;
+            Ok(MutationOutcome::VirtualModelSaved)
         }
     }
 }
@@ -332,6 +350,7 @@ async fn event_loop(terminal: &mut ratatui::DefaultTerminal, client: Arc<Client>
 mod tests {
     use super::*;
     use crate::client::discovery::RUNTIME_FILE;
+    use crate::client::dto::{ModelSlots, RoutingMode, Slot, SlotEfforts};
     use wiremock::matchers::{body_json, method, path};
     use wiremock::{Mock, MockServer, ResponseTemplate};
 
@@ -786,5 +805,104 @@ mod tests {
 
         assert!(rx.recv().await.is_some());
         assert!(rx.recv().await.is_some());
+    }
+
+    /// Task 4: `update_subscription` 的 patch 里 `model_slots` 整块发全 (含空 `fallback`),
+    /// `slot_efforts` 只带非 auto 的槽位——`body_json` 精确断言请求体, 而不只是响应内容, 这是唯一
+    /// 能咬住「auto 槽位漏发了 `null`」这类回归的地方。
+    #[tokio::test]
+    async fn update_slots_sends_the_whole_patch_and_omits_auto_efforts() {
+        let server = MockServer::start().await;
+        Mock::given(method("POST"))
+            .and(path("/ui/api/cmd/update_subscription"))
+            .and(body_json(json!({
+                "id": "1",
+                "patch": {
+                    "model_slots": {"fable": "f", "opus": "o", "sonnet": "s", "haiku": "h", "fallback": ""},
+                    "slot_efforts": {"opus": "high"}
+                }
+            })))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({"id": "1", "display_name": "n"})))
+            .mount(&server)
+            .await;
+        let dir = tempfile::tempdir().unwrap();
+        write_runtime(dir.path(), server.address().port(), "s", "9.9.9-test");
+        let client = Arc::new(Client::connect(dir.path()).unwrap());
+        let (tx, mut rx) = unbounded_channel::<Action>();
+
+        let model_slots = ModelSlots { fable: "f".into(), opus: "o".into(), sonnet: "s".into(), haiku: "h".into(), fallback: String::new() };
+        let mut slot_efforts = SlotEfforts::default();
+        slot_efforts.set(Slot::Opus, Some("high".into()));
+        spawn_mutation(client, tx, Mutation::UpdateSlots { id: "1".into(), model_slots, slot_efforts });
+
+        let done = rx.recv().await.expect("channel 关闭了");
+        assert!(matches!(done, Action::MutationDone { result: Ok(MutationOutcome::SlotsSaved), .. }), "{done:?}");
+    }
+
+    /// Task 4: `update_virtual_model` 带 `name` + `input{mode, subscription_ids}`, `mode` 用
+    /// `as_wire()` 的线上名字 (`round_robin`, 不是 Rust 变体名 `RoundRobin`)。
+    #[tokio::test]
+    async fn update_virtual_model_sends_name_and_input() {
+        let server = MockServer::start().await;
+        Mock::given(method("POST"))
+            .and(path("/ui/api/cmd/update_virtual_model"))
+            .and(body_json(json!({
+                "name": "model-sonnet",
+                "input": {"mode": "round_robin", "subscription_ids": ["1", "2"]}
+            })))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!(null)))
+            .mount(&server)
+            .await;
+        let dir = tempfile::tempdir().unwrap();
+        write_runtime(dir.path(), server.address().port(), "s", "9.9.9-test");
+        let client = Arc::new(Client::connect(dir.path()).unwrap());
+        let (tx, mut rx) = unbounded_channel::<Action>();
+
+        spawn_mutation(
+            client,
+            tx,
+            Mutation::UpdateVirtualModel {
+                name: "model-sonnet".into(),
+                mode: RoutingMode::RoundRobin,
+                subscription_ids: vec!["1".into(), "2".into()],
+            },
+        );
+
+        let done = rx.recv().await.expect("channel 关闭了");
+        assert!(matches!(done, Action::MutationDone { result: Ok(MutationOutcome::VirtualModelSaved), .. }), "{done:?}");
+    }
+
+    /// Task 4: `Fetch::VirtualModels` 打对了 command, 把响应体正确包进 `FetchData::VirtualModels`,
+    /// 且 `mode` 按后端线上名字 (`round_robin`) 正确解析回 `RoutingMode::RoundRobin`。
+    #[tokio::test]
+    async fn fetch_virtual_models_reports_back() {
+        let server = MockServer::start().await;
+        Mock::given(method("POST"))
+            .and(path("/ui/api/cmd/list_virtual_models"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!([
+                {"name": "model-fable", "mode": "sequential", "subscription_ids": []},
+                {"name": "model-sonnet", "mode": "round_robin", "subscription_ids": ["1"]},
+            ])))
+            .mount(&server)
+            .await;
+        let dir = tempfile::tempdir().unwrap();
+        write_runtime(dir.path(), server.address().port(), "s", "9.9.9-test");
+        let client = Arc::new(Client::connect(dir.path()).unwrap());
+        let (tx, mut rx) = unbounded_channel::<Action>();
+
+        spawn_fetch(client, tx, Fetch::VirtualModels, 1);
+
+        let done = rx.recv().await.expect("channel 关闭了");
+        let Action::FetchDone { fetch, issued, result } = done else { panic!("{done:?}") };
+        assert_eq!(fetch, Fetch::VirtualModels);
+        assert_eq!(issued, 1);
+        let vms = match result.expect("应该成功") {
+            FetchData::VirtualModels(v) => v,
+            other => panic!("{other:?}"),
+        };
+        assert_eq!(vms.len(), 2);
+        assert_eq!(vms[1].name, "model-sonnet");
+        assert_eq!(vms[1].mode, RoutingMode::RoundRobin);
+        assert_eq!(vms[1].subscription_ids, vec!["1".to_string()]);
     }
 }

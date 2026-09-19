@@ -517,6 +517,11 @@ fn detail_rows(sub: &Subscription, ctx: &DrawCtx, width: u16) -> Vec<DetailRow> 
             Mutation::TestConnection { .. } => s.sub_busy_testing,
             Mutation::RefreshModels { .. } => s.sub_busy_models,
             Mutation::RefreshBalance { .. } => s.sub_busy_balance,
+            Mutation::UpdateSlots { .. } => s.sub_busy_saving,
+            // 这个订阅页的 busy 查询按 `BusyKey::Subscription` 取, `UpdateVirtualModel` 只会出现在
+            // `BusyKey::VirtualModel` 下, 永远不会真的落到这一分支——但 `match m` 穷尽
+            // `Mutation` 的全部变体 (编译器不知道调用方已经按 key 过滤过), 补一个不会触发的分支。
+            Mutation::UpdateVirtualModel { .. } => s.sub_busy_saving,
         };
         status_spans.push(Span::raw(" · "));
         status_spans.push(Span::styled(busy_text, theme.muted_style()));
