@@ -155,7 +155,7 @@ impl App {
             KeyCode::Tab => Some(Action::NextTab),
             KeyCode::BackTab => Some(Action::PrevTab),
             KeyCode::Char(c @ '1'..='5') => Tab::from_index(c as usize - '1' as usize).map(Action::SwitchTab),
-            _ => self.pages.get_mut(self.tab).handle_key(key, &self.store),
+            _ => self.pages.get_mut(self.tab).handle_key(key, &self.store, self.s),
         }
     }
 
@@ -167,7 +167,7 @@ impl App {
         self.pending_page_fx = Some(dir);
         // 不可见的页面不轮询, 所以切回来的那一刻要补一次。
         if self.conn == Conn::Connected {
-            self.pages.get_mut(self.tab).update(&Action::Refresh, &self.store)
+            self.update_page(self.tab, &Action::Refresh)
         } else {
             Vec::new()
         }
@@ -229,6 +229,20 @@ impl App {
         }
     }
 
+    /// 调用某个页面的 `update`, 并顺带处理它可能产出的通知——`Component::update` 签名只能返回
+    /// `Vec<Cmd>`, 塞不进一个 `Action` (那是给 `handle_key` 用的 `Action::Notify`), 页面想在
+    /// `update()` 内部弹一条 toast (比如「输入的模型名不能为空」「草稿对应的订阅已经不存在了」,
+    /// Task 5) 就存进 `pending_notice`, 这里在 `update` 返回后轮询一次取走。所有会调
+    /// `Component::update` 的地方都该走这个 helper, 不要再各自裸调 `pages.get_mut(tab).update(..)`
+    /// ——否则新页面用上 `take_notice` 时会有调用点漏接的风险。
+    fn update_page(&mut self, tab: Tab, action: &Action) -> Vec<Cmd> {
+        let cmds = self.pages.get_mut(tab).update(action, &self.store, self.s);
+        if let Some((kind, text)) = self.pages.get_mut(tab).take_notice() {
+            self.push_toast(Toast::new(kind, text));
+        }
+        cmds
+    }
+
     /// 订阅备注名, 取不到 (结果回来时订阅已经不在 `Store` 里了) 就退回用 id。
     fn subscription_name(&self, id: &str) -> String {
         self.store.subscription(id).map(|s| s.display_name.clone()).unwrap_or_else(|| id.to_string())
@@ -278,6 +292,10 @@ impl App {
     fn finish_mutation(&mut self, mutation: Mutation, barrier: u64, result: Result<MutationOutcome, String>) -> Vec<Cmd> {
         let key = mutation.busy_key();
         self.busy.remove(&key);
+        // Task 5: 每个页面各恰好一次的机会去响应「这次变更是不是我关心的那条草稿」(订阅页在
+        // `ok && UpdateSlots && id 匹配当前草稿` 时清草稿); 对全部页面调, 不只当前可见的那个——
+        // 用户切走之后保存结果才回来时, 原页面的草稿也该被正确清掉/保留。
+        self.pages.for_each_mut(|page| page.on_mutation_done(&mutation, result.is_ok()));
         for fetch in mutation.refetch() {
             match fetch {
                 // 总览一次整页加载也带着订阅列表 (`Action::FetchDone` 的 `FetchData::Overview`
@@ -379,7 +397,7 @@ impl App {
                     self.toasts.pop_front();
                 }
                 if self.conn == Conn::Connected && self.tick.is_multiple_of(POLL_EVERY_TICKS) {
-                    self.pages.get_mut(self.tab).update(&Action::Refresh, &self.store)
+                    self.update_page(self.tab, &Action::Refresh)
                 } else {
                     Vec::new()
                 }
@@ -390,7 +408,7 @@ impl App {
                 }
                 self.conn = Conn::Connected;
                 self.app_version = Some(app_version.clone());
-                self.pages.get_mut(self.tab).update(&action, &self.store)
+                self.update_page(self.tab, &action)
             }
             Action::ConnectionLost => {
                 self.conn = Conn::Reconnecting;
@@ -416,8 +434,10 @@ impl App {
                         self.notify_subscriptions_changed(changed);
                     }
                     let action = Action::FetchDone { fetch, issued, result: Ok(FetchData::Overview(data)) };
-                    // 加载结果永远交给发起它的页面, 哪怕用户已经切走了。
-                    self.pages.overview.update(&action, &self.store)
+                    // 加载结果永远交给发起它的页面, 哪怕用户已经切走了; 总览页目前不产出通知,
+                    // 直接调 `update` 不经过 `update_page` (那个 helper 是按 `Tab` 索引页面的,
+                    // 这里明确就是总览页自己)。
+                    self.pages.overview.update(&action, &self.store, self.s)
                 }
                 // 单独的订阅列表刷新 (SSE 触发): 只进 Store, 不需要转给任何页面的 update ——
                 // 各页面画的时候直接读 ctx.store。
@@ -437,7 +457,7 @@ impl App {
                     Vec::new()
                 }
             },
-            Action::Refresh | Action::Sse { .. } => self.pages.get_mut(self.tab).update(&action, &self.store),
+            Action::Refresh | Action::Sse { .. } => self.update_page(self.tab, &action),
             Action::Mutate(m) => self.start_mutation(m),
             Action::MutationDone { mutation, barrier, result } => self.finish_mutation(mutation, barrier, result),
             Action::OpenPicker(spec) => {
@@ -446,7 +466,11 @@ impl App {
             }
             Action::PickerDone { tag, choice } => {
                 self.close_popup();
-                self.pages.get_mut(self.tab).update(&Action::PickerDone { tag, choice }, &self.store)
+                self.update_page(self.tab, &Action::PickerDone { tag, choice })
+            }
+            Action::Notify { kind, text } => {
+                self.push_toast(Toast::new(kind, text));
+                Vec::new()
             }
         }
     }

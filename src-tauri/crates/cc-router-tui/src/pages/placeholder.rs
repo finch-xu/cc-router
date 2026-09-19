@@ -30,11 +30,11 @@ impl Placeholder {
 }
 
 impl Component for Placeholder {
-    fn handle_key(&mut self, _key: KeyEvent, _store: &Store) -> Option<Action> {
+    fn handle_key(&mut self, _key: KeyEvent, _store: &Store, _s: &'static Strings) -> Option<Action> {
         None
     }
 
-    fn update(&mut self, _action: &Action, _store: &Store) -> Vec<Cmd> {
+    fn update(&mut self, _action: &Action, _store: &Store, _s: &'static Strings) -> Vec<Cmd> {
         Vec::new()
     }
 

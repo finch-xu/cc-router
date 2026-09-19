@@ -250,11 +250,11 @@ fn panel<'a>(ctx: &DrawCtx, title: &str) -> Block<'a> {
 }
 
 impl Component for Overview {
-    fn handle_key(&mut self, _key: KeyEvent, _store: &Store) -> Option<Action> {
+    fn handle_key(&mut self, _key: KeyEvent, _store: &Store, _s: &'static Strings) -> Option<Action> {
         None
     }
 
-    fn update(&mut self, action: &Action, _store: &Store) -> Vec<Cmd> {
+    fn update(&mut self, action: &Action, _store: &Store, _s: &'static Strings) -> Vec<Cmd> {
         match action {
             Action::Refresh | Action::Connected { .. } => vec![Cmd::Fetch(Fetch::Overview)],
             Action::Sse { name, .. } if SSE_REFETCH.contains(&name.as_str()) => vec![Cmd::Fetch(Fetch::Subscriptions)],

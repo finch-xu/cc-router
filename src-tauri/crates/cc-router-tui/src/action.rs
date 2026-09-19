@@ -6,6 +6,7 @@ use crate::client::dto::{
     Subscription, TestConnectionResult, VirtualModel,
 };
 use crate::widgets::picker::{PickerChoice, PickerSpec, PickerTag};
+use crate::widgets::toast::ToastKind;
 
 /// 五个标签页, 顺序即 `1`–`5` 与 `Strings::tabs` 的下标。
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -195,6 +196,11 @@ pub enum Action {
     /// 转给当前页面的 `update`——页面据 `tag` 知道该把 `choice` 填到哪。Task 5 之前没有真正的消费者,
     /// 页面的 `update` 会直接忽略它。
     PickerDone { tag: PickerTag, choice: PickerChoice },
+    /// 页面想弹一条 toast, 但自己不能直接碰 `App` 的 toast 队列 (Task 5)。只从
+    /// `Component::handle_key` 的返回值这条路走——`update()` 内部想弹通知 (比如处理
+    /// `PickerDone` 时发现输入为空) 用的是另一条路 (`Component::take_notice`, 见 `pages/mod.rs`),
+    /// 不产出这个 `Action` (那个签名返回 `Vec<Cmd>`, 塞不进一个 `Action`)。
+    Notify { kind: ToastKind, text: String },
 }
 
 #[cfg(test)]

@@ -11,12 +11,13 @@ use cc_router_tui::app::{App, AppOptions, MIN_HEIGHT};
 use cc_router_tui::client::dto::{
     BalanceCache, BalanceEntry, BalanceSeverity, BalanceSnapshot, ModelCache, ModelInfo, ModelSlots, OverallStats, ProxyStatus,
     QuotaPeriod, QuotaUsage, RefreshBalanceResult, RefreshModelsResult, RoutingMode, SeriesPoint, Settings, SlotEfforts, Subscription,
-    SubscriptionState, TestConnectionResult,
+    SubscriptionState, TestConnectionResult, EFFORT_CHOICES,
 };
 use cc_router_tui::i18n::ZH;
 use cc_router_tui::pages::Pages;
 use cc_router_tui::theme::{ColorMode, Theme};
 use cc_router_tui::widgets::picker::{self, PickerChoice, PickerItem, PickerSpec, PickerTag, Slot};
+use cc_router_tui::widgets::toast::ToastKind;
 use cc_router_tui::widgets::{confirm, help};
 use ratatui::backend::TestBackend;
 use ratatui::crossterm::event::{KeyCode, KeyEvent, KeyEventKind, KeyEventState, KeyModifiers};
@@ -384,8 +385,12 @@ fn selection_follows_the_id_across_reloads() {
     assert!(out3.contains("示例中转"), "id 消失后应该落到钳制后的下标, 不 panic\n{out3}");
 }
 
+/// Task 5 之前, 宽屏下 `⏎` 没有任何可见效果 (详情面板本来就一直画着)。现在两种宽度下 `⏎` 都会把
+/// 焦点切进详情 (窄屏是切一整屏, 宽屏是边框换色), 这条覆盖 80 列的「切一整屏 + Esc 切回去」部分;
+/// 宽屏的「`⏎` 确实换了焦点」由 `enter_moves_focus_into_the_detail_on_both_widths` /
+/// `focused_pane_has_the_accent_border` 覆盖。
 #[test]
-fn enter_opens_detail_only_on_narrow_terminals() {
+fn enter_opens_detail_on_narrow_terminals() {
     let mut a = subs_app(false);
     let before = render(&mut a, 80, 24);
     assert!(before.contains(ZH.sub_col_name) && !before.contains(ZH.sub_f_endpoint), "{before}");
@@ -397,11 +402,6 @@ fn enter_opens_detail_only_on_narrow_terminals() {
     a.handle_key(key(KeyCode::Esc));
     let back = render(&mut a, 80, 24);
     assert!(back.contains(ZH.sub_col_name), "{back}");
-
-    let wide_before = render(&mut a, 120, 40);
-    a.handle_key(key(KeyCode::Enter));
-    let wide_after = render(&mut a, 120, 40);
-    assert_eq!(wide_before, wide_after, "120 列: ⏎ 前后渲染应该完全相同");
 }
 
 #[test]
@@ -1051,25 +1051,43 @@ fn picker_shows_the_cursor_in_the_input_row() {
     assert!(popup.contains(pos), "光标应该落在弹窗内, 实际 {pos:?}, 弹窗 {popup:?}");
 }
 
-/// Task 3: `PickerDone` 关掉弹窗并转给当前页面的 `update`——Task 5 之前没有真实消费者, 只断言
-/// 弹窗关闭且渲染不 panic (Task 5 会在订阅页补上真实的可观察断言)。
+/// Task 3: `PickerDone` 关掉弹窗并转给当前页面的 `update`。Task 5 补上真实断言: 在订阅详情页
+/// 走一遍真实的 ⏎⏎ 输入 ⏎ 流程, 断言草稿真的落地 (显示新模型名 + 「已修改」+ 标题带 `*`)。
 #[test]
 fn picker_done_reaches_the_current_page() {
-    let mut a = loaded(false);
-    a.update(Action::OpenPicker(picker_spec()));
+    let mut a = subs_app(false);
+    render(&mut a, 80, 24); // 记住这是窄屏
+    a.handle_key(key(KeyCode::Enter)); // List -> Detail{Fable}
+    let open_action = a.handle_key(key(KeyCode::Enter)); // 打开 Fable 槽的模型 picker
+    a.update(open_action.expect("第二次 ⏎ 应该产出 Action::OpenPicker"));
     let opened = render(&mut a, 80, 24);
-    assert!(opened.contains("选择模型"), "弹窗应该已经打开\n{opened}");
+    assert!(opened.contains(&(ZH.pick_model_title)("fable")), "弹窗应该已经打开\n{opened}");
 
+    // 输入框预填了 initial ("glm-4.6"), 先 Ctrl+U 清空再输入自定义值。
+    a.handle_key(KeyEvent::new(KeyCode::Char('u'), KeyModifiers::CONTROL));
+    for c in "glm-x".chars() {
+        a.handle_key(key(KeyCode::Char(c)));
+    }
     let action = a.handle_key(key(KeyCode::Enter));
     let Some(Action::PickerDone { tag, choice }) = action else {
         panic!("⏎ 应该产出 PickerDone, 实际 {action:?}");
     };
-    assert_eq!(tag, PickerTag::SlotModel { slot: Slot::Sonnet });
-    assert_eq!(choice, PickerChoice::Item("glm-4.6".into()), "空输入下 ⏎ 应该选中第一项");
+    assert_eq!(tag, PickerTag::SlotModel { slot: Slot::Fable });
+    assert_eq!(choice, PickerChoice::Custom("glm-x".into()));
 
-    assert!(a.update(Action::PickerDone { tag, choice }).is_empty(), "占位页面的 update 应该忽略它");
-    let closed = render(&mut a, 80, 24);
-    assert!(!closed.contains("选择模型"), "PickerDone 之后弹窗应该已经关闭\n{closed}");
+    assert!(a.update(Action::PickerDone { tag, choice }).is_empty(), "PickerDone 不产出 Cmd");
+    let out = render(&mut a, 80, 24);
+    assert!(!opened_picker_title_visible(&out), "PickerDone 之后弹窗应该已经关闭\n{out}");
+    assert!(out.contains("glm-x"), "草稿里的新模型名应该显示在详情里\n{out}");
+    assert!(out.contains(ZH.sub_slot_modified), "该槽位应该标记为已修改\n{out}");
+    assert!(out.contains(" *"), "标题应该带 * 表示有未保存修改\n{out}");
+}
+
+/// `picker_done_reaches_the_current_page` 用的小帮手: picker 关闭后弹窗标题理应不再出现——
+/// 直接找 "选择" 这个词过于宽泛 (标题里就带这个字), 改成量输入框那一行的边框角标是否消失
+/// 更麻烦, 这里用「弹窗的键位提示行不再出现」这个更稳的信号。
+fn opened_picker_title_visible(out: &str) -> bool {
+    out.contains(ZH.picker_keys)
 }
 
 /// Fix round A: `Clear` 本身不修复紧贴弹窗左右边缘、横跨边界的宽字符 (CJK) ——三个弹窗都要经过
@@ -1379,6 +1397,24 @@ fn drawing_the_same_state_twice_gives_the_same_frame() {
     let first = render(&mut g, 80, 24);
     let second = render(&mut g, 80, 24);
     assert_eq!(first, second, "picker 弹窗打开的状态应该幂等");
+
+    // Task 5: 宽屏下焦点在详情 (边框颜色跟 `self.focus` 走, `pane_border_style` 必须是纯函数)。
+    let mut h = subs_app(false);
+    render(&mut h, 120, 40);
+    h.handle_key(key(KeyCode::Enter));
+    let first = render(&mut h, 120, 40);
+    let second = render(&mut h, 120, 40);
+    assert_eq!(first, second, "宽屏详情焦点应该幂等");
+
+    // Task 5: 有未保存草稿的状态 (标题带 `*`、槽位行带「已修改」, `dirty` 缓存必须是确定性重算)。
+    let mut i = subs_app(false);
+    render(&mut i, 80, 24);
+    i.handle_key(key(KeyCode::Enter));
+    i.handle_key(key(KeyCode::Enter));
+    i.update(Action::PickerDone { tag: PickerTag::SlotModel { slot: Slot::Fable }, choice: PickerChoice::Item("m3".into()) });
+    let first = render(&mut i, 80, 24);
+    let second = render(&mut i, 80, 24);
+    assert_eq!(first, second, "有草稿的状态应该幂等");
 }
 
 /// F3: 空列表加载时没有「旧」行可以比较, 不该把更早排队、还没画出来的闪烁带到后面某一帧。
@@ -1857,20 +1893,24 @@ fn subscription_name_falls_back_to_the_id_in_toasts() {
     assert!(out.contains("1：连接正常"), "订阅不在 Store 里时应该退回用 id\n{out}");
 }
 
-/// 80 列下页面键位 (e/t/m/b 等) 放不下时应该被裁掉, 但全局的 `?` 帮助 / `q` 退出必须一直在。
+/// 80 列下页面键位放不下时应该被裁掉, 但全局的 `?` 帮助 / `q` 退出必须一直在。
 #[test]
 fn global_keys_survive_at_80_columns_on_the_subscriptions_page() {
     let out = render(&mut subs_app(false), 80, 24);
     assert!(out.contains(ZH.key_help) && out.contains(ZH.key_quit), "{out}");
 
-    // M5 fix: 详情态不再重复显示一份「Esc 返回」(面板右下角的标题已经有了), 腾出的空间应该够放
-    // 下 `b 余额`。
+    // Task 5: 详情态的键位栏比以前长了 (多了 ⏎ 改模型 / o 改档位 / s 保存, 排在 e/t/m/b 前面);
+    // 80 列放不下时 keybar 从右往左丢, e/t/m/b 排最后, 现在轮到它们被裁掉——这是简报明确接受的
+    // 取舍 (「后面仍跟 e t m b, 放不下由 keybar 规则丢」), 核心的改槽位三个键必须留下。
     let mut a = subs_app(false);
     render(&mut a, 80, 24);
     a.handle_key(key(KeyCode::Enter));
     let detail_out = render(&mut a, 80, 24);
     let footer = detail_out.lines().last().unwrap_or_else(|| panic!("{detail_out}"));
-    assert!(footer.contains(ZH.key_balance), "详情态键位栏应该放得下 b 余额\n{footer}");
+    assert!(
+        footer.contains(ZH.key_edit_model) && footer.contains(ZH.key_edit_effort) && footer.contains(ZH.key_save),
+        "详情态键位栏至少要放得下改模型 / 改档位 / 保存这三个核心键\n{footer}"
+    );
     assert!(footer.contains(ZH.key_help) && footer.contains(ZH.key_quit), "{footer}");
 }
 
@@ -1947,4 +1987,422 @@ fn last_outcome_is_cleared_when_a_new_mutation_starts() {
     let out2 = render(&mut a, 80, 24);
     assert!(!out2.contains("上游拒绝"), "新一次操作发起后, 上一条结果应该被清掉\n{out2}");
     assert!(out2.contains(ZH.sub_busy_testing), "正忙时详情面板应该显示进行中文案\n{out2}");
+}
+
+// ---------- 订阅详情里改槽位 (Task 5: 焦点模型 + 草稿 + 保存) ----------
+
+/// 提取 `Action::OpenPicker` 里的 `PickerTag::SlotModel { slot }`——测槽位光标移动时反复用。
+fn opened_model_slot(action: Option<Action>) -> Slot {
+    match action {
+        Some(Action::OpenPicker(spec)) => match spec.tag {
+            PickerTag::SlotModel { slot } => slot,
+            other => panic!("期待 SlotModel tag, 实际 {other:?}"),
+        },
+        other => panic!("期待打开模型 picker, 实际 {other:?}"),
+    }
+}
+
+/// 两种宽度下 `⏎` 都能把焦点从列表切进详情: 用「再按一次 ⏎ 是否真的打开了模型 picker」这个
+/// 可观察的副作用验证 (而不是宽屏下本来就一直显示详情内容这件事——那个在 Enter 前后不变,
+/// 咬不住焦点有没有真的切过去)。
+#[test]
+fn enter_moves_focus_into_the_detail_on_both_widths() {
+    for (w, h) in [(80, 24), (120, 40)] {
+        let mut a = subs_app(false);
+        render(&mut a, w, h);
+        assert_eq!(a.handle_key(key(KeyCode::Enter)), None, "{w}x{h}: 第一次 ⏎ 只是切焦点, 不产出 Action");
+        let action = a.handle_key(key(KeyCode::Enter));
+        assert_eq!(opened_model_slot(action), Slot::Fable, "{w}x{h}: 第二次 ⏎ 应该已经在详情焦点, 打开 Fable 槽的模型 picker");
+    }
+}
+
+/// 宽屏下有焦点的那一栏边框是 `theme.accent`, 另一栏是普通 `theme.border`。
+#[test]
+fn focused_pane_has_the_accent_border() {
+    let theme = Theme::new(ColorMode::TrueColor);
+    let mut a = subs_app(false);
+    let buf = render_buffer(&mut a, 120, 40);
+    // 内容区顶边在屏幕第 3 行 (标签栏占 3 行, 无版本不一致横幅); 左栏左上角在 x=0, 右栏左上角
+    // 在 x=list_width (120<140, 应该是 58)。
+    assert_eq!(buf[(0, 3)].style().fg, Some(theme.accent), "List 焦点时左栏边框应该是 accent 色");
+    assert_eq!(buf[(58, 3)].style().fg, Some(theme.border), "List 焦点时右栏边框应该是普通 border 色");
+
+    a.handle_key(key(KeyCode::Enter)); // 切到 Detail 焦点
+    let buf2 = render_buffer(&mut a, 120, 40);
+    assert_eq!(buf2[(0, 3)].style().fg, Some(theme.border), "Detail 焦点时左栏边框应该变回普通 border 色");
+    assert_eq!(buf2[(58, 3)].style().fg, Some(theme.accent), "Detail 焦点时右栏边框应该是 accent 色");
+}
+
+/// 五个槽位间移动, 不绕回; `g`/`G` 跳首尾。
+#[test]
+fn slot_cursor_moves_and_clamps() {
+    let mut a = subs_app(false);
+    render(&mut a, 80, 24);
+    a.handle_key(key(KeyCode::Enter)); // List -> Detail{Fable}
+
+    assert_eq!(a.handle_key(key(KeyCode::Up)), None, "已经在第一个槽位, 不该绕回");
+    assert_eq!(opened_model_slot(a.handle_key(key(KeyCode::Enter))), Slot::Fable);
+
+    a.handle_key(key(KeyCode::Char('j')));
+    assert_eq!(opened_model_slot(a.handle_key(key(KeyCode::Enter))), Slot::Opus);
+    a.handle_key(key(KeyCode::Down));
+    assert_eq!(opened_model_slot(a.handle_key(key(KeyCode::Enter))), Slot::Sonnet);
+    a.handle_key(key(KeyCode::Char('k')));
+    assert_eq!(opened_model_slot(a.handle_key(key(KeyCode::Enter))), Slot::Opus);
+
+    a.handle_key(key(KeyCode::Char('G')));
+    assert_eq!(opened_model_slot(a.handle_key(key(KeyCode::Enter))), Slot::Fallback);
+    a.handle_key(key(KeyCode::Char('j')));
+    assert_eq!(opened_model_slot(a.handle_key(key(KeyCode::Enter))), Slot::Fallback, "到底不该越界");
+
+    a.handle_key(key(KeyCode::Char('g')));
+    assert_eq!(opened_model_slot(a.handle_key(key(KeyCode::Enter))), Slot::Fable);
+}
+
+/// 「智谱主号」(detail_subs 里第一条) 有 12 个缓存模型 (m0..m11); Fable 槽的模型 picker 应该用
+/// 它们填充, 允许自定义输入, `initial` 是该槽当前值。
+#[test]
+fn enter_opens_a_model_picker_with_cached_models_and_custom_allowed() {
+    let mut a = subs_app(false);
+    render(&mut a, 80, 24);
+    a.handle_key(key(KeyCode::Enter)); // Detail{Fable}
+    let action = a.handle_key(key(KeyCode::Enter));
+    let Some(Action::OpenPicker(spec)) = action else { panic!("{action:?}") };
+    assert_eq!(spec.tag, PickerTag::SlotModel { slot: Slot::Fable });
+    assert!(spec.allow_custom, "应该允许自定义输入");
+    assert_eq!(spec.items.len(), 12, "应该用该订阅的 model_cache 填充\n{:?}", spec.items);
+    assert!(spec.items.iter().any(|i| i.id == "m0"), "{:?}", spec.items);
+    assert_eq!(spec.initial, "glm-4.6", "initial 应该是该槽当前值 (还没有草稿时是 Store 里的原值)");
+}
+
+/// 兜底槽的模型 picker 在 items 最前面多一项「清空」。
+#[test]
+fn fallback_slot_offers_a_clear_item_first() {
+    let mut a = subs_app(false);
+    render(&mut a, 80, 24);
+    a.handle_key(key(KeyCode::Enter)); // Detail{Fable}
+    a.handle_key(key(KeyCode::Char('G'))); // -> Fallback
+    let action = a.handle_key(key(KeyCode::Enter));
+    let Some(Action::OpenPicker(spec)) = action else { panic!("{action:?}") };
+    assert_eq!(spec.tag, PickerTag::SlotModel { slot: Slot::Fallback });
+    assert_eq!(spec.items.first().map(|i| i.id.as_str()), Some(""), "第一项应该是清空兜底槽\n{:?}", spec.items);
+    assert_eq!(spec.items.first().map(|i| i.label.as_str()), Some(ZH.pick_clear_fallback));
+}
+
+/// 选定一个模型: 创建草稿, 该槽位行标记「已修改」, 标题带 `*`。
+#[test]
+fn picking_a_model_creates_a_draft_and_marks_the_row() {
+    let mut a = subs_app(false);
+    render(&mut a, 80, 24);
+    a.handle_key(key(KeyCode::Enter));
+    a.handle_key(key(KeyCode::Enter)); // 打开 Fable picker
+
+    a.update(Action::PickerDone { tag: PickerTag::SlotModel { slot: Slot::Fable }, choice: PickerChoice::Item("m3".into()) });
+    let out = render(&mut a, 80, 24);
+    assert!(out.contains("m3"), "{out}");
+    assert!(out.contains(ZH.sub_slot_modified), "{out}");
+    assert!(out.contains(" *"), "标题应该带 *\n{out}");
+}
+
+/// 选回原来的值: 草稿还在 (值等于 Store), 但 dirty 应该清掉——标题不再带 `*`, Esc 也不再弹确认。
+#[test]
+fn picking_the_original_value_again_clears_dirty() {
+    let mut a = subs_app(false);
+    render(&mut a, 80, 24);
+    a.handle_key(key(KeyCode::Enter));
+    a.handle_key(key(KeyCode::Enter));
+    a.update(Action::PickerDone { tag: PickerTag::SlotModel { slot: Slot::Fable }, choice: PickerChoice::Item("m3".into()) });
+    assert!(render(&mut a, 80, 24).contains(" *"));
+
+    a.handle_key(key(KeyCode::Enter)); // 重新打开 picker
+    a.update(Action::PickerDone { tag: PickerTag::SlotModel { slot: Slot::Fable }, choice: PickerChoice::Custom("glm-4.6".into()) });
+    let clean_out = render(&mut a, 80, 24);
+    assert!(!clean_out.contains(" *"), "改回原值应该清掉 dirty\n{clean_out}");
+    assert!(!clean_out.contains(ZH.sub_slot_modified), "{clean_out}");
+
+    // 不脏时 Esc 不该弹确认。
+    assert_eq!(a.handle_key(key(KeyCode::Esc)), None, "不脏时 Esc 不该弹确认");
+}
+
+/// 主槽 (非兜底) 选了空白自定义值应该被拒绝 (不产生草稿, 弹 `sub_model_required`); 兜底槽的空白
+/// 等于清空 (应该被接受)。
+#[test]
+fn custom_blank_is_rejected_for_main_slots_but_clears_the_fallback() {
+    let mut a = subs_app(false);
+    let mut subs = detail_subs();
+    subs[0].model_slots.fallback = "glm-4.5".into(); // 让兜底槽本来就有值, 清空才算一次真的变化
+    a.update(subs_done(2, subs));
+    render(&mut a, 80, 24);
+    a.handle_key(key(KeyCode::Enter)); // Fable
+
+    a.handle_key(key(KeyCode::Enter));
+    assert!(a
+        .update(Action::PickerDone { tag: PickerTag::SlotModel { slot: Slot::Fable }, choice: PickerChoice::Custom("   ".into()) })
+        .is_empty());
+    let out = render(&mut a, 80, 24);
+    assert!(!out.contains(" *"), "空白应该被拒绝, 不产生草稿\n{out}");
+    assert!(out.contains(ZH.sub_model_required), "{out}");
+
+    a.handle_key(key(KeyCode::Char('G'))); // -> Fallback (现在值 "glm-4.5")
+    a.handle_key(key(KeyCode::Enter));
+    a.update(Action::PickerDone { tag: PickerTag::SlotModel { slot: Slot::Fallback }, choice: PickerChoice::Custom("  ".into()) });
+    let out2 = render(&mut a, 80, 24);
+    assert!(out2.contains(" *"), "兜底槽清空 (从有值变没有值) 应该产生草稿\n{out2}");
+    assert!(out2.contains(ZH.sub_slot_unset), "{out2}");
+}
+
+/// 思考档位 picker: `auto` (id 空串) + `EFFORT_CHOICES` 五档, 不允许自定义, initial 是当前 effort。
+#[test]
+fn effort_picker_lists_auto_plus_the_allowlist() {
+    let mut a = subs_app(false);
+    render(&mut a, 80, 24);
+    a.handle_key(key(KeyCode::Enter)); // Fable
+    a.handle_key(key(KeyCode::Char('j'))); // Opus (effort=high)
+    let action = a.handle_key(key(KeyCode::Char('o')));
+    let Some(Action::OpenPicker(spec)) = action else { panic!("{action:?}") };
+    assert_eq!(spec.tag, PickerTag::SlotEffort { slot: Slot::Opus });
+    assert!(!spec.allow_custom, "不该允许自定义档位");
+    assert_eq!(spec.items.len(), 1 + EFFORT_CHOICES.len());
+    assert_eq!(spec.items[0].id, "");
+    assert_eq!(spec.items[0].label, ZH.sub_effort_auto);
+    for (item, expect) in spec.items[1..].iter().zip(EFFORT_CHOICES.iter()) {
+        assert_eq!(item.id, *expect);
+    }
+    assert_eq!(spec.initial, "high", "initial 应该是当前 effort 值");
+}
+
+/// 兜底槽和 Kiro 订阅上按 `o` 应该直接拒绝, 不开弹窗。
+#[test]
+fn effort_is_refused_for_fallback_and_kiro() {
+    let mut a = subs_app(false);
+    render(&mut a, 80, 24);
+    a.handle_key(key(KeyCode::Enter));
+    a.handle_key(key(KeyCode::Char('G'))); // Fallback
+    assert_eq!(
+        a.handle_key(key(KeyCode::Char('o'))),
+        Some(Action::Notify { kind: ToastKind::Info, text: ZH.sub_effort_na_fallback.into() })
+    );
+
+    let mut subs = detail_subs();
+    subs[0].auth_type = "kiro_oauth".into();
+    let mut b = subs_app(false);
+    b.update(subs_done(2, subs));
+    render(&mut b, 80, 24);
+    b.handle_key(key(KeyCode::Enter)); // Fable, 非兜底但是 kiro 订阅
+    assert_eq!(
+        b.handle_key(key(KeyCode::Char('o'))),
+        Some(Action::Notify { kind: ToastKind::Info, text: ZH.sub_effort_na_kiro.into() })
+    );
+}
+
+/// `s` 保存整块 model_slots + slot_efforts (改一个槽, 其余槽位与原 effort 原样带上)。
+#[test]
+fn s_saves_the_whole_slots_and_efforts() {
+    let mut a = subs_app(false);
+    render(&mut a, 80, 24);
+    a.handle_key(key(KeyCode::Enter)); // Fable
+    a.handle_key(key(KeyCode::Enter));
+    a.update(Action::PickerDone { tag: PickerTag::SlotModel { slot: Slot::Fable }, choice: PickerChoice::Item("m3".into()) });
+
+    let action = a.handle_key(key(KeyCode::Char('s')));
+    assert_eq!(
+        action,
+        Some(Action::Mutate(Mutation::UpdateSlots {
+            id: "1".into(),
+            model_slots: ModelSlots {
+                fable: "m3".into(),
+                opus: "glm-4.6".into(),
+                sonnet: "glm-4.6".into(),
+                haiku: "glm-4.5-air".into(),
+                fallback: String::new(),
+            },
+            slot_efforts: SlotEfforts { opus: Some("high".into()), ..Default::default() },
+        }))
+    );
+}
+
+/// 不脏时 `s` 无动作; 有草稿时断线按 `s` 仍然产出 `Action::Mutate`——断线拒绝是 `App::start_mutation`
+/// 统一处理的, 不是页面自己判断连接状态。
+#[test]
+fn s_does_nothing_when_clean_and_refuses_offline() {
+    let mut a = subs_app(false);
+    render(&mut a, 80, 24);
+    a.handle_key(key(KeyCode::Enter));
+    assert_eq!(a.handle_key(key(KeyCode::Char('s'))), None, "不脏时 s 不该有动作");
+
+    a.handle_key(key(KeyCode::Enter)); // 打开 picker
+    a.update(Action::PickerDone { tag: PickerTag::SlotModel { slot: Slot::Fable }, choice: PickerChoice::Item("m3".into()) });
+    a.update(Action::ConnectionLost);
+    let action = a.handle_key(key(KeyCode::Char('s')));
+    assert!(matches!(action, Some(Action::Mutate(Mutation::UpdateSlots { .. }))), "{action:?}");
+    assert!(a.update(action.unwrap()).is_empty(), "断线时应该被 App 拒绝, 不真的发");
+    let out = render(&mut a, 80, 24);
+    assert!(out.contains(ZH.toast_offline), "{out}");
+}
+
+/// 草稿期间来两次轮询刷新 (`FetchDone` 落地的新订阅列表) 不该冲掉草稿; `MutationDone(Err)` 保留
+/// 草稿, 只有 `MutationDone(Ok(SlotsSaved))` 才清掉。
+#[test]
+fn draft_survives_polling_and_is_cleared_only_by_a_successful_save() {
+    let mut a = subs_app(false);
+    render(&mut a, 80, 24);
+    a.handle_key(key(KeyCode::Enter));
+    a.handle_key(key(KeyCode::Enter));
+    a.update(Action::PickerDone { tag: PickerTag::SlotModel { slot: Slot::Fable }, choice: PickerChoice::Item("m3".into()) });
+    let dirty_out = render(&mut a, 80, 24);
+    assert!(dirty_out.contains("m3") && dirty_out.contains(" *"), "{dirty_out}");
+
+    a.update(subs_done(3, detail_subs()));
+    a.update(subs_done(4, detail_subs()));
+    let out_after_polls = render(&mut a, 80, 24);
+    assert!(out_after_polls.contains("m3") && out_after_polls.contains(" *"), "轮询不该冲掉草稿\n{out_after_polls}");
+
+    let mutation = Mutation::UpdateSlots {
+        id: "1".into(),
+        model_slots: ModelSlots {
+            fable: "m3".into(),
+            opus: "glm-4.6".into(),
+            sonnet: "glm-4.6".into(),
+            haiku: "glm-4.5-air".into(),
+            fallback: String::new(),
+        },
+        slot_efforts: SlotEfforts { opus: Some("high".into()), ..Default::default() },
+    };
+    a.update(Action::Mutate(mutation.clone()));
+    a.update(Action::MutationDone { mutation: mutation.clone(), barrier: 0, result: Err("网络错误".into()) });
+    let out_after_fail = render(&mut a, 80, 24);
+    assert!(out_after_fail.contains("m3") && out_after_fail.contains(" *"), "失败应该保留草稿\n{out_after_fail}");
+
+    a.update(Action::Mutate(mutation.clone()));
+    a.update(Action::MutationDone { mutation, barrier: 0, result: Ok(MutationOutcome::SlotsSaved) });
+    let out_after_ok = render(&mut a, 80, 24);
+    assert!(!out_after_ok.contains(" *"), "成功后草稿应该被清掉\n{out_after_ok}");
+}
+
+/// 有草稿时 Esc 弹确认, 选「是」丢弃草稿并回到列表。
+#[test]
+fn esc_with_a_draft_asks_and_yes_returns_to_the_list() {
+    let mut a = subs_app(false);
+    render(&mut a, 80, 24);
+    a.handle_key(key(KeyCode::Enter));
+    a.handle_key(key(KeyCode::Enter));
+    a.update(Action::PickerDone { tag: PickerTag::SlotModel { slot: Slot::Fable }, choice: PickerChoice::Item("m3".into()) });
+
+    let action = a.handle_key(key(KeyCode::Esc));
+    assert_eq!(action, Some(Action::OpenConfirm { prompt: ZH.confirm_discard.into(), on_yes: Box::new(Action::DiscardDraft) }));
+    assert!(a.update(action.unwrap()).is_empty());
+    let out = render(&mut a, 80, 24);
+    assert!(out.contains(ZH.confirm_discard), "{out}");
+
+    assert_eq!(a.handle_key(key(KeyCode::Char('y'))), Some(Action::Confirmed(Box::new(Action::DiscardDraft))));
+    a.update(Action::Confirmed(Box::new(Action::DiscardDraft)));
+    let out2 = render(&mut a, 80, 24);
+    assert!(out2.contains(ZH.sub_col_name), "确认放弃后应该回到列表\n{out2}");
+}
+
+/// 有草稿时切页 / 退出也该先弹确认 (走的是 `App::guard_dirty`, 与 Task 2 的确认流程共用)。
+#[test]
+fn leaving_the_tab_or_quitting_with_a_draft_asks() {
+    let mut a = subs_app(false);
+    render(&mut a, 80, 24);
+    a.handle_key(key(KeyCode::Enter));
+    a.handle_key(key(KeyCode::Enter));
+    a.update(Action::PickerDone { tag: PickerTag::SlotModel { slot: Slot::Fable }, choice: PickerChoice::Item("m3".into()) });
+
+    assert!(a.update(Action::Quit).is_empty(), "有草稿时 q 应该先确认");
+    let out = render(&mut a, 80, 24);
+    assert!(out.contains(ZH.confirm_discard), "{out}");
+    a.update(Action::ClosePopup);
+
+    assert!(a.update(Action::SwitchTab(Tab::Overview)).is_empty(), "有草稿时切页应该先确认");
+    let out2 = render(&mut a, 80, 24);
+    assert!(out2.contains(ZH.confirm_discard), "{out2}");
+}
+
+/// 有草稿时 e/t/m/b 一律被拒绝, 弹 `sub_save_first`。
+#[test]
+fn mutation_keys_are_refused_while_dirty() {
+    let mut a = subs_app(false);
+    render(&mut a, 80, 24);
+    a.handle_key(key(KeyCode::Enter));
+    a.handle_key(key(KeyCode::Enter));
+    a.update(Action::PickerDone { tag: PickerTag::SlotModel { slot: Slot::Fable }, choice: PickerChoice::Item("m3".into()) });
+
+    for code in [KeyCode::Char('e'), KeyCode::Char('t'), KeyCode::Char('m'), KeyCode::Char('b')] {
+        assert_eq!(
+            a.handle_key(key(code)),
+            Some(Action::Notify { kind: ToastKind::Info, text: ZH.sub_save_first.into() }),
+            "{code:?} 应该被拒绝"
+        );
+    }
+}
+
+/// 草稿对应的订阅从 `Store` 消失 (被别处删除) 时, 下一次 `update` 应该丢弃草稿、焦点退回列表、
+/// 弹 `sub_gone`。
+#[test]
+fn draft_is_dropped_when_the_subscription_disappears() {
+    let mut a = subs_app(false);
+    render(&mut a, 80, 24);
+    a.handle_key(key(KeyCode::Enter));
+    a.handle_key(key(KeyCode::Enter));
+    a.update(Action::PickerDone { tag: PickerTag::SlotModel { slot: Slot::Fable }, choice: PickerChoice::Item("m3".into()) });
+    assert!(render(&mut a, 80, 24).contains(" *"));
+
+    let mut without_zhipu = detail_subs();
+    without_zhipu.remove(0);
+    a.update(subs_done(2, without_zhipu));
+    // `subs_done` 本身不会调页面的 `update` (只广播 `on_subscriptions_changed`); 要靠下一次真的
+    // 调用 `update()` 的动作 (这里用 `Refresh`, 与切页/轮询同一条路) 才会核对草稿。
+    a.update(Action::Refresh);
+    let out = render(&mut a, 80, 24);
+    assert!(!out.contains(" *"), "订阅消失后草稿应该被丢弃\n{out}");
+    assert!(out.contains(ZH.sub_gone), "{out}");
+    assert!(out.contains(ZH.sub_col_name), "焦点应该退回列表\n{out}");
+}
+
+/// I2 修正: 短模型名不该把 effort 列推到很远的右边——模型名结尾与 "high" 之间的距离不该超过
+/// 模型列下限 (24), 用「智谱主号」的 opus 槽 (`glm-4.6`, effort=high) 断言。
+#[test]
+fn effort_column_hugs_the_model_name() {
+    let mut a = subs_app(false);
+    render(&mut a, 80, 24);
+    a.handle_key(key(KeyCode::Enter));
+    let out = render(&mut a, 80, 24);
+
+    let opus_row = out.lines().map(plain).find(|l| l.contains("opus") && l.contains("high")).unwrap_or_else(|| panic!("缺 opus 槽这一行\n{out}"));
+    let model_end = opus_row.find("glm-4.6").unwrap() + "glm-4.6".len();
+    let effort_start = opus_row.find("high").unwrap();
+    assert!(
+        effort_start > model_end && effort_start - model_end <= 24,
+        "「high」应该紧跟在模型名后面 (间距 ≤ 24), 不该被推到很远的右边 (实际间距 {})\n{opus_row}",
+        effort_start - model_end
+    );
+}
+
+/// I3: 140 列起左栏放宽到 72 列, 放得下状态列 (120–139 仍是 58 列, 见既有的
+/// `list_has_a_status_column_with_cooldown_when_there_is_room`)。
+#[test]
+fn wide_140_shows_the_status_column() {
+    let out = render(&mut subs_app(false), 140, 40);
+    let header_line = out.lines().find(|l| l.contains(ZH.sub_col_name)).unwrap_or_else(|| panic!("缺表头行\n{out}"));
+    let list_half = header_line.split("││").next().unwrap_or(header_line);
+    assert!(list_half.contains(ZH.sub_col_state), "140 列左栏应该有 72 列, 放得下状态列\n{header_line}");
+}
+
+#[test]
+fn subscriptions_detail_focus_120x40() {
+    let mut a = subs_app(false);
+    render(&mut a, 120, 40);
+    a.handle_key(key(KeyCode::Enter));
+    insta::assert_snapshot!(render(&mut a, 120, 40));
+}
+
+#[test]
+fn subscriptions_dirty_80x24() {
+    let mut a = subs_app(false);
+    render(&mut a, 80, 24);
+    a.handle_key(key(KeyCode::Enter));
+    a.handle_key(key(KeyCode::Enter));
+    a.update(Action::PickerDone { tag: PickerTag::SlotModel { slot: Slot::Fable }, choice: PickerChoice::Item("m3".into()) });
+    insta::assert_snapshot!(render(&mut a, 80, 24));
 }

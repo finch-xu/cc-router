@@ -55,6 +55,10 @@ pub struct Strings {
     pub key_test: &'static str,
     pub key_models: &'static str,
     pub key_balance: &'static str,
+    /// Task 5: 订阅详情里改当前槽位的模型 (⏎) / 思考档位 (o) / 保存草稿 (s)。
+    pub key_edit_model: &'static str,
+    pub key_edit_effort: &'static str,
+    pub key_save: &'static str,
 
     pub help_title: &'static str,
     /// (键, 说明)
@@ -72,6 +76,12 @@ pub struct Strings {
     pub picker_empty: &'static str,
     /// 过滤选择弹窗底部的键位提示。
     pub picker_keys: &'static str,
+    /// Task 5: 改模型 / 改思考档位两个 picker 的标题, 参数是槽位显示名 (四个主槽的英文原名, 或
+    /// [`Strings::sub_slot_fallback`])。
+    pub pick_model_title: fn(slot: &str) -> String,
+    pub pick_effort_title: fn(slot: &str) -> String,
+    /// 兜底槽模型 picker 里置顶的「清空」选项 (对应 `id: ""`)。
+    pub pick_clear_fallback: &'static str,
 
     pub too_small: &'static str,
     pub coming_soon: &'static str,
@@ -158,6 +168,17 @@ pub struct Strings {
     /// `Mutation::UpdateSlots` (Task 5 起从订阅详情页发起) 的进行中文案; 与四个既有就地操作用同一套
     /// 「状态行后追加 busy 文案」机制。
     pub sub_busy_saving: &'static str,
+    /// Task 5: 草稿里跟 `Store` 当前值不同的槽位行末尾追加的 muted 提示。
+    pub sub_slot_modified: &'static str,
+    /// 有草稿时按 e/t/m/b 的拒绝提示 (避免重拉覆盖编辑基线)。
+    pub sub_save_first: &'static str,
+    /// 兜底槽 / Kiro 订阅上按 `o` 改思考档位的拒绝提示 (两种原因各一条)。
+    pub sub_effort_na_fallback: &'static str,
+    pub sub_effort_na_kiro: &'static str,
+    /// 主槽 (非兜底) 选了空白自定义值时的拒绝提示。
+    pub sub_model_required: &'static str,
+    /// 草稿对应的订阅从 `Store` 消失 (被别处删除) 时的提示。
+    pub sub_gone: &'static str,
 }
 
 impl Strings {
@@ -201,6 +222,9 @@ pub const ZH: Strings = Strings {
     key_test: "测试",
     key_models: "模型",
     key_balance: "余额",
+    key_edit_model: "改模型",
+    key_edit_effort: "改档位",
+    key_save: "保存",
 
     help_title: "键位",
     help_rows: &[
@@ -219,6 +243,9 @@ pub const ZH: Strings = Strings {
     picker_use_typed: |text| format!("使用「{text}」"),
     picker_empty: "没有匹配项",
     picker_keys: "⏎ 选择   Esc 取消",
+    pick_model_title: |slot| format!("选择 {slot} 的模型"),
+    pick_effort_title: |slot| format!("选择 {slot} 的思考档位"),
+    pick_clear_fallback: "(清空兜底槽)",
 
     too_small: "请放大终端窗口（至少 80×24）",
     coming_soon: "此页面将在后续版本提供",
@@ -298,7 +325,10 @@ pub const ZH: Strings = Strings {
         ("↑↓ / j k", "上一条 / 下一条"),
         ("g / G", "第一条 / 最后一条"),
         ("PgUp / PgDn", "翻页"),
-        ("⏎ / Esc", "进入 / 退出详情 (窄终端)"),
+        ("⏎ / Esc", "进入 / 退出详情"),
+        ("⏎ (详情内)", "改当前槽位的模型"),
+        ("o", "改当前槽位的思考档位"),
+        ("s", "保存槽位修改"),
         ("e", "启用 / 停用"),
         ("t", "测试连接"),
         ("m", "刷新模型列表"),
@@ -309,6 +339,12 @@ pub const ZH: Strings = Strings {
     sub_busy_models: "正在获取模型…",
     sub_busy_balance: "正在查询余额…",
     sub_busy_saving: "正在保存…",
+    sub_slot_modified: "已修改",
+    sub_save_first: "先按 s 保存或 Esc 放弃当前修改",
+    sub_effort_na_fallback: "兜底槽没有思考档位",
+    sub_effort_na_kiro: "Kiro 不支持思考档位",
+    sub_model_required: "模型不能为空",
+    sub_gone: "这条订阅已不存在",
 };
 
 pub fn strings(lang: Lang) -> &'static Strings {

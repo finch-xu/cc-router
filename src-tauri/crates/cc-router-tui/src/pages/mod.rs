@@ -43,9 +43,11 @@ pub struct DrawCtx<'a> {
 }
 
 pub trait Component {
-    /// 页面自己的键位。全局键 (切页 / 帮助 / 退出 / 刷新) 由 `App` 先处理, 到不了这里。
-    fn handle_key(&mut self, key: KeyEvent, store: &Store) -> Option<Action>;
-    fn update(&mut self, action: &Action, store: &Store) -> Vec<Cmd>;
+    /// 页面自己的键位。全局键 (切页 / 帮助 / 退出 / 刷新) 由 `App` 先处理, 到不了这里。`s`:
+    /// Task 5 起页面自己需要拼装本地化文案 (比如 picker 标题、拒绝操作的 toast) 才加的参数,
+    /// 之前的页面 (总览 / 占位) 用不到就地忽略。
+    fn handle_key(&mut self, key: KeyEvent, store: &Store, s: &'static Strings) -> Option<Action>;
+    fn update(&mut self, action: &Action, store: &Store, s: &'static Strings) -> Vec<Cmd>;
     /// `&mut self`: 只允许为动效记录几何信息, 不改业务状态 —— 同一状态画两次必须得到同一帧。
     fn draw(&mut self, frame: &mut Frame, area: Rect, ctx: &mut DrawCtx);
     /// 底栏左侧显示的页面键位。
@@ -65,6 +67,17 @@ pub trait Component {
 
     /// 丢弃当前草稿, 回到与 `Store` 一致的状态。默认什么都不做 (配合 `is_dirty` 默认 `false`)。
     fn discard_changes(&mut self) {}
+
+    /// 一次就地操作 (`Mutation`) 落地了 (成功或失败), `App::finish_mutation` 对**全部**页面各调
+    /// 一次 (Task 5 起; Task 6 的虚拟模型页也会用到)——页面自己按 `mutation` 的形状判断这跟自己
+    /// 有没有关系 (比如订阅页只关心 `id` 匹配自己当前草稿的 `UpdateSlots`)。默认什么都不做。
+    fn on_mutation_done(&mut self, _mutation: &Mutation, _ok: bool) {}
+
+    /// 页面在 `update()` 内部想弹一条 toast (`update` 签名只能返回 `Vec<Cmd>`, 塞不进一个
+    /// `Action`) 时, 存进这里; `App` 在调用 `update()` 之后轮询一次取走。默认没有待发的通知。
+    fn take_notice(&mut self) -> Option<(ToastKind, String)> {
+        None
+    }
 }
 
 /// 三个页面的集合, 取代散字段 + 两个手写的 `select_page` / `select_page_ref` helper。字段公开是

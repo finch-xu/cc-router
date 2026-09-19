@@ -1,5 +1,8 @@
 //! 订阅页: 列表 + 详情 (宽屏 ≥120 列双栏 / 窄屏进出详情), 加四个就地操作——启停 `e` / 测试连接
 //! `t` / 刷新模型 `m` / 刷新余额 `b`, 列表态与详情态都生效, 作用于当前选中的订阅。
+//!
+//! Task 5 起详情态自己也是个小状态机 ([`Focus::Detail`] 带着当前槽位光标): `⏎` 改模型、`o` 改
+//! 思考档位, 改动先落进页面自己的草稿 ([`SlotDraft`], 不进 `Store`), `s` 才真的发 `UpdateSlots`。
 
 use ratatui::crossterm::event::{KeyCode, KeyEvent};
 use ratatui::layout::{Constraint, Layout, Margin, Rect};
@@ -14,7 +17,7 @@ use unicode_width::UnicodeWidthStr;
 
 use super::{Component, DrawCtx};
 use crate::action::{Action, BusyKey, Cmd, Fetch, Mutation};
-use crate::client::dto::{BalanceSeverity, QuotaUsage, Subscription};
+use crate::client::dto::{BalanceSeverity, ModelSlots, QuotaUsage, Slot, SlotEfforts, Subscription, EFFORT_CHOICES};
 use crate::format::{compact, fit};
 use crate::i18n::Strings;
 use crate::store::Store;
@@ -22,12 +25,18 @@ use crate::theme::Theme;
 use crate::widgets::badge::{badge, status_text};
 use crate::widgets::gauge::quota_gauge;
 use crate::widgets::keybar::Hint;
+use crate::widgets::picker::{PickerChoice, PickerItem, PickerSpec, PickerTag};
 use crate::widgets::spinner_state;
 use crate::widgets::toast::ToastKind;
 
-/// 达到才用左表右详情双栏; 以下只画一栏, 靠 `detail_open` 在列表/详情之间切换。
+/// 达到才用左表右详情双栏; 以下只画一栏, 靠 [`Focus`] 在列表/详情之间切换 (两种宽度下 `⏎` 都能
+/// 切换焦点, 区别只在窄屏一次只画一栏、宽屏两栏都画但边框颜色跟着焦点走)。
 const WIDE_THRESHOLD: u16 = 120;
+/// I3: 达到这个宽度, 左栏从 58 列放宽到 [`LIST_WIDTH_140`] 并显示状态列 (120–139 仍是 58 列
+/// 无状态列, 与 [`WIDE_THRESHOLD`] 那档保持不变)。
+const WIDE_140_THRESHOLD: u16 = 140;
 const LIST_WIDTH: u16 = 58;
+const LIST_WIDTH_140: u16 = 72;
 /// 表的选中前缀 (`highlight_symbol`) 固定宽度, 用于手算列宽给 `format::fit`。
 const HIGHLIGHT_COL: u16 = 2;
 const SYMBOL_COL: u16 = 2;
@@ -64,14 +73,37 @@ enum DetailRow {
     Wrapped { label: &'static str, text: String, height: u16, style: Style },
 }
 
+/// 列表 / 详情的键盘焦点 (Task 5)。两种宽度都有效: 宽屏两栏一直都画, 焦点只影响哪一栏的边框是
+/// `theme.accent`; 窄屏一次只画一栏, 焦点直接决定画哪栏 (与旧的 `detail_open: bool` 同一件事,
+/// 只是现在宽屏下也有意义)。`Detail` 带着当前槽位光标, 因为「进详情」与「选中第一个槽位」是
+/// 同一个动作 (`⏎`/`→`/`l` 从 `List` 过来恒落在 [`Slot::Fable`])。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Focus {
+    List,
+    Detail { slot: Slot },
+}
+
+/// 一条订阅槽位的编辑草稿。`sub_id` 钉住是哪一条订阅 (焦点在 `Detail` 时列表选中项不会变, 但
+/// 防御性地存一份, 不隐式依赖「当前选中项没变过」这件事)。只放页面自己的状态, 不进 `Store`
+/// (spec 全局约束)。
+#[derive(Debug, Clone, PartialEq)]
+struct SlotDraft {
+    sub_id: String,
+    model_slots: ModelSlots,
+    slot_efforts: SlotEfforts,
+}
+
+/// 五个槽位的固定顺序, 给槽位光标的 上/下/首/尾 移动用。
+const ALL_SLOTS: [Slot; 5] = [Slot::Fable, Slot::Opus, Slot::Sonnet, Slot::Haiku, Slot::Fallback];
+/// 四个主槽 (不含兜底), 给详情面板画槽位行用——兜底槽单独一行 (没有 effort 列)。
+const MAIN_SLOTS: [Slot; 4] = [Slot::Fable, Slot::Opus, Slot::Sonnet, Slot::Haiku];
+
 pub struct Subscriptions {
     selected_id: Option<String>,
     /// `selected_id` 在新列表里找不到时, 用这个 (钳制到新列表长度后) 兜底, 而不是简单地弹回第一条。
     last_index: usize,
-    /// 只有窄屏 (< [`WIDE_THRESHOLD`]) 才有意义; 宽屏画双栏时忽略它 (详情视图只是窄屏的一种呈现,
-    /// 不是独立状态机)。
-    detail_open: bool,
-    /// 上一帧的宽度: `handle_key` 判断 `⏎` 该不该进详情要用得到, 但按键发生时还不知道这一帧的几何。
+    focus: Focus,
+    /// 上一帧的宽度: `draw_list`/`draw_detail` 布局判断要用得到, 但按键发生时还不知道这一帧的几何。
     last_width: u16,
     /// 上一帧表体的可视行数, `PageUp` / `PageDown` 按这个翻页; 首帧之前用 [`DEFAULT_PAGE_ROWS`]
     /// 兜底, 不然第一次按键 (还没画过) 只会移动 0 格 (F8 教训: 步长绝不能默认成 0)。
@@ -79,6 +111,15 @@ pub struct Subscriptions {
     table_state: TableState,
     /// 下一帧要闪一下的订阅 id; `draw` 取走。
     flash_rows: Vec<String>,
+    /// 当前正在编辑的槽位草稿; `None` = 没有未保存的修改。首次编辑时从 `Store` 里对应订阅克隆。
+    draft: Option<SlotDraft>,
+    /// `is_dirty()` 的缓存: 草稿与 `Store` 当前值完全相等时为假 (改回去就不算脏)。
+    /// `is_dirty()` 本身拿不到 `Store`, 靠 `sync_draft_with_store` (`update()` 里) /
+    /// `refresh_dirty_flag` (`draw()` 里, 只读重算, 不碰 `draft`/`focus`) 保持更新。
+    dirty: bool,
+    /// 页面在 `update()` 内部想弹的一条 toast, `App::update_page` 在调用 `update()` 之后轮询取走
+    /// (`update()` 签名只能返回 `Vec<Cmd>`, 塞不进一个 `Action::Notify`)。
+    pending_notice: Option<(ToastKind, String)>,
 }
 
 impl Default for Subscriptions {
@@ -86,11 +127,14 @@ impl Default for Subscriptions {
         Self {
             selected_id: None,
             last_index: 0,
-            detail_open: false,
+            focus: Focus::List,
             last_width: 0,
             last_page_rows: DEFAULT_PAGE_ROWS,
             table_state: TableState::default(),
             flash_rows: Vec::new(),
+            draft: None,
+            dirty: false,
+            pending_notice: None,
         }
     }
 }
@@ -98,6 +142,186 @@ impl Default for Subscriptions {
 impl Subscriptions {
     fn is_wide(&self) -> bool {
         self.last_width >= WIDE_THRESHOLD
+    }
+
+    /// I3: 宽屏左栏的列宽——140 列起放宽到 72 (放得下状态列), 120–139 仍是 58 (与之前一致)。
+    fn list_width(&self) -> u16 {
+        if self.last_width >= WIDE_140_THRESHOLD {
+            LIST_WIDTH_140
+        } else {
+            LIST_WIDTH
+        }
+    }
+
+    /// 宽屏下有焦点的那一栏边框用 `theme.accent`, 另一栏用 `theme.border`; 窄屏一次只画一栏,
+    /// 边框颜色的区分没有意义, 恒用 `theme.border` (与改动前一致)。
+    fn pane_border_style(&self, theme: &Theme, is_list_pane: bool) -> Style {
+        if !self.is_wide() {
+            return theme.border_style();
+        }
+        let list_focused = matches!(self.focus, Focus::List);
+        if is_list_pane == list_focused {
+            Style::new().fg(theme.accent)
+        } else {
+            theme.border_style()
+        }
+    }
+
+    /// 效果同 `sync_draft_with_store`, 但**只**重算 `dirty` 这个只读缓存 (不碰 `draft`/`focus`,
+    /// 不产出通知)——`draw()` 里调这个是安全的 (「同一状态画两次得到同一帧」不受影响), 覆盖
+    /// 「草稿仍指向一条存在的订阅, 但它在 `Store` 里的值变了」这种只有靠重新画才会经过的路径。
+    fn refresh_dirty_flag(&mut self, store: &Store) {
+        self.dirty = match &self.draft {
+            Some(draft) => store
+                .subscription(&draft.sub_id)
+                .is_some_and(|sub| sub.model_slots != draft.model_slots || sub.slot_efforts != draft.slot_efforts),
+            None => false,
+        };
+    }
+
+    /// `update()` 专用: 除了重算 `dirty`, 还处理「草稿对应的订阅从 `Store` 消失」(被别处删除)——
+    /// 清草稿、焦点退回 `List`、排一条 `s.sub_gone` 通知。这两件事都是业务状态变更, 只能在
+    /// `update()`/`handle_key()` 里做 (`draw()` 不改业务状态)。
+    fn sync_draft_with_store(&mut self, store: &Store, s: &'static Strings) {
+        let Some(draft) = &self.draft else {
+            self.dirty = false;
+            return;
+        };
+        match store.subscription(&draft.sub_id) {
+            None => {
+                self.draft = None;
+                self.focus = Focus::List;
+                self.dirty = false;
+                self.pending_notice = Some((ToastKind::Info, s.sub_gone.to_string()));
+            }
+            Some(sub) => {
+                self.dirty = sub.model_slots != draft.model_slots || sub.slot_efforts != draft.slot_efforts;
+            }
+        }
+    }
+
+    /// 当前应该显示的槽位值: 有草稿 (且草稿属于这条订阅) 就用草稿, 否则用 `Store` 里的原始值。
+    fn effective_model_slots<'a>(&'a self, sub: &'a Subscription) -> &'a ModelSlots {
+        match &self.draft {
+            Some(d) if d.sub_id == sub.id => &d.model_slots,
+            _ => &sub.model_slots,
+        }
+    }
+
+    fn effective_slot_efforts<'a>(&'a self, sub: &'a Subscription) -> &'a SlotEfforts {
+        match &self.draft {
+            Some(d) if d.sub_id == sub.id => &d.slot_efforts,
+            _ => &sub.slot_efforts,
+        }
+    }
+
+    /// 草稿不存在, 或者存在但属于别的订阅 (理论上不该发生, 防御性写法) 时新建一份 (从 `Store`
+    /// 克隆); 已经存在且属于这条订阅就直接复用——保证同一次编辑会话内多次改动落在同一份草稿上,
+    /// 不会一改就把上一步的修改冲掉。
+    fn draft_mut(&mut self, sub: &Subscription) -> &mut SlotDraft {
+        let needs_new = self.draft.as_ref().is_none_or(|d| d.sub_id != sub.id);
+        if needs_new {
+            self.draft =
+                Some(SlotDraft { sub_id: sub.id.clone(), model_slots: sub.model_slots.clone(), slot_efforts: sub.slot_efforts.clone() });
+        }
+        match &mut self.draft {
+            Some(d) => d,
+            None => unreachable!("刚刚确保过 draft 是 Some"),
+        }
+    }
+
+    fn move_slot_cursor(&mut self, current: Slot, delta: isize) {
+        let idx = ALL_SLOTS.iter().position(|&sl| sl == current).unwrap_or(0);
+        let next = (idx as isize + delta).clamp(0, ALL_SLOTS.len() as isize - 1) as usize;
+        self.focus = Focus::Detail { slot: ALL_SLOTS[next] };
+    }
+
+    /// `⏎` (在 `Detail` 焦点下): 打开当前槽位的模型 picker, `initial` 是草稿 (没有就是 `Store`)
+    /// 里该槽当前值; 兜底槽额外在最前面放一项「清空」。
+    fn open_model_picker(&self, sub: &Subscription, slot: Slot, s: &'static Strings) -> Action {
+        let initial = self.effective_model_slots(sub).get(slot).to_string();
+        let mut items = Vec::new();
+        if slot == Slot::Fallback {
+            items.push(PickerItem { id: String::new(), label: s.pick_clear_fallback.to_string(), hint: None });
+        }
+        if let Some(cache) = &sub.model_cache {
+            items.extend(cache.models.iter().map(|m| PickerItem { id: m.id.clone(), label: m.id.clone(), hint: m.display_name.clone() }));
+        }
+        Action::OpenPicker(PickerSpec {
+            tag: PickerTag::SlotModel { slot },
+            title: (s.pick_model_title)(slot_label(slot, s)),
+            items,
+            allow_custom: true,
+            initial,
+        })
+    }
+
+    /// `o` (在 `Detail` 焦点下): 打开当前槽位的思考档位 picker, 兜底槽 / Kiro 订阅直接拒绝
+    /// (就地回一条 `Action::Notify`, 不开弹窗)。
+    fn open_effort_picker_or_refuse(&self, sub: &Subscription, slot: Slot, s: &'static Strings) -> Option<Action> {
+        if slot == Slot::Fallback {
+            return Some(Action::Notify { kind: ToastKind::Info, text: s.sub_effort_na_fallback.to_string() });
+        }
+        if sub.auth_type == "kiro_oauth" {
+            return Some(Action::Notify { kind: ToastKind::Info, text: s.sub_effort_na_kiro.to_string() });
+        }
+        let initial = self.effective_slot_efforts(sub).get(slot).unwrap_or("").to_string();
+        let mut items = vec![PickerItem { id: String::new(), label: s.sub_effort_auto.to_string(), hint: None }];
+        items.extend(EFFORT_CHOICES.iter().map(|e| PickerItem { id: (*e).to_string(), label: (*e).to_string(), hint: None }));
+        Some(Action::OpenPicker(PickerSpec {
+            tag: PickerTag::SlotEffort { slot },
+            title: (s.pick_effort_title)(slot_label(slot, s)),
+            items,
+            allow_custom: false,
+            initial,
+        }))
+    }
+
+    /// `PickerDone` 落地: 按 `tag` 写进草稿 (首次编辑时新建, 见 [`Self::draft_mut`]); 主槽的空白
+    /// 自定义值被拒绝 (拒绝时不新建草稿), 兜底槽的空白等于清空。写完之后重新核对一次 dirty
+    /// (改回原值应该清脏, 见 `sync_draft_with_store`)。跟自己无关的 tag (虚拟模型页的
+    /// `VmAddSubscription`) 直接忽略。
+    fn apply_picker_choice(&mut self, tag: &PickerTag, choice: &PickerChoice, store: &Store, s: &'static Strings) {
+        let Some(id) = self.selected_id.clone() else { return };
+        let Some(sub) = store.subscription(&id) else { return };
+        match tag {
+            PickerTag::SlotModel { slot } => {
+                let value = match choice {
+                    PickerChoice::Item(item_id) => item_id.clone(),
+                    PickerChoice::Custom(text) => text.trim().to_string(),
+                };
+                if value.is_empty() && *slot != Slot::Fallback {
+                    self.pending_notice = Some((ToastKind::Info, s.sub_model_required.to_string()));
+                    return;
+                }
+                self.draft_mut(sub).model_slots.set(*slot, value);
+            }
+            PickerTag::SlotEffort { slot } => {
+                let value = match choice {
+                    PickerChoice::Item(item_id) if item_id.is_empty() => None,
+                    PickerChoice::Item(item_id) => Some(item_id.clone()),
+                    // `allow_custom: false`: picker 理论上不会产出 Custom, 防御性地忽略。
+                    PickerChoice::Custom(_) => return,
+                };
+                self.draft_mut(sub).slot_efforts.set(*slot, value);
+            }
+            PickerTag::VmAddSubscription => return,
+        }
+        self.sync_draft_with_store(store, s);
+    }
+
+    /// `s`: 不脏时无动作; 脏时产出 `Action::Mutate(UpdateSlots)`——断线由 `App::start_mutation`
+    /// 统一处理 (弹 `toast_offline`, 不真的发), 这里不用重复判断连接状态。
+    fn save_action(&self) -> Option<Action> {
+        if !self.is_dirty() {
+            return None;
+        }
+        let draft = self.draft.as_ref()?;
+        Some(Action::Mutate(Mutation::UpdateSlots {
+            id: draft.sub_id.clone(),
+            model_slots: draft.model_slots.clone(),
+            slot_efforts: draft.slot_efforts.clone(),
+        }))
     }
 
     /// 每次 `draw` / `handle_key` 都要调用: 把 `selected_id` 解析成当前列表里的下标。
@@ -139,7 +363,17 @@ impl Subscriptions {
         self.select_index(subs, next);
     }
 
-    fn draw_list(&mut self, frame: &mut Frame, area: Rect, ctx: &mut DrawCtx, subs: &[Subscription], idx: usize, flash_rows: &[String]) {
+    #[allow(clippy::too_many_arguments)] // 与主 crate 的 dispatch 函数同一条先例 (见 proxy/*.rs)
+    fn draw_list(
+        &mut self,
+        frame: &mut Frame,
+        area: Rect,
+        ctx: &mut DrawCtx,
+        subs: &[Subscription],
+        idx: usize,
+        flash_rows: &[String],
+        border_style: Style,
+    ) {
         let s = ctx.s;
         self.table_state.select(Some(idx));
 
@@ -207,7 +441,7 @@ impl Subscriptions {
         let total = subs.len();
         let block = Block::bordered()
             .border_type(BorderType::Rounded)
-            .border_style(ctx.theme.border_style())
+            .border_style(border_style)
             .title_top(format!(" {} ", (s.sub_title)(total)))
             .title_bottom(Line::from(format!(" {}/{} ", idx + 1, total)).right_aligned().style(ctx.theme.muted_style()))
             .padding(Padding::horizontal(LIST_PADDING));
@@ -254,12 +488,22 @@ impl Subscriptions {
         }
     }
 
-    fn draw_detail(&self, frame: &mut Frame, area: Rect, ctx: &DrawCtx, sub: &Subscription, narrow: bool) {
+    fn draw_detail(&self, frame: &mut Frame, area: Rect, ctx: &DrawCtx, sub: &Subscription, narrow: bool, border_style: Style) {
         let s = ctx.s;
+        let model_slots = self.effective_model_slots(sub);
+        let slot_efforts = self.effective_slot_efforts(sub);
+        let focus_slot = match self.focus {
+            Focus::Detail { slot } => Some(slot),
+            Focus::List => None,
+        };
+        // 有草稿时标题加 " *"——走 `is_dirty()` (`Component` trait 方法, 与 `App::guard_dirty` 问
+        // 的是同一个问题) 而不是直接读 `self.dirty` 字段, 保证「脏」只有这一个判定入口, 改回原值
+        // (草稿仍在但与 `Store` 相等) 不该继续显示这个星号。
+        let title_suffix = if self.is_dirty() { " *" } else { "" };
         let mut block = Block::bordered()
             .border_type(BorderType::Rounded)
-            .border_style(ctx.theme.border_style())
-            .title_top(format!(" {} ", sub.display_name))
+            .border_style(border_style)
+            .title_top(format!(" {}{} ", sub.display_name, title_suffix))
             .padding(Padding::horizontal(1));
         if narrow {
             block = block.title_bottom(Line::from(format!(" Esc {} ", s.key_back)).right_aligned().style(ctx.theme.muted_style()));
@@ -267,7 +511,7 @@ impl Subscriptions {
         let inner = block.inner(area);
         frame.render_widget(block, area);
 
-        let rows = detail_rows(sub, ctx, inner.width);
+        let rows = detail_rows(sub, model_slots, slot_efforts, focus_slot, ctx, inner.width);
         draw_detail_rows(frame, inner, ctx, &rows);
     }
 
@@ -290,57 +534,114 @@ impl Subscriptions {
 }
 
 impl Component for Subscriptions {
-    fn handle_key(&mut self, key: KeyEvent, store: &Store) -> Option<Action> {
+    fn handle_key(&mut self, key: KeyEvent, store: &Store, s: &'static Strings) -> Option<Action> {
         let subs = store.subscriptions();
         let idx = self.resolve_selection(subs);
-        match key.code {
-            KeyCode::Up | KeyCode::Char('k') => {
-                self.move_selection(subs, idx, -1);
-                None
-            }
-            KeyCode::Down | KeyCode::Char('j') => {
-                self.move_selection(subs, idx, 1);
-                None
-            }
-            KeyCode::Char('g') | KeyCode::Home => {
-                self.select_index(subs, 0);
-                None
-            }
-            KeyCode::Char('G') | KeyCode::End => {
-                if !subs.is_empty() {
-                    self.select_index(subs, subs.len() - 1);
+
+        // 有草稿时 e/t/m/b 一律拒绝 (不管当前 focus——草稿只可能在 `Detail` 焦点下存在, 但这条
+        // 判断不依赖那个不变式), 避免重拉覆盖编辑基线的困惑。
+        if self.draft.is_some() && matches!(key.code, KeyCode::Char('e' | 't' | 'm' | 'b')) {
+            return Some(Action::Notify { kind: ToastKind::Info, text: s.sub_save_first.to_string() });
+        }
+
+        match self.focus {
+            Focus::List => match key.code {
+                KeyCode::Up | KeyCode::Char('k') => {
+                    self.move_selection(subs, idx, -1);
+                    None
                 }
-                None
-            }
-            KeyCode::PageUp => {
-                self.move_selection(subs, idx, -(self.last_page_rows.max(1) as isize));
-                None
-            }
-            KeyCode::PageDown => {
-                self.move_selection(subs, idx, self.last_page_rows.max(1) as isize);
-                None
-            }
-            KeyCode::Enter | KeyCode::Right | KeyCode::Char('l') if !self.is_wide() && idx.is_some() => {
-                self.detail_open = true;
-                None
-            }
-            KeyCode::Esc | KeyCode::Left | KeyCode::Char('h') => {
-                self.detail_open = false;
-                None
-            }
-            // 四个就地操作: 列表态 / 详情态都生效, 作用于当前选中的订阅; 没有选中项 (空列表) 不动作。
-            KeyCode::Char('e') => idx.map(|i| Action::Mutate(Mutation::SetEnabled { id: subs[i].id.clone(), enabled: !subs[i].enabled })),
-            KeyCode::Char('t') => idx.map(|i| Action::Mutate(Mutation::TestConnection { id: subs[i].id.clone() })),
-            KeyCode::Char('m') => idx.map(|i| Action::Mutate(Mutation::RefreshModels { id: subs[i].id.clone() })),
-            KeyCode::Char('b') => idx.map(|i| Action::Mutate(Mutation::RefreshBalance { id: subs[i].id.clone() })),
-            _ => None,
+                KeyCode::Down | KeyCode::Char('j') => {
+                    self.move_selection(subs, idx, 1);
+                    None
+                }
+                KeyCode::Char('g') | KeyCode::Home => {
+                    self.select_index(subs, 0);
+                    None
+                }
+                KeyCode::Char('G') | KeyCode::End => {
+                    if !subs.is_empty() {
+                        self.select_index(subs, subs.len() - 1);
+                    }
+                    None
+                }
+                KeyCode::PageUp => {
+                    self.move_selection(subs, idx, -(self.last_page_rows.max(1) as isize));
+                    None
+                }
+                KeyCode::PageDown => {
+                    self.move_selection(subs, idx, self.last_page_rows.max(1) as isize);
+                    None
+                }
+                // 两种宽度都有效 (Task 5): 宽屏下这只是把焦点从列表挪到详情 (边框跟着变), 窄屏下
+                // 才是「切一整屏」——同一个按键, `draw()` 按宽度决定怎么呈现。
+                KeyCode::Enter | KeyCode::Right | KeyCode::Char('l') if idx.is_some() => {
+                    self.focus = Focus::Detail { slot: Slot::Fable };
+                    None
+                }
+                KeyCode::Char('e') => idx.map(|i| Action::Mutate(Mutation::SetEnabled { id: subs[i].id.clone(), enabled: !subs[i].enabled })),
+                KeyCode::Char('t') => idx.map(|i| Action::Mutate(Mutation::TestConnection { id: subs[i].id.clone() })),
+                KeyCode::Char('m') => idx.map(|i| Action::Mutate(Mutation::RefreshModels { id: subs[i].id.clone() })),
+                KeyCode::Char('b') => idx.map(|i| Action::Mutate(Mutation::RefreshBalance { id: subs[i].id.clone() })),
+                _ => None,
+            },
+            Focus::Detail { slot } => match key.code {
+                // 五个槽位间移动, 不绕回; 列表选中项不动。
+                KeyCode::Up | KeyCode::Char('k') => {
+                    self.move_slot_cursor(slot, -1);
+                    None
+                }
+                KeyCode::Down | KeyCode::Char('j') => {
+                    self.move_slot_cursor(slot, 1);
+                    None
+                }
+                KeyCode::Char('g') | KeyCode::Home => {
+                    self.focus = Focus::Detail { slot: ALL_SLOTS[0] };
+                    None
+                }
+                KeyCode::Char('G') | KeyCode::End => {
+                    self.focus = Focus::Detail { slot: ALL_SLOTS[ALL_SLOTS.len() - 1] };
+                    None
+                }
+                KeyCode::Esc | KeyCode::Left | KeyCode::Char('h') => {
+                    if self.is_dirty() {
+                        Some(Action::OpenConfirm { prompt: s.confirm_discard.to_string(), on_yes: Box::new(Action::DiscardDraft) })
+                    } else {
+                        // 草稿不脏 (可能压根没有, 也可能改回了原值) 时直接放行, 顺带清掉它——
+                        // `focus == List` 时 `draft` 恒为 `None` 是页面维持的不变式。
+                        self.draft = None;
+                        self.focus = Focus::List;
+                        None
+                    }
+                }
+                KeyCode::Enter => {
+                    let i = idx?;
+                    Some(self.open_model_picker(&subs[i], slot, s))
+                }
+                KeyCode::Char('o') => {
+                    let i = idx?;
+                    self.open_effort_picker_or_refuse(&subs[i], slot, s)
+                }
+                KeyCode::Char('s') => self.save_action(),
+                KeyCode::Char('e') => idx.map(|i| Action::Mutate(Mutation::SetEnabled { id: subs[i].id.clone(), enabled: !subs[i].enabled })),
+                KeyCode::Char('t') => idx.map(|i| Action::Mutate(Mutation::TestConnection { id: subs[i].id.clone() })),
+                KeyCode::Char('m') => idx.map(|i| Action::Mutate(Mutation::RefreshModels { id: subs[i].id.clone() })),
+                KeyCode::Char('b') => idx.map(|i| Action::Mutate(Mutation::RefreshBalance { id: subs[i].id.clone() })),
+                _ => None,
+            },
         }
     }
 
-    fn update(&mut self, action: &Action, _store: &Store) -> Vec<Cmd> {
+    fn update(&mut self, action: &Action, store: &Store, s: &'static Strings) -> Vec<Cmd> {
+        // 每次 `update()` 都先核对一遍草稿: 草稿对应的订阅可能已经在别处被删掉 (见
+        // `sync_draft_with_store`)。放在 match 之前, 不管这次具体是哪个 action。
+        self.sync_draft_with_store(store, s);
         match action {
             Action::Refresh | Action::Connected { .. } => vec![Cmd::Fetch(Fetch::Subscriptions)],
             Action::Sse { name, .. } if SSE_REFETCH.contains(&name.as_str()) => vec![Cmd::Fetch(Fetch::Subscriptions)],
+            Action::PickerDone { tag, choice } => {
+                self.apply_picker_choice(tag, choice, store, s);
+                Vec::new()
+            }
             _ => Vec::new(),
         }
     }
@@ -348,6 +649,9 @@ impl Component for Subscriptions {
     fn draw(&mut self, frame: &mut Frame, area: Rect, ctx: &mut DrawCtx) {
         let flash_rows = std::mem::take(&mut self.flash_rows);
         self.last_width = area.width;
+        // 只读重算 `dirty` 缓存 (不碰 `draft`/`focus`): 覆盖「草稿仍指向一条存在的订阅, 但它在
+        // `Store` 里的值这一帧才刚变」的路径, 不依赖下一次 `update()` 才被发现。
+        self.refresh_dirty_flag(ctx.store);
 
         if !ctx.store.subscriptions_loaded() {
             self.draw_placeholder(frame, area, ctx, true);
@@ -361,28 +665,49 @@ impl Component for Subscriptions {
         let Some(idx) = self.resolve_selection(subs) else { return };
 
         if self.is_wide() {
-            let [left, right] = Layout::horizontal([Constraint::Length(LIST_WIDTH), Constraint::Min(0)]).areas(area);
-            self.draw_list(frame, left, ctx, subs, idx, &flash_rows);
-            self.draw_detail(frame, right, ctx, &subs[idx], false);
-        } else if self.detail_open {
-            self.draw_detail(frame, area, ctx, &subs[idx], true);
+            let [left, right] = Layout::horizontal([Constraint::Length(self.list_width()), Constraint::Min(0)]).areas(area);
+            let list_border = self.pane_border_style(ctx.theme, true);
+            let detail_border = self.pane_border_style(ctx.theme, false);
+            self.draw_list(frame, left, ctx, subs, idx, &flash_rows, list_border);
+            self.draw_detail(frame, right, ctx, &subs[idx], false, detail_border);
+        } else if matches!(self.focus, Focus::List) {
+            let border = self.pane_border_style(ctx.theme, true);
+            self.draw_list(frame, area, ctx, subs, idx, &flash_rows, border);
         } else {
-            self.draw_list(frame, area, ctx, subs, idx, &flash_rows);
+            let border = self.pane_border_style(ctx.theme, false);
+            self.draw_detail(frame, area, ctx, &subs[idx], true, border);
         }
     }
 
     fn hints(&self, s: &'static Strings) -> Vec<Hint<'static>> {
-        let mut hints = vec![("↑↓", s.key_select)];
-        // M5: 详情态不再重复一份 Esc 返回——面板右下角的 `title_bottom` 已经在说这件事了 (见
-        // `draw_detail`), 键位栏这份纯粹是挤占空间, 挤掉了本该放得下的 `b 余额`。
-        if !self.is_wide() && !self.detail_open {
-            hints.push(("⏎", s.key_detail));
+        match self.focus {
+            Focus::List => {
+                let mut hints = vec![("↑↓", s.key_select)];
+                // M5: 详情态不再重复一份 Esc 返回——面板右下角的 `title_bottom` 已经在说这件事了
+                // (见 `draw_detail`), 键位栏这份纯粹是挤占空间, 挤掉了本该放得下的 `b 余额`。
+                if !self.is_wide() {
+                    hints.push(("⏎", s.key_detail));
+                }
+                hints.push(("e", s.key_toggle));
+                hints.push(("t", s.key_test));
+                hints.push(("m", s.key_models));
+                hints.push(("b", s.key_balance));
+                hints
+            }
+            Focus::Detail { .. } => {
+                // 放不下时 keybar 从右往左丢——e/t/m/b 排在最后, 会先被裁掉, 符合简报的预期。
+                vec![
+                    ("↑↓", s.key_select),
+                    ("⏎", s.key_edit_model),
+                    ("o", s.key_edit_effort),
+                    ("s", s.key_save),
+                    ("e", s.key_toggle),
+                    ("t", s.key_test),
+                    ("m", s.key_models),
+                    ("b", s.key_balance),
+                ]
+            }
         }
-        hints.push(("e", s.key_toggle));
-        hints.push(("t", s.key_test));
-        hints.push(("m", s.key_models));
-        hints.push(("b", s.key_balance));
-        hints
     }
 
     fn help(&self, s: &'static Strings) -> &'static [(&'static str, &'static str)] {
@@ -393,6 +718,32 @@ impl Component for Subscriptions {
         // 整体替换而不是往后追加: 页面不可见时攒了好几拨变化, 回来只该闪最新一拨——旧的早就过时了,
         // 而且不去重的 `extend` 会让积压的重复 id 在 `flash_rows.contains` 里白跑好几遍 (I10)。
         self.flash_rows = changed.to_vec();
+    }
+
+    fn is_dirty(&self) -> bool {
+        self.dirty
+    }
+
+    fn discard_changes(&mut self) {
+        self.draft = None;
+        self.focus = Focus::List;
+        self.dirty = false;
+    }
+
+    fn on_mutation_done(&mut self, mutation: &Mutation, ok: bool) {
+        if !ok {
+            return;
+        }
+        if let Mutation::UpdateSlots { id, .. } = mutation {
+            if self.draft.as_ref().is_some_and(|d| &d.sub_id == id) {
+                self.draft = None;
+                self.dirty = false;
+            }
+        }
+    }
+
+    fn take_notice(&mut self) -> Option<(ToastKind, String)> {
+        self.pending_notice.take()
     }
 }
 
@@ -423,33 +774,88 @@ fn model_style(model: &str, theme: &Theme) -> Style {
     }
 }
 
-/// I2: 槽位那两个字符缩进 + 名字列 + effort 列吃掉的宽度之后, 剩下的都给模型名, 下限 24 列
-/// (旧的固定值) ——真实的模型 id (`claude-sonnet-4-5-20250929` / `qwen3-coder-480b-a35b-instruct`)
-/// 经常超过 24, 详情面板实际有 58~76 列可用, 不该白白浪费。
-fn slot_model_col(width: u16) -> usize {
-    width.saturating_sub(2 + SLOT_NAME_COL as u16 + EFFORT_COL as u16).max(24) as usize
+/// 四个主槽 + 兜底槽里最长的那个模型名的显示宽度。
+fn longest_model_width(model_slots: &ModelSlots) -> usize {
+    [&model_slots.fable, &model_slots.opus, &model_slots.sonnet, &model_slots.haiku, &model_slots.fallback]
+        .into_iter()
+        .map(|m| m.width())
+        .max()
+        .unwrap_or(0)
 }
 
-fn slot_line(name: &'static str, model: &str, effort: Option<&str>, model_col: usize, theme: &Theme, s: &'static Strings) -> Line<'static> {
+/// I2 (Task 5 修正): 模型名列宽 = `min(可用宽度, 五个槽里最长模型名的显示宽度 + 2)`, 下限 24
+/// (旧的固定值)——之前的版本把整段可用宽度都给了模型名, 短模型名 (常见情况) 后面拖着一大段
+/// 空白, effort 列被推到贴着右边框的地方; 现在按实际内容定宽, 让 effort 列贴着模型名。
+/// 宽度小到连 24 都算不出来时仍然钳制在 24 (`.max(24)` 排在 `.min(available)` 之后), 不会因为
+/// 窄而给出更小 (甚至溢出成 0) 的值——80 列的最小终端保证了这种极端情况不会真的溢出面板。
+fn slot_model_col(width: u16, model_slots: &ModelSlots) -> usize {
+    let available = width.saturating_sub(2 + SLOT_NAME_COL as u16 + EFFORT_COL as u16) as usize;
+    (longest_model_width(model_slots) + 2).min(available).max(24)
+}
+
+/// `Slot` 的显示名: 四个主槽用英文原名 (与后端 `ModelSlots` 的字段名一致), `Fallback` 用现有的
+/// `s.sub_slot_fallback` (中文「兜底」)。
+fn slot_label(slot: Slot, s: &'static Strings) -> &'static str {
+    match slot {
+        Slot::Fable => "fable",
+        Slot::Opus => "opus",
+        Slot::Sonnet => "sonnet",
+        Slot::Haiku => "haiku",
+        Slot::Fallback => s.sub_slot_fallback,
+    }
+}
+
+/// `modified`: 这个槽位的显示值 (草稿) 跟 `Store` 里的原始值不同, 行末追加一条 muted 的
+/// `s.sub_slot_modified`。`focused`: 当前详情焦点落在这个槽位, 整行 `REVERSED` (与列表选中行、
+/// picker 选中行同一套视觉语言)。
+#[allow(clippy::too_many_arguments)] // 与主 crate 的 dispatch 函数同一条先例 (见 proxy/*.rs)
+fn slot_line(
+    name: &'static str,
+    model: &str,
+    effort: Option<&str>,
+    model_col: usize,
+    theme: &Theme,
+    s: &'static Strings,
+    modified: bool,
+    focused: bool,
+) -> Line<'static> {
     let effort_text = match effort {
         Some(e) if !e.is_empty() => e.to_string(),
         _ => s.sub_effort_auto.to_string(),
     };
     let effort_style = if effort.is_some_and(|e| !e.is_empty()) { Style::default() } else { theme.muted_style() };
-    Line::from(vec![
+    let mut spans = vec![
         Span::raw(format!("  {}", fit(name, SLOT_NAME_COL))),
         Span::styled(fit(model, model_col), model_style(model, theme)),
         Span::styled(effort_text, effort_style),
-    ])
+    ];
+    if modified {
+        spans.push(Span::raw(" "));
+        spans.push(Span::styled(s.sub_slot_modified, theme.muted_style()));
+    }
+    let mut line = Line::from(spans);
+    if focused {
+        line = line.style(Style::new().add_modifier(Modifier::REVERSED));
+    }
+    line
 }
 
-fn fallback_slot_line(model: &str, theme: &Theme, s: &'static Strings) -> Line<'static> {
+fn fallback_slot_line(model: &str, theme: &Theme, s: &'static Strings, modified: bool, focused: bool) -> Line<'static> {
     let name = format!("  {}", fit(s.sub_slot_fallback, SLOT_NAME_COL));
-    if model.is_empty() {
-        Line::from(vec![Span::raw(name), Span::styled(s.sub_slot_unset, theme.muted_style())])
+    let mut spans = if model.is_empty() {
+        vec![Span::raw(name), Span::styled(s.sub_slot_unset, theme.muted_style())]
     } else {
-        Line::from(vec![Span::raw(name), Span::styled(model.to_string(), model_style(model, theme))])
+        vec![Span::raw(name), Span::styled(model.to_string(), model_style(model, theme))]
+    };
+    if modified {
+        spans.push(Span::raw(" "));
+        spans.push(Span::styled(s.sub_slot_modified, theme.muted_style()));
     }
+    let mut line = Line::from(spans);
+    if focused {
+        line = line.style(Style::new().add_modifier(Modifier::REVERSED));
+    }
+    line
 }
 
 /// `value_width`: 字段值那一列还剩多少显示宽度 (详情内宽 - `FIELD_LABEL_COL`), 长文本 (URL /
@@ -500,7 +906,17 @@ fn balance_rows(sub: &Subscription, theme: &Theme, s: &'static Strings, value_wi
 }
 
 /// `width`: 详情面板内宽 (block 边框 + 内边距之后), 用来给长字段截断、给「最近错误」估折行数。
-fn detail_rows(sub: &Subscription, ctx: &DrawCtx, width: u16) -> Vec<DetailRow> {
+/// `model_slots`/`slot_efforts`: 当前应该显示的槽位值 (有草稿就是草稿, 否则是 `sub` 自己的原始值,
+/// 由调用方 `Subscriptions::effective_model_slots`/`effective_slot_efforts` 算好传进来);
+/// `focus_slot`: 详情焦点当前落在哪个槽位 (`None` = 焦点不在详情, 比如宽屏下焦点还在列表)。
+fn detail_rows(
+    sub: &Subscription,
+    model_slots: &ModelSlots,
+    slot_efforts: &SlotEfforts,
+    focus_slot: Option<Slot>,
+    ctx: &DrawCtx,
+    width: u16,
+) -> Vec<DetailRow> {
     let s = ctx.s;
     let theme = ctx.theme;
     let value_width = width.saturating_sub(FIELD_LABEL_COL as u16) as usize;
@@ -549,19 +965,23 @@ fn detail_rows(sub: &Subscription, ctx: &DrawCtx, width: u16) -> Vec<DetailRow> 
     // 端点
     rows.push(DetailRow::Line(field_line(s.sub_f_endpoint, vec![Span::raw(clip(&sub.base_url, value_width))])));
 
-    // 槽位: 标签独占一行, 四个槽 + 兜底各自缩进一行 (兜底没有 effort 列)。
+    // 槽位: 标签独占一行, 四个槽 + 兜底各自缩进一行 (兜底没有 effort 列)。有草稿时显示草稿值;
+    // 与 `Store` (`sub` 自己的字段) 不同的槽位行末尾加 muted 的「已修改」, 焦点落在的槽位整行
+    // REVERSED。
     rows.push(DetailRow::Line(Line::from(Span::raw(fit(s.sub_f_slots, FIELD_LABEL_COL)))));
-    let model_col = slot_model_col(width);
-    let slot_efforts = &sub.slot_efforts;
-    for (name, model, effort) in [
-        ("fable", &sub.model_slots.fable, slot_efforts.fable.as_deref()),
-        ("opus", &sub.model_slots.opus, slot_efforts.opus.as_deref()),
-        ("sonnet", &sub.model_slots.sonnet, slot_efforts.sonnet.as_deref()),
-        ("haiku", &sub.model_slots.haiku, slot_efforts.haiku.as_deref()),
-    ] {
-        rows.push(DetailRow::Line(slot_line(name, model, effort, model_col, theme, s)));
+    let model_col = slot_model_col(width, model_slots);
+    for slot in MAIN_SLOTS {
+        let name = slot_label(slot, s);
+        let model = model_slots.get(slot);
+        let effort = slot_efforts.get(slot);
+        let modified = model != sub.model_slots.get(slot) || effort != sub.slot_efforts.get(slot);
+        let focused = focus_slot == Some(slot);
+        rows.push(DetailRow::Line(slot_line(name, model, effort, model_col, theme, s, modified, focused)));
     }
-    rows.push(DetailRow::Line(fallback_slot_line(&sub.model_slots.fallback, theme, s)));
+    let fallback_model = model_slots.get(Slot::Fallback);
+    let fallback_modified = fallback_model != sub.model_slots.get(Slot::Fallback);
+    let fallback_focused = focus_slot == Some(Slot::Fallback);
+    rows.push(DetailRow::Line(fallback_slot_line(fallback_model, theme, s, fallback_modified, fallback_focused)));
 
     // 限额: 每个设了上限的周期一行, 不只显示最紧的那个。`limit == Some(0)` 与「没设上限」同义
     // (`QuotaUsage::ratio()` 把它当无限额处理, 见 `tightest_quota` 同一条规则), 不能只看
@@ -745,12 +1165,22 @@ mod tests {
         assert!(clipped.trim_end().ends_with('…'), "超长文本截断后应该以省略号收尾");
     }
 
-    /// I2: 模型名列按可用宽度动态算, 下限 24 (旧的固定值)。
+    fn slots_with_sonnet(sonnet: &str) -> ModelSlots {
+        ModelSlots { fable: "d".into(), opus: "a".into(), sonnet: sonnet.into(), haiku: "c".into(), fallback: String::new() }
+    }
+
+    /// I2 (Task 5 修正): 模型名列宽是 `min(可用宽度, 最长模型名+2)`, 下限 24——不再是「把整段
+    /// 可用宽度都给模型名」那版, 短模型名不该拖出一大段空白让 effort 列远在天边。
     #[test]
-    fn slot_model_col_uses_available_width_with_a_floor() {
-        // 80 列窄屏详情面板: inner=76, 76-2-8(SLOT_NAME_COL)-8(EFFORT_COL)=58。
-        assert_eq!(slot_model_col(76), 58);
-        // 宽度小到连 24 都算不出来时, 钳制在 24, 不会因为窄而给出更小 (甚至溢出成 0) 的值。
-        assert_eq!(slot_model_col(20), 24);
+    fn slot_model_col_uses_the_longest_model_name_capped_by_available_width_and_a_floor() {
+        // 80 列窄屏详情面板: inner=76, 可用=76-2-8(SLOT_NAME_COL)-8(EFFORT_COL)=58。
+        // 短模型名 (mock 惯用的 "d"/"a"/"c" 单字符): 1+2=3, 远小于下限 24, 钳到 24。
+        assert_eq!(slot_model_col(76, &slots_with_sonnet("b")), 24);
+        // 30 字符的真实模型 id: 30+2=32, 小于可用宽度 58, 直接用 32——effort 列贴着模型名,
+        // 不再吃掉整段 58 列的可用宽度。
+        let real = slots_with_sonnet("qwen3-coder-480b-a35b-instruct");
+        assert_eq!(slot_model_col(76, &real), 32);
+        // 宽度小到连 24 都算不出来时, 仍然钳制在 24, 不会因为窄而给出更小 (甚至溢出成 0) 的值。
+        assert_eq!(slot_model_col(20, &slots_with_sonnet("b")), 24);
     }
 }

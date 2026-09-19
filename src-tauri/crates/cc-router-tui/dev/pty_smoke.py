@@ -68,6 +68,10 @@ DATA = {
     "test_connection": {"ok": True, "message": "连接正常", "http_status": 200, "model_used": "moonshot-v1-8k", "state_reset": True},
     "refresh_model_list": {"kind": "auto", "models": [{"id": "moonshot-v1-8k", "display_name": None}], "fetched_at": NOW_MS},
     "refresh_subscription_balance": {"kind": "unsupported"},
+    # Task 5: `Mutation::UpdateSlots` 落地成 `update_subscription`; `runtime.rs::call_mutation` 把
+    # 返回值反序列化成 `serde_json::Value` 就直接丢弃 (权威值等 refetch 的 list_subscriptions 拿),
+    # 所以随便一个合法 JSON 都够, 空对象最省事。
+    "update_subscription": {},
 }
 
 # 去掉转义序列之后必须出现过的文字
@@ -75,6 +79,7 @@ EXPECT = [
     "总览", "1,284", "98.6%", "智谱主号", "已连接", "订阅 (3)", "备注名", "此页面将在后续版本提供", "键位",
     "连接正常",  # test_connection 成功的 toast
     "已停用",  # set_subscription_enabled 的 toast (Kimi 备用被 e 停用)
+    "槽位已保存",  # update_subscription 成功的 toast (Task 5: ⏎⏎ 改模型 ⏎ s 保存)
 ]
 
 
@@ -154,15 +159,35 @@ def main():
     pump(3.0)  # 启动动效 + 首次加载 + 1.5s 时的状态变更事件
     # 2 = 订阅页 (真页面, 期待「订阅 (3)」「备注名」); j = 选中第二条 "Kimi 备用";
     # t = 测试连接 (等够 0.8s 让假后端的响应 + toast + 重拉列表都跑完), e = 就地启停 (同样等 0.8s);
-    # ? / Esc = 帮助弹窗开关; 3 = 虚拟模型页 (仍占位, 期待「此页面将在后续版本提供」); 1 = 回总览。
-    for keys, wait in ((b"2", 0.6), (b"j", 0.6), (b"t", 0.8), (b"e", 0.8), (b"?", 0.6), (b"\x1b", 0.6), (b"3", 0.6), (b"1", 0.6)):
+    # ? / Esc = 帮助弹窗开关; 此时仍在订阅页且选中 "Kimi 备用":
+    #   ⏎ 进详情 (焦点落在 fable 槽) → ⏎ 打开 fable 槽的模型 picker (输入框预填当前值 "d") →
+    #   输入 "glm" (追加在预填值后面, 变成 "dglm", 够用了——这条冒烟不关心具体模型名) →
+    #   ⏎ 选中「使用「dglm」」这一行, 写进草稿 → s 保存 (真的打一次假后端的 update_subscription,
+    #   等够 0.8s 让响应 + toast + 重拉列表跑完);
+    # 3 = 虚拟模型页 (仍占位, 期待「此页面将在后续版本提供」); 1 = 回总览。
+    for keys, wait in (
+        (b"2", 0.6),
+        (b"j", 0.6),
+        (b"t", 0.8),
+        (b"e", 0.8),
+        (b"?", 0.6),
+        (b"\x1b", 0.6),
+        (b"\r", 0.4),
+        (b"\r", 0.4),
+        (b"glm", 0.3),
+        (b"\r", 0.4),
+        (b"s", 0.8),
+        (b"3", 0.6),
+        (b"1", 0.6),
+    ):
         os.write(fd, keys)
         pump(wait)
-    # 让两条 toast (t 的「连接正常」、e 的「已停用」) 彻底放完再量「空闲」: toast 一条只能显示
-    # 3s (`toast::LIFETIME_MS`) + 300ms 消散动效, 第二条还要等第一条弹出队列才轮到它显示——
-    # 不等够的话空闲窗口会撞上消散动效的 60fps 重画, 把「按需重绘」误判成一直在跑 (曾经在这里
-    # 从 260 字节涨到 1291 字节, 就是这个重叠)。
-    pump(3.5)
+    # 让三条 toast (t 的「连接正常」、e 的「已停用」、s 的「槽位已保存」) 彻底放完再量「空闲」:
+    # toast 一条只能显示 3s (`toast::LIFETIME_MS`) + 300ms 消散动效, 后一条还要等前一条弹出队列
+    # 才轮到它显示——三条挤在一起比 Task 4 时的两条要多等一整个显示周期, 不等够的话空闲窗口会
+    # 撞上消散动效的 60fps 重画, 把「按需重绘」误判成一直在跑 (Task 4 时曾经在这里从 260 字节涨到
+    # 1291 字节, 就是这个重叠; 三条顺序显示大约要 9~10s 才能全部放完, 这里留了余量)。
+    pump(5.0)
     before_idle = len(out)
     pump(2.0)
     idle_bytes = len(out) - before_idle
