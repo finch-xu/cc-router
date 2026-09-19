@@ -6,7 +6,7 @@
 
 use std::time::Duration;
 
-use cc_router_tui::action::{Action, Cmd, OverviewData};
+use cc_router_tui::action::{Action, Cmd, Fetch, FetchData, OverviewData, Tab};
 use cc_router_tui::app::{App, AppOptions};
 use cc_router_tui::client::dto::{
     OverallStats, ProxyStatus, QuotaPeriod, QuotaUsage, SeriesPoint, Settings, Subscription, SubscriptionState,
@@ -90,10 +90,25 @@ fn data() -> OverviewData {
     }
 }
 
+/// 构造一次 `Fetch::Overview` 加载完成的 [`Action`]。
+fn overview_done(issued: u64, data: OverviewData) -> Action {
+    Action::FetchDone { fetch: Fetch::Overview, issued, result: Ok(FetchData::Overview(Box::new(data))) }
+}
+
+/// 构造一次 `Fetch::Subscriptions` 加载完成的 [`Action`]。
+fn subs_done(issued: u64, subs: Vec<Subscription>) -> Action {
+    Action::FetchDone { fetch: Fetch::Subscriptions, issued, result: Ok(FetchData::Subscriptions(subs)) }
+}
+
+/// 构造一次加载失败的 [`Action`]; `fetch`/`issued` 对失败路径不影响 (`App::update` 不看它们)。
+fn fetch_failed(message: &str) -> Action {
+    Action::FetchDone { fetch: Fetch::Overview, issued: 0, result: Err(message.into()) }
+}
+
 fn loaded(fx_enabled: bool) -> App {
     let mut a = app(fx_enabled);
-    assert_eq!(a.update(Action::Connected { app_version: VERSION.into() }), vec![Cmd::FetchOverview]);
-    assert!(a.update(Action::OverviewLoaded(Box::new(data()))).is_empty());
+    assert_eq!(a.update(Action::Connected { app_version: VERSION.into() }), vec![Cmd::Fetch(Fetch::Overview)]);
+    assert!(a.update(overview_done(1, data())).is_empty());
     a
 }
 
@@ -133,7 +148,7 @@ fn help_popup_80x24() {
 #[test]
 fn placeholder_page_80x24() {
     let mut a = loaded(false);
-    a.update(Action::SwitchTab(1));
+    a.update(Action::SwitchTab(Tab::Subscriptions));
     insta::assert_snapshot!(render(&mut a, 80, 24));
 }
 
@@ -185,7 +200,7 @@ fn long_subscription_list_is_truncated_with_a_count() {
     a.update(Action::Connected { app_version: VERSION.into() });
     let mut d = data();
     d.subscriptions = (0..30).map(|i| sub(&i.to_string(), &format!("sub-{i:02}"), SubscriptionState::Healthy)).collect();
-    a.update(Action::OverviewLoaded(Box::new(d)));
+    a.update(overview_done(1, d));
     let out = render(&mut a, 80, 24);
     // 80×24: 健康度面板内高 9 行 → 8 条 + 1 行「还有 22 个」
     assert!(out.contains("… 还有 22 个"), "{out}");
@@ -207,14 +222,13 @@ fn reconnect_toast_appears_then_expires() {
 
 #[test]
 fn load_failure_toasts_only_while_connected() {
-    let fail = || Action::LoadFailed { cmd: Cmd::FetchOverview, message: "boom".into() };
     let mut a = loaded(false);
-    a.update(fail());
+    a.update(fetch_failed("boom"));
     assert!(render(&mut a, 80, 24).contains("加载失败：boom"));
 
     let mut b = loaded(false);
     b.update(Action::ConnectionLost);
-    b.update(fail());
+    b.update(fetch_failed("boom"));
     assert!(!render(&mut b, 80, 24).contains("加载失败"));
 }
 
@@ -224,13 +238,21 @@ fn load_failure_toasts_only_while_connected() {
 fn keys_map_to_actions() {
     let mut a = loaded(false);
     assert_eq!(a.handle_key(key(KeyCode::Char('q'))), Some(Action::Quit));
-    assert_eq!(a.handle_key(key(KeyCode::Char('3'))), Some(Action::SwitchTab(2)));
+    assert_eq!(a.handle_key(key(KeyCode::Char('3'))), Some(Action::SwitchTab(Tab::VirtualModels)));
     assert_eq!(a.handle_key(key(KeyCode::Char('6'))), None);
     assert_eq!(a.handle_key(key(KeyCode::Tab)), Some(Action::NextTab));
     assert_eq!(a.handle_key(key(KeyCode::BackTab)), Some(Action::PrevTab));
     assert_eq!(a.handle_key(key(KeyCode::Char('r'))), Some(Action::Refresh));
     assert_eq!(a.handle_key(key(KeyCode::Char('?'))), Some(Action::ToggleHelp));
     assert_eq!(a.handle_key(KeyEvent::new(KeyCode::Char('c'), KeyModifiers::CONTROL)), Some(Action::Quit));
+}
+
+/// `'3'` 直达第三个标签 (`Tab::VirtualModels`, 0 起算下标 2); `'6'` 超出 5 个标签, 不产生 action。
+#[test]
+fn tab_keys_use_the_tab_enum() {
+    let mut a = loaded(false);
+    assert_eq!(a.handle_key(key(KeyCode::Char('3'))), Some(Action::SwitchTab(Tab::VirtualModels)));
+    assert_eq!(a.handle_key(key(KeyCode::Char('6'))), None);
 }
 
 #[test]
@@ -260,9 +282,8 @@ fn tabs_wrap_around_and_returning_to_a_page_refreshes_it() {
     let mut a = loaded(false);
     assert!(a.update(Action::PrevTab).is_empty(), "占位页不拉数据");
     assert!(render(&mut a, 80, 24).contains(ZH.coming_soon));
-    assert_eq!(a.update(Action::NextTab), vec![Cmd::FetchOverview], "从第 5 页绕回总览");
-    assert!(a.update(Action::SwitchTab(0)).is_empty(), "已经在这一页");
-    assert!(a.update(Action::SwitchTab(9)).is_empty());
+    assert_eq!(a.update(Action::NextTab), vec![Cmd::Fetch(Fetch::Overview)], "从第 5 页绕回总览");
+    assert!(a.update(Action::SwitchTab(Tab::Overview)).is_empty(), "已经在这一页");
 }
 
 #[test]
@@ -279,7 +300,7 @@ fn only_the_visible_page_polls_and_only_while_connected() {
     assert_eq!(quiet, 0, "断线期间不轮询");
 
     let mut b = loaded(false);
-    b.update(Action::SwitchTab(3));
+    b.update(Action::SwitchTab(Tab::Live));
     let hidden: usize = (1..=40).map(|i| b.update(Action::Tick { now_ms: NOW + i * 250 }).len()).sum();
     assert_eq!(hidden, 0, "总览不可见时不轮询");
 }
@@ -288,10 +309,10 @@ fn only_the_visible_page_polls_and_only_while_connected() {
 fn subscription_events_refetch_the_list_only_on_the_overview() {
     let ev = |name: &str| Action::Sse { name: name.into(), data: "\"1\"".into() };
     let mut a = loaded(false);
-    assert_eq!(a.update(ev("subscription_state_changed")), vec![Cmd::FetchSubscriptions]);
-    assert_eq!(a.update(ev("subscription_quota_reached")), vec![Cmd::FetchSubscriptions]);
+    assert_eq!(a.update(ev("subscription_state_changed")), vec![Cmd::Fetch(Fetch::Subscriptions)]);
+    assert_eq!(a.update(ev("subscription_quota_reached")), vec![Cmd::Fetch(Fetch::Subscriptions)]);
     assert!(a.update(ev("route_attempt_started")).is_empty());
-    a.update(Action::SwitchTab(2));
+    a.update(Action::SwitchTab(Tab::VirtualModels));
     assert!(a.update(ev("subscription_state_changed")).is_empty());
 }
 
@@ -299,10 +320,32 @@ fn subscription_events_refetch_the_list_only_on_the_overview() {
 fn a_load_that_finishes_after_leaving_the_page_still_lands() {
     let mut a = app(false);
     a.update(Action::Connected { app_version: VERSION.into() });
-    a.update(Action::SwitchTab(1));
-    a.update(Action::OverviewLoaded(Box::new(data())));
-    a.update(Action::SwitchTab(0));
+    a.update(Action::SwitchTab(Tab::Subscriptions));
+    a.update(overview_done(1, data()));
+    a.update(Action::SwitchTab(Tab::Overview));
     assert!(render(&mut a, 80, 24).contains("1,284"));
+}
+
+// ---------- Store / 订阅数据流 ----------
+
+/// 晚到的旧总览加载不该把更新的订阅列表覆盖回去; 但总览页自己的统计数字 (与订阅无关) 照常更新。
+#[test]
+fn a_stale_overview_does_not_overwrite_a_newer_subscription_list() {
+    let mut a = loaded(false); // issued=1 (Overview)
+
+    let mut subs = data().subscriptions;
+    subs[1].state = SubscriptionState::RateLimited; // "智谱主号"
+    subs[1].is_dispatchable = false;
+    a.update(subs_done(7, subs));
+
+    let mut old = data();
+    old.stats.total_requests = 9999;
+    a.update(overview_done(6, old)); // 晚于 issued=7, 订阅部分应该被丢弃
+
+    let out = render(&mut a, 80, 24);
+    let row = out.lines().find(|l| l.contains("智谱主号")).unwrap_or_else(|| panic!("缺「智谱主号」这一行\n{out}"));
+    assert!(row.contains("限流"), "订阅列表不该被旧的 overview 加载覆盖\n{out}");
+    assert!(out.contains("9,999"), "总览页自己的统计数字照常用这次 overview 的\n{out}");
 }
 
 // ---------- 动效 ----------
@@ -330,7 +373,7 @@ fn startup_effect_plays_once() {
 fn idle_time_before_a_trigger_does_not_fast_forward_the_effect() {
     let mut a = loaded(true);
     settle(&mut a);
-    a.update(Action::SwitchTab(1));
+    a.update(Action::SwitchTab(Tab::Subscriptions));
     render_with(&mut a, 80, 24, Duration::from_secs(5));
     assert!(a.wants_fast_frames(), "切页效果这一帧才开始");
     render_with(&mut a, 80, 24, Duration::from_millis(200));
@@ -342,14 +385,14 @@ fn a_changed_subscription_row_flashes() {
     let mut a = loaded(true);
     settle(&mut a);
 
-    a.update(Action::SubscriptionsLoaded(data().subscriptions));
+    a.update(subs_done(2, data().subscriptions));
     render(&mut a, 80, 24);
     assert!(!a.wants_fast_frames(), "没变化就不闪");
 
     let mut subs = data().subscriptions;
     subs[1].state = SubscriptionState::RateLimited;
     subs[1].is_dispatchable = false;
-    a.update(Action::SubscriptionsLoaded(subs));
+    a.update(subs_done(3, subs));
     render(&mut a, 80, 24);
     assert!(a.wants_fast_frames());
 }
@@ -360,7 +403,7 @@ fn a_changed_number_pulses_but_the_first_load_does_not() {
     settle(&mut a);
     let mut d = data();
     d.stats.total_requests += 1;
-    a.update(Action::OverviewLoaded(Box::new(d)));
+    a.update(overview_done(2, d));
     render(&mut a, 80, 24);
     assert!(a.wants_fast_frames());
 }
@@ -369,7 +412,7 @@ fn a_changed_number_pulses_but_the_first_load_does_not() {
 fn with_fx_disabled_nothing_ever_animates() {
     let mut a = loaded(false);
     render(&mut a, 80, 24);
-    a.update(Action::SwitchTab(1));
+    a.update(Action::SwitchTab(Tab::Subscriptions));
     a.update(Action::ToggleHelp);
     render(&mut a, 80, 24);
     assert!(!a.wants_fast_frames());
@@ -414,12 +457,12 @@ fn a_flash_queued_while_the_list_was_empty_does_not_fire_later() {
     let mut subs = data().subscriptions;
     subs[1].state = SubscriptionState::RateLimited;
     subs[1].is_dispatchable = false;
-    a.update(Action::SubscriptionsLoaded(subs));
-    a.update(Action::SubscriptionsLoaded(vec![]));
+    a.update(subs_done(2, subs));
+    a.update(subs_done(3, vec![]));
     render(&mut a, 80, 24);
     settle(&mut a);
 
-    a.update(Action::SubscriptionsLoaded(data().subscriptions));
+    a.update(subs_done(4, data().subscriptions));
     render(&mut a, 80, 24);
     assert!(!a.wants_fast_frames(), "早前排队又落空的闪烁不该在这里冒出来");
 }
@@ -428,9 +471,8 @@ fn a_flash_queued_while_the_list_was_empty_does_not_fire_later() {
 #[test]
 fn repeated_failures_do_not_pile_up_toasts() {
     let mut a = loaded(false);
-    let fail = || Action::LoadFailed { cmd: Cmd::FetchOverview, message: "boom".into() };
     for _ in 0..10 {
-        a.update(fail());
+        a.update(fetch_failed("boom"));
     }
     assert!(render(&mut a, 80, 24).contains("加载失败：boom"));
     a.update(Action::Tick { now_ms: NOW + 3_000 });
@@ -442,7 +484,7 @@ fn repeated_failures_do_not_pile_up_toasts() {
 fn a_toast_does_not_cover_the_version_banner() {
     let mut a = app(false);
     a.update(Action::Connected { app_version: "1.2.3".into() });
-    a.update(Action::LoadFailed { cmd: Cmd::FetchOverview, message: "boom".into() });
+    a.update(fetch_failed("boom"));
     // 80 列下版本不一致的横幅文案比屏幕还宽, 会填满整行; toast 如果画到这一行,
     // 一定会用自己的边框字符覆盖掉横幅的一部分 —— 这样测试才咬得住 toast 顶行硬编码回归。
     let out = render(&mut a, 80, 30);
@@ -467,7 +509,7 @@ fn the_first_load_does_not_pulse() {
     let mut a = app(true);
     a.update(Action::Connected { app_version: VERSION.into() });
     settle(&mut a);
-    a.update(Action::OverviewLoaded(Box::new(data())));
+    a.update(overview_done(1, data()));
     render(&mut a, 80, 24);
     assert!(!a.wants_fast_frames(), "首次加载没有旧值可比, 不该脉冲");
 }
@@ -506,7 +548,7 @@ fn empty_subscription_list_and_listen_all_are_shown() {
     let mut d = data();
     d.subscriptions = vec![];
     d.status.listen_all = true;
-    a.update(Action::OverviewLoaded(Box::new(d)));
+    a.update(overview_done(1, d));
     // 80×24 是支持的最小终端: 「基址 · 监听 0.0.0.0」这一整行必须放得下, 不能被裁掉 (fix round 2)。
     let out = render(&mut a, 80, 24);
     assert!(out.contains(ZH.ov_no_subs), "{out}");
@@ -520,7 +562,7 @@ fn empty_subscription_list_and_listen_all_are_shown() {
     d2.subscriptions = vec![];
     d2.status.listen_all = true;
     d2.status.base_url = "https://127.0.0.1:23457".into();
-    b.update(Action::OverviewLoaded(Box::new(d2)));
+    b.update(overview_done(1, d2));
     let out2 = render(&mut b, 80, 24);
     assert!(out2.contains("https://127.0.0.1:23457"), "{out2}");
     assert!(out2.contains("监听 0.0.0.0"), "{out2}");

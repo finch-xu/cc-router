@@ -8,17 +8,18 @@ use ratatui::Frame;
 use super::{Component, DrawCtx};
 use crate::action::{Action, Cmd};
 use crate::i18n::Strings;
+use crate::store::Store;
 use crate::widgets::keybar::Hint;
 
 #[derive(Debug, Default)]
 pub struct Placeholder;
 
 impl Component for Placeholder {
-    fn handle_key(&mut self, _key: KeyEvent) -> Option<Action> {
+    fn handle_key(&mut self, _key: KeyEvent, _store: &Store) -> Option<Action> {
         None
     }
 
-    fn update(&mut self, _action: &Action) -> Vec<Cmd> {
+    fn update(&mut self, _action: &Action, _store: &Store) -> Vec<Cmd> {
         Vec::new()
     }
 

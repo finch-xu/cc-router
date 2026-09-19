@@ -12,7 +12,7 @@ use ratatui::crossterm::event::{Event, EventStream};
 use serde_json::json;
 use tokio::sync::mpsc::{unbounded_channel, UnboundedSender};
 
-use crate::action::{Action, Cmd, OverviewData};
+use crate::action::{Action, Cmd, Fetch, FetchData, OverviewData};
 use crate::app::App;
 use crate::client::dto::Subscription;
 use crate::client::{commands, Client, ClientError};
@@ -59,18 +59,29 @@ async fn fetch_overview(client: &Client) -> Result<OverviewData, ClientError> {
     Ok(OverviewData { status, settings, stats, series, subscriptions })
 }
 
-fn spawn_fetch(client: Arc<Client>, tx: UnboundedSender<Action>, cmd: Cmd) {
+fn spawn_fetch(client: Arc<Client>, tx: UnboundedSender<Action>, fetch: Fetch, issued: u64) {
     tokio::spawn(async move {
-        let result = match cmd {
-            Cmd::FetchOverview => fetch_overview(&client).await.map(|d| Action::OverviewLoaded(Box::new(d))),
-            Cmd::FetchSubscriptions => client
+        let result = match fetch {
+            Fetch::Overview => fetch_overview(&client).await.map(|d| FetchData::Overview(Box::new(d))),
+            Fetch::Subscriptions => client
                 .call::<Vec<Subscription>>(commands::LIST_SUBSCRIPTIONS, json!({}))
                 .await
-                .map(Action::SubscriptionsLoaded),
-            Cmd::Quit => return,
+                .map(FetchData::Subscriptions),
         };
-        let _ = tx.send(result.unwrap_or_else(|e| Action::LoadFailed { cmd, message: e.to_string() }));
+        let result = result.map_err(|e: ClientError| e.to_string());
+        let _ = tx.send(Action::FetchDone { fetch, issued, result });
     });
+}
+
+/// 主循环发起加载时盖的单调递增序号 (从 1 开始)。抽成独立结构体, 方便单测「递增」这一件事本身。
+#[derive(Default)]
+struct Issued(u64);
+
+impl Issued {
+    fn next(&mut self) -> u64 {
+        self.0 += 1;
+        self.0
+    }
 }
 
 /// 跑一轮「连上事件流 → 转发事件, 直到断线」。返回值是这一轮事件流**实际存活了多久**——
@@ -116,40 +127,30 @@ async fn sse_loop(client: Arc<Client>, tx: UnboundedSender<Action>) {
     }
 }
 
-/// 哪个 [`Cmd`] 的结果回来了 (用来清「进行中」标记)。
-fn finished(action: &Action) -> Option<Cmd> {
-    match action {
-        Action::OverviewLoaded(_) => Some(Cmd::FetchOverview),
-        Action::SubscriptionsLoaded(_) => Some(Cmd::FetchSubscriptions),
-        Action::LoadFailed { cmd, .. } => Some(*cmd),
-        _ => None,
-    }
-}
-
 /// 同一种加载同时只跑一个; 进行中又来了同种请求, 记一笔, 等这次回来后补跑一次 (G7:
 /// 否则会静默丢掉一次刷新请求, 比如断线重连期间某订阅状态变了, 要等下一次 5s 轮询才补上)。
 #[derive(Default)]
 struct Fetches {
-    in_flight: HashSet<Cmd>,
-    rerun: HashSet<Cmd>,
+    in_flight: HashSet<Fetch>,
+    rerun: HashSet<Fetch>,
 }
 
 impl Fetches {
     /// 要不要现在就发起? (false = 已有同种请求在跑, 已记下待补跑)
-    fn request(&mut self, cmd: Cmd) -> bool {
-        if self.in_flight.insert(cmd) {
+    fn request(&mut self, fetch: Fetch) -> bool {
+        if self.in_flight.insert(fetch) {
             true
         } else {
-            self.rerun.insert(cmd);
+            self.rerun.insert(fetch);
             false
         }
     }
 
     /// 一次加载回来了; 返回 true 表示要立刻补跑一次 (调用方负责 spawn)。
-    fn finished(&mut self, cmd: Cmd) -> bool {
-        self.in_flight.remove(&cmd);
-        if self.rerun.remove(&cmd) {
-            self.in_flight.insert(cmd);
+    fn finished(&mut self, fetch: Fetch) -> bool {
+        self.in_flight.remove(&fetch);
+        if self.rerun.remove(&fetch) {
+            self.in_flight.insert(fetch);
             true
         } else {
             false
@@ -168,6 +169,36 @@ pub async fn run(client: Arc<Client>, mut app: App) -> std::io::Result<()> {
     result
 }
 
+/// 处理单个 [`Action`]: 先用它做 `Fetches` / `Issued` 的记账 (清「进行中」标记, 要补跑就以新的
+/// 序号重新 spawn), 再喂给 `App::update` 把结果 `Cmd` 变成真正的副作用 (spawn 新加载 / 退出)。
+/// 单个 action 的处理逻辑抽成这个函数, 供 `select!` 拿到的那一个和抽干队列时的每一个共用。
+/// 返回 `true` 表示主循环该退出 (`Cmd::Quit`)。
+fn process_action(
+    action: Action,
+    client: &Arc<Client>,
+    tx: &UnboundedSender<Action>,
+    fetches: &mut Fetches,
+    issued: &mut Issued,
+    app: &mut App,
+) -> bool {
+    if let Action::FetchDone { fetch, .. } = &action {
+        if fetches.finished(*fetch) {
+            spawn_fetch(client.clone(), tx.clone(), *fetch, issued.next());
+        }
+    }
+    for cmd in app.update(action) {
+        match cmd {
+            Cmd::Quit => return true,
+            Cmd::Fetch(fetch) => {
+                if fetches.request(fetch) {
+                    spawn_fetch(client.clone(), tx.clone(), fetch, issued.next());
+                }
+            }
+        }
+    }
+    false
+}
+
 async fn event_loop(terminal: &mut ratatui::DefaultTerminal, client: Arc<Client>, app: &mut App) -> std::io::Result<()> {
     let (tx, mut rx) = unbounded_channel::<Action>();
     let mut sse = tokio::spawn(sse_loop(client.clone(), tx.clone()));
@@ -181,6 +212,9 @@ async fn event_loop(terminal: &mut ratatui::DefaultTerminal, client: Arc<Client>
     tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
     // 同一种加载同时只跑一个: 后端慢的时候轮询不会越积越多。
     let mut fetches = Fetches::default();
+    // 每次真正 spawn 一个加载 (含补跑) 时盖的单调递增序号, 带进 `Action::FetchDone` 给 `Store`
+    // 判断新旧。
+    let mut issued = Issued::default();
     let mut last_frame = Instant::now();
 
     'outer: loop {
@@ -207,19 +241,14 @@ async fn event_loop(terminal: &mut ratatui::DefaultTerminal, client: Arc<Client>
         };
 
         let Some(action) = action else { continue };
-        if let Some(done) = finished(&action) {
-            if fetches.finished(done) {
-                spawn_fetch(client.clone(), tx.clone(), done);
-            }
+        if process_action(action, &client, &tx, &mut fetches, &mut issued, app) {
+            break 'outer;
         }
-        for cmd in app.update(action) {
-            match cmd {
-                Cmd::Quit => break 'outer,
-                fetch => {
-                    if fetches.request(fetch) {
-                        spawn_fetch(client.clone(), tx.clone(), fetch);
-                    }
-                }
+        // 抽干再画: select! 那一个处理完之后, 把这时已经排在队列里的 action 一并处理掉,
+        // 再回到循环顶部画一帧 (为事件洪峰准备; 键盘与 tick 走 select! 的常规分支, 不受影响)。
+        while let Ok(a) = rx.try_recv() {
+            if process_action(a, &client, &tx, &mut fetches, &mut issued, app) {
+                break 'outer;
             }
         }
     }
@@ -241,13 +270,11 @@ mod tests {
     }
 
     #[test]
-    fn finished_maps_results_back_to_their_cmd() {
-        assert_eq!(finished(&Action::SubscriptionsLoaded(vec![])), Some(Cmd::FetchSubscriptions));
-        assert_eq!(
-            finished(&Action::LoadFailed { cmd: Cmd::FetchOverview, message: String::new() }),
-            Some(Cmd::FetchOverview)
-        );
-        assert_eq!(finished(&Action::Refresh), None);
+    fn issued_numbers_are_strictly_increasing() {
+        let mut issued = Issued::default();
+        assert_eq!(issued.next(), 1);
+        assert_eq!(issued.next(), 2);
+        assert_eq!(issued.next(), 3);
     }
 
     #[test]
@@ -283,19 +310,19 @@ mod tests {
     #[test]
     fn fetches_coalesces_concurrent_requests_of_the_same_kind() {
         let mut f = Fetches::default();
-        assert!(f.request(Cmd::FetchOverview)); // 第一次: 发起
-        assert!(!f.request(Cmd::FetchOverview)); // 还在跑: 只记一笔待补跑
-        assert!(f.finished(Cmd::FetchOverview)); // 回来了: 之前记的那笔要补跑
-        assert!(!f.finished(Cmd::FetchOverview)); // 这次是补跑的结果, 没有再记新的待补跑
+        assert!(f.request(Fetch::Overview)); // 第一次: 发起
+        assert!(!f.request(Fetch::Overview)); // 还在跑: 只记一笔待补跑
+        assert!(f.finished(Fetch::Overview)); // 回来了: 之前记的那笔要补跑
+        assert!(!f.finished(Fetch::Overview)); // 这次是补跑的结果, 没有再记新的待补跑
     }
 
     #[test]
     fn fetches_unrelated_kinds_do_not_interfere() {
         let mut f = Fetches::default();
-        assert!(f.request(Cmd::FetchOverview));
-        assert!(f.request(Cmd::FetchSubscriptions)); // 不同种类互不影响
-        assert!(!f.finished(Cmd::FetchSubscriptions)); // 没有同种的待补跑
-        assert!(!f.finished(Cmd::FetchOverview));
+        assert!(f.request(Fetch::Overview));
+        assert!(f.request(Fetch::Subscriptions)); // 不同种类互不影响
+        assert!(!f.finished(Fetch::Subscriptions)); // 没有同种的待补跑
+        assert!(!f.finished(Fetch::Overview));
     }
 
     fn write_runtime(dir: &std::path::Path, port: u16, secret: &str, app_version: &str) {

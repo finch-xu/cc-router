@@ -10,10 +10,11 @@ use throbber_widgets_tui::{Throbber, BRAILLE_SIX};
 use tui_big_text::{BigText, PixelSize};
 
 use super::{Component, DrawCtx};
-use crate::action::{Action, Cmd, OverviewData};
+use crate::action::{Action, Cmd, Fetch, FetchData, OverviewData};
 use crate::client::dto::{hourly_buckets, OverallStats, ProxyStatus, Subscription};
 use crate::format::{compact, fit, mmss, percent, thousands};
 use crate::i18n::Strings;
+use crate::store::Store;
 use crate::widgets::badge::{badge, severity};
 use crate::widgets::keybar::Hint;
 use crate::widgets::spinner_state;
@@ -40,9 +41,8 @@ pub struct Overview {
     auth_enabled: bool,
     stats: Option<OverallStats>,
     hourly: [u64; 24],
-    subscriptions: Vec<Subscription>,
-    loaded: bool,
-    /// 下一帧要闪一下的订阅 id / 数字; `draw` 取走。
+    /// 下一帧要闪一下的订阅 id / 数字; `draw` 取走。订阅列表本身不再自己存副本, 画的时候
+    /// 从 `ctx.store` 读 (Store 是唯一真值)。
     flash_rows: Vec<String>,
     flash_values: Vec<&'static str>,
     /// 上一帧 logo 画在哪 —— 启动动效要用。
@@ -69,29 +69,13 @@ impl Overview {
         self.stats = Some(stats);
     }
 
-    fn set_subscriptions(&mut self, mut subs: Vec<Subscription>) {
-        if self.loaded {
-            for new in &subs {
-                let changed = self.subscriptions.iter().find(|old| old.id == new.id).is_some_and(|old| {
-                    (old.state, old.enabled, old.is_dispatchable) != (new.state, new.enabled, new.is_dispatchable)
-                });
-                if changed {
-                    self.flash_rows.push(new.id.clone());
-                }
-            }
-        }
-        // 稳定排序: 同一档内保持后端给的顺序 (与桌面端一致)。
-        subs.sort_by_key(severity);
-        self.subscriptions = subs;
-    }
-
     fn apply(&mut self, data: OverviewData) {
         self.status = Some(data.status);
         self.auth_enabled = data.settings.auth_enabled;
         self.set_stats(data.stats);
         self.hourly = hourly_buckets(&data.series);
-        self.set_subscriptions(data.subscriptions);
-        self.loaded = true;
+        // data.subscriptions 由 App 先转交给 Store 处理 (含去重 / 变更检测); 本页面不再
+        // 自己存一份副本, 画的时候直接读 ctx.store。
     }
 
     fn draw_hero(&mut self, frame: &mut Frame, area: Rect, show_logo: bool, ctx: &DrawCtx) {
@@ -128,10 +112,11 @@ impl Overview {
                 spans.push(Span::styled(format!(" · {}", s.ov_listen_all), Style::new().fg(ctx.theme.warn)));
             }
             lines.push(Line::from(spans));
-            let ok = self.subscriptions.iter().filter(|x| x.is_dispatchable).count();
+            let subs = ctx.store.subscriptions();
+            let ok = subs.iter().filter(|x| x.is_dispatchable).count();
             let auth = if self.auth_enabled { s.ov_auth_on } else { s.ov_auth_off };
             lines.push(Line::styled(
-                format!("{auth} · {}", (s.ov_subs_summary)(self.subscriptions.len(), ok)),
+                format!("{auth} · {}", (s.ov_subs_summary)(subs.len(), ok)),
                 ctx.theme.muted_style(),
             ));
         }
@@ -187,29 +172,32 @@ impl Overview {
 
     fn draw_health(&mut self, frame: &mut Frame, area: Rect, ctx: &mut DrawCtx, flash_rows: &[String]) {
         let s = ctx.s;
-        let block = panel(ctx, s.ov_health)
-            .title_bottom(Line::from(format!(" {} ", self.subscriptions.len())).right_aligned().style(ctx.theme.muted_style()));
+        // 每次画的时候按 severity 稳定排序出一个临时列表: 同一档内保持后端给的顺序 (与桌面端一致)。
+        let mut subs: Vec<&Subscription> = ctx.store.subscriptions().iter().collect();
+        subs.sort_by_key(|sub| severity(sub));
+        let block =
+            panel(ctx, s.ov_health).title_bottom(Line::from(format!(" {} ", subs.len())).right_aligned().style(ctx.theme.muted_style()));
         let inner = block.inner(area);
         frame.render_widget(block, area);
 
-        if !self.loaded {
+        if !ctx.store.subscriptions_loaded() {
             let mut state = spinner_state(ctx.tick);
             let throbber = Throbber::default().label(s.loading).throbber_set(BRAILLE_SIX).style(ctx.theme.muted_style());
             frame.render_stateful_widget(throbber, inner, &mut state);
             return;
         }
-        if self.subscriptions.is_empty() {
+        if subs.is_empty() {
             frame.render_widget(Line::styled(s.ov_no_subs, ctx.theme.muted_style()), inner);
             return;
         }
 
         let capacity = inner.height as usize;
-        let overflow = self.subscriptions.len() > capacity;
-        let shown = if overflow { capacity.saturating_sub(1) } else { self.subscriptions.len() };
+        let overflow = subs.len() > capacity;
+        let shown = if overflow { capacity.saturating_sub(1) } else { subs.len() };
         // 窄终端名字列 18, 宽终端多给一些; 其余列定宽, 进度条吃掉剩下的。
         let name_col: usize = if inner.width >= 110 { 28 } else { 18 };
 
-        for (i, sub) in self.subscriptions.iter().take(shown).enumerate() {
+        for (i, sub) in subs.iter().take(shown).enumerate() {
             let row = Rect::new(inner.x, inner.y + i as u16, inner.width, 1);
             let b = badge(sub, ctx.theme, s);
             let status = match sub.cooldown_until.filter(|until| *until > ctx.now_ms && sub.enabled) {
@@ -265,7 +253,7 @@ impl Overview {
         }
         if overflow && capacity > 0 {
             let row = Rect::new(inner.x, inner.y + shown as u16, inner.width, 1);
-            let hidden = self.subscriptions.len() - shown;
+            let hidden = subs.len() - shown;
             frame.render_widget(Line::styled((s.ov_more_rows)(hidden), ctx.theme.muted_style()), row);
         }
     }
@@ -280,20 +268,16 @@ fn panel<'a>(ctx: &DrawCtx, title: &str) -> Block<'a> {
 }
 
 impl Component for Overview {
-    fn handle_key(&mut self, _key: KeyEvent) -> Option<Action> {
+    fn handle_key(&mut self, _key: KeyEvent, _store: &Store) -> Option<Action> {
         None
     }
 
-    fn update(&mut self, action: &Action) -> Vec<Cmd> {
+    fn update(&mut self, action: &Action, _store: &Store) -> Vec<Cmd> {
         match action {
-            Action::Refresh | Action::Connected { .. } => vec![Cmd::FetchOverview],
-            Action::Sse { name, .. } if SSE_REFETCH.contains(&name.as_str()) => vec![Cmd::FetchSubscriptions],
-            Action::OverviewLoaded(data) => {
+            Action::Refresh | Action::Connected { .. } => vec![Cmd::Fetch(Fetch::Overview)],
+            Action::Sse { name, .. } if SSE_REFETCH.contains(&name.as_str()) => vec![Cmd::Fetch(Fetch::Subscriptions)],
+            Action::FetchDone { fetch: Fetch::Overview, result: Ok(FetchData::Overview(data)), .. } => {
                 self.apply((**data).clone());
-                Vec::new()
-            }
-            Action::SubscriptionsLoaded(subs) => {
-                self.set_subscriptions(subs.clone());
                 Vec::new()
             }
             _ => Vec::new(),
@@ -320,5 +304,9 @@ impl Component for Overview {
 
     fn hints(&self, s: &'static Strings) -> Vec<Hint<'static>> {
         vec![("r", s.key_refresh)]
+    }
+
+    fn on_subscriptions_changed(&mut self, changed: &[String]) {
+        self.flash_rows.extend(changed.iter().cloned());
     }
 }
