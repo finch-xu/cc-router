@@ -12,6 +12,7 @@ use crate::i18n::Strings;
 use crate::store::Store;
 use crate::theme::Theme;
 use crate::widgets::keybar::Hint;
+use crate::widgets::toast::ToastKind;
 
 pub mod overview;
 pub mod placeholder;
@@ -31,6 +32,9 @@ pub struct DrawCtx<'a> {
     pub store: &'a Store,
     /// 正在进行的就地操作, 键是订阅 id。订阅页拿它把忙碌行的状态符号换成 spinner。
     pub busy: &'a HashMap<String, Mutation>,
+    /// 每条订阅最近一次就地操作的结果 (与对应 toast 同一份文本), 键是订阅 id; 发起新操作时移除
+    /// (`App::start_mutation`)。订阅详情页拿它在「状态」行后面画一条「上次操作」(I1 fix)。
+    pub last_outcome: &'a HashMap<String, (ToastKind, String)>,
 }
 
 pub trait Component {

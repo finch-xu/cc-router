@@ -112,6 +112,7 @@ pub struct Strings {
     pub sub_col_name: &'static str,
     pub sub_col_provider: &'static str,
     pub sub_col_sonnet: &'static str,
+    pub sub_col_state: &'static str,
     pub sub_f_state: &'static str,
     pub sub_f_provider: &'static str,
     pub sub_f_endpoint: &'static str,
@@ -121,6 +122,9 @@ pub struct Strings {
     pub sub_f_models: &'static str,
     pub sub_f_referenced: &'static str,
     pub sub_f_last_error: &'static str,
+    /// 详情面板「状态」行后面追加的「上次操作」行: 显示最近一次就地操作 (启停/测试/刷新模型/
+    /// 刷新余额) 的完整结果文案 (与对应 toast 同一份文本), 不再被 toast 的单行截断限制。
+    pub sub_f_last_action: &'static str,
     pub sub_slot_fallback: &'static str,
     pub sub_slot_unset: &'static str,
     pub sub_effort_auto: &'static str,
@@ -242,6 +246,7 @@ pub const ZH: Strings = Strings {
     sub_col_name: "备注名",
     sub_col_provider: "厂商",
     sub_col_sonnet: "sonnet",
+    sub_col_state: "状态",
     sub_f_state: "状态",
     sub_f_provider: "厂商",
     sub_f_endpoint: "端点",
@@ -251,6 +256,7 @@ pub const ZH: Strings = Strings {
     sub_f_models: "模型",
     sub_f_referenced: "被引用",
     sub_f_last_error: "最近错误",
+    sub_f_last_action: "上次操作",
     sub_slot_fallback: "兜底",
     sub_slot_unset: "(未配置)",
     sub_effort_auto: "auto",

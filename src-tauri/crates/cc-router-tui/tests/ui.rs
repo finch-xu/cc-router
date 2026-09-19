@@ -201,6 +201,44 @@ fn render(a: &mut App, width: u16, height: u16) -> String {
     render_with(a, width, height, Duration::ZERO)
 }
 
+/// M6 (`disabled_rows_are_muted`) 需要检查单元格的**样式**而不是文字内容, 文字断言够不着这个——
+/// 所以留一份返回 `Buffer` 本身的变体, 供需要读 `.style()` 的测试直接检查颜色。
+fn render_buffer(a: &mut App, width: u16, height: u16) -> ratatui::buffer::Buffer {
+    let mut terminal = Terminal::new(TestBackend::new(width, height)).unwrap();
+    terminal.draw(|f| a.draw(f, Duration::ZERO)).unwrap();
+    terminal.backend().buffer().clone()
+}
+
+/// 把 `buf` 第 `y` 行重建成一段纯文本 (宽字符的第二个占位单元格 `symbol()` 是空串, 天然跳过),
+/// 用来定位某个字段所在的行号——不依赖页面内部的坐标常量。
+fn buffer_row_text(buf: &ratatui::buffer::Buffer, y: u16) -> String {
+    (0..buf.area.width).map(|x| buf[(x, y)].symbol().to_string()).collect()
+}
+
+/// 在第 `y` 行从左到右找纯 ASCII 子串 `needle` 出现的起始格, 返回那一格的样式——用来断言
+/// 「这段文字是不是被整体涂成了 muted 颜色」(M6: `disabled_rows_are_muted`)。
+fn find_cell_style(buf: &ratatui::buffer::Buffer, y: u16, needle: &str) -> ratatui::style::Style {
+    let bytes: Vec<char> = needle.chars().collect();
+    let mut matched = 0usize;
+    let mut start_x = 0u16;
+    for x in 0..buf.area.width {
+        let sym = buf[(x, y)].symbol();
+        let matches_next = sym.starts_with(bytes[matched]);
+        if matches_next {
+            if matched == 0 {
+                start_x = x;
+            }
+            matched += 1;
+            if matched == bytes.len() {
+                return buf[(start_x, y)].style();
+            }
+        } else {
+            matched = 0;
+        }
+    }
+    panic!("第 {y} 行找不到 {needle:?}\n{}", buffer_row_text(buf, y));
+}
+
 fn key(code: KeyCode) -> KeyEvent {
     KeyEvent::new(code, KeyModifiers::NONE)
 }
@@ -582,6 +620,160 @@ fn page_keys_move_by_the_visible_row_count() {
     assert!(top.contains(" 1/30 "), "多次 PageUp 应该钳制在第一条, 不越界\n{top}");
 }
 
+// ---------- final-fix: I2 模型名列按宽度动态算 ----------
+
+/// I2: 真实模型 id 经常超过旧的固定 24 列 (`claude-sonnet-4-5-20250929` / 30 字符级别的
+/// `qwen3-coder-480b-a35b-instruct`)。80 列窄屏详情 (inner=76) 与 120×40 宽屏右侧详情面板
+/// (inner=62) 都留有余量 (`slot_model_col` 分别算出 58 / 44), 应该整段显示, 不截断。
+#[test]
+fn a_long_model_name_renders_in_full_when_there_is_room() {
+    let long_model = "qwen3-coder-480b-a35b-instruct";
+    assert!(long_model.len() > 24, "测试串本身要比旧的固定列宽更长");
+
+    let mut a = subs_app(false);
+    let mut subs = detail_subs();
+    subs[0].model_slots.sonnet = long_model.into();
+    a.update(subs_done(2, subs));
+    render(&mut a, 80, 24);
+    a.handle_key(key(KeyCode::Enter));
+    let out = render(&mut a, 80, 24);
+    assert!(out.contains(long_model), "80 列详情面板应该完整显示 30 字符的模型名, 不截断\n{out}");
+
+    let mut b = subs_app(false);
+    let mut subs2 = detail_subs();
+    subs2[0].model_slots.sonnet = long_model.into();
+    b.update(subs_done(2, subs2));
+    let out2 = render(&mut b, 120, 40);
+    assert!(out2.contains(long_model), "120×40 宽屏右侧详情面板同样应该完整显示\n{out2}");
+}
+
+// ---------- final-fix: M4 限额上限为 0 视为不限额 ----------
+
+/// M4: `QuotaUsage::ratio()` 把 `limit == Some(0)` 当无限额处理, 限额行的过滤条件必须跟它同一
+/// 套规则 (`tightest_quota` 已经是这样), 不能只看 `limit.is_some()`——否则会显示一条假的
+/// "0%  n / 0" 限额行。
+#[test]
+fn a_configured_limit_of_zero_is_treated_as_unlimited() {
+    let mut a = subs_app(false);
+    let mut subs = detail_subs();
+    subs[2].quota_usage = vec![quota_period(QuotaPeriod::Daily, 0, 5)]; // 示例中转: 唯一一条限额, limit=0
+    a.update(subs_done(2, subs));
+    render(&mut a, 80, 24); // 记住这是窄屏。
+    a.handle_key(key(KeyCode::Char('G'))); // 选中示例中转
+    a.handle_key(key(KeyCode::Enter));
+    let out = render(&mut a, 80, 24);
+    let row = out.lines().find(|l| l.contains(ZH.sub_f_quota)).unwrap_or_else(|| panic!("缺「限额」这一行\n{out}"));
+    assert!(row.contains('—'), "limit=0 应该视为不限额, 显示占位符而不是假的百分比\n{out}");
+    assert!(!out.contains("0%"), "{out}");
+}
+
+// ---------- final-fix: M2 折行字段的续行对齐 ----------
+
+/// M2: 「最近错误」折行后, 续行必须从与首行相同的值列开始 (不能顶到列 0)——90 个 'x' 远超窄屏
+/// 详情的值列宽度 (66), 保证真的会折成至少两行。
+#[test]
+fn wrapped_field_continuation_lines_share_the_value_column() {
+    let mut a = subs_app(false);
+    let mut subs = detail_subs();
+    subs[1].last_error_message = Some("x".repeat(90));
+    a.update(subs_done(2, subs));
+    render(&mut a, 80, 24);
+    a.handle_key(key(KeyCode::Char('j'))); // Kimi 备用
+    a.handle_key(key(KeyCode::Enter));
+    let out = render(&mut a, 80, 24);
+
+    let lines: Vec<&str> = out.lines().map(plain).collect();
+    let idx = lines
+        .iter()
+        .position(|l| l.trim_start_matches('│').trim_start().starts_with(ZH.sub_f_last_error))
+        .unwrap_or_else(|| panic!("缺「最近错误」这一行\n{out}"));
+    let value_col = value_column(lines[idx], ZH.sub_f_last_error);
+
+    let continuation = lines[idx + 1];
+    let content = continuation.trim_start_matches('│');
+    assert!(!content.trim().is_empty(), "续行不该是空的 (说明确实折行了)\n{out}");
+    // `value_column` 量出来的列号是从整行 (含开头的「│」边框) 算起的绝对列; 这里要用同一套基准,
+    // 不能先把「│」切掉再数空格 (那样会系统性少数 1 列, 边框本身占的那一列)。
+    let indent = 1 + continuation.chars().skip(1).take_while(|c| *c == ' ').count();
+    assert_eq!(indent, value_col, "续行应该从与首行相同的值列开始, 不能顶到列 0\n{out}");
+}
+
+/// M2: 装不下 (超过 4 行 cap) 的「最近错误」不能被 `Paragraph` 的 `Wrap` 悄悄裁掉——必须由我们自己
+/// 截断并在最后一行补省略号 (`clip_to_rows`)。300 个 'x' 远超 4 行 × 66 列的容量。
+#[test]
+fn a_very_long_last_error_ends_with_an_ellipsis_within_the_row_cap() {
+    let mut a = subs_app(false);
+    let mut subs = detail_subs();
+    subs[1].last_error_message = Some("x".repeat(300));
+    a.update(subs_done(2, subs));
+    render(&mut a, 80, 24);
+    a.handle_key(key(KeyCode::Char('j'))); // Kimi 备用
+    a.handle_key(key(KeyCode::Enter));
+    let out = render(&mut a, 80, 24);
+
+    let lines: Vec<&str> = out.lines().map(plain).collect();
+    let idx = lines
+        .iter()
+        .position(|l| l.trim_start_matches('│').trim_start().starts_with(ZH.sub_f_last_error))
+        .unwrap_or_else(|| panic!("缺「最近错误」这一行\n{out}"));
+    let last_row = lines[idx + 3]; // 4 行 cap: 第 0 行是标签所在行, 第 3 行是最后一行。
+    let trimmed = last_row.trim_end_matches('│').trim_end();
+    assert!(trimmed.ends_with('…'), "装不下的最近错误最后一行应该以省略号收尾\n{out}");
+}
+
+// ---------- final-fix: M6 列表状态列 + 停用行整体变灰 ----------
+
+/// M6: 状态列只在留得出空间时才加进来。80×24 (窄屏, 列表独占整行) 有room, 应该看到「状态」表头
+/// 与冷却倒计时；120×40 宽屏的左侧列表固定只有 58 列, 加上状态列会把 sonnet 挤到 12 列以下,
+/// 按规则应该整列省略——sonnet 列 (`fit` 到定宽) 依然保留原来的宽度, 不因为省略状态列而跟着变。
+#[test]
+fn list_has_a_status_column_with_cooldown_when_there_is_room() {
+    let narrow = render(&mut subs_app(false), 80, 24);
+    assert!(narrow.contains(ZH.sub_col_state), "80 列有空间, 应该显示「状态」表头\n{narrow}");
+    let kimi_row = narrow.lines().find(|l| l.contains("Kimi 备用")).unwrap_or_else(|| panic!("{narrow}"));
+    assert!(kimi_row.contains("限流 · 00:42"), "状态列应该带冷却倒计时\n{kimi_row}");
+
+    // 120×40: 右侧详情面板的「状态」字段行 (`sub_f_state`) 与列表的状态列表头是**同一个中文词**,
+    // 直接在整页输出里找会被详情面板那份撞上——只看表头所在行、且只看双栏分界符 `││` 左边
+    // (列表那一半) 的内容。
+    let wide = render(&mut subs_app(false), 120, 40);
+    let header_line = wide.lines().find(|l| l.contains(ZH.sub_col_name)).unwrap_or_else(|| panic!("缺表头行\n{wide}"));
+    let list_half = header_line.split("││").next().unwrap_or(header_line);
+    assert!(
+        !list_half.contains(ZH.sub_col_state),
+        "120×40 宽屏的左侧列表固定 58 列, 放不下状态列 (还要给 sonnet 留 ≥12 列), 应该整列省略\n{header_line}"
+    );
+}
+
+/// M6: 手动停用的订阅整行都该是 muted 颜色, 不再各自套 badge 的语义色。
+#[test]
+fn disabled_rows_are_muted() {
+    let mut a = subs_app(false);
+    let mut subs = detail_subs();
+    subs[1].enabled = false; // Kimi 备用 (provider_display_name = "Moonshot", 纯 ASCII, 方便按字符定位)
+    a.update(subs_done(2, subs));
+    render(&mut a, 80, 24);
+
+    let buf = render_buffer(&mut a, 80, 24);
+    let theme = Theme::new(ColorMode::TrueColor);
+    let kimi_y = (0..buf.area.height)
+        .find(|&y| buffer_row_text(&buf, y).contains("Kimi"))
+        .unwrap_or_else(|| panic!("找不到 Kimi 备用所在的行"));
+
+    let name_style = find_cell_style(&buf, kimi_y, "Kimi");
+    assert_eq!(name_style.fg, Some(theme.muted), "停用订阅的备注名应该是 muted 颜色");
+    let provider_style = find_cell_style(&buf, kimi_y, "Moonshot");
+    assert_eq!(provider_style.fg, Some(theme.muted), "停用订阅的厂商也应该是 muted 颜色");
+
+    // 对照组: 智谱主号 (下标 0, 紧挨在 Kimi 上面那一行) 没被停用, 该保留自己 badge 的颜色, 不受
+    // 影响——用 sonnet 列 ("glm-4.6", 纯 ASCII) 断言, 避开 CJK 宽字符的续格在这个 ratatui 版本里
+    // 重建成带空格文本 (`buffer_row_text` 逐格拼 `symbol()`, 宽字符续格是字面空格而不是空串,
+    // "智谱主号" 会被拼成 "智 谱 主 号") 的干扰。
+    let zhipu_y = kimi_y - 1;
+    let zhipu_sonnet_style = find_cell_style(&buf, zhipu_y, "glm-4.6");
+    assert_ne!(zhipu_sonnet_style.fg, Some(theme.muted), "没被停用的订阅不该被整行变灰\n{}", buffer_row_text(&buf, zhipu_y));
+}
+
 // ---------- 渲染内容 ----------
 
 #[test]
@@ -927,6 +1119,26 @@ fn drawing_the_same_state_twice_gives_the_same_frame() {
     let first = render(&mut d, 80, 24);
     let second = render(&mut d, 80, 24);
     assert_eq!(first, second, "忙碌行 (spinner) 也应该幂等");
+
+    // final-fix I1: 详情面板显示「上次操作」结果时也应该幂等。
+    let mut e = subs_app(false);
+    let mutation = Mutation::TestConnection { id: "1".into() };
+    e.update(Action::Mutate(mutation.clone()));
+    e.update(Action::MutationDone {
+        mutation,
+        result: Ok(MutationOutcome::Tested(TestConnectionResult {
+            ok: true,
+            message: "ok".into(),
+            http_status: Some(200),
+            model_used: None,
+            state_reset: true,
+        })),
+    });
+    render(&mut e, 80, 24);
+    e.handle_key(key(KeyCode::Enter));
+    let first = render(&mut e, 80, 24);
+    let second = render(&mut e, 80, 24);
+    assert_eq!(first, second, "详情面板显示上次操作结果时也应该幂等");
 }
 
 /// F3: 空列表加载时没有「旧」行可以比较, 不该把更早排队、还没画出来的闪烁带到后面某一帧。
@@ -1332,4 +1544,87 @@ fn subscription_name_falls_back_to_the_id_in_toasts() {
 fn global_keys_survive_at_80_columns_on_the_subscriptions_page() {
     let out = render(&mut subs_app(false), 80, 24);
     assert!(out.contains(ZH.key_help) && out.contains(ZH.key_quit), "{out}");
+
+    // M5 fix: 详情态不再重复显示一份「Esc 返回」(面板右下角的标题已经有了), 腾出的空间应该够放
+    // 下 `b 余额`。
+    let mut a = subs_app(false);
+    render(&mut a, 80, 24);
+    a.handle_key(key(KeyCode::Enter));
+    let detail_out = render(&mut a, 80, 24);
+    let footer = detail_out.lines().last().unwrap_or_else(|| panic!("{detail_out}"));
+    assert!(footer.contains(ZH.key_balance), "详情态键位栏应该放得下 b 余额\n{footer}");
+    assert!(footer.contains(ZH.key_help) && footer.contains(ZH.key_quit), "{footer}");
+}
+
+// ---------- final-fix: I1 就地操作的完整结果落在详情面板 ----------
+
+/// I1: 失败结果的完整文案只能在详情面板的「上次操作」行看到——toast 单行被截断 (≤72 列, 3 秒就
+/// 消失)。120 个 'x' (安全落在窄屏详情 3 行 × 66 列 = 198 列的容量以内, 不会被 `clip_to_rows`
+/// 二次截断) 用来确认「完整」这件事, 而不是像最近错误那样也可能需要省略号收尾。
+#[test]
+fn a_failed_test_connection_stays_readable_in_the_detail() {
+    let long_message = "x".repeat(120);
+    let mut a = subs_app(false);
+    let mutation = Mutation::TestConnection { id: "1".into() };
+    a.update(Action::Mutate(mutation.clone()));
+    a.update(Action::MutationDone {
+        mutation,
+        result: Ok(MutationOutcome::Tested(TestConnectionResult {
+            ok: false,
+            message: long_message.clone(),
+            http_status: Some(401),
+            model_used: None,
+            state_reset: false,
+        })),
+    });
+
+    // toast 还在屏幕上 (刚发生, 没过期): 应该是被截断的一行, 不包含完整的 120 个 'x'。
+    let toast_out = render(&mut a, 80, 24);
+    assert!(!toast_out.contains(&long_message), "toast 应该被截断成一行, 不该塞下完整的 120 个 x\n{toast_out}");
+    assert!(toast_out.contains('…'), "toast 截断后应该以省略号收尾\n{toast_out}");
+
+    // 进详情前先让 toast 过期 (3 秒生命周期): 否则它的浮层边框会叠在刚打开的详情面板上面,
+    // 挡住「上次操作」这一行, 跟本用例要验证的东西 (详情面板本身能不能显示完整文案) 无关。
+    a.update(Action::Tick { now_ms: NOW + 3_000 });
+    // 进详情: 「上次操作」行应该显示完整文案 (不截断), 不受 toast 单行限制。
+    a.handle_key(key(KeyCode::Enter));
+    let out = render(&mut a, 80, 24);
+    assert!(out.contains(ZH.sub_f_last_action), "详情面板应该有「上次操作」这一行\n{out}");
+    // 折行后的 120 个 'x' 会被拆到好几个渲染行里, 中间隔着每行末尾的引号 + 换行, 不能直接
+    // `.contains(&long_message)`——改成数总的 'x' 个数 (面板里其它文字都不含 'x')。
+    let x_count = out.chars().filter(|&c| c == 'x').count();
+    assert_eq!(x_count, 120, "详情面板应该显示完整的 120 个 x (折行但不截断), 不像 toast 那样截断\n{out}");
+}
+
+/// I1: 发起新一次操作那一刻, 上一条 `last_outcome` 就该被清掉——不能让用户以为「上次操作」显示
+/// 的是这次刚发出去的操作的结果 (正忙时应该显示的是「正在测试连接…」busy 文案)。
+#[test]
+fn last_outcome_is_cleared_when_a_new_mutation_starts() {
+    let mut a = subs_app(false);
+    let mutation = Mutation::TestConnection { id: "1".into() };
+    a.update(Action::Mutate(mutation.clone()));
+    a.update(Action::MutationDone {
+        mutation: mutation.clone(),
+        result: Ok(MutationOutcome::Tested(TestConnectionResult {
+            ok: false,
+            message: "上游拒绝".into(),
+            http_status: Some(401),
+            model_used: None,
+            state_reset: false,
+        })),
+    });
+    render(&mut a, 80, 24);
+    // 让 toast 过期, 不然它的浮层边框会叠在刚打开的详情面板上面, 挡住这里要断言的文字。
+    a.update(Action::Tick { now_ms: NOW + 3_000 });
+    a.handle_key(key(KeyCode::Enter));
+    let out = render(&mut a, 80, 24);
+    assert!(out.contains(ZH.sub_f_last_action) && out.contains("上游拒绝"), "上一次操作结果应该出现在详情里\n{out}");
+
+    a.handle_key(key(KeyCode::Esc));
+    a.update(Action::Mutate(mutation));
+    render(&mut a, 80, 24);
+    a.handle_key(key(KeyCode::Enter));
+    let out2 = render(&mut a, 80, 24);
+    assert!(!out2.contains("上游拒绝"), "新一次操作发起后, 上一条结果应该被清掉\n{out2}");
+    assert!(out2.contains(ZH.sub_busy_testing), "正忙时详情面板应该显示进行中文案\n{out2}");
 }

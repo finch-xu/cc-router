@@ -588,6 +588,117 @@ mod tests {
         );
     }
 
+    /// M7: `process_action` 是主循环真正的路由——`mutations_are_never_coalesced` 只调了
+    /// `spawn_mutation` 本身, 哪怕以后有人手滑把 `Cmd::Mutate` 也接进 `Fetches` 的去重表, 那个测试
+    /// 照样会通过, 咬不住这个回归。这里直接驱动 `process_action`:
+    /// 1. 两次会各自让 `App::update` 产出 `Cmd::Fetch(Subscriptions)` 的 action → 只有一次真正的
+    ///    HTTP 请求 (第二次被 `Fetches` 记成待补跑, 不再发)。
+    /// 2. 那次请求的结果 (`Action::FetchDone`) 送进来 → `process_action` 内部的补跑逻辑再发一次,
+    ///    带一个更大的 `issued`。
+    /// 3. 三次 `Cmd::Mutate` (两条不同订阅 + 第三条对其中一条订阅再来一次同类操作但换成第三条
+    ///    订阅) → 三次都应该真的发出 POST, 不经过 `Fetches` 的去重。
+    /// 全程不 `sleep` 固定时长, 用「等 mock 收到的请求数到达预期」的轮询 + 3 秒超时兜底, 避免抖动。
+    #[tokio::test]
+    async fn process_action_dedupes_fetches_and_reruns_after_completion() {
+        let server = MockServer::start().await;
+        Mock::given(method("POST"))
+            .and(path("/ui/api/cmd/list_subscriptions"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!([])))
+            .mount(&server)
+            .await;
+        Mock::given(method("POST"))
+            .and(path("/ui/api/cmd/set_subscription_enabled"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!(null)))
+            .mount(&server)
+            .await;
+        let dir = tempfile::tempdir().unwrap();
+        write_runtime(dir.path(), server.address().port(), "s", "9.9.9-test");
+        let client = Arc::new(Client::connect(dir.path()).unwrap());
+        let (tx, mut rx) = unbounded_channel::<Action>();
+        let mut fetches = Fetches::default();
+        let mut issued = Issued::default();
+        let mut app = App::new(crate::app::AppOptions {
+            strings: &crate::i18n::ZH,
+            theme: crate::theme::Theme::new(crate::theme::ColorMode::TrueColor),
+            fx_enabled: false,
+            now_ms: 0,
+            tui_version: "9.9.9-test",
+        });
+        app.update(crate::action::Action::SwitchTab(crate::action::Tab::Subscriptions));
+
+        // 1) 两次都会产出 Cmd::Fetch(Subscriptions): `Connected` 与 `Refresh` 各自在订阅页的
+        //    `update()` 里映射成一次 Fetch。第一次真的发; 这次请求还没回来时第二次应该被去重。
+        assert!(!process_action(Action::Connected { app_version: "9.9.9-test".into() }, &client, &tx, &mut fetches, &mut issued, &mut app));
+        assert!(!process_action(Action::Refresh, &client, &tx, &mut fetches, &mut issued, &mut app));
+
+        tokio::time::timeout(Duration::from_secs(3), async {
+            while count_requests(&server, "list_subscriptions").await < 1 {
+                tokio::time::sleep(Duration::from_millis(10)).await;
+            }
+        })
+        .await
+        .expect("第一次请求应该很快发出去");
+        // 给「第二次会不会也发一次」留一点时间观察, 而不是立刻断言——去重发生在 `Fetches::request`
+        // 同步返回的那一刻 (上面第二个 `process_action` 调用里), 这里只是确认没有多余的请求跟上来。
+        tokio::time::sleep(Duration::from_millis(50)).await;
+        assert_eq!(count_requests(&server, "list_subscriptions").await, 1, "第二次 Cmd::Fetch 应该被去重, 不是真的再发一次请求");
+
+        // 2) 第一次的结果回来了: `process_action` 应该按上面记的那笔待补跑, 立刻用更大的 issued
+        //    再发一次。
+        let first_done = tokio::time::timeout(Duration::from_secs(3), rx.recv()).await.expect("等第一次 FetchDone 超时").expect("channel 关闭了");
+        let Action::FetchDone { issued: first_issued, .. } = &first_done else { panic!("{first_done:?}") };
+        let first_issued = *first_issued;
+        assert!(!process_action(first_done, &client, &tx, &mut fetches, &mut issued, &mut app));
+
+        let rerun_done = tokio::time::timeout(Duration::from_secs(3), rx.recv()).await.expect("等补跑的 FetchDone 超时").expect("channel 关闭了");
+        let Action::FetchDone { issued: rerun_issued, .. } = &rerun_done else { panic!("{rerun_done:?}") };
+        assert!(*rerun_issued > first_issued, "补跑应该带一个比第一次更大的 issued");
+        assert!(!process_action(rerun_done, &client, &tx, &mut fetches, &mut issued, &mut app));
+
+        assert_eq!(count_requests(&server, "list_subscriptions").await, 2, "总共应该只发生过两次 list_subscriptions 请求: 第一次 + 补跑");
+
+        // 3) 三次 Cmd::Mutate (两条不同订阅 + 第三条订阅上同一种操作) 都应该真的发出去, 不经过
+        //    `Fetches` 的去重——就地操作永不去重、永不补跑 (与 `Fetch` 相反)。
+        assert!(!process_action(
+            Action::Mutate(Mutation::SetEnabled { id: "a".into(), enabled: false }),
+            &client,
+            &tx,
+            &mut fetches,
+            &mut issued,
+            &mut app
+        ));
+        assert!(!process_action(
+            Action::Mutate(Mutation::SetEnabled { id: "b".into(), enabled: false }),
+            &client,
+            &tx,
+            &mut fetches,
+            &mut issued,
+            &mut app
+        ));
+        assert!(!process_action(
+            Action::Mutate(Mutation::SetEnabled { id: "c".into(), enabled: false }),
+            &client,
+            &tx,
+            &mut fetches,
+            &mut issued,
+            &mut app
+        ));
+
+        tokio::time::timeout(Duration::from_secs(3), async {
+            while count_requests(&server, "set_subscription_enabled").await < 3 {
+                tokio::time::sleep(Duration::from_millis(10)).await;
+            }
+        })
+        .await
+        .expect("三次 Cmd::Mutate 都应该真的各自发出一次 POST");
+    }
+
+    /// 数 mock server 收到的、路径以 `suffix` 结尾的请求条数 (供上面这条测试轮询用, 不固定
+    /// `sleep` 时长)。
+    async fn count_requests(server: &MockServer, suffix: &str) -> usize {
+        server.received_requests().await.unwrap().iter().filter(|r| r.url.path().ends_with(suffix)).count()
+    }
+
     /// 就地操作绝不经过 `Fetches` 的「同类只跑一个」去重: 同一个 `Cmd::Mutate` 连发两次必须真的
     /// 打两次上游 (`.expect(2)` 在 `MockServer` drop 时校验)。忙碌表「同一订阅同时只跑一个」的
     /// 语义是 `App` 更上游的把关, 与这里「runtime 层不去重」是两回事。

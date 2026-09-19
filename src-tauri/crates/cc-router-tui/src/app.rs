@@ -85,6 +85,10 @@ pub struct App {
     /// 正在进行的就地操作, 键是订阅 id。**按订阅 id 判重, 不按 `Mutation` 整体** —— 同一条订阅
     /// 同时只能有一个操作在跑, 但不同操作 (比如先 `t` 再 `e`) 仍然互斥, 不是各自独立排队。
     busy: HashMap<String, Mutation>,
+    /// 每条订阅最近一次就地操作的结果, 与对应 toast 用的是**同一份文本** (I1 fix): toast 只能显示
+    /// 一行 (≤72 列, 3 秒就消失), 详情面板的「上次操作」行拿这份存档展示完整文案。发起新操作时
+    /// (`start_mutation` 真的派发出去那一刻) 移除对应条目, 不是等结果回来才清。
+    last_outcome: HashMap<String, (ToastKind, String)>,
 }
 
 impl App {
@@ -110,6 +114,7 @@ impl App {
             now_ms: opts.now_ms,
             tick: 0,
             busy: HashMap::new(),
+            last_outcome: HashMap::new(),
         }
     }
 
@@ -250,16 +255,21 @@ impl App {
             }
         }
         self.busy.insert(id.to_string(), m.clone());
+        // I1 fix: 这条订阅上一次操作的结果 (如果还挂在详情面板上) 已经过时了, 新操作一发起就该
+        // 隐去它, 不能让用户以为「上次操作」显示的是这次刚发出去的操作的结果。
+        self.last_outcome.remove(id);
         vec![Cmd::Mutate(m)]
     }
 
     /// `Action::MutationDone`: 从忙碌表移除, 按结果弹一条 toast, **无论成败都追加一次订阅列表
-    /// 刷新** —— 状态 / 缓存 / 错误信息可能都变了。
+    /// 刷新** —— 状态 / 缓存 / 错误信息可能都变了。toast 与 `last_outcome`（I1 fix）**共用同一份
+    /// 文本**: toast 只能显示一行 (≤72 列, 3 秒就消失), 详情面板的「上次操作」行拿 `last_outcome`
+    /// 展示完整文案, 不受 toast 单行截断的限制。
     fn finish_mutation(&mut self, mutation: Mutation, result: Result<MutationOutcome, String>) -> Vec<Cmd> {
         let id = mutation.subscription_id().to_string();
         self.busy.remove(&id);
         let name = self.subscription_name(&id);
-        match result {
+        let (kind, text) = match &result {
             Ok(MutationOutcome::EnabledSet) => {
                 let enabled = matches!(mutation, Mutation::SetEnabled { enabled: true, .. });
                 // 乐观更新 Store, 不等下一次 Fetch::Subscriptions 落地: 否则「按 e、还没刷新完又按
@@ -267,33 +277,25 @@ impl App {
                 // 且第二条 toast 文案与第一条相同, 被 push_toast 的去重规则吞掉, 用户毫无反馈。
                 self.store.set_enabled(&id, enabled);
                 let text = if enabled { (self.s.toast_enabled)(&name) } else { (self.s.toast_disabled)(&name) };
-                self.push_toast(Toast::new(ToastKind::Success, text));
+                (ToastKind::Success, text)
             }
-            Ok(MutationOutcome::Tested(r)) if r.ok => {
-                self.push_toast(Toast::new(ToastKind::Success, (self.s.toast_test_ok)(&name, r.model_used.as_deref())));
-            }
-            Ok(MutationOutcome::Tested(r)) => {
-                self.push_toast(Toast::new(ToastKind::Error, (self.s.toast_test_failed)(&name, &r.message)));
-            }
+            Ok(MutationOutcome::Tested(r)) if r.ok => (ToastKind::Success, (self.s.toast_test_ok)(&name, r.model_used.as_deref())),
+            Ok(MutationOutcome::Tested(r)) => (ToastKind::Error, (self.s.toast_test_failed)(&name, &r.message)),
             Ok(MutationOutcome::Models(RefreshModelsResult::Auto { models, .. })) => {
-                self.push_toast(Toast::new(ToastKind::Success, (self.s.toast_models_ok)(&name, models.len())));
+                (ToastKind::Success, (self.s.toast_models_ok)(&name, models.len()))
             }
             Ok(MutationOutcome::Models(RefreshModelsResult::ManualFallback { reason })) => {
-                self.push_toast(Toast::new(ToastKind::Info, (self.s.toast_models_manual)(&name, &reason)));
+                (ToastKind::Info, (self.s.toast_models_manual)(&name, reason))
             }
-            Ok(MutationOutcome::Balance(RefreshBalanceResult::Success { .. })) => {
-                self.push_toast(Toast::new(ToastKind::Success, (self.s.toast_balance_ok)(&name)));
-            }
+            Ok(MutationOutcome::Balance(RefreshBalanceResult::Success { .. })) => (ToastKind::Success, (self.s.toast_balance_ok)(&name)),
             Ok(MutationOutcome::Balance(RefreshBalanceResult::Failed { reason })) => {
-                self.push_toast(Toast::new(ToastKind::Error, (self.s.toast_balance_failed)(&name, &reason)));
+                (ToastKind::Error, (self.s.toast_balance_failed)(&name, reason))
             }
-            Ok(MutationOutcome::Balance(RefreshBalanceResult::Unsupported)) => {
-                self.push_toast(Toast::new(ToastKind::Info, self.s.sub_balance_unsupported));
-            }
-            Err(message) => {
-                self.push_toast(Toast::new(ToastKind::Error, (self.s.toast_mutation_failed)(&name, &message)));
-            }
-        }
+            Ok(MutationOutcome::Balance(RefreshBalanceResult::Unsupported)) => (ToastKind::Info, self.s.sub_balance_unsupported.to_string()),
+            Err(message) => (ToastKind::Error, (self.s.toast_mutation_failed)(&name, message)),
+        };
+        self.push_toast(Toast::new(kind, text.clone()));
+        self.last_outcome.insert(id, (kind, text));
         vec![Cmd::Fetch(Fetch::Subscriptions)]
     }
 
@@ -469,8 +471,16 @@ impl App {
         }
 
         let s = self.s;
-        let mut ctx =
-            DrawCtx { theme: &self.theme, s, now_ms: self.now_ms, tick: self.tick, fx: &mut self.fx, store: &self.store, busy: &self.busy };
+        let mut ctx = DrawCtx {
+            theme: &self.theme,
+            s,
+            now_ms: self.now_ms,
+            tick: self.tick,
+            fx: &mut self.fx,
+            store: &self.store,
+            busy: &self.busy,
+            last_outcome: &self.last_outcome,
+        };
         let page = Self::select_page(self.tab, &mut self.overview, &mut self.subscriptions, &mut self.placeholder);
         page.draw(frame, content, &mut ctx);
         let mut left = page.hints(s);

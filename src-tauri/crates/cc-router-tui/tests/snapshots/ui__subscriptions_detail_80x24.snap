@@ -1,5 +1,6 @@
 ---
 source: crates/cc-router-tui/tests/ui.rs
+assertion_line: 252
 expression: "render(&mut a, 80, 24)"
 ---
 "╭ cc-router ──────────────────────────────────────────────── ● 已连接 · v9.9.9 ╮" Hidden by multi-width symbols: [(64, " "), (66, " "), (68, " ")]
@@ -10,10 +11,10 @@ expression: "render(&mut a, 80, 24)"
 "│ 厂商      智谱 · api_key                                                     │" Hidden by multi-width symbols: [(3, " "), (5, " "), (13, " "), (15, " ")]
 "│ 端点      https://open.bigmodel.cn/api/anthropic                             │" Hidden by multi-width symbols: [(3, " "), (5, " ")]
 "│ 槽位                                                                         │" Hidden by multi-width symbols: [(3, " "), (5, " ")]
-"│   fable   glm-4.6                 auto                                       │"
-"│   opus    glm-4.6                 high                                       │"
-"│   sonnet  glm-4.6                 auto                                       │"
-"│   haiku   glm-4.5-air             auto                                       │"
+"│   fable   glm-4.6                                                   auto     │"
+"│   opus    glm-4.6                                                   high     │"
+"│   sonnet  glm-4.6                                                   auto     │"
+"│   haiku   glm-4.5-air                                               auto     │"
 "│   兜底    (未配置)                                                           │" Hidden by multi-width symbols: [(5, " "), (7, " "), (14, " "), (16, " "), (18, " ")]
 "│ 限额      日限额    ━━━━━━━━━━━━━━━━━━━━─────────────   62% 620 / 1.0K       │" Hidden by multi-width symbols: [(3, " "), (5, " "), (13, " "), (15, " "), (17, " ")]
 "│ 余额      账户不可用 (可能欠费或被封)                                        │" Hidden by multi-width symbols: [(3, " "), (5, " "), (13, " "), (15, " "), (17, " "), (19, " "), (21, " "), (25, " "), (27, " "), (29, " "), (31, " "), (33, " "), (35, " "), (37, " ")]
@@ -25,4 +26,4 @@ expression: "render(&mut a, 80, 24)"
 "│                                                                              │"
 "│                                                                              │"
 "╰──────────────────────────────────────────────────────────────────── Esc 返回 ╯" Hidden by multi-width symbols: [(75, " "), (77, " ")]
-" 1-5 切页   ↑↓ 选择   Esc 返回   e 启停   t 测试   m 模型       ? 帮助   q 退出 " Hidden by multi-width symbols: [(6, " "), (8, " "), (16, " "), (18, " "), (27, " "), (29, " "), (36, " "), (38, " "), (45, " "), (47, " "), (54, " "), (56, " "), (67, " "), (69, " "), (76, " "), (78, " ")]
+" 1-5 切页   ↑↓ 选择   e 启停   t 测试   m 模型   b 余额         ? 帮助   q 退出 " Hidden by multi-width symbols: [(6, " "), (8, " "), (16, " "), (18, " "), (25, " "), (27, " "), (34, " "), (36, " "), (43, " "), (45, " "), (52, " "), (54, " "), (67, " "), (69, " "), (76, " "), (78, " ")]

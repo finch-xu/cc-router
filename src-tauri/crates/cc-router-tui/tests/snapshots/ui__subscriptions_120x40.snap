@@ -1,5 +1,6 @@
 ---
 source: crates/cc-router-tui/tests/ui.rs
+assertion_line: 239
 expression: "render(&mut subs_app(false), 120, 40)"
 ---
 "╭ cc-router ──────────────────────────────────────────────────────────────────────────────────────── ● 已连接 · v9.9.9 ╮" Hidden by multi-width symbols: [(104, " "), (106, " "), (108, " ")]
@@ -10,10 +11,10 @@ expression: "render(&mut subs_app(false), 120, 40)"
 "│ ▌ ●  智谱主号             智谱         glm-4.6         ││ 厂商      智谱 · api_key                                   │" Hidden by multi-width symbols: [(8, " "), (10, " "), (12, " "), (14, " "), (29, " "), (31, " "), (61, " "), (63, " "), (71, " "), (73, " ")]
 "│   ◐  Kimi 备用            Moonshot     (pending)       ││ 端点      https://open.bigmodel.cn/api/anthropic           │" Hidden by multi-width symbols: [(13, " "), (15, " "), (61, " "), (63, " ")]
 "│   ✕  示例中转             自定义中转   claude-sonnet-… ││ 槽位                                                       │" Hidden by multi-width symbols: [(8, " "), (10, " "), (12, " "), (14, " "), (29, " "), (31, " "), (33, " "), (35, " "), (37, " "), (61, " "), (63, " ")]
-"│                                                        ││   fable   glm-4.6                 auto                     │"
-"│                                                        ││   opus    glm-4.6                 high                     │"
-"│                                                        ││   sonnet  glm-4.6                 auto                     │"
-"│                                                        ││   haiku   glm-4.5-air             auto                     │"
+"│                                                        ││   fable   glm-4.6                                 auto     │"
+"│                                                        ││   opus    glm-4.6                                 high     │"
+"│                                                        ││   sonnet  glm-4.6                                 auto     │"
+"│                                                        ││   haiku   glm-4.5-air                             auto     │"
 "│                                                        ││   兜底    (未配置)                                         │" Hidden by multi-width symbols: [(63, " "), (65, " "), (72, " "), (74, " "), (76, " ")]
 "│                                                        ││ 限额      日限额    ━━━━━━━━━──────   62% 620 / 1.0K       │" Hidden by multi-width symbols: [(61, " "), (63, " "), (71, " "), (73, " "), (75, " ")]
 "│                                                        ││ 余额      账户不可用 (可能欠费或被封)                      │" Hidden by multi-width symbols: [(61, " "), (63, " "), (71, " "), (73, " "), (75, " "), (77, " "), (79, " "), (83, " "), (85, " "), (87, " "), (89, " "), (91, " "), (93, " "), (95, " ")]
