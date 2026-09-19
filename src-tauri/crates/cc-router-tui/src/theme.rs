@@ -110,6 +110,17 @@ impl Theme {
         }
     }
 
+    /// 限额进度条颜色: ≥100% 满 `err`、≥80% 告急 `warn`、否则 `ok`。总览页、订阅页共用同一判定。
+    pub fn quota_color(&self, ratio: f64) -> Color {
+        if ratio >= 1.0 {
+            self.err
+        } else if ratio >= 0.8 {
+            self.warn
+        } else {
+            self.ok
+        }
+    }
+
     pub fn accent_bold(&self) -> Style {
         Style::new().fg(self.accent).add_modifier(Modifier::BOLD)
     }

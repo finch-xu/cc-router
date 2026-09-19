@@ -224,13 +224,7 @@ impl Overview {
             );
             match sub.tightest_quota().and_then(|q| q.ratio().map(|r| (q, r))) {
                 Some((q, ratio)) => {
-                    let color = if ratio >= 1.0 {
-                        ctx.theme.err
-                    } else if ratio >= 0.8 {
-                        ctx.theme.warn
-                    } else {
-                        ctx.theme.ok
-                    };
+                    let color = ctx.theme.quota_color(ratio);
                     frame.render_widget(Line::styled(s.quota_period(q.period), ctx.theme.muted_style()), label);
                     frame.render_widget(
                         LineGauge::default()

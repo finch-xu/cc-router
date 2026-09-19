@@ -9,7 +9,8 @@ use std::time::Duration;
 use cc_router_tui::action::{Action, Cmd, Fetch, FetchData, OverviewData, Tab};
 use cc_router_tui::app::{App, AppOptions};
 use cc_router_tui::client::dto::{
-    ModelSlots, OverallStats, ProxyStatus, QuotaPeriod, QuotaUsage, SeriesPoint, Settings, Subscription, SubscriptionState,
+    BalanceCache, BalanceEntry, BalanceSeverity, BalanceSnapshot, ModelCache, ModelInfo, ModelSlots, OverallStats, ProxyStatus,
+    QuotaPeriod, QuotaUsage, SeriesPoint, Settings, SlotEfforts, Subscription, SubscriptionState,
 };
 use cc_router_tui::i18n::ZH;
 use cc_router_tui::theme::{ColorMode, Theme};
@@ -31,15 +32,11 @@ fn app(fx_enabled: bool) -> App {
 }
 
 fn quota(limit: u64, used: u64) -> QuotaUsage {
-    QuotaUsage {
-        period: QuotaPeriod::Daily,
-        limit: Some(limit),
-        input: used,
-        output: 0,
-        cache_creation: 0,
-        cache_read: 0,
-        exceeded: used >= limit,
-    }
+    quota_period(QuotaPeriod::Daily, limit, used)
+}
+
+fn quota_period(period: QuotaPeriod, limit: u64, used: u64) -> QuotaUsage {
+    QuotaUsage { period, limit: Some(limit), input: used, output: 0, cache_creation: 0, cache_read: 0, exceeded: used >= limit }
 }
 
 fn sub(id: &str, name: &str, state: SubscriptionState) -> Subscription {
@@ -121,6 +118,77 @@ fn loaded(fx_enabled: bool) -> App {
     a
 }
 
+/// 订阅页测试用的 3 条订阅 (后端顺序: 智谱主号 / Kimi 备用 / 示例中转), 字段覆盖 task-3-brief.md
+/// 详情面板的每一条规则:
+///   - 智谱主号: 单个限额周期、槽位 effort 覆盖 (opus=high)、兜底槽未配置、模型已缓存、
+///     被引用、余额有 entries (含 Low 严重度 + hint, 外加 is_available=false 的不可用行)。
+///   - Kimi 备用: 限流 + 冷却倒计时、两个限额周期同时设了上限、sonnet 槽是 (pending)、
+///     余额支持但还没查过、有最近错误 (用来看 Wrap)。
+///   - 示例中转: 凭证失效、余额不支持、没有限额、没有被引用、没有最近错误、模型没缓存过 ——
+///     占位符那组规则全靠它覆盖。
+fn detail_subs() -> Vec<Subscription> {
+    let mut zhipu = sub("1", "智谱主号", SubscriptionState::Healthy);
+    zhipu.provider_display_name = "智谱".into();
+    zhipu.provider_id = "zhipu".into();
+    zhipu.base_url = "https://open.bigmodel.cn/api/anthropic".into();
+    zhipu.auth_type = "api_key".into();
+    zhipu.model_slots =
+        ModelSlots { fable: "glm-4.6".into(), opus: "glm-4.6".into(), sonnet: "glm-4.6".into(), haiku: "glm-4.5-air".into(), fallback: String::new() };
+    zhipu.slot_efforts = SlotEfforts { opus: Some("high".into()), ..Default::default() };
+    zhipu.quota_usage = vec![quota(1000, 620)];
+    zhipu.balance_supported = true;
+    zhipu.balance_cache = Some(BalanceCache {
+        fetched_at: NOW,
+        snapshot: BalanceSnapshot {
+            is_available: Some(false),
+            entries: vec![
+                BalanceEntry { label: "余额".into(), value_text: "39.28".into(), unit: "CNY".into(), hint: None, severity: BalanceSeverity::Normal },
+                BalanceEntry {
+                    label: "赠送余额".into(),
+                    value_text: "1.00".into(),
+                    unit: "CNY".into(),
+                    hint: Some("即将过期".into()),
+                    severity: BalanceSeverity::Low,
+                },
+            ],
+        },
+    });
+    zhipu.model_cache = Some(ModelCache { fetched_at: NOW, models: (0..12).map(|i| ModelInfo { id: format!("m{i}"), display_name: None }).collect() });
+    zhipu.referenced_by = vec!["model-sonnet".into(), "model-opus".into()];
+
+    let mut kimi = sub("2", "Kimi 备用", SubscriptionState::RateLimited);
+    kimi.provider_display_name = "Moonshot".into();
+    kimi.cooldown_until = Some(NOW + 42_000);
+    kimi.model_slots.sonnet = "(pending)".into();
+    kimi.quota_usage = vec![quota_period(QuotaPeriod::Daily, 1000, 950), quota_period(QuotaPeriod::Monthly, 5000, 4200)];
+    kimi.balance_supported = true;
+    kimi.balance_cache = None;
+    kimi.referenced_by = vec!["model-haiku".into()];
+    kimi.last_error_message = Some("上游返回 429 Too Many Requests, 已达到本分钟请求数上限, 请稍后重试".into());
+
+    let mut relay = sub("3", "示例中转", SubscriptionState::AuthFailed);
+    relay.provider_display_name = "自定义中转".into();
+    relay.base_url = "https://relay.example.invalid/v1".into();
+    relay.model_slots = ModelSlots {
+        fable: "claude-haiku-4-5".into(),
+        opus: "claude-opus-4-1".into(),
+        sonnet: "claude-sonnet-4-5".into(),
+        haiku: "claude-haiku-4-5".into(),
+        fallback: String::new(),
+    };
+
+    vec![zhipu, kimi, relay]
+}
+
+/// 连上 + 切到订阅页 + 喂一份 `detail_subs()`。
+fn subs_app(fx_enabled: bool) -> App {
+    let mut a = app(fx_enabled);
+    a.update(Action::Connected { app_version: VERSION.into() });
+    a.update(Action::SwitchTab(Tab::Subscriptions));
+    a.update(subs_done(1, detail_subs()));
+    a
+}
+
 fn render_with(a: &mut App, width: u16, height: u16, elapsed: Duration) -> String {
     let mut terminal = Terminal::new(TestBackend::new(width, height)).unwrap();
     terminal.draw(|f| a.draw(f, elapsed)).unwrap();
@@ -157,8 +225,200 @@ fn help_popup_80x24() {
 #[test]
 fn placeholder_page_80x24() {
     let mut a = loaded(false);
-    a.update(Action::SwitchTab(Tab::Subscriptions));
+    // 订阅页 (Tab::Subscriptions) 从 Task 3 起是真页面了, 占位快照换一个仍然占位的标签。
+    a.update(Action::SwitchTab(Tab::VirtualModels));
     insta::assert_snapshot!(render(&mut a, 80, 24));
+}
+
+// ---------- 订阅页 ----------
+
+#[test]
+fn subscriptions_120x40() {
+    insta::assert_snapshot!(render(&mut subs_app(false), 120, 40));
+}
+
+#[test]
+fn subscriptions_list_80x24() {
+    insta::assert_snapshot!(render(&mut subs_app(false), 80, 24));
+}
+
+#[test]
+fn subscriptions_detail_80x24() {
+    let mut a = subs_app(false);
+    render(&mut a, 80, 24); // 先画一帧, 让页面记住这是窄屏。
+    a.handle_key(key(KeyCode::Enter));
+    insta::assert_snapshot!(render(&mut a, 80, 24));
+}
+
+#[test]
+fn subscriptions_page_lists_in_backend_order() {
+    let out = render(&mut subs_app(false), 120, 40);
+    let pos = |needle: &str| out.find(needle).unwrap_or_else(|| panic!("缺 {needle}\n{out}"));
+    assert!(pos("智谱主号") < pos("Kimi 备用"), "应该按后端给的顺序, 不按严重度排\n{out}");
+    assert!(pos("Kimi 备用") < pos("示例中转"), "{out}");
+}
+
+#[test]
+fn selection_moves_and_clamps() {
+    let mut a = subs_app(false);
+    for _ in 0..4 {
+        a.handle_key(key(KeyCode::Char('j')));
+    }
+    let out = render(&mut a, 120, 40);
+    assert!(out.contains(" 3/3 "), "j j j j 不该越过最后一条\n{out}");
+
+    a.handle_key(key(KeyCode::Char('k')));
+    let out = render(&mut a, 120, 40);
+    assert!(out.contains(" 2/3 "), "{out}");
+
+    a.handle_key(key(KeyCode::Char('G')));
+    assert!(render(&mut a, 120, 40).contains(" 3/3 "));
+    a.handle_key(key(KeyCode::Char('g')));
+    assert!(render(&mut a, 120, 40).contains(" 1/3 "));
+
+    // 到顶之后再往上不该绕回最后一条。
+    a.handle_key(key(KeyCode::Char('k')));
+    assert!(render(&mut a, 120, 40).contains(" 1/3 "), "k 到顶不绕回");
+}
+
+/// 用窄屏 + 进详情来断言, 好让渲染出来的文字只包含被选中的那一条 —— 宽屏双栏下列表本来就会把
+/// 三条订阅的名字/厂商全部列出来, `out.contains("Kimi 备用")` 那种断言不管选没选中 Kimi 都成立,
+/// 咬不住「选中项到底是谁」这件事。
+#[test]
+fn selection_follows_the_id_across_reloads() {
+    let mut a = subs_app(false);
+    render(&mut a, 80, 24); // 让页面记住这是窄屏。
+    a.handle_key(key(KeyCode::Char('j'))); // 选中第 2 条: Kimi 备用 (id "2")
+    a.handle_key(key(KeyCode::Enter));
+    let out = render(&mut a, 80, 24);
+    assert!(out.contains("Kimi 备用") && out.contains("Moonshot"), "{out}");
+
+    // 新列表把 Kimi 挪到第 3 位: [智谱主号, 示例中转, Kimi 备用]。
+    let mut subs = detail_subs();
+    subs.swap(1, 2);
+    a.update(subs_done(2, subs));
+    let out2 = render(&mut a, 80, 24);
+    assert!(out2.contains("Kimi 备用") && out2.contains("Moonshot"), "选中项应该跟着 id 走, 不是跟着下标\n{out2}");
+
+    // 再来一份不含 Kimi 的列表 (长度 2): 应该落到 last_index=2 钳制到长度 2 后的下标 1, 也就是
+    // 「示例中转」(此时它在新列表的下标 1), 而不是 panic。
+    let full = detail_subs();
+    let without_kimi = vec![full[0].clone(), full[2].clone()];
+    a.update(subs_done(3, without_kimi));
+    let out3 = render(&mut a, 80, 24);
+    assert!(out3.contains("示例中转"), "id 消失后应该落到钳制后的下标, 不 panic\n{out3}");
+}
+
+#[test]
+fn enter_opens_detail_only_on_narrow_terminals() {
+    let mut a = subs_app(false);
+    let before = render(&mut a, 80, 24);
+    assert!(before.contains(ZH.sub_col_name) && !before.contains(ZH.sub_f_endpoint), "{before}");
+
+    a.handle_key(key(KeyCode::Enter));
+    let after = render(&mut a, 80, 24);
+    assert!(after.contains(ZH.sub_f_endpoint) && !after.contains(ZH.sub_col_name), "80 列: ⏎ 应该进详情\n{after}");
+
+    a.handle_key(key(KeyCode::Esc));
+    let back = render(&mut a, 80, 24);
+    assert!(back.contains(ZH.sub_col_name), "{back}");
+
+    let wide_before = render(&mut a, 120, 40);
+    a.handle_key(key(KeyCode::Enter));
+    let wide_after = render(&mut a, 120, 40);
+    assert_eq!(wide_before, wide_after, "120 列: ⏎ 前后渲染应该完全相同");
+}
+
+#[test]
+fn detail_survives_widening() {
+    let mut a = subs_app(false);
+    render(&mut a, 80, 24);
+    a.handle_key(key(KeyCode::Enter));
+    let narrow = render(&mut a, 80, 24);
+    assert!(narrow.contains(ZH.sub_f_endpoint) && !narrow.contains(ZH.sub_col_name), "{narrow}");
+
+    let wide = render(&mut a, 120, 40);
+    assert!(wide.contains(ZH.sub_col_name) && wide.contains(ZH.sub_f_endpoint), "拉宽后左表右详情都该在\n{wide}");
+}
+
+#[test]
+fn detail_shows_every_limited_period_and_pending_slots() {
+    let mut a = subs_app(false);
+    a.handle_key(key(KeyCode::Char('j'))); // Kimi: 两个限额周期 + pending 槽
+    let out = render(&mut a, 120, 40);
+    assert!(out.contains(ZH.q_daily) && out.contains(ZH.q_monthly), "两个设了上限的周期都该有一条 gauge\n{out}");
+    assert!(out.contains("(pending)"), "{out}");
+}
+
+#[test]
+fn balance_rows_cover_unsupported_never_and_entries() {
+    let mut a = subs_app(false);
+    // 智谱主号: 有 entries (含 Low 严重度 + hint), 外加 is_available=false 的不可用提示行。
+    let out_zhipu = render(&mut a, 120, 40);
+    assert!(out_zhipu.contains("39.28") && out_zhipu.contains("CNY"), "{out_zhipu}");
+    assert!(out_zhipu.contains("即将过期"), "hint 应该跟在 entry 后面\n{out_zhipu}");
+    assert!(out_zhipu.contains(ZH.sub_balance_unavailable), "is_available=false 应该加一行不可用提示\n{out_zhipu}");
+
+    // Kimi 备用: 支持但还没查过。
+    a.handle_key(key(KeyCode::Char('j')));
+    let out_kimi = render(&mut a, 120, 40);
+    assert!(out_kimi.contains(ZH.sub_balance_never), "{out_kimi}");
+
+    // 示例中转: 该厂商不支持余额查询。
+    a.handle_key(key(KeyCode::Char('j')));
+    let out_relay = render(&mut a, 120, 40);
+    assert!(out_relay.contains(ZH.sub_balance_unsupported), "{out_relay}");
+}
+
+#[test]
+fn unreferenced_and_no_error_use_placeholders() {
+    let mut a = subs_app(false);
+    a.handle_key(key(KeyCode::Char('G'))); // 示例中转: 没有被引用, 也没有最近错误
+    let out = render(&mut a, 120, 40);
+    assert!(out.contains(ZH.sub_unreferenced), "{out}");
+    let error_row = out.lines().find(|l| l.contains(ZH.sub_f_last_error)).unwrap_or_else(|| panic!("缺「最近错误」这一行\n{out}"));
+    assert!(error_row.contains('—'), "没有最近错误时应该显示占位符\n{out}");
+}
+
+#[test]
+fn esc_without_a_popup_reaches_the_page() {
+    let mut a = subs_app(false);
+    render(&mut a, 80, 24); // 让页面记住这是窄屏。
+    a.handle_key(key(KeyCode::Enter));
+    let out = render(&mut a, 80, 24);
+    assert!(out.contains(ZH.sub_f_endpoint), "应该已经进入详情\n{out}");
+
+    assert_eq!(a.handle_key(key(KeyCode::Esc)), None, "没有弹窗时 Esc 应该交给页面, 不产生 Action");
+    let out2 = render(&mut a, 80, 24);
+    assert!(out2.contains(ZH.sub_col_name), "Esc 应该退出详情回到列表\n{out2}");
+
+    // 弹窗打开时 Esc 仍然只关弹窗。
+    a.update(Action::ToggleHelp);
+    assert_eq!(a.handle_key(key(KeyCode::Esc)), Some(Action::ClosePopup));
+}
+
+#[test]
+fn a_changed_subscription_row_flashes_on_the_subscriptions_page() {
+    let mut a = subs_app(true);
+    settle(&mut a);
+
+    let mut subs = detail_subs();
+    subs[1].state = SubscriptionState::TransientError;
+    subs[1].is_dispatchable = false;
+    a.update(subs_done(2, subs));
+    render(&mut a, 80, 24);
+    assert!(a.wants_fast_frames(), "订阅页也该因为状态变化而闪一下");
+}
+
+#[test]
+fn help_popup_shows_page_keys_on_the_subscriptions_page() {
+    let mut a = subs_app(false);
+    a.update(Action::ToggleHelp);
+    let out = render(&mut a, 80, 24);
+    for (_, desc) in ZH.sub_help_rows {
+        assert!(out.contains(desc), "缺 {desc:?}\n{out}");
+    }
+    assert!(out.contains("PgUp / PgDn"), "{out}");
 }
 
 // ---------- 渲染内容 ----------
@@ -312,6 +572,12 @@ fn only_the_visible_page_polls_and_only_while_connected() {
     b.update(Action::SwitchTab(Tab::Live));
     let hidden: usize = (1..=40).map(|i| b.update(Action::Tick { now_ms: NOW + i * 250 }).len()).sum();
     assert_eq!(hidden, 0, "总览不可见时不轮询");
+
+    // 停在订阅页时轮询发的是 Fetch::Subscriptions, 不是 Fetch::Overview。
+    let mut c = loaded(false);
+    c.update(Action::SwitchTab(Tab::Subscriptions));
+    let sub_fetches: Vec<Cmd> = (1..=20).flat_map(|i| c.update(Action::Tick { now_ms: NOW + i * 250 })).collect();
+    assert_eq!(sub_fetches, vec![Cmd::Fetch(Fetch::Subscriptions)], "订阅页可见时轮询应该发 Fetch::Subscriptions");
 }
 
 #[test]
@@ -480,6 +746,18 @@ fn drawing_the_same_state_twice_gives_the_same_frame() {
     let first = render(&mut b, 80, 24);
     let second = render(&mut b, 80, 24);
     assert_eq!(first, second);
+
+    // 订阅页列表态: `resolve_selection` 在 `draw` 里重新解析下标, 必须是幂等的。
+    let mut c = subs_app(false);
+    let first = render(&mut c, 80, 24);
+    let second = render(&mut c, 80, 24);
+    assert_eq!(first, second, "订阅页列表态应该幂等");
+
+    // 订阅页详情态 (窄屏)。
+    c.handle_key(key(KeyCode::Enter));
+    let first = render(&mut c, 80, 24);
+    let second = render(&mut c, 80, 24);
+    assert_eq!(first, second, "订阅页详情态应该幂等");
 }
 
 /// F3: 空列表加载时没有「旧」行可以比较, 不该把更早排队、还没画出来的闪烁带到后面某一帧。

@@ -18,6 +18,7 @@ use crate::fx::{self, Dir, Fx};
 use crate::i18n::Strings;
 use crate::pages::overview::Overview;
 use crate::pages::placeholder::Placeholder;
+use crate::pages::subscriptions::Subscriptions;
 use crate::pages::{Component, DrawCtx};
 use crate::store::Store;
 use crate::theme::Theme;
@@ -68,6 +69,7 @@ pub struct App {
     tab: Tab,
     store: Store,
     overview: Overview,
+    subscriptions: Subscriptions,
     placeholder: Placeholder,
     popup: Option<Popup>,
     popup_area: Option<Rect>,
@@ -91,6 +93,7 @@ impl App {
             tab: Tab::Overview,
             store: Store::default(),
             overview: Overview::default(),
+            subscriptions: Subscriptions::default(),
             placeholder: Placeholder,
             popup: None,
             popup_area: None,
@@ -110,21 +113,33 @@ impl App {
         self.fx.is_running()
     }
 
-    /// 按 `tab` 从两个不相交的字段里选一个页面。写成拿具体字段引用的关联函数 (而不是
+    /// 按 `tab` 从几个不相交的字段里选一个页面。写成拿具体字段引用的关联函数 (而不是
     /// `&mut self` 的 helper 方法), 这样调用方在拿到 `&mut dyn Component` 的同时还能借用
     /// `self` 的其它字段 (比如 `self.store`) —— `&mut self` 的方法做不到这一点。
-    fn select_page<'a>(tab: Tab, overview: &'a mut Overview, placeholder: &'a mut Placeholder) -> &'a mut dyn Component {
+    fn select_page<'a>(
+        tab: Tab,
+        overview: &'a mut Overview,
+        subscriptions: &'a mut Subscriptions,
+        placeholder: &'a mut Placeholder,
+    ) -> &'a mut dyn Component {
         match tab {
             Tab::Overview => overview,
-            Tab::Subscriptions | Tab::VirtualModels | Tab::Live | Tab::Logs => placeholder,
+            Tab::Subscriptions => subscriptions,
+            Tab::VirtualModels | Tab::Live | Tab::Logs => placeholder,
         }
     }
 
     /// 同上, 只读版本 (帮助弹窗只需要 `help()`, 不需要 `&mut`)。
-    fn select_page_ref<'a>(tab: Tab, overview: &'a Overview, placeholder: &'a Placeholder) -> &'a dyn Component {
+    fn select_page_ref<'a>(
+        tab: Tab,
+        overview: &'a Overview,
+        subscriptions: &'a Subscriptions,
+        placeholder: &'a Placeholder,
+    ) -> &'a dyn Component {
         match tab {
             Tab::Overview => overview,
-            Tab::Subscriptions | Tab::VirtualModels | Tab::Live | Tab::Logs => placeholder,
+            Tab::Subscriptions => subscriptions,
+            Tab::VirtualModels | Tab::Live | Tab::Logs => placeholder,
         }
     }
 
@@ -155,7 +170,7 @@ impl App {
             KeyCode::Tab => Some(Action::NextTab),
             KeyCode::BackTab => Some(Action::PrevTab),
             KeyCode::Char(c @ '1'..='5') => Tab::from_index(c as usize - '1' as usize).map(Action::SwitchTab),
-            _ => Self::select_page(self.tab, &mut self.overview, &mut self.placeholder).handle_key(key, &self.store),
+            _ => Self::select_page(self.tab, &mut self.overview, &mut self.subscriptions, &mut self.placeholder).handle_key(key, &self.store),
         }
     }
 
@@ -167,7 +182,7 @@ impl App {
         self.pending_page_fx = Some(dir);
         // 不可见的页面不轮询, 所以切回来的那一刻要补一次。
         if self.conn == Conn::Connected {
-            Self::select_page(self.tab, &mut self.overview, &mut self.placeholder).update(&Action::Refresh, &self.store)
+            Self::select_page(self.tab, &mut self.overview, &mut self.subscriptions, &mut self.placeholder).update(&Action::Refresh, &self.store)
         } else {
             Vec::new()
         }
@@ -184,6 +199,7 @@ impl App {
     /// 页面"这种只有部分刷新路径才触发、没有测试能咬住的漏更 (fix round 1, I1)。
     fn notify_subscriptions_changed(&mut self, changed: &[String]) {
         self.overview.on_subscriptions_changed(changed);
+        self.subscriptions.on_subscriptions_changed(changed);
         self.placeholder.on_subscriptions_changed(changed);
     }
 
@@ -229,7 +245,7 @@ impl App {
                     self.toasts.pop_front();
                 }
                 if self.conn == Conn::Connected && self.tick.is_multiple_of(POLL_EVERY_TICKS) {
-                    Self::select_page(self.tab, &mut self.overview, &mut self.placeholder).update(&Action::Refresh, &self.store)
+                    Self::select_page(self.tab, &mut self.overview, &mut self.subscriptions, &mut self.placeholder).update(&Action::Refresh, &self.store)
                 } else {
                     Vec::new()
                 }
@@ -240,7 +256,7 @@ impl App {
                 }
                 self.conn = Conn::Connected;
                 self.app_version = Some(app_version.clone());
-                Self::select_page(self.tab, &mut self.overview, &mut self.placeholder).update(&action, &self.store)
+                Self::select_page(self.tab, &mut self.overview, &mut self.subscriptions, &mut self.placeholder).update(&action, &self.store)
             }
             Action::ConnectionLost => {
                 self.conn = Conn::Reconnecting;
@@ -281,7 +297,7 @@ impl App {
                 }
             },
             Action::Refresh | Action::Sse { .. } => {
-                Self::select_page(self.tab, &mut self.overview, &mut self.placeholder).update(&action, &self.store)
+                Self::select_page(self.tab, &mut self.overview, &mut self.subscriptions, &mut self.placeholder).update(&action, &self.store)
             }
         }
     }
@@ -371,7 +387,7 @@ impl App {
 
         let s = self.s;
         let mut ctx = DrawCtx { theme: &self.theme, s, now_ms: self.now_ms, tick: self.tick, fx: &mut self.fx, store: &self.store };
-        let page = Self::select_page(self.tab, &mut self.overview, &mut self.placeholder);
+        let page = Self::select_page(self.tab, &mut self.overview, &mut self.subscriptions, &mut self.placeholder);
         page.draw(frame, content, &mut ctx);
         let mut left = page.hints(s);
         left.insert(0, ("1-5", s.key_switch_tab));
@@ -382,7 +398,7 @@ impl App {
         if self.popup.is_some() {
             // 压暗背景用静态的 DIM 修饰符而不是动效: 16 色 / 无色终端下同样成立。
             frame.buffer_mut().set_style(screen, Style::new().add_modifier(Modifier::DIM));
-            let page_rows = Self::select_page_ref(self.tab, &self.overview, &self.placeholder).help(s);
+            let page_rows = Self::select_page_ref(self.tab, &self.overview, &self.subscriptions, &self.placeholder).help(s);
             let area = help::area(screen, s, page_rows);
             help::draw(frame, area, &self.theme, s, page_rows);
             self.popup_area = Some(area);

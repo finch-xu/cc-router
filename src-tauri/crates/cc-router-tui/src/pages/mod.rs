@@ -13,6 +13,7 @@ use crate::widgets::keybar::Hint;
 
 pub mod overview;
 pub mod placeholder;
+pub mod subscriptions;
 
 /// 画一帧需要的只读环境 + 动效入口。
 pub struct DrawCtx<'a> {

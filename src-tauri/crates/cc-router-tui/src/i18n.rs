@@ -48,6 +48,9 @@ pub struct Strings {
     pub key_help: &'static str,
     pub key_quit: &'static str,
     pub key_close: &'static str,
+    pub key_select: &'static str,
+    pub key_detail: &'static str,
+    pub key_back: &'static str,
 
     pub help_title: &'static str,
     /// (键, 说明)
@@ -88,6 +91,30 @@ pub struct Strings {
 
     pub toast_reconnected: &'static str,
     pub toast_load_failed: fn(reason: &str) -> String,
+
+    pub sub_title: fn(usize) -> String,
+    pub sub_col_name: &'static str,
+    pub sub_col_provider: &'static str,
+    pub sub_col_sonnet: &'static str,
+    pub sub_f_state: &'static str,
+    pub sub_f_provider: &'static str,
+    pub sub_f_endpoint: &'static str,
+    pub sub_f_slots: &'static str,
+    pub sub_f_quota: &'static str,
+    pub sub_f_balance: &'static str,
+    pub sub_f_models: &'static str,
+    pub sub_f_referenced: &'static str,
+    pub sub_f_last_error: &'static str,
+    pub sub_slot_fallback: &'static str,
+    pub sub_slot_unset: &'static str,
+    pub sub_effort_auto: &'static str,
+    pub sub_balance_unsupported: &'static str,
+    pub sub_balance_never: &'static str,
+    pub sub_balance_unavailable: &'static str,
+    pub sub_models_cached: fn(usize) -> String,
+    pub sub_models_never: &'static str,
+    pub sub_unreferenced: &'static str,
+    pub sub_help_rows: &'static [(&'static str, &'static str)],
 }
 
 impl Strings {
@@ -124,6 +151,9 @@ pub const ZH: Strings = Strings {
     key_help: "帮助",
     key_quit: "退出",
     key_close: "关闭",
+    key_select: "选择",
+    key_detail: "详情",
+    key_back: "返回",
 
     help_title: "键位",
     help_rows: &[
@@ -169,6 +199,35 @@ pub const ZH: Strings = Strings {
 
     toast_reconnected: "已重新连接",
     toast_load_failed: |reason| format!("加载失败：{reason}"),
+
+    sub_title: |n| format!("订阅 ({n})"),
+    sub_col_name: "备注名",
+    sub_col_provider: "厂商",
+    sub_col_sonnet: "sonnet",
+    sub_f_state: "状态",
+    sub_f_provider: "厂商",
+    sub_f_endpoint: "端点",
+    sub_f_slots: "槽位",
+    sub_f_quota: "限额",
+    sub_f_balance: "余额",
+    sub_f_models: "模型",
+    sub_f_referenced: "被引用",
+    sub_f_last_error: "最近错误",
+    sub_slot_fallback: "兜底",
+    sub_slot_unset: "(未配置)",
+    sub_effort_auto: "auto",
+    sub_balance_unsupported: "该厂商不支持余额查询",
+    sub_balance_never: "还没查过,按 b 刷新",
+    sub_balance_unavailable: "账户不可用 (可能欠费或被封)",
+    sub_models_cached: |n| format!("已缓存 {n} 个"),
+    sub_models_never: "还没获取过,按 m 刷新",
+    sub_unreferenced: "没有被任何虚拟模型引用",
+    sub_help_rows: &[
+        ("↑↓ / j k", "上一条 / 下一条"),
+        ("g / G", "第一条 / 最后一条"),
+        ("PgUp / PgDn", "翻页"),
+        ("⏎ / Esc", "进入 / 退出详情 (窄终端)"),
+    ],
 };
 
 pub fn strings(lang: Lang) -> &'static Strings {

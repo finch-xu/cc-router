@@ -3,7 +3,8 @@
 
 单测用 TestBackend, 测不到「真的进备用屏幕、真的读键盘、真的退得出来」这一段。这个脚本:
   1. 起一个假的 cc-router 后端 (5 个 command + 事件流), 在临时目录写一份 runtime.json;
-  2. 在 80x24 的伪终端里跑 TUI, 依次按 2 / ? / Esc / 1 / q;
+  2. 在 80x24 的伪终端里跑 TUI, 依次按 2 / ? / Esc / 3 / 1 / q
+     (2 = 订阅页, Task 3 起是真页面了; 3 = 虚拟模型页, 仍是占位, 顶掉原来 2 占的那个断言);
   3. 断言: 退出码 0、进出过备用屏幕、几个页面的关键文字都出现过、空闲 2 秒几乎不输出 (按需重绘)。
 
 用法 (仓库根目录):
@@ -36,9 +37,14 @@ def quota(limit, used):
 
 
 def sub(sid, name, state, dispatchable, usage=None, cooldown=None):
+    # provider_id / base_url / auth_type / model_slots 是 Task 2 加的订阅详情字段, dto::Subscription
+    # 里没有 #[serde(default)], 缺了任何一个都会让 list_subscriptions 反序列化失败, 订阅页 (Task 3
+    # 起是真页面) 整页转圈圈。
     return {"id": sid, "display_name": name, "provider_display_name": "p", "enabled": True, "state": state,
             "cooldown_until": cooldown, "last_error_message": None, "is_dispatchable": dispatchable,
-            "quota_usage": [usage] if usage else []}
+            "quota_usage": [usage] if usage else [],
+            "provider_id": "p", "base_url": "https://example.invalid", "auth_type": "api_key",
+            "model_slots": {"fable": "d", "opus": "a", "sonnet": "b", "haiku": "c"}}
 
 
 DATA = {
@@ -57,7 +63,7 @@ DATA = {
 }
 
 # 去掉转义序列之后必须出现过的文字
-EXPECT = ["总览", "1,284", "98.6%", "智谱主号", "已连接", "此页面将在后续版本提供", "键位"]
+EXPECT = ["总览", "1,284", "98.6%", "智谱主号", "已连接", "订阅 (3)", "备注名", "此页面将在后续版本提供", "键位"]
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -125,7 +131,9 @@ def main():
                     return
 
     pump(3.0)  # 启动动效 + 首次加载 + 1.5s 时的状态变更事件
-    for keys in (b"2", b"?", b"\x1b", b"1"):
+    # 2 = 订阅页 (真页面, 期待「订阅 (3)」「备注名」); ? / Esc = 帮助弹窗开关; 3 = 虚拟模型页
+    # (仍占位, 期待「此页面将在后续版本提供」); 1 = 回总览。
+    for keys in (b"2", b"?", b"\x1b", b"3", b"1"):
         os.write(fd, keys)
         pump(0.6)
     before_idle = len(out)
