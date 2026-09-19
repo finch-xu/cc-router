@@ -21,6 +21,7 @@ use crate::pages::{Component, DrawCtx, Pages};
 use crate::popup::{ConfirmState, Popup};
 use crate::store::Store;
 use crate::theme::Theme;
+use crate::widgets::picker::{self, PickerState};
 use crate::widgets::toast::{self, Toast, ToastKind};
 use crate::widgets::{confirm, help, keybar, spinner_state};
 
@@ -130,7 +131,9 @@ impl App {
             return Some(Action::ForceQuit);
         }
         // 弹窗打开时按变体各自决定按键含义; 键盘完全归弹窗, 到不了下面的全局键 / 页面。
-        if let Some(popup) = &self.popup {
+        // `&mut self.popup`: `Popup::Picker` 的按键 (打字 / 移动选中) 直接改 `PickerState` 自身,
+        // 不像 Help / Confirm 那样只读。
+        if let Some(popup) = &mut self.popup {
             return match popup {
                 Popup::Help => match key.code {
                     KeyCode::Esc | KeyCode::Char('?') | KeyCode::Char('q') => Some(Action::ClosePopup),
@@ -142,6 +145,7 @@ impl App {
                     KeyCode::Char('n') | KeyCode::Char('N') | KeyCode::Esc | KeyCode::Enter => Some(Action::ClosePopup),
                     _ => None,
                 },
+                Popup::Picker(state) => state.handle_key(key),
             };
         }
         match key.code {
@@ -407,6 +411,15 @@ impl App {
             Action::Refresh | Action::Sse { .. } => self.pages.get_mut(self.tab).update(&action, &self.store),
             Action::Mutate(m) => self.start_mutation(m),
             Action::MutationDone { mutation, barrier, result } => self.finish_mutation(mutation, barrier, result),
+            Action::OpenPicker(spec) => {
+                self.popup = Some(Popup::Picker(PickerState::new(spec)));
+                self.pending_popup_fx = Some(PopupFx::Open);
+                Vec::new()
+            }
+            Action::PickerDone { tag, choice } => {
+                self.close_popup();
+                self.pages.get_mut(self.tab).update(&Action::PickerDone { tag, choice }, &self.store)
+            }
         }
     }
 
@@ -512,10 +525,10 @@ impl App {
 
         self.draw_toast(frame, screen, content.y);
 
-        if let Some(popup) = &self.popup {
+        if let Some(popup) = &mut self.popup {
             // 压暗背景用静态的 DIM 修饰符而不是动效: 16 色 / 无色终端下同样成立。
             frame.buffer_mut().set_style(screen, Style::new().add_modifier(Modifier::DIM));
-            // 穷尽 match: 以后加新弹窗变体 (Task 3 的 Picker) 忘了在这里接住会编译失败。
+            // 穷尽 match: 以后加新弹窗变体忘了在这里接住会编译失败。
             let area = match popup {
                 Popup::Help => {
                     let page_rows = self.pages.get(self.tab).help(s);
@@ -526,6 +539,11 @@ impl App {
                 Popup::Confirm(state) => {
                     let area = confirm::area(screen, &state.prompt);
                     confirm::draw(frame, area, state, &self.theme, s);
+                    area
+                }
+                Popup::Picker(state) => {
+                    let area = picker::area(screen);
+                    picker::draw(frame, area, state, &self.theme, s);
                     area
                 }
             };

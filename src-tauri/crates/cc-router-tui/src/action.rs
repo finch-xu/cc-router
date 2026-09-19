@@ -4,6 +4,7 @@
 use crate::client::dto::{
     OverallStats, ProxyStatus, RefreshBalanceResult, RefreshModelsResult, SeriesPoint, Settings, Subscription, TestConnectionResult,
 };
+use crate::widgets::picker::{PickerChoice, PickerSpec, PickerTag};
 
 /// 五个标签页, 顺序即 `1`–`5` 与 `Strings::tabs` 的下标。
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -159,6 +160,12 @@ pub enum Action {
     /// `0`); `App` 据此对 `mutation.refetch()` 里每个目标调用对应的 `set_*_barrier`, 挡住那些在
     /// 变更完成前就已经发起、内容还是变更前旧值的加载晚到时把乐观更新冲回去。
     MutationDone { mutation: Mutation, barrier: u64, result: Result<MutationOutcome, String> },
+    /// 打开一个过滤选择弹窗 (Task 5/6 起从页面发起: 选模型 / 选 effort / 给虚拟模型加订阅)。
+    OpenPicker(PickerSpec),
+    /// 用户在选择弹窗里选定了一行 (或输入了自定义值)。`App` 收到后先关弹窗 (带关闭动效), 再原样
+    /// 转给当前页面的 `update`——页面据 `tag` 知道该把 `choice` 填到哪。Task 5 之前没有真正的消费者,
+    /// 页面的 `update` 会直接忽略它。
+    PickerDone { tag: PickerTag, choice: PickerChoice },
 }
 
 #[cfg(test)]

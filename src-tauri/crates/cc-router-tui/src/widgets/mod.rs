@@ -5,6 +5,7 @@ pub mod confirm;
 pub mod gauge;
 pub mod help;
 pub mod keybar;
+pub mod picker;
 pub mod toast;
 
 /// 第 `tick` 帧的 spinner 状态。`calc_step(0)` 在 throbber-widgets-tui 里的含义是「随机取一格」,

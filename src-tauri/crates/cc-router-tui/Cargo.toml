@@ -27,6 +27,10 @@ thiserror = "2"
 throbber-widgets-tui = "0.11"
 tokio = { version = "1", features = ["rt-multi-thread", "macros", "time", "sync"] }
 tui-big-text = "0.8"
+# 默认 feature "ratatui-crossterm" 拉的是同一个 ratatui/crossterm (由 ratatui 的 "crossterm" 默认
+# feature 提供), 不会引入第二份 crossterm / ratatui —— 加依赖后用 `cargo tree -p cc-router-tui -d`
+# 确认过。
+tui-input = "0.15"
 unicode-width = "0.2"
 
 [dev-dependencies]

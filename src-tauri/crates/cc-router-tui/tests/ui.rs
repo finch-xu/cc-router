@@ -16,6 +16,7 @@ use cc_router_tui::client::dto::{
 use cc_router_tui::i18n::ZH;
 use cc_router_tui::pages::Pages;
 use cc_router_tui::theme::{ColorMode, Theme};
+use cc_router_tui::widgets::picker::{self, PickerChoice, PickerItem, PickerSpec, PickerTag, Slot};
 use ratatui::backend::TestBackend;
 use ratatui::crossterm::event::{KeyCode, KeyEvent, KeyEventKind, KeyEventState, KeyModifiers};
 use ratatui::Terminal;
@@ -242,6 +243,38 @@ fn find_cell_style(buf: &ratatui::buffer::Buffer, y: u16, needle: &str) -> ratat
 
 fn key(code: KeyCode) -> KeyEvent {
     KeyEvent::new(code, KeyModifiers::NONE)
+}
+
+/// 12 个模型条目, 给 picker 快照 (`picker_popup_80x24`) 与其它 picker 相关测试共用——够长, 能看出
+/// 输入 "gl" 过滤后只剩 glm 系列的效果。
+fn picker_items() -> Vec<PickerItem> {
+    [
+        ("glm-4.6", "GLM 4.6 主力"),
+        ("glm-4.5-air", "GLM 4.5 Air"),
+        ("glm-4.5", "GLM 4.5"),
+        ("glm-4.5-flash", "GLM 4.5 Flash"),
+        ("claude-3-opus", "Claude 3 Opus"),
+        ("claude-3-sonnet", "Claude 3 Sonnet"),
+        ("gpt-4o", "GPT-4o"),
+        ("gpt-4o-mini", "GPT-4o mini"),
+        ("o3", "o3"),
+        ("o3-mini", "o3-mini"),
+        ("deepseek-chat", "DeepSeek Chat"),
+        ("deepseek-reasoner", "DeepSeek Reasoner"),
+    ]
+    .into_iter()
+    .map(|(id, label)| PickerItem { id: id.into(), label: label.into(), hint: None })
+    .collect()
+}
+
+fn picker_spec() -> PickerSpec {
+    PickerSpec {
+        tag: PickerTag::SlotModel { slot: Slot::Sonnet },
+        title: "选择模型".into(),
+        items: picker_items(),
+        allow_custom: true,
+        initial: String::new(),
+    }
 }
 
 // ---------- 快照 ----------
@@ -968,6 +1001,69 @@ fn confirm_popup_80x24() {
     insta::assert_snapshot!(render(&mut a, 80, 24));
 }
 
+/// Task 3: 12 项列表, 输入 "gl" 过滤到只剩 glm 系列 + 置顶的「使用「gl」」自定义行。
+#[test]
+fn picker_popup_80x24() {
+    let mut a = loaded(false);
+    a.update(Action::OpenPicker(picker_spec()));
+    a.handle_key(key(KeyCode::Char('g')));
+    a.handle_key(key(KeyCode::Char('l')));
+    insta::assert_snapshot!(render(&mut a, 80, 24));
+}
+
+/// Task 3: 弹窗打开时, 全局键 (q / 数字切页 / r / ?) 应该全部被 picker 吞进输入框, 不产生对应的
+/// `Action` (对照 `help_popup_still_closes_with_esc_question_mark_and_q`: 帮助弹窗里这些键有专门
+/// 语义, picker 里它们只是普通字符)。
+#[test]
+fn picker_swallows_global_keys() {
+    let mut a = loaded(false);
+    a.update(Action::OpenPicker(picker_spec()));
+    for c in ['q', '2', 'r', '?'] {
+        assert_eq!(a.handle_key(key(KeyCode::Char(c))), None, "{c:?} 应该被 picker 吞进输入框");
+    }
+    let out = render(&mut a, 80, 24);
+    assert!(out.contains("q2r?"), "四个字符应该都进了输入框\n{out}");
+}
+
+/// Task 3: 光标只在 picker 弹窗打开时才出现 (ratatui 默认隐藏, 只有 `set_cursor_position` 当帧
+/// 调用过才会显示), 而且应该落在弹窗内的输入框那一行, 不在别处。
+#[test]
+fn picker_shows_the_cursor_in_the_input_row() {
+    let mut a = loaded(false);
+    let mut terminal = Terminal::new(TestBackend::new(80, 24)).unwrap();
+    terminal.draw(|f| a.draw(f, Duration::ZERO)).unwrap();
+    assert!(!terminal.backend().cursor_visible(), "没有弹窗时不该显示光标");
+
+    a.update(Action::OpenPicker(picker_spec()));
+    a.handle_key(key(KeyCode::Char('g')));
+    terminal.draw(|f| a.draw(f, Duration::ZERO)).unwrap();
+    assert!(terminal.backend().cursor_visible(), "picker 打开时应该显示光标");
+    let pos = terminal.backend().cursor_position();
+    let popup = picker::area(ratatui::layout::Rect::new(0, 0, 80, 24));
+    assert!(popup.contains(pos), "光标应该落在弹窗内, 实际 {pos:?}, 弹窗 {popup:?}");
+}
+
+/// Task 3: `PickerDone` 关掉弹窗并转给当前页面的 `update`——Task 5 之前没有真实消费者, 只断言
+/// 弹窗关闭且渲染不 panic (Task 5 会在订阅页补上真实的可观察断言)。
+#[test]
+fn picker_done_reaches_the_current_page() {
+    let mut a = loaded(false);
+    a.update(Action::OpenPicker(picker_spec()));
+    let opened = render(&mut a, 80, 24);
+    assert!(opened.contains("选择模型"), "弹窗应该已经打开\n{opened}");
+
+    let action = a.handle_key(key(KeyCode::Enter));
+    let Some(Action::PickerDone { tag, choice }) = action else {
+        panic!("⏎ 应该产出 PickerDone, 实际 {action:?}");
+    };
+    assert_eq!(tag, PickerTag::SlotModel { slot: Slot::Sonnet });
+    assert_eq!(choice, PickerChoice::Item("glm-4.6".into()), "空输入下 ⏎ 应该选中第一项");
+
+    assert!(a.update(Action::PickerDone { tag, choice }).is_empty(), "占位页面的 update 应该忽略它");
+    let closed = render(&mut a, 80, 24);
+    assert!(!closed.contains("选择模型"), "PickerDone 之后弹窗应该已经关闭\n{closed}");
+}
+
 #[test]
 fn tabs_wrap_around_and_returning_to_a_page_refreshes_it() {
     let mut a = loaded(false);
@@ -1216,6 +1312,15 @@ fn drawing_the_same_state_twice_gives_the_same_frame() {
     let first = render(&mut f, 80, 24);
     let second = render(&mut f, 80, 24);
     assert_eq!(first, second, "确认弹窗打开的状态应该幂等");
+
+    // Task 3: picker 弹窗打开的状态 (含光标位置——`TestBackend` 也记录了光标, `render()` 的字符串
+    // 比较不包含它, 但 `visual_cursor` / `visual_scroll` 本身必须是纯函数, 这里顺带覆盖)。
+    let mut g = loaded(false);
+    g.update(Action::OpenPicker(picker_spec()));
+    g.handle_key(key(KeyCode::Char('g')));
+    let first = render(&mut g, 80, 24);
+    let second = render(&mut g, 80, 24);
+    assert_eq!(first, second, "picker 弹窗打开的状态应该幂等");
 }
 
 /// F3: 空列表加载时没有「旧」行可以比较, 不该把更早排队、还没画出来的闪烁带到后面某一帧。

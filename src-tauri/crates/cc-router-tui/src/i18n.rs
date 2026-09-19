@@ -66,6 +66,13 @@ pub struct Strings {
     /// 当前页面有未保存修改时, 退出 / 切页前弹出的确认文案。
     pub confirm_discard: &'static str,
 
+    /// 过滤选择弹窗里「使用当前输入」那一行的文案, 参数是输入框里 (trim 过的) 文本。
+    pub picker_use_typed: fn(text: &str) -> String,
+    /// 过滤后没有任何匹配项时列表区显示的占位文案。
+    pub picker_empty: &'static str,
+    /// 过滤选择弹窗底部的键位提示。
+    pub picker_keys: &'static str,
+
     pub too_small: &'static str,
     pub coming_soon: &'static str,
     pub loading: &'static str,
@@ -203,6 +210,10 @@ pub const ZH: Strings = Strings {
     confirm_title: "确认",
     confirm_keys: "y 是   n 否",
     confirm_discard: "有未保存的修改,确定放弃吗?",
+
+    picker_use_typed: |text| format!("使用「{text}」"),
+    picker_empty: "没有匹配项",
+    picker_keys: "⏎ 选择   Esc 取消",
 
     too_small: "请放大终端窗口（至少 80×24）",
     coming_soon: "此页面将在后续版本提供",

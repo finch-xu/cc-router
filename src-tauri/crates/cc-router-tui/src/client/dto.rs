@@ -108,6 +108,18 @@ pub struct ModelSlots {
     pub fallback: String,
 }
 
+/// 五个模型槽位, 与 [`ModelSlots`] 的字段一一对应。`widgets::picker::PickerTag` 用它区分「给哪个
+/// 槽位选值」(Task 5 起); Task 4 会在这里紧挨着加 `ModelSlots::get(Slot)`。放在 dto.rs 而不是
+/// action.rs, 因为它描述的是后端数据形状 (槽位这个概念), 不是某一次 UI 交互。
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum Slot {
+    Fable,
+    Opus,
+    Sonnet,
+    Haiku,
+    Fallback,
+}
+
 /// 每个模型槽位的 reasoning effort 覆盖。字段缺失 (老数据 `'{}'`) = 全 auto。
 #[derive(Debug, Clone, Default, Deserialize, PartialEq, Eq)]
 pub struct SlotEfforts {
