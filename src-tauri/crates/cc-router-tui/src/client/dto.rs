@@ -81,6 +81,124 @@ pub struct Subscription {
     pub is_dispatchable: bool,
     #[serde(default)]
     pub quota_usage: Vec<QuotaUsage>,
+    pub provider_id: String,
+    pub base_url: String,
+    /// 后端是枚举 (`AuthType`, `#[serde(rename_all = "snake_case")]`), 这里按字符串收, 只用于显示。
+    pub auth_type: String,
+    pub model_slots: ModelSlots,
+    #[serde(default)]
+    pub slot_efforts: SlotEfforts,
+    #[serde(default)]
+    pub referenced_by: Vec<String>,
+    #[serde(default)]
+    pub balance_supported: bool,
+    #[serde(default)]
+    pub balance_cache: Option<BalanceCache>,
+    #[serde(default)]
+    pub model_cache: Option<ModelCache>,
+}
+
+#[derive(Debug, Clone, Deserialize, PartialEq, Eq)]
+pub struct ModelSlots {
+    pub fable: String,
+    pub opus: String,
+    pub sonnet: String,
+    pub haiku: String,
+    #[serde(default)]
+    pub fallback: String,
+}
+
+/// 每个模型槽位的 reasoning effort 覆盖。字段缺失 (老数据 `'{}'`) = 全 auto。
+#[derive(Debug, Clone, Default, Deserialize, PartialEq, Eq)]
+pub struct SlotEfforts {
+    #[serde(default)]
+    pub fable: Option<String>,
+    #[serde(default)]
+    pub opus: Option<String>,
+    #[serde(default)]
+    pub sonnet: Option<String>,
+    #[serde(default)]
+    pub haiku: Option<String>,
+}
+
+#[derive(Debug, Clone, Deserialize, PartialEq, Eq)]
+pub struct ModelCache {
+    pub fetched_at: i64,
+    pub models: Vec<ModelInfo>,
+}
+
+#[derive(Debug, Clone, Deserialize, PartialEq, Eq)]
+pub struct ModelInfo {
+    pub id: String,
+    #[serde(default)]
+    pub display_name: Option<String>,
+}
+
+#[derive(Debug, Clone, Deserialize, PartialEq, Eq)]
+pub struct BalanceCache {
+    pub fetched_at: i64,
+    pub snapshot: BalanceSnapshot,
+}
+
+#[derive(Debug, Clone, Deserialize, PartialEq, Eq)]
+pub struct BalanceSnapshot {
+    /// 账户是否可用 (DeepSeek `is_available`)。None = 该 provider 不报告此字段。
+    #[serde(default)]
+    pub is_available: Option<bool>,
+    pub entries: Vec<BalanceEntry>,
+}
+
+#[derive(Debug, Clone, Deserialize, PartialEq, Eq)]
+pub struct BalanceEntry {
+    pub label: String,
+    pub value_text: String,
+    pub unit: String,
+    #[serde(default)]
+    pub hint: Option<String>,
+    pub severity: BalanceSeverity,
+}
+
+#[derive(Debug, Clone, Copy, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum BalanceSeverity {
+    Normal,
+    Low,
+    Critical,
+    /// 后端将来加了新级别时, 旧 TUI 不应该整个订阅解析失败。
+    #[serde(other)]
+    Unknown,
+}
+
+/// `test_connection` 的返回值。
+#[derive(Debug, Clone, Deserialize, PartialEq, Eq)]
+pub struct TestConnectionResult {
+    pub ok: bool,
+    pub message: String,
+    /// 上游 HTTP 状态码; 网络错误时为 None。
+    #[serde(default)]
+    pub http_status: Option<u16>,
+    /// 实际用于测试的 model 名 (从 slots 或 example_models 兜底选出)。
+    #[serde(default)]
+    pub model_used: Option<String>,
+    /// 测试通过且触发了状态机复活 → true。
+    pub state_reset: bool,
+}
+
+/// `refresh_model_list` 的返回值。
+#[derive(Debug, Clone, Deserialize, PartialEq, Eq)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum RefreshModelsResult {
+    Auto { models: Vec<ModelInfo>, fetched_at: i64 },
+    ManualFallback { reason: String },
+}
+
+/// `refresh_subscription_balance` 的返回值。
+#[derive(Debug, Clone, Deserialize, PartialEq, Eq)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum RefreshBalanceResult {
+    Success { snapshot: BalanceSnapshot, fetched_at: i64 },
+    Failed { reason: String },
+    Unsupported,
 }
 
 impl Subscription {
@@ -147,7 +265,8 @@ mod tests {
         let subs: Vec<Subscription> = serde_json::from_str(
             r#"[{"id":"a","display_name":"n","provider_display_name":"p","enabled":true,
                  "state":"some_future_state","cooldown_until":null,"last_error_message":null,
-                 "is_dispatchable":false,"extra":1}]"#,
+                 "is_dispatchable":false,"provider_id":"p","base_url":"","auth_type":"api_key",
+                 "model_slots":{"fable":"","opus":"","sonnet":"","haiku":""},"extra":1}]"#,
         )
         .unwrap();
         assert_eq!(subs[0].state, SubscriptionState::Unknown);
@@ -162,7 +281,8 @@ mod tests {
     fn tightest_quota_ignores_unlimited_periods() {
         let mut sub: Subscription = serde_json::from_str(
             r#"{"id":"a","display_name":"n","provider_display_name":"p","enabled":true,"state":"healthy",
-                "is_dispatchable":true}"#,
+                "is_dispatchable":true,"provider_id":"p","base_url":"","auth_type":"api_key",
+                "model_slots":{"fable":"","opus":"","sonnet":"","haiku":""}}"#,
         )
         .unwrap();
         assert!(sub.tightest_quota().is_none());

@@ -44,7 +44,7 @@ pub fn severity(sub: &Subscription) -> u8 {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::client::dto::{QuotaPeriod, QuotaUsage};
+    use crate::client::dto::{ModelSlots, QuotaPeriod, QuotaUsage};
     use crate::i18n::ZH;
     use crate::theme::ColorMode;
 
@@ -59,6 +59,15 @@ mod tests {
             last_error_message: None,
             is_dispatchable,
             quota_usage: vec![],
+            provider_id: "p".into(),
+            base_url: "https://example.invalid".into(),
+            auth_type: "api_key".into(),
+            model_slots: ModelSlots { fable: "d".into(), opus: "a".into(), sonnet: "b".into(), haiku: "c".into(), fallback: String::new() },
+            slot_efforts: Default::default(),
+            referenced_by: vec![],
+            balance_supported: false,
+            balance_cache: None,
+            model_cache: None,
         }
     }
 

@@ -13,6 +13,20 @@ pub mod commands {
     pub const LIST_SUBSCRIPTIONS: &str = "list_subscriptions";
     pub const GET_OVERALL_STATS: &str = "get_overall_stats";
     pub const GET_DAILY_SERIES: &str = "get_daily_series";
+    pub const SET_SUBSCRIPTION_ENABLED: &str = "set_subscription_enabled";
+    pub const TEST_CONNECTION: &str = "test_connection";
+    pub const REFRESH_MODEL_LIST: &str = "refresh_model_list";
+    pub const REFRESH_SUBSCRIPTION_BALANCE: &str = "refresh_subscription_balance";
     /// 契约测试遍历这张表; 加新 command 时同时加进来。
-    pub const ALL: &[&str] = &[PROXY_STATUS, GET_SETTINGS, LIST_SUBSCRIPTIONS, GET_OVERALL_STATS, GET_DAILY_SERIES];
+    pub const ALL: &[&str] = &[
+        PROXY_STATUS,
+        GET_SETTINGS,
+        LIST_SUBSCRIPTIONS,
+        GET_OVERALL_STATS,
+        GET_DAILY_SERIES,
+        SET_SUBSCRIPTION_ENABLED,
+        TEST_CONNECTION,
+        REFRESH_MODEL_LIST,
+        REFRESH_SUBSCRIPTION_BALANCE,
+    ];
 }

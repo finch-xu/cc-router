@@ -149,11 +149,15 @@ impl Client {
         }
     }
 
-    /// `args` 是 camelCase 的参数对象, 无参数传 `json!({})`。
+    /// `args` 是 camelCase 的参数对象, 无参数传 `json!({})`。15 秒超时。
     pub async fn call<T: DeserializeOwned>(&self, name: &str, args: Value) -> Result<T, ClientError> {
-        let resp = self
-            .send_with_retry(|http, base| http.post(format!("{base}/ui/api/cmd/{name}")).timeout(Duration::from_secs(15)).json(&args))
-            .await?;
+        self.call_with_timeout(name, args, Duration::from_secs(15)).await
+    }
+
+    /// 与 `call` 相同, 但单次请求的超时由调用方给 (测试连接要真的打一次上游, 15 秒不够)。
+    pub async fn call_with_timeout<T: DeserializeOwned>(&self, name: &str, args: Value, timeout: Duration) -> Result<T, ClientError> {
+        let resp =
+            self.send_with_retry(|http, base| http.post(format!("{base}/ui/api/cmd/{name}")).timeout(timeout).json(&args)).await?;
         let status = resp.status();
         let body = resp.text().await.map_err(|e| ClientError::Transport(e.to_string()))?;
         if !status.is_success() {
@@ -327,6 +331,25 @@ mod tests {
         write_runtime(dir.path(), port, "s");
         let err = Client::connect(dir.path()).unwrap().call::<Value>("x", json!({})).await.unwrap_err();
         assert!(matches!(err, ClientError::NotRunning), "{err}");
+    }
+
+    /// 测试连接要真的打一次上游, 调用方可以给比默认 15 秒更短的超时。上游卡住时必须在给定
+    /// 超时内返回 (不等 send_with_retry 的重试, 因为超时不是 `is_connect()` 错误)。
+    #[tokio::test]
+    async fn call_with_timeout_is_honoured() {
+        let start = std::time::Instant::now();
+        let server = MockServer::start().await;
+        Mock::given(method("POST"))
+            .respond_with(ResponseTemplate::new(200).set_delay(Duration::from_millis(1500)))
+            .mount(&server)
+            .await;
+        let dir = tempfile::tempdir().unwrap();
+        write_runtime(dir.path(), port_of(&server), "s");
+        let client = Client::connect(dir.path()).unwrap();
+
+        let err = client.call_with_timeout::<Value>("slow", json!({}), Duration::from_millis(200)).await.unwrap_err();
+        assert!(matches!(err, ClientError::Transport(_)), "{err}");
+        assert!(start.elapsed() < Duration::from_secs(1), "花了 {:?}", start.elapsed());
     }
 
     #[tokio::test]

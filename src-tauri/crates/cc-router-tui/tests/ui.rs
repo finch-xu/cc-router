@@ -9,7 +9,7 @@ use std::time::Duration;
 use cc_router_tui::action::{Action, Cmd, Fetch, FetchData, OverviewData, Tab};
 use cc_router_tui::app::{App, AppOptions};
 use cc_router_tui::client::dto::{
-    OverallStats, ProxyStatus, QuotaPeriod, QuotaUsage, SeriesPoint, Settings, Subscription, SubscriptionState,
+    ModelSlots, OverallStats, ProxyStatus, QuotaPeriod, QuotaUsage, SeriesPoint, Settings, Subscription, SubscriptionState,
 };
 use cc_router_tui::i18n::ZH;
 use cc_router_tui::theme::{ColorMode, Theme};
@@ -53,6 +53,15 @@ fn sub(id: &str, name: &str, state: SubscriptionState) -> Subscription {
         last_error_message: None,
         is_dispatchable: state == SubscriptionState::Healthy,
         quota_usage: vec![],
+        provider_id: "p".into(),
+        base_url: "https://example.invalid".into(),
+        auth_type: "api_key".into(),
+        model_slots: ModelSlots { fable: "d".into(), opus: "a".into(), sonnet: "b".into(), haiku: "c".into(), fallback: String::new() },
+        slot_efforts: Default::default(),
+        referenced_by: vec![],
+        balance_supported: false,
+        balance_cache: None,
+        model_cache: None,
     }
 }
 

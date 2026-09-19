@@ -55,7 +55,7 @@ impl Store {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::client::dto::SubscriptionState;
+    use crate::client::dto::{ModelSlots, SubscriptionState};
 
     fn sub(id: &str, state: SubscriptionState) -> Subscription {
         Subscription {
@@ -68,6 +68,15 @@ mod tests {
             last_error_message: None,
             is_dispatchable: state == SubscriptionState::Healthy,
             quota_usage: vec![],
+            provider_id: "p".into(),
+            base_url: "https://example.invalid".into(),
+            auth_type: "api_key".into(),
+            model_slots: ModelSlots { fable: "d".into(), opus: "a".into(), sonnet: "b".into(), haiku: "c".into(), fallback: String::new() },
+            slot_efforts: Default::default(),
+            referenced_by: vec![],
+            balance_supported: false,
+            balance_cache: None,
+            model_cache: None,
         }
     }
 

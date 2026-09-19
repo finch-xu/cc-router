@@ -9,9 +9,14 @@ use serde::{de::DeserializeOwned, Serialize};
 
 use crate::commands::proxy::ProxyStatus;
 use crate::commands::statistics::{DailySeriesPointDto, OverallStatsDto, StatsRange};
+use crate::commands::subscriptions::{RefreshBalanceResult, RefreshModelListResult, TestConnectionResult};
+use crate::provider::model::AuthType;
 use crate::runtime_file::RuntimeFile;
 use crate::settings::model::{ProxyMode, Settings};
-use crate::subscription::model::{SubscriptionDto, SubscriptionRow, SubscriptionRuntime, SubscriptionState};
+use crate::subscription::model::{
+    BalanceEntry, BalanceSeverity, BalanceSnapshot, ModelCache, ModelInfo, SubscriptionDto, SubscriptionRow, SubscriptionRuntime,
+    SubscriptionState,
+};
 use crate::subscription::quota::{TokenQuotas, ALL_PERIODS};
 
 fn through_json<T: Serialize, V: DeserializeOwned>(value: &T) -> V {
@@ -101,6 +106,151 @@ fn subscription_matches() {
     assert!(view.is_dispatchable);
     assert_eq!(view.quota_usage.len(), 4, "后端固定给 4 个周期");
     assert!(view.tightest_quota().is_none(), "没设上限的周期不参与");
+    assert_eq!(view.provider_id, "zhipu");
+    assert_eq!(view.base_url, "");
+    assert_eq!(view.auth_type, "api_key");
+    assert_eq!(view.model_slots.sonnet, "b");
+    assert!(view.referenced_by.is_empty());
+}
+
+/// 订阅详情页要用的字段: 槽位级 effort 覆盖、兜底槽、referenced_by、model_cache、balance_cache。
+#[test]
+fn subscription_detail_fields_match() {
+    let mut row = SubscriptionRow::test_fixture("zhipu", "default");
+    row.slot_efforts.opus = Some("high".into());
+    row.model_slots.fallback = "x".into();
+    let mut rt = SubscriptionRuntime::from_row(row);
+    rt.model_cache = Some(ModelCache {
+        fetched_at: chrono::Utc::now(),
+        models: vec![
+            ModelInfo { id: "glm-4.6".into(), display_name: Some("GLM-4.6".into()) },
+            ModelInfo { id: "glm-4.7".into(), display_name: None },
+        ],
+    });
+    rt.balance_cache = Some(BalanceSnapshot {
+        is_available: Some(true),
+        entries: vec![BalanceEntry {
+            label: "余额".into(),
+            value_text: "9.99".into(),
+            unit: "CNY".into(),
+            hint: None,
+            severity: BalanceSeverity::Low,
+        }],
+        fetched_at: chrono::Utc::now(),
+    });
+    let real = SubscriptionDto::from_runtime(&rt, vec!["model-sonnet".into()]);
+    let view: dto::Subscription = through_json(&real);
+
+    assert_eq!(view.slot_efforts.opus.as_deref(), Some("high"));
+    assert_eq!(view.model_slots.fallback, "x");
+    assert_eq!(view.referenced_by, vec!["model-sonnet".to_string()]);
+    let model_cache = view.model_cache.expect("model_cache 应该有值");
+    assert_eq!(model_cache.models.len(), 2);
+    let balance_cache = view.balance_cache.expect("balance_cache 应该有值");
+    assert_eq!(balance_cache.snapshot.entries.len(), 1);
+    assert_eq!(balance_cache.snapshot.entries[0].severity, dto::BalanceSeverity::Low);
+}
+
+/// 后端的每一个余额告警级别, TUI 都必须认得 —— 落到 `Unknown` 说明 TUI 的枚举漏了一个。
+#[test]
+fn every_backend_balance_severity_is_known_to_the_tui() {
+    for severity in [BalanceSeverity::Normal, BalanceSeverity::Low, BalanceSeverity::Critical] {
+        let view: dto::BalanceSeverity = through_json(&severity);
+        assert_ne!(view, dto::BalanceSeverity::Unknown, "{severity:?}");
+    }
+}
+
+/// `auth_type` 在 TUI 侧按字符串收 (只用于显示) —— 后端 7 个变体都必须序列化成普通字符串,
+/// 不能是带 tag 的对象, 否则 `dto::Subscription::auth_type: String` 解析失败。
+#[test]
+fn every_backend_auth_type_is_a_plain_string_for_the_tui() {
+    use AuthType::*;
+    for auth in [
+        ApiKey,
+        ChatgptOauth,
+        KiroOauth,
+        GeminiApiKey,
+        OpenaiResponsesApiKey,
+        OpenaiChatCompletionsApiKey,
+        GeminiInteractionsApiKey,
+    ] {
+        let value = serde_json::to_value(auth).unwrap();
+        assert!(value.is_string(), "{auth:?} 没有序列化成字符串: {value:?}");
+    }
+}
+
+#[test]
+fn test_connection_result_matches() {
+    let real = TestConnectionResult {
+        ok: true,
+        message: "连接成功".into(),
+        http_status: Some(200),
+        model_used: Some("glm-4.6".into()),
+        state_reset: true,
+    };
+    let view: dto::TestConnectionResult = through_json(&real);
+    assert_eq!(
+        view,
+        dto::TestConnectionResult {
+            ok: true,
+            message: "连接成功".into(),
+            http_status: Some(200),
+            model_used: Some("glm-4.6".into()),
+            state_reset: true,
+        }
+    );
+
+    // 网络错误时两个 Option 字段都缺省。
+    let real_absent = TestConnectionResult { ok: false, message: "网络错误".into(), http_status: None, model_used: None, state_reset: false };
+    let view_absent: dto::TestConnectionResult = through_json(&real_absent);
+    assert_eq!(
+        view_absent,
+        dto::TestConnectionResult { ok: false, message: "网络错误".into(), http_status: None, model_used: None, state_reset: false }
+    );
+}
+
+#[test]
+fn refresh_model_list_result_matches() {
+    let auto = RefreshModelListResult::Auto {
+        models: vec![ModelInfo { id: "glm-4.6".into(), display_name: None }],
+        fetched_at: 1_700_000_000_000,
+    };
+    let view: dto::RefreshModelsResult = through_json(&auto);
+    assert_eq!(
+        view,
+        dto::RefreshModelsResult::Auto {
+            models: vec![dto::ModelInfo { id: "glm-4.6".into(), display_name: None }],
+            fetched_at: 1_700_000_000_000,
+        }
+    );
+
+    let manual = RefreshModelListResult::ManualFallback { reason: "provider 未声明 model_discovery".into() };
+    let view: dto::RefreshModelsResult = through_json(&manual);
+    assert_eq!(view, dto::RefreshModelsResult::ManualFallback { reason: "provider 未声明 model_discovery".into() });
+}
+
+#[test]
+fn refresh_balance_result_matches() {
+    let success = RefreshBalanceResult::Success {
+        snapshot: BalanceSnapshot { is_available: Some(true), entries: vec![], fetched_at: chrono::Utc::now() },
+        fetched_at: 1_700_000_000_000,
+    };
+    let view: dto::RefreshBalanceResult = through_json(&success);
+    assert_eq!(
+        view,
+        dto::RefreshBalanceResult::Success {
+            snapshot: dto::BalanceSnapshot { is_available: Some(true), entries: vec![] },
+            fetched_at: 1_700_000_000_000,
+        }
+    );
+
+    let failed = RefreshBalanceResult::Failed { reason: "网络超时".into() };
+    let view: dto::RefreshBalanceResult = through_json(&failed);
+    assert_eq!(view, dto::RefreshBalanceResult::Failed { reason: "网络超时".into() });
+
+    let unsupported = RefreshBalanceResult::Unsupported;
+    let view: dto::RefreshBalanceResult = through_json(&unsupported);
+    assert_eq!(view, dto::RefreshBalanceResult::Unsupported);
 }
 
 #[test]
