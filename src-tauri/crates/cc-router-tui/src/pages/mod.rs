@@ -14,6 +14,7 @@ use crate::theme::Theme;
 use crate::widgets::keybar::Hint;
 use crate::widgets::toast::ToastKind;
 
+pub mod draft;
 pub mod overview;
 pub mod placeholder;
 pub mod subscriptions;
@@ -58,8 +59,11 @@ pub trait Component {
     fn help(&self, _s: &'static Strings) -> &'static [(&'static str, &'static str)] {
         &[]
     }
-    /// `Store` 刚接受了一份订阅列表, `changed` 是状态变了的 id。默认什么都不做。
-    fn on_subscriptions_changed(&mut self, _changed: &[String]) {}
+    /// `Store` 刚接受了一份订阅列表, `changed` 是状态变了的 id。默认什么都不做。`store`/`s`
+    /// (S1(c), fix round P3b): 编辑类页面 (订阅详情页) 需要在这一刻 (而不是等下一次真正的
+    /// `update()` 调用) 就核对一遍自己的草稿是不是对应的订阅已经消失——`Store` 这一刻已经接受了
+    /// 新列表, 早一帧发现总比晚一帧好。
+    fn on_subscriptions_changed(&mut self, _changed: &[String], _store: &Store, _s: &'static Strings) {}
 
     /// 是否有未保存的草稿。默认否——大多数页面只读展示后端数据; 编辑类页面 (P3b 起) 覆盖它。
     /// 草稿只放页面自己的状态, 不进 `Store` (spec 全局约束)。

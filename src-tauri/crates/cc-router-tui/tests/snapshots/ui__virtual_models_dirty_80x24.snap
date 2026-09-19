@@ -6,11 +6,11 @@ expression: "render(&mut a, 80, 24)"
 "│ 1 总览   2 订阅   3 虚拟模型   4 实时路由   5 日志                           │" Hidden by multi-width symbols: [(5, " "), (7, " "), (14, " "), (16, " "), (23, " "), (25, " "), (27, " "), (29, " "), (36, " "), (38, " "), (40, " "), (42, " "), (49, " "), (51, " ")]
 "╰──────────────────────────────────────────────────────────────────────────────╯"
 "╭ 虚拟模型 ────────────────────╮╭ model-fable * ───────────────────────────────╮" Hidden by multi-width symbols: [(3, " "), (5, " "), (7, " "), (9, " ")]
-"│ ▌ model-fable     顺序   2   ││    1 ? ghost-le(已删除)                      │" Hidden by multi-width symbols: [(21, " "), (23, " "), (51, " "), (53, " "), (55, " ")]
-"│   model-opus      轮询   3   ││ ▌  2 ● 智谱主号          p                   │" Hidden by multi-width symbols: [(21, " "), (23, " "), (42, " "), (44, " "), (46, " "), (48, " ")]
-"│   model-sonnet    会话   3   ││                                              │" Hidden by multi-width symbols: [(21, " "), (23, " ")]
-"│   model-haiku     顺序   0   ││                                              │" Hidden by multi-width symbols: [(21, " "), (23, " ")]
-"│   model-fallback  顺序   3   ││                                              │" Hidden by multi-width symbols: [(21, " "), (23, " ")]
+"│ ▌ model-fable *     顺序   2 ││    1 ? ghost-le (已删除)                     │" Hidden by multi-width symbols: [(23, " "), (25, " "), (52, " "), (54, " "), (56, " ")]
+"│   model-opus        轮询   3 ││ ▌  2 ● 智谱主号          p                   │" Hidden by multi-width symbols: [(23, " "), (25, " "), (42, " "), (44, " "), (46, " "), (48, " ")]
+"│   model-sonnet      会话   3 ││                                              │" Hidden by multi-width symbols: [(23, " "), (25, " ")]
+"│   model-haiku       顺序   0 ││                                              │" Hidden by multi-width symbols: [(23, " "), (25, " ")]
+"│   model-fallback    顺序   3 ││                                              │" Hidden by multi-width symbols: [(23, " "), (25, " ")]
 "│                              ││                                              │"
 "│                              ││                                              │"
 "│                              ││                                              │"
@@ -25,4 +25,4 @@ expression: "render(&mut a, 80, 24)"
 "│                              ││                                              │"
 "│                              ││                                              │"
 "╰──────────────────────────────╯╰──────────────── 顺序 (sequential) · 2 个订阅 ╯" Hidden by multi-width symbols: [(51, " "), (53, " "), (73, " "), (75, " "), (77, " ")]
-" 1-5 切页   ↑↓ 选择   J K J K 移动   a 加入   x 移除   m 模式   ? 帮助   q 退出 " Hidden by multi-width symbols: [(6, " "), (8, " "), (16, " "), (18, " "), (31, " "), (33, " "), (40, " "), (42, " "), (49, " "), (51, " "), (58, " "), (60, " "), (67, " "), (69, " "), (76, " "), (78, " ")]
+" 1-5 切页   ↑↓ 选择   s 保存   J K 移动   a 加入   x 移除       ? 帮助   q 退出 " Hidden by multi-width symbols: [(6, " "), (8, " "), (16, " "), (18, " "), (25, " "), (27, " "), (36, " "), (38, " "), (45, " "), (47, " "), (54, " "), (56, " "), (67, " "), (69, " "), (76, " "), (78, " ")]

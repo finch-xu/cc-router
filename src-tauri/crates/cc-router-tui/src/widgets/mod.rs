@@ -2,9 +2,12 @@
 
 use ratatui::buffer::Buffer;
 use ratatui::layout::{Position, Rect};
+use ratatui::style::Style;
 use ratatui::widgets::Clear;
 use ratatui::Frame;
 use unicode_width::UnicodeWidthStr;
+
+use crate::theme::Theme;
 
 pub mod badge;
 pub mod confirm;
@@ -13,6 +16,17 @@ pub mod help;
 pub mod keybar;
 pub mod picker;
 pub mod toast;
+
+/// 两栏页面 (订阅详情页 / 虚拟模型页, D3 fix round P3b) 共用的边框配色规则: 有焦点的那一栏用
+/// `theme.accent`, 没有焦点的用普通 `theme.border_style()`。「要不要真的按焦点区分颜色」(比如
+/// 订阅页窄屏一次只画一栏时区分没有意义) 由调用方决定——这里只管这一条颜色规则本身。
+pub fn pane_border_style(theme: &Theme, focused: bool) -> Style {
+    if focused {
+        Style::new().fg(theme.accent)
+    } else {
+        theme.border_style()
+    }
+}
 
 /// 第 `tick` 帧的 spinner 状态。`calc_step(0)` 在 throbber-widgets-tui 里的含义是「随机取一格」,
 /// 所以步长永远不传 0 —— 否则同一状态画两次会得到不同的帧。
@@ -78,7 +92,14 @@ fn reset_if_wide(buf: &mut Buffer, x: u16, y: u16) {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use ratatui::style::Style;
+    use crate::theme::ColorMode;
+
+    #[test]
+    fn pane_border_style_follows_focus() {
+        let theme = Theme::new(ColorMode::TrueColor);
+        assert_eq!(pane_border_style(&theme, true).fg, Some(theme.accent));
+        assert_eq!(pane_border_style(&theme, false), theme.border_style());
+    }
 
     #[test]
     fn wide_glyphs_crossing_either_popup_edge_are_reset() {

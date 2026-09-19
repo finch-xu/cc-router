@@ -1,10 +1,10 @@
 //! 虚拟模型页: 左 5 个虚拟模型 / 右选中虚拟模型的有序订阅。支持重排序 (`J`/`K`)、加入 (`a`,
 //! picker 选未绑定的订阅)、移除 (`x`)、切换调度模式 (`m`)、保存 (`s`)。
 //!
-//! 与订阅详情页 (Task 5, `subscriptions.rs`) 同一套草稿模式: 页面自己的 [`VmDraft`], 首次编辑时
-//! 从 `Store` 克隆, 与 `Store` 当前值完全相等则不脏, 只有成功保存才清空。**与订阅页不同的一点**:
-//! 布局不随终端宽度变化 (左 32 列固定, 右吃剩余), 因为虚拟模型固定只有 5 个, 不需要按宽度切一栏/
-//! 两栏。
+//! 与订阅详情页 (Task 5, `subscriptions.rs`) 同一套草稿模式 (D3 起收进共用的 [`super::draft::Draft`]):
+//! 页面自己的 [`VmDraft`], 首次编辑时从 `Store` 克隆, 与 `Store` 当前值完全相等则立刻丢弃, 只有
+//! 成功保存才清空。**与订阅页不同的一点**: 布局不随终端宽度变化 (左 32 列固定, 右吃剩余), 因为
+//! 虚拟模型固定只有 5 个, 不需要按宽度切一栏/两栏。
 
 use ratatui::crossterm::event::{KeyCode, KeyEvent};
 use ratatui::layout::{Constraint, Layout, Rect};
@@ -14,6 +14,7 @@ use ratatui::widgets::{Block, BorderType, List, ListItem, ListState, Padding};
 use ratatui::Frame;
 use throbber_widgets_tui::{Throbber, BRAILLE_SIX};
 
+use super::draft::Draft;
 use super::{Component, DrawCtx};
 use crate::action::{Action, BusyKey, Cmd, Fetch, Mutation};
 use crate::client::dto::{RoutingMode, VirtualModel};
@@ -24,14 +25,15 @@ use crate::theme::Theme;
 use crate::widgets::badge::badge;
 use crate::widgets::keybar::Hint;
 use crate::widgets::picker::{PickerChoice, PickerItem, PickerSpec, PickerTag};
-use crate::widgets::spinner_state;
 use crate::widgets::toast::ToastKind;
+use crate::widgets::{pane_border_style, spinner_state};
 
 /// 左栏固定宽度 (brief: 「所有宽度同一种：左 32 列，右吃剩余」)——虚拟模型固定只有 5 个,
 /// 不需要像订阅页那样按终端宽度切一栏/两栏。
 const LEFT_WIDTH: u16 = 32;
-/// 最长的虚拟模型名是 "model-fallback" (14 列), 留 1 列余量。
-const MODEL_NAME_COL: usize = 15;
+/// 最长的虚拟模型名是 "model-fallback" (14 列) + 草稿标记 " *" (2 列) = 16, 留 1 列余量 (V5,
+/// fix round P3b: 草稿存在时左栏列表行也要显示 `*`, 因为 toast 会挡住右栏标题上的那颗)。
+const MODEL_NAME_COL: usize = 17;
 /// 模式短名 (顺序/轮询/会话/未知) 都是 2 个 CJK 字符 (显示宽度 4), 留 1 列余量。
 const MODE_COL: usize = 5;
 const MEMBER_SYMBOL_COL: usize = 2;
@@ -57,75 +59,68 @@ struct VmDraft {
     subscription_ids: Vec<String>,
 }
 
+/// [`Draft::edit`]/[`Draft::sync`]/[`Draft::refresh_dirty`] 要求的 base: 这个虚拟模型在 `Store`
+/// 里当前的值。
+fn vm_draft_base(vm: &VirtualModel) -> VmDraft {
+    VmDraft { name: vm.name.clone(), mode: vm.mode, subscription_ids: vm.subscription_ids.clone() }
+}
+
 pub struct VirtualModels {
     /// 左栏选中的虚拟模型下标 (0..5, 后端固定顺序 fable/opus/sonnet/haiku/fallback)。
     selected_index: usize,
     focus: VmFocus,
     /// 右栏 (成员列表) 的光标下标, 相对当前选中的虚拟模型; 换选中项时归零。
     members_cursor: usize,
-    draft: Option<VmDraft>,
-    /// `is_dirty()` 的缓存, 与 `Store` 当前值比较得出; 由 `refresh_dirty_flag` 在 `draw()` /
-    /// `update()` 里保持更新 (同订阅页的 `dirty` 字段同一套约定)。
-    dirty: bool,
+    /// 当前正在编辑的虚拟模型草稿; `None` = 没有未保存的修改。D2/D3 (fix round P3b) 起
+    /// `draft.is_some()` 与 `is_dirty()` 恒等价——零编辑 (空列表上的 `x`/`J`/`K`、到头的
+    /// `J`/`K`) 或者改回原值都不会留下草稿, 见 [`Draft::edit`]。
+    draft: Draft<VmDraft>,
     /// 下一帧要闪一下的订阅 id; `draw` 取走。
     flash_rows: Vec<String>,
 }
 
 impl Default for VirtualModels {
     fn default() -> Self {
-        Self { selected_index: 0, focus: VmFocus::Models, members_cursor: 0, draft: None, dirty: false, flash_rows: Vec::new() }
+        Self { selected_index: 0, focus: VmFocus::Models, members_cursor: 0, draft: Draft::default(), flash_rows: Vec::new() }
     }
 }
 
 impl VirtualModels {
     fn pane_border_style(&self, theme: &Theme, is_left: bool) -> Style {
         let left_focused = matches!(self.focus, VmFocus::Models);
-        if is_left == left_focused {
-            Style::new().fg(theme.accent)
-        } else {
-            theme.border_style()
-        }
+        pane_border_style(theme, is_left == left_focused)
     }
 
     /// 当前应该显示的调度模式: 有草稿 (且属于这个虚拟模型) 就用草稿, 否则用 `Store` 里的原始值。
     fn effective_mode(&self, vm: &VirtualModel) -> RoutingMode {
-        match &self.draft {
+        match self.draft.get() {
             Some(d) if d.name == vm.name => d.mode,
             _ => vm.mode,
         }
     }
 
     fn effective_subscription_ids<'a>(&'a self, vm: &'a VirtualModel) -> &'a [String] {
-        match &self.draft {
+        match self.draft.get() {
             Some(d) if d.name == vm.name => &d.subscription_ids,
             _ => &vm.subscription_ids,
         }
     }
 
-    /// 草稿不存在, 或者存在但属于别的虚拟模型 (换了选中项之后按 `m`) 时新建一份 (从 `Store`
-    /// 克隆); 已经存在且属于这个虚拟模型就直接复用。
-    fn draft_mut(&mut self, vm: &VirtualModel) -> &mut VmDraft {
-        let needs_new = self.draft.as_ref().is_none_or(|d| d.name != vm.name);
-        if needs_new {
-            self.draft = Some(VmDraft { name: vm.name.clone(), mode: vm.mode, subscription_ids: vm.subscription_ids.clone() });
-        }
-        match &mut self.draft {
-            Some(d) => d,
-            None => unreachable!("刚刚确保过 draft 是 Some"),
-        }
+    /// `draw()` 专用: 只重算 `is_dirty()` 的缓存, 不碰 `draft`/`focus`——保证「同一状态画两次
+    /// 得到同一帧」不受影响 (与订阅页 `refresh_dirty_flag` 同一条道理, 见 [`Draft::refresh_dirty`]
+    /// 与 [`Draft::sync`] 的分工说明)。
+    fn refresh_dirty_flag(&mut self, store: &Store) {
+        let base = self.draft.get().and_then(|d| store.virtual_models().iter().find(|vm| vm.name == d.name)).map(vm_draft_base);
+        self.draft.refresh_dirty(base.as_ref());
     }
 
-    /// 只重算 `dirty` 这个只读缓存, 不碰 `draft`/`focus`——`draw()`/`update()` 都调这个, 保证
-    /// 「同一状态画两次得到同一帧」不受影响 (与订阅页 `refresh_dirty_flag` 同一条道理)。
-    fn refresh_dirty_flag(&mut self, store: &Store) {
-        self.dirty = match &self.draft {
-            Some(d) => store
-                .virtual_models()
-                .iter()
-                .find(|vm| vm.name == d.name)
-                .is_some_and(|vm| vm.mode != d.mode || vm.subscription_ids != d.subscription_ids),
-            None => false,
-        };
+    /// `update()` 专用: 真正核对一遍草稿是否已经与 `Store` 当前值相等 (D2, 改回原值 / 别的客户端
+    /// 把 `Store` 改成了跟草稿一样都算) 就丢弃——虚拟模型固定只有 5 个, 理论上不会真的「消失」,
+    /// 但仍然按 `Draft::sync` 的通用语义处理 (base 找不到就丢弃), 不额外弹通知/挪焦点。
+    fn sync_draft_with_store(&mut self, store: &Store) {
+        let Some(name) = self.draft.get().map(|d| d.name.clone()) else { return };
+        let base = store.virtual_models().iter().find(|vm| vm.name == name).map(vm_draft_base);
+        self.draft.sync(base.as_ref());
     }
 
     /// `Models` 焦点下 `↑↓`/`jk`: 有草稿时先确认 (`on_yes: DiscardDraft`, 确认后停在原位,
@@ -135,7 +130,7 @@ impl VirtualModels {
         if self.is_dirty() {
             return Some(Action::OpenConfirm { prompt: s.confirm_discard.to_string(), on_yes: Box::new(Action::DiscardDraft) });
         }
-        self.draft = None;
+        self.draft.clear();
         let next = (idx as isize + delta).clamp(0, vms.len() as isize - 1) as usize;
         self.selected_index = next;
         self.members_cursor = 0;
@@ -174,22 +169,26 @@ impl VirtualModels {
         }
         let idx = self.selected_index.min(vms.len() - 1);
         let vm = &vms[idx];
-        let draft = self.draft_mut(vm);
-        draft.subscription_ids.push(id.clone());
-        self.members_cursor = draft.subscription_ids.len() - 1;
-        self.refresh_dirty_flag(store);
+        let base = vm_draft_base(vm);
+        self.draft.edit(&base, |d| d.subscription_ids.push(id.clone()));
+        self.members_cursor = self.effective_subscription_ids(vm).len() - 1;
     }
 
     /// `s`: 不脏时无动作; 草稿的调度模式是 `Unknown` (后端某天加的新模式, `as_wire()` 会静默降级
-    /// 成 `"sequential"`) 时拒绝保存, 不能让用户在不知情的情况下把它发回后端。断线 / 忙碌由
-    /// `App::start_mutation` 统一处理, 这里不用重复判断。
-    fn save_action(&self, s: &'static Strings) -> Option<Action> {
+    /// 成 `"sequential"`) 时拒绝保存, 不能让用户在不知情的情况下把它发回后端。V2 (fix round P3b):
+    /// 草稿里如果还有 `Store` 找不到的 id (「已删除」的订阅) 也拒绝——发给后端只会换回一句裸 uuid
+    /// 的英文报错, 不如就地引导用户先按 `x` 移除。断线 / 忙碌由 `App::start_mutation` 统一处理,
+    /// 这里不用重复判断。
+    fn save_action(&self, s: &'static Strings, store: &Store) -> Option<Action> {
         if !self.is_dirty() {
             return None;
         }
-        let draft = self.draft.as_ref()?;
+        let draft = self.draft.get()?;
         if draft.mode == RoutingMode::Unknown {
             return Some(Action::Notify { kind: ToastKind::Info, text: s.vm_unknown_mode.to_string() });
+        }
+        if draft.subscription_ids.iter().any(|id| store.subscription(id).is_none()) {
+            return Some(Action::Notify { kind: ToastKind::Info, text: s.vm_remove_ghosts_first.to_string() });
         }
         Some(Action::Mutate(Mutation::UpdateVirtualModel {
             name: draft.name.clone(),
@@ -216,8 +215,12 @@ impl VirtualModels {
             .map(|vm| {
                 let mode = self.effective_mode(vm);
                 let count = self.effective_subscription_ids(vm).len();
+                // V5 (fix round P3b): 草稿存在时左栏这一行也带 `*`——右栏标题上的那颗会被 80 列
+                // 下贴右边缘的 toast 挡住, 左栏这颗不会 (toast 只贴右边)。
+                let is_dirty_here = self.draft.get().is_some_and(|d| d.name == vm.name);
+                let name = if is_dirty_here { format!("{} *", vm.name) } else { vm.name.clone() };
                 let line = Line::from(vec![
-                    Span::raw(fit(&vm.name, MODEL_NAME_COL)),
+                    Span::raw(fit(&name, MODEL_NAME_COL)),
                     Span::raw(" "),
                     Span::raw(fit(s.vm_mode_short(mode), MODE_COL)),
                     Span::raw(format!("{count:>3}")),
@@ -242,7 +245,7 @@ impl VirtualModels {
         let ids: Vec<String> = self.effective_subscription_ids(vm).to_vec();
         let mode = self.effective_mode(vm);
         let is_fallback = vm.name == "model-fallback";
-        let is_dirty_here = self.is_dirty() && self.draft.as_ref().is_some_and(|d| d.name == vm.name);
+        let is_dirty_here = self.draft.get().is_some_and(|d| d.name == vm.name);
 
         let title_suffix = if is_dirty_here { " *" } else { "" };
         let mut title_spans: Vec<Span<'static>> = vec![Span::raw(format!(" {}{} ", vm.name, title_suffix))];
@@ -278,27 +281,24 @@ impl VirtualModels {
                     spans.push(Span::styled(fit(b.symbol, MEMBER_SYMBOL_COL), Style::new().fg(b.color)));
                     spans.push(Span::raw(fit(&sub.display_name, MEMBER_NAME_COL)));
                     spans.push(Span::raw(fit(&sub.provider_display_name, MEMBER_PROVIDER_COL)));
-                    if is_fallback && sub.auth_type != "api_key" && sub.model_slots.fallback.is_empty() {
+                    // V3 (fix round P3b): 与后端 `ModelSlots::fallback_model()` 的 `trim()` 规则
+                    // 对齐——纯空白的兜底槽视为未配置, 否则这里会漏标一条实际会被 pipeline 跳过的
+                    // 订阅。
+                    if is_fallback && sub.auth_type != "api_key" && sub.model_slots.fallback.trim().is_empty() {
                         spans.push(Span::styled(s.vm_will_skip, Style::new().fg(theme.warn)));
                     }
                 }
                 None => {
-                    // 订阅在 Store 里找不到 (被别处删除): 名字退化成 id 前 8 位 + `vm_missing`。
+                    // V2 (fix round P3b): 订阅在 Store 里找不到 (被别处删除) 这一行——之前是手写
+                    // 拼接 (无分隔符、不走 `fit`), 跟正常行的列对不齐; 现在走同一个 `fit` 列, 只是
+                    // 内容换成「id 前 8 位 + vm_missing」, 整行 muted。
                     let prefix: String = id.chars().take(8).collect();
+                    let label = format!("{prefix} {}", s.vm_missing);
                     spans.push(Span::styled(fit("?", MEMBER_SYMBOL_COL), theme.muted_style()));
-                    spans.push(Span::styled(format!("{prefix}{}", s.vm_missing), theme.muted_style()));
+                    spans.push(Span::styled(fit(&label, MEMBER_NAME_COL), theme.muted_style()));
                 }
             }
             items.push(ListItem::new(Line::from(spans)));
-        }
-
-        // 只对这一帧实际画出来的行触发闪烁 (成员列表不分页, 全部都在视野里)。
-        for (i, id) in ids.iter().enumerate() {
-            if flash_rows.contains(id) {
-                let color = store.subscription(id).map(|sub| badge(sub, theme, s).color).unwrap_or(theme.muted);
-                let rect = Rect::new(inner.x, inner.y + i as u16, inner.width, 1);
-                ctx.fx.row_changed(id, rect, color);
-            }
         }
 
         let list = List::new(items).highlight_symbol("▌ ").highlight_style(Style::new().add_modifier(Modifier::REVERSED));
@@ -306,7 +306,32 @@ impl VirtualModels {
         let cursor = self.members_cursor.min(ids.len() - 1);
         state.select(Some(cursor));
         frame.render_stateful_widget(list, inner, &mut state);
+
+        // V4 (fix round P3b): 成员超过面板高度时 `List` 会自动滚动——只有渲染完之后 `state.offset()`
+        // 才知道真实的可视窗口在哪; 用没经过 offset 换算的下标算 rect 会闪错行 / 闪到面板外
+        // (`inner.y + i` 在滚动之后完全对不上屏幕上的实际行), 与订阅页 `draw_list` 渲染完
+        // `table_state` 之后再读 `offset()` 是同一个道理。
+        let offset = state.offset();
+        let capacity = inner.height as usize;
+        for (i, id) in ids.iter().enumerate() {
+            if flash_rows.contains(id) {
+                if let Some(rect) = member_flash_rect(inner, offset, capacity, i) {
+                    let color = store.subscription(id).map(|sub| badge(sub, theme, s).color).unwrap_or(theme.muted);
+                    ctx.fx.row_changed(id, rect, color);
+                }
+            }
+        }
     }
+}
+
+/// V4: 第 `i` 个成员这一帧是否落在可视窗口 (`offset`..`offset+capacity`) 内, 是则返回它相对
+/// `inner` 的行 `Rect` (`y` 已经按 `offset` 换算过, 保证落在 `inner` 高度以内), 不在窗口内返回
+/// `None`——纯函数, 拆出来单独测试几何计算本身, 不需要真的渲染一帧。
+fn member_flash_rect(inner: Rect, offset: usize, capacity: usize, i: usize) -> Option<Rect> {
+    if i < offset || i >= offset + capacity {
+        return None;
+    }
+    Some(Rect::new(inner.x, inner.y + (i - offset) as u16, inner.width, 1))
 }
 
 impl Component for VirtualModels {
@@ -328,9 +353,8 @@ impl Component for VirtualModels {
                 }
                 // 「m 在 Models 焦点下也可用（作用于选中的虚拟模型，同样产生草稿）」。
                 KeyCode::Char('m') => {
-                    let mode = self.effective_mode(vm).next();
-                    self.draft_mut(vm).mode = mode;
-                    self.refresh_dirty_flag(store);
+                    let base = vm_draft_base(vm);
+                    self.draft.edit(&base, |d| d.mode = d.mode.next());
                     None
                 }
                 _ => None,
@@ -347,51 +371,52 @@ impl Component for VirtualModels {
                         self.members_cursor = if len == 0 { 0 } else { (cursor + 1).min(len - 1) };
                         None
                     }
-                    // 到头不动 (不绕回)——去掉这条越界保护, `J` 在最后一项上会尝试
-                    // `swap(cursor, cursor+1)` 越界 panic (Step 4 咬合检查 a)。
-                    // 到头不动 (不绕回)——去掉这条越界保护, `J` 在最后一项上会尝试
-                    // `swap(cursor, cursor+1)` 越界 panic (Step 4 咬合检查 a)。
+                    // D2(b) (fix round P3b): 到头 (或空列表) 不动——`cursor+1 < len`/`cursor > 0`
+                    // 这两条边界判断现在只决定"要不要真的动 `members_cursor`", 草稿那边完全交给
+                    // `Draft::edit` 自己核对结果是否等于 base (空列表 / 单项列表上的 no-op swap
+                    // 结果必然与 base 相等, 会被自动丢弃, 不需要在这里重复判断一遍)。
                     KeyCode::Char('J') => {
-                        let d = self.draft_mut(vm);
-                        if cursor + 1 < d.subscription_ids.len() {
-                            d.subscription_ids.swap(cursor, cursor + 1);
+                        if cursor + 1 < len {
+                            let base = vm_draft_base(vm);
+                            self.draft.edit(&base, |d| d.subscription_ids.swap(cursor, cursor + 1));
                             self.members_cursor = cursor + 1;
                         }
-                        self.refresh_dirty_flag(store);
                         None
                     }
                     KeyCode::Char('K') => {
-                        let d = self.draft_mut(vm);
                         if cursor > 0 {
-                            d.subscription_ids.swap(cursor - 1, cursor);
+                            let base = vm_draft_base(vm);
+                            self.draft.edit(&base, |d| d.subscription_ids.swap(cursor - 1, cursor));
                             self.members_cursor = cursor - 1;
                         }
-                        self.refresh_dirty_flag(store);
                         None
                     }
                     KeyCode::Char('a') => Some(self.open_add_picker(vm, store, s)),
                     KeyCode::Char('x') => {
-                        let d = self.draft_mut(vm);
-                        if cursor < d.subscription_ids.len() {
-                            d.subscription_ids.remove(cursor);
-                        }
-                        let new_len = d.subscription_ids.len();
+                        let base = vm_draft_base(vm);
+                        self.draft.edit(&base, |d| {
+                            if cursor < d.subscription_ids.len() {
+                                d.subscription_ids.remove(cursor);
+                            }
+                        });
+                        // 空列表上按 `x`: `edit` 内部的比较让草稿保持 `None` (D2b), 这里从
+                        // `effective_subscription_ids` (自动回落到 `vm` 的原值) 读新长度, 不用
+                        // 关心到底有没有真的创建过草稿。
+                        let new_len = self.effective_subscription_ids(vm).len();
                         self.members_cursor = if new_len == 0 { 0 } else { cursor.min(new_len - 1) };
-                        self.refresh_dirty_flag(store);
                         None
                     }
                     KeyCode::Char('m') => {
-                        let mode = self.effective_mode(vm).next();
-                        self.draft_mut(vm).mode = mode;
-                        self.refresh_dirty_flag(store);
+                        let base = vm_draft_base(vm);
+                        self.draft.edit(&base, |d| d.mode = d.mode.next());
                         None
                     }
-                    KeyCode::Char('s') => self.save_action(s),
+                    KeyCode::Char('s') => self.save_action(s, store),
                     KeyCode::Esc | KeyCode::Left | KeyCode::Char('h') => {
                         if self.is_dirty() {
                             Some(Action::OpenConfirm { prompt: s.confirm_discard.to_string(), on_yes: Box::new(Action::DiscardDraft) })
                         } else {
-                            self.draft = None;
+                            self.draft.clear();
                             self.focus = VmFocus::Models;
                             None
                         }
@@ -403,7 +428,7 @@ impl Component for VirtualModels {
     }
 
     fn update(&mut self, action: &Action, store: &Store, _s: &'static Strings) -> Vec<Cmd> {
-        self.refresh_dirty_flag(store);
+        self.sync_draft_with_store(store);
         match action {
             // 右栏要订阅名 / 厂商 / badge, 所以两个 Fetch 都要——被 `Fetches` 去重, 每 5 秒都发也
             // 没关系。
@@ -444,7 +469,22 @@ impl Component for VirtualModels {
         match self.focus {
             VmFocus::Models => vec![("↑↓", s.key_select), ("⏎", s.key_detail), ("m", s.key_mode)],
             VmFocus::Members => {
-                vec![("↑↓", s.key_select), ("J K", s.key_move), ("a", s.key_add), ("x", s.key_remove), ("m", s.key_mode), ("s", s.key_save)]
+                // V1(b) (fix round P3b): 80 列放不下时 keybar 从右往左丢, `s` 原来排最后, `m` 反而
+                // 先它一步留下——丢掉保存提示是最糟的裁剪结果。脏时把 `s` 挪到 `↑↓ 选择` 右边第一个
+                // (保证它是最后才会被裁掉的那批), 不脏时留在原位 (跟着 `m` 之后, 视觉上更贴近
+                // "调整完之后保存" 的顺序)。
+                let mut hints = vec![("↑↓", s.key_select)];
+                if self.is_dirty() {
+                    hints.push(("s", s.key_save));
+                }
+                hints.push(("J K", s.key_move));
+                hints.push(("a", s.key_add));
+                hints.push(("x", s.key_remove));
+                hints.push(("m", s.key_mode));
+                if !self.is_dirty() {
+                    hints.push(("s", s.key_save));
+                }
+                hints
             }
         }
     }
@@ -453,17 +493,16 @@ impl Component for VirtualModels {
         s.vm_help_rows
     }
 
-    fn on_subscriptions_changed(&mut self, changed: &[String]) {
+    fn on_subscriptions_changed(&mut self, changed: &[String], _store: &Store, _s: &'static Strings) {
         self.flash_rows = changed.to_vec();
     }
 
     fn is_dirty(&self) -> bool {
-        self.dirty
+        self.draft.is_dirty()
     }
 
     fn discard_changes(&mut self) {
-        self.draft = None;
-        self.dirty = false;
+        self.draft.clear();
         self.focus = VmFocus::Models;
     }
 
@@ -471,11 +510,31 @@ impl Component for VirtualModels {
         if !ok {
             return;
         }
-        if let Mutation::UpdateVirtualModel { name, .. } = mutation {
-            if self.draft.as_ref().is_some_and(|d| &d.name == name) {
-                self.draft = None;
-                self.dirty = false;
+        // D1 (fix round P3b): 同订阅页——只有「保存时发出去的负载」与「结果落地这一刻的当前草稿」
+        // 完全相等才清空, 用户在保存在途期间可能已经又重排/加减了一次成员。
+        if let Mutation::UpdateVirtualModel { name, mode, subscription_ids } = mutation {
+            if self.draft.get().is_some_and(|d| &d.name == name) {
+                let saved = VmDraft { name: name.clone(), mode: *mode, subscription_ids: subscription_ids.clone() };
+                if self.draft.matches(&saved) {
+                    self.draft.clear();
+                }
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// V4: 只覆盖窗口内的下标, 窗口外的 (滚出视野之前 / 还没滚到) 都该是 `None`; 窗口边界 (第一行 /
+    /// 最后一行) 的 `y` 应该正确换算成相对 `inner` 的坐标, 不是原始下标。
+    #[test]
+    fn member_flash_rect_only_covers_the_visible_window() {
+        let inner = Rect::new(3, 5, 20, 4); // 可视窗口 offset..offset+4
+        assert_eq!(member_flash_rect(inner, 2, 4, 1), None, "offset=2: 下标 1 已经滚出视野之前");
+        assert_eq!(member_flash_rect(inner, 2, 4, 2), Some(Rect::new(3, 5, 20, 1)), "窗口第一行, y 应该换算成 inner.y");
+        assert_eq!(member_flash_rect(inner, 2, 4, 5), Some(Rect::new(3, 8, 20, 1)), "窗口最后一行");
+        assert_eq!(member_flash_rect(inner, 2, 4, 6), None, "还没滚到的下标");
     }
 }

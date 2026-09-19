@@ -15,6 +15,7 @@ use ratatui::Frame;
 use throbber_widgets_tui::{Throbber, BRAILLE_SIX};
 use unicode_width::UnicodeWidthStr;
 
+use super::draft::Draft;
 use super::{Component, DrawCtx};
 use crate::action::{Action, BusyKey, Cmd, Fetch, Mutation};
 use crate::client::dto::{BalanceSeverity, ModelSlots, QuotaUsage, Slot, SlotEfforts, Subscription, EFFORT_CHOICES};
@@ -26,8 +27,8 @@ use crate::widgets::badge::{badge, status_text};
 use crate::widgets::gauge::quota_gauge;
 use crate::widgets::keybar::Hint;
 use crate::widgets::picker::{PickerChoice, PickerItem, PickerSpec, PickerTag};
-use crate::widgets::spinner_state;
 use crate::widgets::toast::ToastKind;
+use crate::widgets::{pane_border_style, spinner_state};
 
 /// 达到才用左表右详情双栏; 以下只画一栏, 靠 [`Focus`] 在列表/详情之间切换 (两种宽度下 `⏎` 都能
 /// 切换焦点, 区别只在窄屏一次只画一栏、宽屏两栏都画但边框颜色跟着焦点走)。
@@ -93,6 +94,12 @@ struct SlotDraft {
     slot_efforts: SlotEfforts,
 }
 
+/// [`Draft::edit`]/[`Draft::sync`]/[`Draft::refresh_dirty`] 要求的 base: 这条订阅在 `Store` 里
+/// 当前的值, 包成跟草稿同一个形状才能直接比较相等。
+fn slot_draft_base(sub: &Subscription) -> SlotDraft {
+    SlotDraft { sub_id: sub.id.clone(), model_slots: sub.model_slots.clone(), slot_efforts: sub.slot_efforts.clone() }
+}
+
 /// 五个槽位的固定顺序, 给槽位光标的 上/下/首/尾 移动用。
 const ALL_SLOTS: [Slot; 5] = [Slot::Fable, Slot::Opus, Slot::Sonnet, Slot::Haiku, Slot::Fallback];
 /// 四个主槽 (不含兜底), 给详情面板画槽位行用——兜底槽单独一行 (没有 effort 列)。
@@ -111,12 +118,11 @@ pub struct Subscriptions {
     table_state: TableState,
     /// 下一帧要闪一下的订阅 id; `draw` 取走。
     flash_rows: Vec<String>,
-    /// 当前正在编辑的槽位草稿; `None` = 没有未保存的修改。首次编辑时从 `Store` 里对应订阅克隆。
-    draft: Option<SlotDraft>,
-    /// `is_dirty()` 的缓存: 草稿与 `Store` 当前值完全相等时为假 (改回去就不算脏)。
-    /// `is_dirty()` 本身拿不到 `Store`, 靠 `sync_draft_with_store` (`update()` 里) /
-    /// `refresh_dirty_flag` (`draw()` 里, 只读重算, 不碰 `draft`/`focus`) 保持更新。
-    dirty: bool,
+    /// 当前正在编辑的槽位草稿; `None` = 没有未保存的修改。首次编辑时从 `Store` 里对应订阅克隆,
+    /// 与 `Store` 当前值相等 (改回原值 / 从没真的改过) 就立刻丢弃——D2/D3 (fix round P3b) 起这条
+    /// 规则收进 [`Draft`] 内部, 不再是页面自己要记得维护的约定 (`draft.is_some()` ⇔ `is_dirty()`
+    /// 恒成立)。
+    draft: Draft<SlotDraft>,
     /// 页面在 `update()` 内部想弹的一条 toast, `App::update_page` 在调用 `update()` 之后轮询取走
     /// (`update()` 签名只能返回 `Vec<Cmd>`, 塞不进一个 `Action::Notify`)。
     pending_notice: Option<(ToastKind, String)>,
@@ -132,8 +138,7 @@ impl Default for Subscriptions {
             last_page_rows: DEFAULT_PAGE_ROWS,
             table_state: TableState::default(),
             flash_rows: Vec::new(),
-            draft: None,
-            dirty: false,
+            draft: Draft::default(),
             pending_notice: None,
         }
     }
@@ -154,79 +159,52 @@ impl Subscriptions {
     }
 
     /// 宽屏下有焦点的那一栏边框用 `theme.accent`, 另一栏用 `theme.border`; 窄屏一次只画一栏,
-    /// 边框颜色的区分没有意义, 恒用 `theme.border` (与改动前一致)。
+    /// 边框颜色的区分没有意义, 恒用 `theme.border` (与改动前一致)。「focused → accent, 否则
+    /// border」这条颜色规则本身挪进了 `widgets::pane_border_style` (D3, 与虚拟模型页共用)。
     fn pane_border_style(&self, theme: &Theme, is_list_pane: bool) -> Style {
         if !self.is_wide() {
             return theme.border_style();
         }
         let list_focused = matches!(self.focus, Focus::List);
-        if is_list_pane == list_focused {
-            Style::new().fg(theme.accent)
-        } else {
-            theme.border_style()
-        }
+        pane_border_style(theme, is_list_pane == list_focused)
     }
 
-    /// 效果同 `sync_draft_with_store`, 但**只**重算 `dirty` 这个只读缓存 (不碰 `draft`/`focus`,
-    /// 不产出通知)——`draw()` 里调这个是安全的 (「同一状态画两次得到同一帧」不受影响), 覆盖
-    /// 「草稿仍指向一条存在的订阅, 但它在 `Store` 里的值变了」这种只有靠重新画才会经过的路径。
+    /// `draw()` 专用: 只重算 `is_dirty()` 的缓存 (不碰 `draft`/`focus`, 不产出通知)——「同一状态
+    /// 画两次得到同一帧」不受影响, 覆盖「草稿仍指向一条存在的订阅, 但它在 `Store` 里的值变了」
+    /// 这种只有靠重新画才会经过的路径。真正的丢弃 (D2) 只在 `sync_draft_with_store` (`update()`
+    /// 时机) 里发生, 见 [`Draft::refresh_dirty`] 与 [`Draft::sync`] 的分工说明。
     fn refresh_dirty_flag(&mut self, store: &Store) {
-        self.dirty = match &self.draft {
-            Some(draft) => store
-                .subscription(&draft.sub_id)
-                .is_some_and(|sub| sub.model_slots != draft.model_slots || sub.slot_efforts != draft.slot_efforts),
-            None => false,
-        };
+        let base = self.draft.get().and_then(|d| store.subscription(&d.sub_id)).map(slot_draft_base);
+        self.draft.refresh_dirty(base.as_ref());
     }
 
-    /// `update()` 专用: 除了重算 `dirty`, 还处理「草稿对应的订阅从 `Store` 消失」(被别处删除)——
-    /// 清草稿、焦点退回 `List`、排一条 `s.sub_gone` 通知。这两件事都是业务状态变更, 只能在
-    /// `update()`/`handle_key()` 里做 (`draw()` 不改业务状态)。
+    /// `update()` 专用: 核对一遍草稿是否已经与 `Store` 当前值相等 (D2, 改回原值 / 别的客户端把
+    /// `Store` 改成了跟草稿一样都算) 就真的丢弃; 草稿对应的订阅从 `Store` 消失 (被别处删除) 时
+    /// 也丢弃, 并顺带处理「消失」这件业务逻辑本身 (清草稿、焦点退回 `List`、排一条 `s.sub_gone`
+    /// 通知)——这两件事都是业务状态变更, 只能在 `update()`/`handle_key()` 里做, 不能在 `draw()`
+    /// 里 (`draw()` 不改业务状态)。
     fn sync_draft_with_store(&mut self, store: &Store, s: &'static Strings) {
-        let Some(draft) = &self.draft else {
-            self.dirty = false;
-            return;
-        };
-        match store.subscription(&draft.sub_id) {
-            None => {
-                self.draft = None;
-                self.focus = Focus::List;
-                self.dirty = false;
-                self.pending_notice = Some((ToastKind::Info, s.sub_gone.to_string()));
-            }
-            Some(sub) => {
-                self.dirty = sub.model_slots != draft.model_slots || sub.slot_efforts != draft.slot_efforts;
-            }
+        let Some(sub_id) = self.draft.get().map(|d| d.sub_id.clone()) else { return };
+        let base = store.subscription(&sub_id).map(slot_draft_base);
+        let vanished = self.draft.sync(base.as_ref());
+        if vanished {
+            self.focus = Focus::List;
+            self.pending_notice = Some((ToastKind::Info, s.sub_gone.to_string()));
         }
     }
 
     /// 当前应该显示的槽位值: 有草稿 (且草稿属于这条订阅) 就用草稿, 否则用 `Store` 里的原始值。
     fn effective_model_slots<'a>(&'a self, sub: &'a Subscription) -> &'a ModelSlots {
-        match &self.draft {
+        match self.draft.get() {
             Some(d) if d.sub_id == sub.id => &d.model_slots,
             _ => &sub.model_slots,
         }
     }
 
     fn effective_slot_efforts<'a>(&'a self, sub: &'a Subscription) -> &'a SlotEfforts {
-        match &self.draft {
+        match self.draft.get() {
             Some(d) if d.sub_id == sub.id => &d.slot_efforts,
             _ => &sub.slot_efforts,
-        }
-    }
-
-    /// 草稿不存在, 或者存在但属于别的订阅 (理论上不该发生, 防御性写法) 时新建一份 (从 `Store`
-    /// 克隆); 已经存在且属于这条订阅就直接复用——保证同一次编辑会话内多次改动落在同一份草稿上,
-    /// 不会一改就把上一步的修改冲掉。
-    fn draft_mut(&mut self, sub: &Subscription) -> &mut SlotDraft {
-        let needs_new = self.draft.as_ref().is_none_or(|d| d.sub_id != sub.id);
-        if needs_new {
-            self.draft =
-                Some(SlotDraft { sub_id: sub.id.clone(), model_slots: sub.model_slots.clone(), slot_efforts: sub.slot_efforts.clone() });
-        }
-        match &mut self.draft {
-            Some(d) => d,
-            None => unreachable!("刚刚确保过 draft 是 Some"),
         }
     }
 
@@ -277,13 +255,19 @@ impl Subscriptions {
         }))
     }
 
-    /// `PickerDone` 落地: 按 `tag` 写进草稿 (首次编辑时新建, 见 [`Self::draft_mut`]); 主槽的空白
-    /// 自定义值被拒绝 (拒绝时不新建草稿), 兜底槽的空白等于清空。写完之后重新核对一次 dirty
-    /// (改回原值应该清脏, 见 `sync_draft_with_store`)。跟自己无关的 tag (虚拟模型页的
-    /// `VmAddSubscription`) 直接忽略。
+    /// `PickerDone` 落地: 按 `tag` 通过 [`Draft::edit`] 写进草稿 (首次编辑时惰性克隆, 结果等于
+    /// `Store` 当前值就立刻丢弃, D2/D3 起这条规则收在 `Draft` 内部, 这里不用再手动核对一遍);
+    /// 主槽的空白自定义值被拒绝 (拒绝时不碰草稿), 兜底槽的空白等于清空。跟自己无关的 tag
+    /// (虚拟模型页的 `VmAddSubscription`) 直接忽略。
     fn apply_picker_choice(&mut self, tag: &PickerTag, choice: &PickerChoice, store: &Store, s: &'static Strings) {
         let Some(id) = self.selected_id.clone() else { return };
         let Some(sub) = store.subscription(&id) else { return };
+        // 防御性: 草稿如果属于别的订阅 (理论上不该发生, `focus == Detail` 期间选中项不会变) 先
+        // 丢弃, 不把别的订阅的编辑内容当成这条订阅的基线。
+        if self.draft.get().is_some_and(|d| d.sub_id != sub.id) {
+            self.draft.clear();
+        }
+        let base = slot_draft_base(sub);
         match tag {
             PickerTag::SlotModel { slot } => {
                 let value = match choice {
@@ -294,7 +278,7 @@ impl Subscriptions {
                     self.pending_notice = Some((ToastKind::Info, s.sub_model_required.to_string()));
                     return;
                 }
-                self.draft_mut(sub).model_slots.set(*slot, value);
+                self.draft.edit(&base, |d| d.model_slots.set(*slot, value));
             }
             PickerTag::SlotEffort { slot } => {
                 let value = match choice {
@@ -303,11 +287,10 @@ impl Subscriptions {
                     // `allow_custom: false`: picker 理论上不会产出 Custom, 防御性地忽略。
                     PickerChoice::Custom(_) => return,
                 };
-                self.draft_mut(sub).slot_efforts.set(*slot, value);
+                self.draft.edit(&base, |d| d.slot_efforts.set(*slot, value));
             }
-            PickerTag::VmAddSubscription => return,
+            PickerTag::VmAddSubscription => (),
         }
-        self.sync_draft_with_store(store, s);
     }
 
     /// `s`: 不脏时无动作; 脏时产出 `Action::Mutate(UpdateSlots)`——断线由 `App::start_mutation`
@@ -316,7 +299,7 @@ impl Subscriptions {
         if !self.is_dirty() {
             return None;
         }
-        let draft = self.draft.as_ref()?;
+        let draft = self.draft.get()?;
         Some(Action::Mutate(Mutation::UpdateSlots {
             id: draft.sub_id.clone(),
             model_slots: draft.model_slots.clone(),
@@ -539,8 +522,11 @@ impl Component for Subscriptions {
         let idx = self.resolve_selection(subs);
 
         // 有草稿时 e/t/m/b 一律拒绝 (不管当前 focus——草稿只可能在 `Detail` 焦点下存在, 但这条
-        // 判断不依赖那个不变式), 避免重拉覆盖编辑基线的困惑。
-        if self.draft.is_some() && matches!(key.code, KeyCode::Char('e' | 't' | 'm' | 'b')) {
+        // 判断不依赖那个不变式), 避免重拉覆盖编辑基线的困惑。D2/D3 (fix round P3b) 起
+        // `draft.get().is_some()` 与 `is_dirty()` 恒等价 (零编辑/改回原值都不留草稿, 由
+        // `Draft::edit`/`Draft::sync` 保证), 这里直接查草稿是否存在——与虚拟模型页 V5 的左栏
+        // `*` 标记同一种判定方式, 两个页面对这条不变式的依赖保持一致。
+        if self.draft.get().is_some() && matches!(key.code, KeyCode::Char('e' | 't' | 'm' | 'b')) {
             return Some(Action::Notify { kind: ToastKind::Info, text: s.sub_save_first.to_string() });
         }
 
@@ -607,8 +593,10 @@ impl Component for Subscriptions {
                         Some(Action::OpenConfirm { prompt: s.confirm_discard.to_string(), on_yes: Box::new(Action::DiscardDraft) })
                     } else {
                         // 草稿不脏 (可能压根没有, 也可能改回了原值) 时直接放行, 顺带清掉它——
-                        // `focus == List` 时 `draft` 恒为 `None` 是页面维持的不变式。
-                        self.draft = None;
+                        // `focus == List` 时 `draft` 恒为 `None` 是页面维持的不变式。D2 起改回
+                        // 原值时草稿其实已经被 `Draft::edit` 自动丢弃了, 这里的 `clear()` 只是
+                        // 兜底 (真正没有草稿的普通情况下是个 no-op)。
+                        self.draft.clear();
                         self.focus = Focus::List;
                         None
                     }
@@ -682,30 +670,29 @@ impl Component for Subscriptions {
     fn hints(&self, s: &'static Strings) -> Vec<Hint<'static>> {
         match self.focus {
             Focus::List => {
+                // S1(a) (fix round P3b): `⏎` 现在两种宽度下都会真的切焦点进详情 (Task 5), 不该
+                // 只在窄屏才提示——宽屏用户一样需要知道这个键。
+                vec![("↑↓", s.key_select), ("⏎", s.key_detail), ("e", s.key_toggle), ("t", s.key_test), ("m", s.key_models), ("b", s.key_balance)]
+            }
+            Focus::Detail { .. } => {
+                // 放不下时 keybar 从右往左丢——e/t/m/b 排在最后, 会先被裁掉, 符合简报的预期。
+                // V1(b) (fix round P3b): 脏页面上 `s 保存` 排到 `↑↓ 选择` 右边第一个, 保证它是
+                // 最后才会被裁掉的那批——丢掉保存提示是所有裁剪结果里最糟的一种; 不脏时留在原位
+                // (跟在改模型/改档位后面, 视觉上更贴近它们描述的操作)。
                 let mut hints = vec![("↑↓", s.key_select)];
-                // M5: 详情态不再重复一份 Esc 返回——面板右下角的 `title_bottom` 已经在说这件事了
-                // (见 `draw_detail`), 键位栏这份纯粹是挤占空间, 挤掉了本该放得下的 `b 余额`。
-                if !self.is_wide() {
-                    hints.push(("⏎", s.key_detail));
+                if self.is_dirty() {
+                    hints.push(("s", s.key_save));
+                }
+                hints.push(("⏎", s.key_edit_model));
+                hints.push(("o", s.key_edit_effort));
+                if !self.is_dirty() {
+                    hints.push(("s", s.key_save));
                 }
                 hints.push(("e", s.key_toggle));
                 hints.push(("t", s.key_test));
                 hints.push(("m", s.key_models));
                 hints.push(("b", s.key_balance));
                 hints
-            }
-            Focus::Detail { .. } => {
-                // 放不下时 keybar 从右往左丢——e/t/m/b 排在最后, 会先被裁掉, 符合简报的预期。
-                vec![
-                    ("↑↓", s.key_select),
-                    ("⏎", s.key_edit_model),
-                    ("o", s.key_edit_effort),
-                    ("s", s.key_save),
-                    ("e", s.key_toggle),
-                    ("t", s.key_test),
-                    ("m", s.key_models),
-                    ("b", s.key_balance),
-                ]
             }
         }
     }
@@ -714,30 +701,38 @@ impl Component for Subscriptions {
         s.sub_help_rows
     }
 
-    fn on_subscriptions_changed(&mut self, changed: &[String]) {
+    fn on_subscriptions_changed(&mut self, changed: &[String], store: &Store, s: &'static Strings) {
         // 整体替换而不是往后追加: 页面不可见时攒了好几拨变化, 回来只该闪最新一拨——旧的早就过时了,
         // 而且不去重的 `extend` 会让积压的重复 id 在 `flash_rows.contains` 里白跑好几遍 (I10)。
         self.flash_rows = changed.to_vec();
+        // S1(c) (fix round P3b): `Store` 这一刻刚接受了新列表, 立刻核对一遍草稿对应的订阅还在不在,
+        // 不用等下一次真正的 `update()` (`Refresh`/`Sse`/`PickerDone`/…) 才发现——早一帧总比晚一帧
+        // 好, 尤其是「订阅被删了但用户还盯着详情面板」这种场景。
+        self.sync_draft_with_store(store, s);
     }
 
     fn is_dirty(&self) -> bool {
-        self.dirty
+        self.draft.is_dirty()
     }
 
     fn discard_changes(&mut self) {
-        self.draft = None;
+        self.draft.clear();
         self.focus = Focus::List;
-        self.dirty = false;
     }
 
     fn on_mutation_done(&mut self, mutation: &Mutation, ok: bool) {
         if !ok {
             return;
         }
-        if let Mutation::UpdateSlots { id, .. } = mutation {
-            if self.draft.as_ref().is_some_and(|d| &d.sub_id == id) {
-                self.draft = None;
-                self.dirty = false;
+        // D1 (fix round P3b): 只有「保存时发出去的那份负载」与「结果落地这一刻的当前草稿」完全
+        // 相等才清空——用户在保存在途期间可能已经又编辑了一次 (比如先选 m3、按 s、还没等结果回来
+        // 又选了 m9), 这时不能凭 `id` 匹配就无条件清掉, 会把 m9 这次编辑悄悄冲掉且没有任何提示。
+        if let Mutation::UpdateSlots { id, model_slots, slot_efforts } = mutation {
+            if self.draft.get().is_some_and(|d| &d.sub_id == id) {
+                let saved = SlotDraft { sub_id: id.clone(), model_slots: model_slots.clone(), slot_efforts: slot_efforts.clone() };
+                if self.draft.matches(&saved) {
+                    self.draft.clear();
+                }
             }
         }
     }
@@ -1134,15 +1129,53 @@ fn draw_quota_row(frame: &mut Frame, area: Rect, ctx: &DrawCtx, label: &str, q: 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::i18n::ZH;
 
     /// Fix round 1, #10: 页面不可见时攒了好几拨订阅变化, 回来只该闪最新一拨——`extend` 会把
     /// 旧的也留着, 之后每帧都要多扫一遍这些早就过时的 id。
     #[test]
     fn on_subscriptions_changed_replaces_the_queue_not_appends() {
         let mut page = Subscriptions::default();
-        page.on_subscriptions_changed(&["a".to_string(), "b".to_string()]);
-        page.on_subscriptions_changed(&["c".to_string()]);
+        let store = Store::default();
+        page.on_subscriptions_changed(&["a".to_string(), "b".to_string()], &store, &ZH);
+        page.on_subscriptions_changed(&["c".to_string()], &store, &ZH);
         assert_eq!(page.flash_rows, vec!["c".to_string()], "第三次通知应该整体替换队列, 不是往后追加");
+    }
+
+    /// D3: `Draft<T>` 的 `edit` 帮页面自动做「零编辑不留草稿」, D2 的槽位编辑单测因此可以直接从
+    /// `Draft` 的单测里覆盖——这里只补一条页面层面的集成检查: 通过 `apply_picker_choice` 选回原值
+    /// 之后, `draft` 真的被清空了 (`get()` 返回 `None`), 不是仅仅 `dirty` 缓存变假。
+    #[test]
+    fn a_reverted_pick_actually_clears_the_draft_not_just_the_dirty_cache() {
+        let mut page = Subscriptions::default();
+        let mut store = Store::default();
+        let sub = crate::client::dto::Subscription {
+            id: "1".into(),
+            display_name: "s".into(),
+            provider_display_name: "p".into(),
+            enabled: true,
+            state: crate::client::dto::SubscriptionState::Healthy,
+            cooldown_until: None,
+            last_error_message: None,
+            is_dispatchable: true,
+            quota_usage: vec![],
+            provider_id: "p".into(),
+            base_url: "https://example.invalid".into(),
+            auth_type: "api_key".into(),
+            model_slots: ModelSlots { fable: "d".into(), opus: "a".into(), sonnet: "b".into(), haiku: "c".into(), fallback: String::new() },
+            slot_efforts: Default::default(),
+            referenced_by: vec![],
+            balance_supported: false,
+            balance_cache: None,
+            model_cache: None,
+        };
+        store.apply_subscriptions(1, vec![sub]);
+        page.selected_id = Some("1".into());
+
+        page.apply_picker_choice(&PickerTag::SlotModel { slot: Slot::Fable }, &PickerChoice::Item("m3".into()), &store, &ZH);
+        assert!(page.draft.get().is_some());
+        page.apply_picker_choice(&PickerTag::SlotModel { slot: Slot::Fable }, &PickerChoice::Custom("d".into()), &store, &ZH);
+        assert!(page.draft.get().is_none(), "改回原值应该真的清空草稿, 不是只改 dirty 缓存");
     }
 
     /// M3: 上游错误信息没有长度上限, 旧版 `text.width() as u16` 会在超长字符串上静默环绕

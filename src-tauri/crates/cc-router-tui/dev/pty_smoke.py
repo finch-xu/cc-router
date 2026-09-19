@@ -91,7 +91,11 @@ EXPECT = [
     "已停用",  # set_subscription_enabled 的 toast (Kimi 备用被 e 停用)
     "槽位已保存",  # update_subscription 成功的 toast (Task 5: ⏎⏎ 改模型 ⏎ s 保存)
     "虚拟模型",  # Task 6: 虚拟模型页标题 (标签栏一直可见, 这里顺带确认真进过这一页)
-    "已保存",  # update_virtual_model 成功的 toast (Task 6: l 进 Members、J 重排、s 保存)
+    # update_virtual_model 成功的 toast (Task 6: l 进 Members、J 重排、s 保存)。fix round P3b:
+    # 旧版只断言过 "已保存", 它只是 "槽位已保存" (订阅页保存的 toast) 的子串, 就算虚拟模型页那次
+    # 保存根本没发生也测不出来——`toast_vm_saved` 的实际文案是 `{vm}：已保存` (`i18n.rs`), 这里
+    # 换成 model-fable 专属的完整文案, 真的能证明虚拟模型页的保存生效了。
+    "model-fable：已保存",
 ]
 
 

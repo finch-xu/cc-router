@@ -21,6 +21,7 @@ use cc_router_tui::widgets::toast::ToastKind;
 use cc_router_tui::widgets::{confirm, help};
 use ratatui::backend::TestBackend;
 use ratatui::crossterm::event::{KeyCode, KeyEvent, KeyEventKind, KeyEventState, KeyModifiers};
+use ratatui::style::Modifier;
 use ratatui::Terminal;
 use unicode_width::{UnicodeWidthChar, UnicodeWidthStr};
 
@@ -1440,11 +1441,14 @@ fn drawing_the_same_state_twice_gives_the_same_frame() {
     let second = render(&mut l, 80, 24);
     assert_eq!(first, second, "虚拟模型页草稿态应该幂等");
 
-    // Task 6: 保存中 (右栏标题 spinner) 的状态也应该幂等。
+    // Task 6: 保存中 (右栏标题 spinner) 的状态也应该幂等。model-opus (无 ghost 成员, V2 fix round
+    // P3b 起 model-fable 自带的 ghost 会让 `s` 变成拒绝通知而不是真的进入保存中态)。
     let mut m = vm_app(false);
+    m.handle_key(key(KeyCode::Down)); // model-opus
     m.handle_key(key(KeyCode::Right));
     m.handle_key(key(KeyCode::Char('J')));
     let mutation = m.handle_key(key(KeyCode::Char('s'))).expect("有草稿时 s 应该产出 Action");
+    assert!(matches!(mutation, Action::Mutate(_)), "应该真的产出保存动作, 不是被 ghost 守卫拒绝: {mutation:?}");
     m.update(mutation);
     let first = render(&mut m, 80, 24);
     let second = render(&mut m, 80, 24);
@@ -1948,6 +1952,37 @@ fn global_keys_survive_at_80_columns_on_the_subscriptions_page() {
     assert!(footer.contains(ZH.key_help) && footer.contains(ZH.key_quit), "{footer}");
 }
 
+/// S1(a) (fix round P3b): `⏎` 现在两种宽度下都会真的把焦点切进详情 (Task 5 起), 不该只在窄屏才
+/// 提示——宽屏用户同样需要知道这个键。
+#[test]
+fn enter_hint_shows_in_the_list_focus_at_every_width() {
+    for (w, h) in [(80, 24), (120, 40)] {
+        let out = render(&mut subs_app(false), w, h);
+        let footer = out.lines().last().unwrap_or_else(|| panic!("{w}x{h}: {out}"));
+        assert!(footer.contains(ZH.key_detail), "{w}x{h}: 列表态键位栏应该显示 ⏎ 详情\n{footer}");
+    }
+}
+
+/// S1(b) (fix round P3b): 焦点落在的槽位行应该整行 `REVERSED`, 之前没有单测直接检查过这一点。
+#[test]
+fn focused_slot_row_is_reversed() {
+    let mut a = subs_app(false);
+    render(&mut a, 80, 24);
+    a.handle_key(key(KeyCode::Enter)); // Detail{Fable}
+    let buf = render_buffer(&mut a, 80, 24);
+    let y = (0..buf.area.height)
+        .find(|&y| buffer_row_text(&buf, y).contains("fable"))
+        .unwrap_or_else(|| panic!("找不到 fable 槽这一行"));
+    let style = find_cell_style(&buf, y, "fable");
+    assert!(style.add_modifier.contains(Modifier::REVERSED), "焦点落在的槽位行应该整行 REVERSED");
+
+    // 移开焦点之后 (opus 槽), fable 那一行不再 REVERSED。
+    a.handle_key(key(KeyCode::Char('j')));
+    let buf2 = render_buffer(&mut a, 80, 24);
+    let style2 = find_cell_style(&buf2, y, "fable");
+    assert!(!style2.add_modifier.contains(Modifier::REVERSED), "焦点移开后不该再是 REVERSED\n{}", buffer_row_text(&buf2, y));
+}
+
 // ---------- final-fix: I1 就地操作的完整结果落在详情面板 ----------
 
 /// I1: 失败结果的完整文案只能在详情面板的「上次操作」行看到——toast 单行被截断 (≤72 列, 3 秒就
@@ -2313,6 +2348,95 @@ fn draft_survives_polling_and_is_cleared_only_by_a_successful_save() {
     assert!(!out_after_ok.contains(" *"), "成功后草稿应该被清掉\n{out_after_ok}");
 }
 
+/// D1 (fix round P3b): 一次保存发出去之后 (还没等结果回来) 用户又编辑了一次——结果 (对应第一次
+/// 编辑, m3) 落地时不该无脑清掉草稿, 因为草稿这时已经是第二次编辑 (m9) 了。旧版 `on_mutation_done`
+/// 只按 `id` 匹配就清空, 会把 m9 这次编辑悄悄冲掉且没有任何提示。
+#[test]
+fn edits_made_while_a_save_is_in_flight_survive_it() {
+    let mut a = subs_app(false);
+    render(&mut a, 80, 24);
+    a.handle_key(key(KeyCode::Enter));
+    a.handle_key(key(KeyCode::Enter)); // 打开 Fable picker
+    a.update(Action::PickerDone { tag: PickerTag::SlotModel { slot: Slot::Fable }, choice: PickerChoice::Item("m3".into()) });
+
+    let action = a.handle_key(key(KeyCode::Char('s')));
+    let mutation = match action {
+        Some(Action::Mutate(m)) => m,
+        other => panic!("{other:?}"),
+    };
+    assert_eq!(a.update(Action::Mutate(mutation.clone())), vec![Cmd::Mutate(Box::new(mutation.clone()))]);
+
+    // 保存 (m3) 还在飞行中, 用户又编辑了一次, 改成 m9。
+    a.handle_key(key(KeyCode::Enter)); // 重新打开 Fable picker (焦点还在 Fable 槽)
+    a.update(Action::PickerDone { tag: PickerTag::SlotModel { slot: Slot::Fable }, choice: PickerChoice::Item("m9".into()) });
+
+    // 第一次保存 (m3) 的结果回来了, 后端随后带回来的刷新结果也是 m3 (第一次保存后的真值)。
+    a.update(Action::MutationDone { mutation: mutation.clone(), barrier: 0, result: Ok(MutationOutcome::SlotsSaved) });
+    let mut after_first_save = detail_subs();
+    after_first_save[0].model_slots.fable = "m3".into();
+    a.update(subs_done(2, after_first_save));
+
+    let out = render(&mut a, 80, 24);
+    assert!(out.contains("m9") && out.contains(" *"), "在途保存不该吞掉后续的编辑\n{out}");
+
+    let action2 = a.handle_key(key(KeyCode::Char('s')));
+    assert!(
+        matches!(&action2, Some(Action::Mutate(Mutation::UpdateSlots { model_slots, .. })) if model_slots.fable == "m9"),
+        "s 应该发第二次编辑 (m9) 的状态, 不是已经过时的第一次 (m3)\n{action2:?}"
+    );
+}
+
+/// D2(a) (fix round P3b): 选中一个新模型再选回原值——草稿应该被真的丢弃 (不是「存在但不脏」的
+/// 僵尸态), 之后 `t` 应该正常发出 `TestConnection`, 不该被 `sub_save_first` 拦下。
+#[test]
+fn a_reverted_draft_is_dropped_and_actions_work_again() {
+    let mut a = subs_app(false);
+    render(&mut a, 80, 24);
+    a.handle_key(key(KeyCode::Enter));
+    a.handle_key(key(KeyCode::Enter)); // 打开 Fable picker
+    a.update(Action::PickerDone { tag: PickerTag::SlotModel { slot: Slot::Fable }, choice: PickerChoice::Item("m3".into()) });
+    assert!(render(&mut a, 80, 24).contains(" *"));
+
+    a.handle_key(key(KeyCode::Enter)); // 重新打开 picker
+    a.update(Action::PickerDone { tag: PickerTag::SlotModel { slot: Slot::Fable }, choice: PickerChoice::Custom("glm-4.6".into()) }); // 改回原值
+    let clean_out = render(&mut a, 80, 24);
+    assert!(!clean_out.contains(" *"), "{clean_out}");
+
+    let action = a.handle_key(key(KeyCode::Char('t')));
+    assert_eq!(
+        action,
+        Some(Action::Mutate(Mutation::TestConnection { id: "1".into() })),
+        "改回原值后草稿应该被真的丢弃, t 应该正常生效, 不该被「先保存」拦下\n{action:?}"
+    );
+}
+
+/// D2(c) (fix round P3b): 没有草稿的页面, 别的客户端 (桌面 app) 改了这条订阅的槽位——不该凭空
+/// 冒出 `*`。
+#[test]
+fn a_clean_page_never_turns_dirty_from_someone_elses_change() {
+    // 订阅详情页。
+    let mut a = subs_app(false);
+    render(&mut a, 80, 24);
+    a.handle_key(key(KeyCode::Enter)); // 进详情, 但不编辑, 没有草稿
+    let mut changed = detail_subs();
+    changed[0].model_slots.fable = "someone-else-changed-it".into();
+    a.update(subs_done(2, changed));
+    a.update(Action::Refresh);
+    let out = render(&mut a, 80, 24);
+    assert!(!out.contains(" *"), "没有草稿时, 别的客户端改动不该显示 *\n{out}");
+    assert!(out.contains("someone-else-changed-it"), "应该正常显示新值\n{out}");
+
+    // 虚拟模型页: 同理。
+    let mut b = vm_app(false);
+    b.handle_key(key(KeyCode::Right)); // 进 Members, 没有编辑, 没有草稿
+    let mut vms = vm_list();
+    vms.iter_mut().find(|vm| vm.name == "model-fable").unwrap().mode = RoutingMode::RoundRobin;
+    b.update(vm_done(2, vms));
+    b.update(Action::Refresh);
+    let out2 = render(&mut b, 80, 24);
+    assert!(!out2.contains(" *"), "{out2}");
+}
+
 /// 有草稿时 Esc 弹确认, 选「是」丢弃草稿并回到列表。
 #[test]
 fn esc_with_a_draft_asks_and_yes_returns_to_the_list() {
@@ -2385,13 +2509,37 @@ fn draft_is_dropped_when_the_subscription_disappears() {
     let mut without_zhipu = detail_subs();
     without_zhipu.remove(0);
     a.update(subs_done(2, without_zhipu));
-    // `subs_done` 本身不会调页面的 `update` (只广播 `on_subscriptions_changed`); 要靠下一次真的
-    // 调用 `update()` 的动作 (这里用 `Refresh`, 与切页/轮询同一条路) 才会核对草稿。
+    // S1(c) (fix round P3b) 起 `subs_done` 广播 `on_subscriptions_changed` 那一刻本身就已经核对过
+    // 草稿了 (见 `sub_gone_is_noticed_as_soon_as_the_list_arrives`); 这里再补一次真正的 `update()`
+    // (`Refresh`, 与切页/轮询同一条路) 纯粹是双重确认——即便没有这一行, 上面 `subs_done` 那一刻
+    // 就已经该生效了。
     a.update(Action::Refresh);
     let out = render(&mut a, 80, 24);
     assert!(!out.contains(" *"), "订阅消失后草稿应该被丢弃\n{out}");
     assert!(out.contains(ZH.sub_gone), "{out}");
     assert!(out.contains(ZH.sub_col_name), "焦点应该退回列表\n{out}");
+}
+
+/// S1(c) (fix round P3b): 草稿对应的订阅消失这件事, 不用等下一次真正的 `update()` 动作——`Store`
+/// 刚接受新列表 (`on_subscriptions_changed`) 那一刻就该立刻生效, 不留一帧的延迟。
+#[test]
+fn sub_gone_is_noticed_as_soon_as_the_list_arrives() {
+    let mut a = subs_app(false);
+    render(&mut a, 80, 24);
+    a.handle_key(key(KeyCode::Enter));
+    a.handle_key(key(KeyCode::Enter));
+    a.update(Action::PickerDone { tag: PickerTag::SlotModel { slot: Slot::Fable }, choice: PickerChoice::Item("m3".into()) });
+    assert!(render(&mut a, 80, 24).contains(" *"));
+
+    let mut without_zhipu = detail_subs();
+    without_zhipu.remove(0);
+    // 只喂 `subs_done`, 不额外调 `Action::Refresh`——如果通知本身不会立刻核对草稿, 这里应该还
+    // 看得到 `*` 和详情面板。
+    a.update(subs_done(2, without_zhipu));
+    let out = render(&mut a, 80, 24);
+    assert!(!out.contains(" *"), "订阅消失后草稿应该立刻被丢弃, 不用等下一次 update()\n{out}");
+    assert!(out.contains(ZH.sub_gone), "{out}");
+    assert!(out.contains(ZH.sub_col_name), "焦点应该立刻退回列表\n{out}");
 }
 
 /// I2 修正: 短模型名不该把 effort 列推到很远的右边——模型名结尾与 "high" 之间的距离不该超过
@@ -2574,6 +2722,25 @@ fn fallback_marks_translated_subscriptions_without_a_fallback_slot() {
 
     let gemini_fb_line = out.lines().find(|l| l.contains("Gemini 有兜底")).unwrap_or_else(|| panic!("{out}"));
     assert!(!gemini_fb_line.contains(ZH.vm_will_skip), "配了兜底槽的不该标记\n{gemini_fb_line}");
+
+    // V3 (fix round P3b): 后端 `ModelSlots::fallback_model()` 是 `trim()` 之后判空的, 纯空白的
+    // 兜底槽也该被视为未配置——否则会漏标一条实际会被 pipeline 统一跳过守卫拦下的订阅。用独立的
+    // fixture (不复用 `vm_subs`/`vm_list`, 避免牵动其它依赖那两个函数固定候选列表的用例)。
+    let mut subs = vm_subs();
+    let mut gemini_blank = sub("6", "Gemini 空白兜底", SubscriptionState::Healthy);
+    gemini_blank.provider_display_name = "Gemini".into();
+    gemini_blank.auth_type = "gemini_api_key".into();
+    gemini_blank.model_slots.fallback = "  ".into();
+    subs.push(gemini_blank);
+    let mut vms = vm_list();
+    vms.iter_mut().find(|vm| vm.name == "model-fallback").unwrap().subscription_ids.push("6".into());
+    let mut b = vm_app_with(false, vms, subs);
+    for _ in 0..4 {
+        b.handle_key(key(KeyCode::Down));
+    }
+    let out2 = render(&mut b, 80, 24);
+    let blank_line = out2.lines().find(|l| l.contains("Gemini 空白兜底")).unwrap_or_else(|| panic!("{out2}"));
+    assert!(blank_line.contains(ZH.vm_will_skip), "纯空白的兜底槽应该视为未配置\n{blank_line}");
 }
 
 #[test]
@@ -2692,18 +2859,128 @@ fn reverting_every_change_clears_dirty() {
     assert!(!out.contains(" *"), "改回原值应该清脏\n{out}");
 }
 
+/// D2(b) (fix round P3b): `x`/`J`/`K` 在空列表上、以及 `K` 在第一项 / `J` 在最后一项上, 都是
+/// no-op——旧版 `draft_mut` 会在这些场景里无条件新建一份 (跟 `Store` 完全相等的) 草稿, 表现成
+/// 「什么都没做但页面莫名其妙变脏」。
+#[test]
+fn noop_edits_do_not_create_a_draft() {
+    let mut a = vm_app(false);
+    for _ in 0..3 {
+        a.handle_key(key(KeyCode::Down)); // fable -> opus -> sonnet -> haiku (空列表)
+    }
+    a.handle_key(key(KeyCode::Right)); // Members, model-haiku ids=[]
+
+    a.handle_key(key(KeyCode::Char('x')));
+    a.handle_key(key(KeyCode::Char('J')));
+    a.handle_key(key(KeyCode::Char('K')));
+    let out = render(&mut a, 80, 24);
+    assert!(!out.contains(" *"), "空列表上 x/J/K 都不该产生草稿\n{out}");
+
+    // 不脏时切页不该弹确认, 应该真的切过去 (总览页的「今日」面板标题是静态文案, 与是否已经加载
+    // 过总览数据无关, 用它确认真的切走了)。
+    a.update(Action::SwitchTab(Tab::Overview));
+    let out2 = render(&mut a, 80, 24);
+    assert!(!out2.contains(ZH.confirm_discard), "不脏时切页不该弹确认\n{out2}");
+    assert!(out2.contains(ZH.ov_today), "应该已经真的切到总览页\n{out2}");
+
+    // 没有草稿时, 别的客户端把这个虚拟模型的成员列表改了——应该正常显示新值, 不带 *。
+    let mut a2 = vm_app(false);
+    for _ in 0..3 {
+        a2.handle_key(key(KeyCode::Down));
+    }
+    a2.handle_key(key(KeyCode::Right));
+    a2.handle_key(key(KeyCode::Char('x')));
+    a2.handle_key(key(KeyCode::Char('J')));
+    a2.handle_key(key(KeyCode::Char('K')));
+    let mut vms2 = vm_list();
+    vms2.iter_mut().find(|vm| vm.name == "model-haiku").unwrap().subscription_ids = vec!["1".into()];
+    a2.update(vm_done(2, vms2));
+    let out3 = render(&mut a2, 80, 24);
+    assert!(!out3.contains(" *"), "没有草稿时, 别处的改动不该显示 *\n{out3}");
+    assert!(out3.contains("智谱主号"), "应该正常显示 Store 的新值\n{out3}");
+
+    // K 在第一项 / J 在最后一项上也是 no-op (model-opus, ids=["1","2","3"])。
+    let mut b = vm_app(false);
+    b.handle_key(key(KeyCode::Down)); // model-opus
+    b.handle_key(key(KeyCode::Right));
+    b.handle_key(key(KeyCode::Char('K'))); // 已经在第一项
+    let out4 = render(&mut b, 80, 24);
+    assert!(!out4.contains(" *"), "K 在第一项上应该是 no-op\n{out4}");
+
+    b.handle_key(key(KeyCode::Down));
+    b.handle_key(key(KeyCode::Down)); // 光标移到最后一项
+    b.handle_key(key(KeyCode::Char('J'))); // 已经在最后一项
+    let out5 = render(&mut b, 80, 24);
+    assert!(!out5.contains(" *"), "J 在最后一项上应该是 no-op\n{out5}");
+}
+
+/// V2 (fix round P3b): 草稿里还有 `Store` 找不到的 id (「已删除」的订阅) 时, `s` 应该拒绝并
+/// 引导用户先移除, 不能把裸 id 发给后端换回一句英文报错; 移除之后 `s` 应该正常生效。
+#[test]
+fn saving_with_ghost_members_is_refused_with_guidance() {
+    let mut a = vm_app(false); // model-fable ids=["1", "ghost-legacy-sub-999"]
+    a.handle_key(key(KeyCode::Right)); // Members
+    a.handle_key(key(KeyCode::Char('m'))); // 造一个脏草稿 (只改调度模式, ghost 仍在列表里)
+
+    let action = a.handle_key(key(KeyCode::Char('s')));
+    assert_eq!(
+        action,
+        Some(Action::Notify { kind: ToastKind::Info, text: ZH.vm_remove_ghosts_first.into() }),
+        "草稿里还有已删除的订阅时应该拒绝保存, 引导用户先移除\n{action:?}"
+    );
+
+    a.handle_key(key(KeyCode::Down)); // 光标移到下标 1 (ghost)
+    a.handle_key(key(KeyCode::Char('x'))); // 移除它
+    let out = render(&mut a, 80, 24);
+    assert!(!out.contains(ZH.vm_missing), "移除后不该再显示 ghost 行\n{out}");
+
+    let action2 = a.handle_key(key(KeyCode::Char('s')));
+    assert!(matches!(action2, Some(Action::Mutate(Mutation::UpdateVirtualModel { .. }))), "移除 ghost 后 s 应该正常生效\n{action2:?}");
+}
+
+/// V4 (fix round P3b): 成员超过面板高度、光标滚到后面时, 闪烁 rect 必须按渲染之后的真实可视窗口
+/// 换算——用未经换算的原始下标算 rect 会闪错行 / 闪到面板外。这里只断言不 panic (`fx_enabled: true`
+/// 才会真的把 rect 交给 tachyonfx 处理); 「只有可视行才会闪」由 `member_flash_rect` 的纯函数单测
+/// 覆盖几何计算本身。
+#[test]
+fn flash_rects_stay_inside_the_scrolled_visible_window() {
+    let subs: Vec<Subscription> = (1..=30).map(|i| sub(&i.to_string(), &format!("订阅{i}"), SubscriptionState::Healthy)).collect();
+    let ids: Vec<String> = subs.iter().map(|s| s.id.clone()).collect();
+    let vms = vec![VirtualModel { name: "model-fable".into(), mode: RoutingMode::Sequential, subscription_ids: ids }];
+    let mut a = vm_app_with(true, vms.clone(), subs.clone()); // fx_enabled: true, 否则闪烁不会真的进 tachyonfx
+    a.handle_key(key(KeyCode::Right)); // Members
+    for _ in 0..29 {
+        a.handle_key(key(KeyCode::Down)); // 光标滚到最后一项 ("订阅30"), 列表自动滚动
+    }
+
+    // 让一条已经滚出视野的 ("订阅1") 和一条仍在视野内的 ("订阅30") 同时变化, 排进 flash_rows。
+    let mut changed_subs = subs.clone();
+    changed_subs[0].state = SubscriptionState::RateLimited;
+    changed_subs[0].is_dispatchable = false;
+    changed_subs[29].state = SubscriptionState::RateLimited;
+    changed_subs[29].is_dispatchable = false;
+    a.update(subs_done(2, changed_subs));
+
+    // 不该 panic (滚动之后 offset 换算错误会把 rect 的 y 算到面板高度以外)。
+    render(&mut a, 80, 24);
+}
+
 #[test]
 fn s_sends_the_draft_in_order() {
     let mut a = vm_app(false);
-    a.handle_key(key(KeyCode::Right)); // Members, model-fable ids=["1", ghost]
-    a.handle_key(key(KeyCode::Char('J'))); // -> [ghost, "1"]
+    // model-opus (ids=["1","2","3"], 无 ghost 成员) 而不是 model-fable——V2 (fix round P3b) 起草稿
+    // 里有 `Store` 找不到的 id 会被 `s` 拒绝, model-fable 自带的 ghost 成员会跟这个用例真正想测的
+    // 「保存按草稿顺序发送」这件事互相干扰, 见 `saving_with_ghost_members_is_refused_with_guidance`。
+    a.handle_key(key(KeyCode::Down)); // model-opus
+    a.handle_key(key(KeyCode::Right)); // Members, ids=["1","2","3"]
+    a.handle_key(key(KeyCode::Char('J'))); // -> ["2","1","3"]
     let action = a.handle_key(key(KeyCode::Char('s')));
     assert_eq!(
         action,
         Some(Action::Mutate(Mutation::UpdateVirtualModel {
-            name: "model-fable".into(),
-            mode: RoutingMode::Sequential,
-            subscription_ids: vec!["ghost-legacy-sub-999".into(), "1".into()],
+            name: "model-opus".into(),
+            mode: RoutingMode::RoundRobin,
+            subscription_ids: vec!["2".into(), "1".into(), "3".into()],
         }))
     );
 }
@@ -2711,14 +2988,16 @@ fn s_sends_the_draft_in_order() {
 #[test]
 fn s_refuses_offline_and_ignores_while_busy() {
     let mut a = vm_app(false);
+    // model-opus: 同上, 避开 model-fable 自带的 ghost 成员 (与本用例要测的断线/忙碌拒绝无关)。
+    a.handle_key(key(KeyCode::Down)); // model-opus
     a.handle_key(key(KeyCode::Right)); // Members
     assert_eq!(a.handle_key(key(KeyCode::Char('s'))), None, "不脏时 s 不该有动作");
 
     a.handle_key(key(KeyCode::Char('J'))); // 造草稿
     let mutation = Mutation::UpdateVirtualModel {
-        name: "model-fable".into(),
-        mode: RoutingMode::Sequential,
-        subscription_ids: vec!["ghost-legacy-sub-999".into(), "1".into()],
+        name: "model-opus".into(),
+        mode: RoutingMode::RoundRobin,
+        subscription_ids: vec!["2".into(), "1".into(), "3".into()],
     };
     assert_eq!(a.handle_key(key(KeyCode::Char('s'))), Some(Action::Mutate(mutation.clone())));
 
@@ -2731,6 +3010,52 @@ fn s_refuses_offline_and_ignores_while_busy() {
     a.update(Action::Connected { app_version: VERSION.into() });
     assert_eq!(a.update(Action::Mutate(mutation.clone())), vec![Cmd::Mutate(Box::new(mutation.clone()))]);
     assert!(a.update(Action::Mutate(mutation)).is_empty(), "同一虚拟模型忙碌中应该被忽略");
+}
+
+/// D1 (fix round P3b): 一次保存发出去之后 (还没等结果回来) 用户又重排序了一次——结果落地时不该
+/// 无脑清掉草稿, 因为草稿这时已经是第二次重排序的结果了。用 model-opus (无 ghost 成员, 避免和
+/// V2 的守卫互相干扰)。
+#[test]
+fn reorders_made_while_a_save_is_in_flight_survive_it() {
+    let mut a = vm_app(false);
+    a.handle_key(key(KeyCode::Down)); // model-opus, ids=["1","2","3"]
+    a.handle_key(key(KeyCode::Right)); // Members
+    a.handle_key(key(KeyCode::Char('J'))); // cursor 0 -> swap(0,1): ["2","1","3"], cursor=1
+    let action = a.handle_key(key(KeyCode::Char('s')));
+    let mutation = match action {
+        Some(Action::Mutate(m)) => m,
+        other => panic!("{other:?}"),
+    };
+    assert_eq!(a.update(Action::Mutate(mutation.clone())), vec![Cmd::Mutate(Box::new(mutation.clone()))]);
+
+    // 保存 (["2","1","3"]) 还在飞行中, 用户又按了一次 J: cursor=1 -> swap(1,2): ["2","3","1"]。
+    a.handle_key(key(KeyCode::Char('J')));
+
+    // 第一次保存的结果回来了, 后端随后带回来的刷新结果也是第一次保存的顺序。
+    a.update(Action::MutationDone { mutation: mutation.clone(), barrier: 0, result: Ok(MutationOutcome::VirtualModelSaved) });
+    let mut vms_after_first_save = vm_list();
+    vms_after_first_save.iter_mut().find(|vm| vm.name == "model-opus").unwrap().subscription_ids =
+        vec!["2".into(), "1".into(), "3".into()];
+    a.update(vm_done(2, vms_after_first_save));
+
+    let out = render(&mut a, 80, 24);
+    assert!(out.contains(" *"), "在途保存不该吞掉后续的重排序\n{out}");
+    let pos = |needle: &str| out.find(needle).unwrap_or_else(|| panic!("缺 {needle}\n{out}"));
+    assert!(
+        pos("Kimi 备用") < pos("示例中转") && pos("示例中转") < pos("智谱主号"),
+        "成员顺序应该是第二次重排序 (\"2\",\"3\",\"1\") 之后的样子\n{out}"
+    );
+
+    let action2 = a.handle_key(key(KeyCode::Char('s')));
+    assert_eq!(
+        action2,
+        Some(Action::Mutate(Mutation::UpdateVirtualModel {
+            name: "model-opus".into(),
+            mode: RoutingMode::RoundRobin,
+            subscription_ids: vec!["2".into(), "3".into(), "1".into()],
+        })),
+        "s 应该发第二次重排序之后的状态"
+    );
 }
 
 #[test]
@@ -2753,12 +3078,12 @@ fn draft_survives_polling_and_clears_on_successful_save_only() {
     };
     a.update(Action::Mutate(mutation.clone()));
     a.update(Action::MutationDone { mutation: mutation.clone(), barrier: 0, result: Err("网络错误".into()) });
-    // 失败会弹一条 toast, 80 列下它贴右边缘, 会盖住右栏标题上那颗 `*`——先画一帧让它记下
-    // `shown_at`, 再把表调到过期之后重画一次, 把它弹出队列, 这样才能干净地看到标题。
-    render(&mut a, 80, 24);
-    a.update(Action::Tick { now_ms: NOW + 4_000 });
+    // V5 (fix round P3b): 失败会弹一条 toast, 80 列下它贴右边缘, 会盖住右栏标题上那颗 `*`——不用
+    // 再等 toast 过期才能干净地看到, 现在左栏这个虚拟模型自己的列表行也带 `*` (toast 不会盖住
+    // 最左边这一栏), 直接查它就够了 (不再需要 `render` + `Tick` 的过期工作区)。
     let out_after_fail = render(&mut a, 80, 24);
-    assert!(out_after_fail.contains(" *"), "失败应该保留草稿\n{out_after_fail}");
+    let fable_line = vm_list_row(&out_after_fail, "model-fable");
+    assert!(fable_line.contains(" *"), "失败应该保留草稿, 左栏列表行应该显示 *\n{fable_line}");
 
     a.update(Action::Mutate(mutation.clone()));
     a.update(Action::MutationDone { mutation, barrier: 0, result: Ok(MutationOutcome::VirtualModelSaved) });
@@ -2852,9 +3177,56 @@ fn unknown_mode_is_never_saved_silently() {
     );
 
     a.handle_key(key(KeyCode::Char('m'))); // Unknown -> Sequential
+
+    // V2 (fix round P3b): model-fable 自带一个 ghost 成员 (`Store` 里找不到的 id), 光是模式挪到
+    // 已知值还不够保存——先把它挪走 (`J` 已经把它换到下标 0), 否则会被 V2 的守卫拦下 (那不是这个
+    // 用例要验证的东西, 专门的守卫行为见 `saving_with_ghost_members_is_refused_with_guidance`)。
+    a.handle_key(key(KeyCode::Up)); // 光标回到下标 0 (ghost)
+    a.handle_key(key(KeyCode::Char('x'))); // 移除它
+
     let action2 = a.handle_key(key(KeyCode::Char('s')));
     assert!(
         matches!(action2, Some(Action::Mutate(Mutation::UpdateVirtualModel { mode: RoutingMode::Sequential, .. }))),
-        "挪到已知模式之后应该允许保存, 实际 {action2:?}"
+        "挪到已知模式并清掉 ghost 成员之后应该允许保存, 实际 {action2:?}"
     );
+}
+
+// ---------- V1(b): 脏页面 80 列下 `s 保存` 不该被裁掉 (两个页面各一份, fix round P3b) ----------
+//
+// 两边字面上是同一个测试名 (`save_hint_survives_at_80_columns_when_dirty`), 分别按页面套一层
+// module 让 Rust 允许重名——这份重复正是 spec 要求的「两个页面都要有一条同名测试」。
+
+mod subscriptions_save_hint {
+    use super::*;
+
+    /// 详情态脏的时候, `hints()` 把 `s 保存` 排到 `↑↓ 选择` 右边第一个 (在 `⏎ 改模型` / `o 改档位`
+    /// 前面)——keybar 放不下时从右往左丢, 这样 `s` 是最后才会被裁掉的那批, 不脏时它退回原位
+    /// (跟在 `o` 后面)。
+    #[test]
+    fn save_hint_survives_at_80_columns_when_dirty() {
+        let mut a = subs_app(false);
+        render(&mut a, 80, 24);
+        a.handle_key(key(KeyCode::Enter));
+        a.handle_key(key(KeyCode::Enter));
+        a.update(Action::PickerDone { tag: PickerTag::SlotModel { slot: Slot::Fable }, choice: PickerChoice::Item("m3".into()) });
+        let out = render(&mut a, 80, 24);
+        let footer = out.lines().last().unwrap_or_else(|| panic!("{out}"));
+        assert!(footer.contains(ZH.key_save), "脏页面 80 列下 s 保存不该被丢\n{footer}");
+    }
+}
+
+mod virtual_models_save_hint {
+    use super::*;
+
+    /// 同上, 虚拟模型页的 Members 焦点。旧版把 `s` 排在 `hints()` 最后一个, 80 列下反而是最先被
+    /// 丢掉的那个 (`m 模式` 排它前面, 会先留下)——这正是简报里描述的观测到的 bug。
+    #[test]
+    fn save_hint_survives_at_80_columns_when_dirty() {
+        let mut a = vm_app(false);
+        a.handle_key(key(KeyCode::Right));
+        a.handle_key(key(KeyCode::Char('J')));
+        let out = render(&mut a, 80, 24);
+        let footer = out.lines().last().unwrap_or_else(|| panic!("{out}"));
+        assert!(footer.contains(ZH.key_save), "脏页面 80 列下 s 保存不该被丢\n{footer}");
+    }
 }

@@ -212,8 +212,24 @@ impl App {
     /// `Store` 刚接受了一份订阅列表 (`FetchDone` 两个分支共用): 广播给所有页面。**唯一**列出
     /// 全部页面字段的地方 —— 以后加新页面只改这一处, 不会出现"某个 FetchDone 分支忘了通知新
     /// 页面"这种只有部分刷新路径才触发、没有测试能咬住的漏更 (fix round 1, I1)。
+    ///
+    /// S1(c) (fix round P3b): `on_subscriptions_changed` 现在可能顺带产出一条通知 (订阅详情页的
+    /// 草稿对应的订阅这一刻从 `Store` 里消失了) —— 这条通知不是从 `Component::update()` 触发的,
+    /// 不会被 `update_page` 那条轮询路径捡到, 所以这里也照 `update_page` 的规矩轮询一次取走,
+    /// 不然要等下一次真正的 `update()` 调用才会显示, 违背"立刻生效"的本意。
     fn notify_subscriptions_changed(&mut self, changed: &[String]) {
-        self.pages.for_each_mut(|page| page.on_subscriptions_changed(changed));
+        let store = &self.store;
+        let s = self.s;
+        let mut notices = Vec::new();
+        self.pages.for_each_mut(|page| {
+            page.on_subscriptions_changed(changed, store, s);
+            if let Some(notice) = page.take_notice() {
+                notices.push(notice);
+            }
+        });
+        for (kind, text) in notices {
+            self.push_toast(Toast::new(kind, text));
+        }
     }
 
     /// 两处 toast 入口共用: 与最新排队的一条重复 (同 kind 同 text) 就丢弃, 否则挤掉最旧的排队项

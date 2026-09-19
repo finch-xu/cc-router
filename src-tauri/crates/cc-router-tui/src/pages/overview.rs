@@ -288,7 +288,7 @@ impl Component for Overview {
         vec![("r", s.key_refresh)]
     }
 
-    fn on_subscriptions_changed(&mut self, changed: &[String]) {
+    fn on_subscriptions_changed(&mut self, changed: &[String], _store: &Store, _s: &'static Strings) {
         // 整体替换而不是往后追加: 页面不可见时攒了好几拨变化, 回来只该闪最新一拨 (Fix round 1, #10,
         // 与订阅页同一处改动)。
         self.flash_rows = changed.to_vec();

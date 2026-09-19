@@ -207,6 +207,9 @@ pub struct Strings {
     pub vm_will_skip: &'static str,
     /// `a` 键在没有可加入的订阅时的提示 (就地回答, 不开弹窗)。
     pub vm_nothing_to_add: &'static str,
+    /// V2 (fix round P3b): 草稿里还有 `Store` 找不到的 id (「已删除」的订阅) 时, `s` 拒绝保存的
+    /// 提示——不能把这种裸 id 发给后端, 后端会用一句英文报错拒绝, 对用户毫无意义。
+    pub vm_remove_ghosts_first: &'static str,
     /// `a` 弹窗的标题, 参数是虚拟模型名。
     pub vm_pick_add_title: fn(vm: &str) -> String,
     /// 草稿的调度模式是 `RoutingMode::Unknown` (后端某天加的新模式, 这版 TUI 不认得) 时, `s`
@@ -278,7 +281,7 @@ pub const ZH: Strings = Strings {
     key_edit_model: "改模型",
     key_edit_effort: "改档位",
     key_save: "保存",
-    key_move: "J K 移动",
+    key_move: "移动",
     key_add: "加入",
     key_remove: "移除",
     key_mode: "模式",
@@ -417,6 +420,7 @@ pub const ZH: Strings = Strings {
     vm_missing: "(已删除)",
     vm_will_skip: "将被跳过",
     vm_nothing_to_add: "所有订阅都已在列表里",
+    vm_remove_ghosts_first: "列表里有已删除的订阅,请先按 x 移除",
     vm_pick_add_title: |vm| format!("给 {vm} 加入订阅"),
     vm_unknown_mode: "这个调度模式当前版本不认识,请在桌面 app 里修改",
     vm_help_rows: &[
