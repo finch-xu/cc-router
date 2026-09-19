@@ -26,6 +26,21 @@ impl Store {
         self.subscriptions.iter().find(|s| s.id == id)
     }
 
+    /// 乐观更新: `set_subscription_enabled` 成功后立刻把这条订阅的 `enabled` 改过来, 不等下一次
+    /// `apply_subscriptions`——否则「按 e、还没等到重拉结果就又按一次 e」会读到没改过的旧值,
+    /// 算出同一个目标值发给后端 (变成 no-op), 且第二次 toast 文案与第一次相同被去重规则吞掉,
+    /// 用户毫无反馈。**刻意不碰 `subs_issued`**: 这只是本地临时纠正, 后端权威结果 (`Fetch::Subscriptions`
+    /// 刷新) 落地时该按原来的序号规则正常覆盖它。返回 `true` 表示找到了这条订阅并改了。
+    pub fn set_enabled(&mut self, id: &str, enabled: bool) -> bool {
+        match self.subscriptions.iter_mut().find(|s| s.id == id) {
+            Some(sub) => {
+                sub.enabled = enabled;
+                true
+            }
+            None => false,
+        }
+    }
+
     /// 接受一份订阅列表。`issued` 小于已接受的序号 → 丢弃, 返回 `None` (晚到的旧结果)。
     /// 否则替换并返回「状态变了的订阅 id」(首次加载返回空 —— 首次不算变化): 以
     /// `(state, enabled, is_dispatchable)` 三元组比较, 只比两边都有的 id。
@@ -155,5 +170,21 @@ mod tests {
         // b 被移除, c 是新出现的 —— 都不算「状态变了」。
         let changed = store.apply_subscriptions(2, vec![sub("a", SubscriptionState::Healthy), sub("c", SubscriptionState::Healthy)]);
         assert_eq!(changed, Some(vec![]));
+    }
+
+    #[test]
+    fn set_enabled_optimistically_updates_without_bumping_issued() {
+        let mut store = Store::default();
+        store.apply_subscriptions(5, vec![sub("a", SubscriptionState::Healthy)]);
+
+        assert!(store.set_enabled("a", false));
+        assert!(!store.subscription("a").unwrap().enabled);
+
+        // 不该动 subs_issued: 晚到的、序号更旧的后端结果仍然按老规则被丢弃 (不受这次乐观更新影响)。
+        let changed = store.apply_subscriptions(3, vec![sub("a", SubscriptionState::RateLimited)]);
+        assert_eq!(changed, None, "issued=3 仍然晚于已接受的 issued=5, 乐观更新不该让这条判断失效");
+        assert!(!store.subscription("a").unwrap().enabled, "旧结果被丢弃, 乐观更新的值应该保留");
+
+        assert!(!store.set_enabled("missing", true), "订阅不在 Store 里时应该返回 false, 不 panic");
     }
 }

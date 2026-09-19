@@ -919,6 +919,14 @@ fn drawing_the_same_state_twice_gives_the_same_frame() {
     let first = render(&mut c, 80, 24);
     let second = render(&mut c, 80, 24);
     assert_eq!(first, second, "订阅页详情态应该幂等");
+
+    // 订阅页忙碌行 (Task 4): spinner 是唯一读 tick 计数器的渲染路径, 同一帧画两遍必须得到同一个
+    // 符号, 不能因为 throbber 步长算法而漂移。
+    let mut d = subs_app(false);
+    d.update(Action::Mutate(Mutation::TestConnection { id: "1".into() }));
+    let first = render(&mut d, 80, 24);
+    let second = render(&mut d, 80, 24);
+    assert_eq!(first, second, "忙碌行 (spinner) 也应该幂等");
 }
 
 /// F3: 空列表加载时没有「旧」行可以比较, 不该把更早排队、还没画出来的闪烁带到后面某一帧。
@@ -1070,6 +1078,35 @@ fn keys_on_the_subscriptions_page_map_to_mutations() {
     );
 }
 
+/// 忙碌表在 `MutationDone` 落地时就清空了, 但 `Store` 里的 `enabled` 要等下一轮
+/// `Cmd::Fetch(Subscriptions)` 真正跑完才会更新。这中间有个窗口: 第一次 `e` 的结果已经回来
+/// (toast 弹过、忙碌表已清), 但刷新还没跑完, 这时马上再按一次 `e` 必须读到**乐观更新过**的
+/// `enabled`, 朝反方向走——而不是从 `Store` 里的旧值重新算出同一个目标 (变成 no-op 请求,
+/// 且因为 toast 文案与上一条相同被去重规则吞掉, 用户毫无反馈)。
+#[test]
+fn a_second_toggle_right_after_the_first_goes_the_other_way() {
+    let mut a = subs_app(false); // id "1" (智谱主号) 默认 enabled=true
+    assert_eq!(
+        a.handle_key(key(KeyCode::Char('e'))),
+        Some(Action::Mutate(Mutation::SetEnabled { id: "1".into(), enabled: false }))
+    );
+    let mutation = Mutation::SetEnabled { id: "1".into(), enabled: false };
+    a.update(Action::Mutate(mutation.clone()));
+    // 结果回来了 (忙碌表已清), 但 subs_done 刷新还没跑完——Store 里原始的 enabled=true 没变。
+    a.update(Action::MutationDone { mutation, result: Ok(MutationOutcome::EnabledSet) });
+
+    assert_eq!(
+        a.handle_key(key(KeyCode::Char('e'))),
+        Some(Action::Mutate(Mutation::SetEnabled { id: "1".into(), enabled: true })),
+        "第一次 e 已经把它关掉了 (乐观更新), 这次 e 应该朝相反方向 (重新打开) 走"
+    );
+    assert_eq!(
+        a.update(Action::Mutate(Mutation::SetEnabled { id: "1".into(), enabled: true })),
+        vec![Cmd::Mutate(Mutation::SetEnabled { id: "1".into(), enabled: true })],
+        "这次应该真的发出去, 不是 no-op"
+    );
+}
+
 /// 同一订阅的操作同时只跑一个 (按订阅 id 判重, 不按 `Mutation` 整体): 连按两次 `t` 第二次被丢弃;
 /// 另一条订阅同时 `t` 照发; `MutationDone` 之后可以再发。
 #[test]
@@ -1106,6 +1143,20 @@ fn mutations_are_refused_while_offline() {
     assert!(a.update(Action::Mutate(Mutation::TestConnection { id: "1".into() })).is_empty());
     let out = render(&mut a, 80, 24);
     assert!(out.contains(ZH.toast_offline), "{out}");
+}
+
+/// 断线判定必须排在忙碌表前面: 一条订阅正忙着 (上一次操作还没等到 `MutationDone` 就掉线了) 时再按
+/// 键, 也该看到「未连接」提示, 而不是被忙碌表的「已经在跑, 丢弃」悄悄吞掉、界面毫无反馈。
+#[test]
+fn a_key_press_on_a_busy_row_while_offline_still_shows_the_offline_toast() {
+    let mut a = subs_app(false); // 已连接
+    let m = Mutation::TestConnection { id: "1".into() };
+    assert!(!a.update(Action::Mutate(m.clone())).is_empty(), "先让这条订阅忙起来");
+
+    a.update(Action::ConnectionLost); // 忙碌表里的记录还在, 但现在断线了。
+    assert!(a.update(Action::Mutate(m)).is_empty(), "断线时不该真的发请求");
+    let out = render(&mut a, 80, 24);
+    assert!(out.contains(ZH.toast_offline), "忙碌订阅断线时按键也该弹「未连接」\n{out}");
 }
 
 /// 「示例中转」(id "3") 的 `balance_supported = false`: `b` 应该就地回答, 不产生 `Cmd`。
@@ -1215,14 +1266,42 @@ fn every_mutation_outcome_toasts_and_refetches() {
 #[test]
 fn a_busy_row_shows_a_spinner_and_the_detail_says_what_is_running() {
     let mut a = subs_app(false);
-    let before = render(&mut a, 80, 24); // 列表态, 智谱主号选中 (健康, "●")
+    let before = render(&mut a, 80, 24); // 列表态, 三条都在。
+    let zhipu_before = before.lines().find(|l| l.contains("智谱主号")).unwrap_or_else(|| panic!("{before}"));
+    assert!(zhipu_before.contains('●'), "忙碌前应该显示健康符号\n{zhipu_before}");
+
     a.update(Action::Mutate(Mutation::TestConnection { id: "1".into() }));
     let busy_list = render(&mut a, 80, 24);
-    assert_ne!(before, busy_list, "忙碌时列表第一列应该换成 spinner");
+    let zhipu_busy = busy_list.lines().find(|l| l.contains("智谱主号")).unwrap_or_else(|| panic!("{busy_list}"));
+    assert!(!zhipu_busy.contains('●'), "忙碌行不该再显示健康 badge 符号, 应该换成 spinner\n{zhipu_busy}");
+    // 没在忙的行仍然照常显示自己的 badge 符号——忙碌只影响那一行, 不是整页。
+    let kimi = busy_list.lines().find(|l| l.contains("Kimi 备用")).unwrap_or_else(|| panic!("{busy_list}"));
+    assert!(kimi.contains('◐'), "没在忙的行应该保留自己的 badge 符号\n{kimi}");
+    let relay = busy_list.lines().find(|l| l.contains("示例中转")).unwrap_or_else(|| panic!("{busy_list}"));
+    assert!(relay.contains('✕'), "没在忙的行应该保留自己的 badge 符号\n{relay}");
 
     a.handle_key(key(KeyCode::Enter));
     let out = render(&mut a, 80, 24);
     assert!(out.contains(ZH.sub_busy_testing), "详情面板的状态行应该追加进行中文案\n{out}");
+}
+
+/// 简报规定四个就地操作在列表态与详情态都生效; 这里专门覆盖窄屏详情态打开时按 e/t/m/b 仍然
+/// 能映射出正确的 `Action::Mutate` (不是只有列表态测过)。
+#[test]
+fn mutation_keys_work_inside_the_narrow_detail_view() {
+    let mut a = subs_app(false);
+    render(&mut a, 80, 24); // 让页面记住这是窄屏。
+    a.handle_key(key(KeyCode::Enter)); // 进入详情, 选中的是第一条 "智谱主号" (id "1", enabled=true)。
+    let out = render(&mut a, 80, 24);
+    assert!(out.contains(ZH.sub_f_endpoint), "应该已经在详情态\n{out}");
+
+    assert_eq!(
+        a.handle_key(key(KeyCode::Char('e'))),
+        Some(Action::Mutate(Mutation::SetEnabled { id: "1".into(), enabled: false }))
+    );
+    assert_eq!(a.handle_key(key(KeyCode::Char('t'))), Some(Action::Mutate(Mutation::TestConnection { id: "1".into() })));
+    assert_eq!(a.handle_key(key(KeyCode::Char('m'))), Some(Action::Mutate(Mutation::RefreshModels { id: "1".into() })));
+    assert_eq!(a.handle_key(key(KeyCode::Char('b'))), Some(Action::Mutate(Mutation::RefreshBalance { id: "1".into() })));
 }
 
 /// 结果回来时订阅已经不在 `Store` 里了 (比如用户在别处删掉了这条订阅) —— toast 应该退回用 id。

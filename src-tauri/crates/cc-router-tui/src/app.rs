@@ -231,11 +231,13 @@ impl App {
     /// 要发的那条才 `insert`。
     fn start_mutation(&mut self, m: Mutation) -> Vec<Cmd> {
         let id = m.subscription_id();
-        if self.busy.contains_key(id) {
-            return Vec::new();
-        }
+        // 断线判定必须排在忙碌表前面: 断线期间按在一条正忙的订阅上 (比如上一次操作还没跑完就掉线了)
+        // 也该看到「未连接」提示, 而不是被忙碌表悄悄吞掉、什么反馈都没有。
         if self.conn != Conn::Connected {
             self.push_toast(Toast::new(ToastKind::Error, self.s.toast_offline));
+            return Vec::new();
+        }
+        if self.busy.contains_key(id) {
             return Vec::new();
         }
         if matches!(m, Mutation::RefreshBalance { .. }) {
@@ -260,6 +262,10 @@ impl App {
         match result {
             Ok(MutationOutcome::EnabledSet) => {
                 let enabled = matches!(mutation, Mutation::SetEnabled { enabled: true, .. });
+                // 乐观更新 Store, 不等下一次 Fetch::Subscriptions 落地: 否则「按 e、还没刷新完又按
+                // 一次 e」会从 Store 读到没改过的旧 enabled, 算出同一个目标值发给后端 (no-op),
+                // 且第二条 toast 文案与第一条相同, 被 push_toast 的去重规则吞掉, 用户毫无反馈。
+                self.store.set_enabled(&id, enabled);
                 let text = if enabled { (self.s.toast_enabled)(&name) } else { (self.s.toast_disabled)(&name) };
                 self.push_toast(Toast::new(ToastKind::Success, text));
             }

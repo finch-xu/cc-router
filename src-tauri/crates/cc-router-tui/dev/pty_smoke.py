@@ -158,6 +158,11 @@ def main():
     for keys, wait in ((b"2", 0.6), (b"j", 0.6), (b"t", 0.8), (b"e", 0.8), (b"?", 0.6), (b"\x1b", 0.6), (b"3", 0.6), (b"1", 0.6)):
         os.write(fd, keys)
         pump(wait)
+    # 让两条 toast (t 的「连接正常」、e 的「已停用」) 彻底放完再量「空闲」: toast 一条只能显示
+    # 3s (`toast::LIFETIME_MS`) + 300ms 消散动效, 第二条还要等第一条弹出队列才轮到它显示——
+    # 不等够的话空闲窗口会撞上消散动效的 60fps 重画, 把「按需重绘」误判成一直在跑 (曾经在这里
+    # 从 260 字节涨到 1291 字节, 就是这个重叠)。
+    pump(3.5)
     before_idle = len(out)
     pump(2.0)
     idle_bytes = len(out) - before_idle
