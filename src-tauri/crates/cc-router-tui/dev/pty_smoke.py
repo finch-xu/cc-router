@@ -2,10 +2,12 @@
 """cc-router-tui 的伪终端冒烟测试 (仅 macOS / Linux)。
 
 单测用 TestBackend, 测不到「真的进备用屏幕、真的读键盘、真的退得出来」这一段。这个脚本:
-  1. 起一个假的 cc-router 后端 (9 个 command + 事件流), 在临时目录写一份 runtime.json;
-  2. 在 80x24 的伪终端里跑 TUI, 依次按 2 / j / t / e / ? / Esc / 3 / 1 / q
-     (2 = 订阅页; j 选中第二条 "Kimi 备用"; t = 测试连接, e = 就地启停——Task 4 加的四个就地操作里
-     挑两个真的打一次假后端; 3 = 虚拟模型页, 仍是占位, 顶掉原来 2 占的那个断言);
+  1. 起一个假的 cc-router 后端 (11 个 command + 事件流), 在临时目录写一份 runtime.json;
+  2. 在 80x24 的伪终端里跑 TUI, 依次按 2 / j / t / e / ? / Esc / ⏎⏎glm⏎ / s / 3 / l / J / s / 4 / 1 / q
+     (2 = 订阅页; j 选中第二条 "Kimi 备用"; t = 测试连接, e = 就地启停; ⏎⏎glm⏎ + s = 改 fable 槽模型
+     再保存——Task 4/5 加的就地操作里挑几个真的打一次假后端; 3 = 虚拟模型页, Task 6 起是真页面:
+     l 从 Models 进 Members、J 把第一条订阅下移一位造一个草稿、s 保存——真的打一次假后端的
+     `update_virtual_model`; 4 = 实时路由, 仍是占位, 顶掉原来 3 占的那个断言);
   3. 断言: 退出码 0、进出过备用屏幕、几个页面的关键文字 (含就地操作的 toast 文案) 都出现过、
      空闲 2 秒几乎不输出 (按需重绘)。
 
@@ -72,6 +74,14 @@ DATA = {
     # 返回值反序列化成 `serde_json::Value` 就直接丢弃 (权威值等 refetch 的 list_subscriptions 拿),
     # 所以随便一个合法 JSON 都够, 空对象最省事。
     "update_subscription": {},
+    # Task 6: 5 个虚拟模型, 后端固定顺序; subscription_ids 引用上面三条假订阅。
+    "list_virtual_models": [
+        {"name": "model-fable", "mode": "sequential", "subscription_ids": ["1", "2"]},
+        {"name": "model-opus", "mode": "round_robin", "subscription_ids": ["1"]},
+        {"name": "model-sonnet", "mode": "sticky", "subscription_ids": ["1", "2", "3"]},
+        {"name": "model-haiku", "mode": "sequential", "subscription_ids": []},
+        {"name": "model-fallback", "mode": "sequential", "subscription_ids": ["3"]},
+    ],
 }
 
 # 去掉转义序列之后必须出现过的文字
@@ -80,6 +90,8 @@ EXPECT = [
     "连接正常",  # test_connection 成功的 toast
     "已停用",  # set_subscription_enabled 的 toast (Kimi 备用被 e 停用)
     "槽位已保存",  # update_subscription 成功的 toast (Task 5: ⏎⏎ 改模型 ⏎ s 保存)
+    "虚拟模型",  # Task 6: 虚拟模型页标题 (标签栏一直可见, 这里顺带确认真进过这一页)
+    "已保存",  # update_virtual_model 成功的 toast (Task 6: l 进 Members、J 重排、s 保存)
 ]
 
 
@@ -99,6 +111,17 @@ class Handler(BaseHTTPRequestHandler):
             for s in DATA["list_subscriptions"]:
                 if s["id"] == req.get("id"):
                     s["enabled"] = req.get("enabled", s["enabled"])
+            body = json.dumps(None).encode()
+        elif name == "update_virtual_model":
+            # 同样真的改一下内存里的条目, 好让 s 之后的 `Cmd::Fetch(VirtualModels)` 补拉看到新顺序 /
+            # 新模式。`input` 是 `{mode, subscription_ids}` (`runtime.rs::call_mutation` 拼的形状)。
+            # 返回 JSON null (对应 Rust 端的 `()`, 与 `set_subscription_enabled` 同一套约定)。
+            req = json.loads(raw or b"{}")
+            input_ = req.get("input", {})
+            for vm in DATA["list_virtual_models"]:
+                if vm["name"] == req.get("name"):
+                    vm["mode"] = input_.get("mode", vm["mode"])
+                    vm["subscription_ids"] = input_.get("subscription_ids", vm["subscription_ids"])
             body = json.dumps(None).encode()
         else:
             body = json.dumps(DATA[name]).encode()
@@ -164,7 +187,10 @@ def main():
     #   输入 "glm" (追加在预填值后面, 变成 "dglm", 够用了——这条冒烟不关心具体模型名) →
     #   ⏎ 选中「使用「dglm」」这一行, 写进草稿 → s 保存 (真的打一次假后端的 update_subscription,
     #   等够 0.8s 让响应 + toast + 重拉列表跑完);
-    # 3 = 虚拟模型页 (仍占位, 期待「此页面将在后续版本提供」); 1 = 回总览。
+    # 3 = 虚拟模型页 (Task 6 起是真页面, 默认选中 model-fable / Models 焦点):
+    #   l 切到 Members 焦点 (选中 model-fable 的成员列表) → J 把第一条订阅下移一位 (造一个草稿) →
+    #   s 保存 (真的打一次假后端的 update_virtual_model, 等够 0.8s 让响应 + toast + 重拉都跑完);
+    # 4 = 实时路由 (仍占位, 期待「此页面将在后续版本提供」, 顶掉原来 3 占的那个断言); 1 = 回总览。
     for keys, wait in (
         (b"2", 0.6),
         (b"j", 0.6),
@@ -178,16 +204,22 @@ def main():
         (b"\r", 0.4),
         (b"s", 0.8),
         (b"3", 0.6),
+        (b"l", 0.4),
+        (b"J", 0.4),
+        (b"s", 0.8),
+        (b"4", 0.6),
         (b"1", 0.6),
     ):
         os.write(fd, keys)
         pump(wait)
-    # 让三条 toast (t 的「连接正常」、e 的「已停用」、s 的「槽位已保存」) 彻底放完再量「空闲」:
-    # toast 一条只能显示 3s (`toast::LIFETIME_MS`) + 300ms 消散动效, 后一条还要等前一条弹出队列
-    # 才轮到它显示——三条挤在一起比 Task 4 时的两条要多等一整个显示周期, 不等够的话空闲窗口会
-    # 撞上消散动效的 60fps 重画, 把「按需重绘」误判成一直在跑 (Task 4 时曾经在这里从 260 字节涨到
-    # 1291 字节, 就是这个重叠; 三条顺序显示大约要 9~10s 才能全部放完, 这里留了余量)。
-    pump(5.0)
+    # 让四条 toast (t 的「连接正常」、e 的「已停用」、订阅页 s 的「槽位已保存」、虚拟模型页 s 的
+    # 「已保存」) 彻底放完再量「空闲」: toast 一条只能显示 3s (`toast::LIFETIME_MS`) + 300ms 消散
+    # 动效, 后一条还要等前一条弹出队列才轮到它显示 (`MAX_TOASTS=4`, 四条都不会被挤掉)——四条顺序
+    # 显示大约要 13s 才能全部放完 (从第一条 t 的 toast 大约 t≈5s 开始展示算起), 不等够的话空闲窗口
+    # 会撞上消散动效的 60fps 重画, 把「按需重绘」误判成一直在跑 (Task 4 时曾经在两条 toast 上踩过
+    # 这个坑, 从 260 字节涨到 1291 字节; Task 6 加了第四条 toast, 这里把 settle pump 从 5s 延到 9s
+    # 留够余量)。
+    pump(9.0)
     before_idle = len(out)
     pump(2.0)
     idle_bytes = len(out) - before_idle

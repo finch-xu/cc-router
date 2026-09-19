@@ -640,11 +640,12 @@ mod tests {
         App::new(AppOptions { strings: &ZH, theme: Theme::new(crate::theme::ColorMode::TrueColor), fx_enabled: false, now_ms: NOW, tui_version: VERSION })
     }
 
-    /// 切到一个占位页 (`Tab::VirtualModels`) 并把它标记成 dirty——三个占位 tab 共用同一个
-    /// `Placeholder` 实例, 选哪个不影响测试意图。
+    /// 切到一个占位页 (`Tab::Live`) 并把它标记成 dirty——`Live`/`Logs` 两个占位 tab 共用同一个
+    /// `Placeholder` 实例, 选哪个不影响测试意图。**不用 `Tab::VirtualModels`**: Task 6 起它是
+    /// 真页面 (`pages::virtual_models::VirtualModels`), 不再挂占位组件, 够不着这个测试专用钩子。
     fn dirty_app() -> App {
         let mut a = app();
-        a.update(Action::SwitchTab(Tab::VirtualModels));
+        a.update(Action::SwitchTab(Tab::Live));
         a.pages.placeholder.set_force_dirty(true);
         a
     }
@@ -701,7 +702,7 @@ mod tests {
     fn switching_tabs_on_a_dirty_page_asks_first_and_yes_discards() {
         let mut a = dirty_app();
         assert!(a.update(Action::SwitchTab(Tab::Overview)).is_empty(), "dirty 时切页应该先确认");
-        assert_eq!(a.tab, Tab::VirtualModels, "确认之前不该真的切走");
+        assert_eq!(a.tab, Tab::Live, "确认之前不该真的切走");
         assert!(a.pages.placeholder.is_dirty());
 
         a.update(Action::Confirmed(Box::new(Action::SwitchTab(Tab::Overview))));
@@ -713,17 +714,17 @@ mod tests {
     /// `PrevTab` 走的是同一个 `guard_dirty` helper, 但从没被单独断言过。
     #[test]
     fn next_tab_and_prev_tab_on_a_dirty_page_ask_first_and_yes_discards() {
-        let mut a = dirty_app(); // tab = VirtualModels (index 2)
+        let mut a = dirty_app(); // tab = Live (index 3)
         assert!(a.update(Action::NextTab).is_empty(), "dirty 时 NextTab 应该先确认");
-        assert_eq!(a.tab, Tab::VirtualModels, "确认之前不该真的切走");
+        assert_eq!(a.tab, Tab::Live, "确认之前不该真的切走");
         a.update(Action::Confirmed(Box::new(Action::NextTab)));
-        assert_eq!(a.tab, Tab::Live, "y 之后应该真的切到下一页");
+        assert_eq!(a.tab, Tab::Logs, "y 之后应该真的切到下一页");
 
         let mut b = dirty_app();
         assert!(b.update(Action::PrevTab).is_empty(), "dirty 时 PrevTab 应该先确认");
-        assert_eq!(b.tab, Tab::VirtualModels);
+        assert_eq!(b.tab, Tab::Live);
         b.update(Action::Confirmed(Box::new(Action::PrevTab)));
-        assert_eq!(b.tab, Tab::Subscriptions, "y 之后应该真的切到上一页");
+        assert_eq!(b.tab, Tab::VirtualModels, "y 之后应该真的切到上一页");
     }
 
     /// Fix round E: `Action::DiscardDraft` (页面自己按 Esc 放弃编辑时用) 应该直接调用当前页面的

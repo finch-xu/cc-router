@@ -4,7 +4,7 @@
 //! 文案与桌面端独立一份 (TUI 用语更短), 但状态名等术语沿用桌面端 `src/i18n/locales/zh.json` 的叫法。
 //! **en / ja 译文在 P6 补**: 现在 [`strings`] 对三种语言都返回 [`ZH`], 语言解析逻辑已经是最终形态。
 
-use crate::client::dto::{QuotaPeriod, SubscriptionState};
+use crate::client::dto::{QuotaPeriod, RoutingMode, SubscriptionState};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Lang {
@@ -59,6 +59,11 @@ pub struct Strings {
     pub key_edit_model: &'static str,
     pub key_edit_effort: &'static str,
     pub key_save: &'static str,
+    /// Task 6: 虚拟模型页——成员列表里 `J`/`K` 重排序、`a` 加入、`x` 移除。
+    pub key_move: &'static str,
+    pub key_add: &'static str,
+    pub key_remove: &'static str,
+    pub key_mode: &'static str,
 
     pub help_title: &'static str,
     /// (键, 说明)
@@ -179,6 +184,36 @@ pub struct Strings {
     pub sub_model_required: &'static str,
     /// 草稿对应的订阅从 `Store` 消失 (被别处删除) 时的提示。
     pub sub_gone: &'static str,
+
+    // ---------- Task 6: 虚拟模型页 ----------
+    pub vm_title: &'static str,
+    /// `RoutingMode` 的四个短名 (列表列用), 通过 [`Strings::vm_mode_short`] 取。
+    pub vm_mode_seq: &'static str,
+    pub vm_mode_rr: &'static str,
+    pub vm_mode_sticky: &'static str,
+    pub vm_mode_unknown: &'static str,
+    /// 四个全名 (带线上名字, 成员面板 `title_bottom` 用), 通过 [`Strings::vm_mode_full`] 取。
+    pub vm_mode_full_seq: &'static str,
+    pub vm_mode_full_rr: &'static str,
+    pub vm_mode_full_sticky: &'static str,
+    pub vm_mode_full_unknown: &'static str,
+    /// 成员面板 `title_bottom`: `{mode_full} · {n} 个订阅`。
+    pub vm_members_summary: fn(mode_full: &str, n: usize) -> String,
+    pub vm_empty: &'static str,
+    /// 订阅 id 在 `Store` 里找不到 (被别处删除) 时, 名字退化成 id 前 8 位 + 这个后缀。
+    pub vm_missing: &'static str,
+    /// 仅 `model-fallback`: 订阅是翻译类 (`auth_type != "api_key"`) 且没配兜底槽时, 行尾追加这个
+    /// 警告 (对应后端 pipeline 的统一跳过守卫)。
+    pub vm_will_skip: &'static str,
+    /// `a` 键在没有可加入的订阅时的提示 (就地回答, 不开弹窗)。
+    pub vm_nothing_to_add: &'static str,
+    /// `a` 弹窗的标题, 参数是虚拟模型名。
+    pub vm_pick_add_title: fn(vm: &str) -> String,
+    /// 草稿的调度模式是 `RoutingMode::Unknown` (后端某天加的新模式, 这版 TUI 不认得) 时, `s`
+    /// 拒绝保存的提示——`Unknown.as_wire()` 会静默降级成 `"sequential"`, 不能让用户在不知情的
+    /// 情况下把它发回后端。
+    pub vm_unknown_mode: &'static str,
+    pub vm_help_rows: &'static [(&'static str, &'static str)],
 }
 
 impl Strings {
@@ -200,6 +235,24 @@ impl Strings {
             QuotaPeriod::Weekly => self.q_weekly,
             QuotaPeriod::Monthly => self.q_monthly,
             QuotaPeriod::Total | QuotaPeriod::Unknown => self.q_total,
+        }
+    }
+
+    pub fn vm_mode_short(&self, mode: RoutingMode) -> &'static str {
+        match mode {
+            RoutingMode::Sequential => self.vm_mode_seq,
+            RoutingMode::RoundRobin => self.vm_mode_rr,
+            RoutingMode::Sticky => self.vm_mode_sticky,
+            RoutingMode::Unknown => self.vm_mode_unknown,
+        }
+    }
+
+    pub fn vm_mode_full(&self, mode: RoutingMode) -> &'static str {
+        match mode {
+            RoutingMode::Sequential => self.vm_mode_full_seq,
+            RoutingMode::RoundRobin => self.vm_mode_full_rr,
+            RoutingMode::Sticky => self.vm_mode_full_sticky,
+            RoutingMode::Unknown => self.vm_mode_full_unknown,
         }
     }
 }
@@ -225,6 +278,10 @@ pub const ZH: Strings = Strings {
     key_edit_model: "改模型",
     key_edit_effort: "改档位",
     key_save: "保存",
+    key_move: "J K 移动",
+    key_add: "加入",
+    key_remove: "移除",
+    key_mode: "模式",
 
     help_title: "键位",
     help_rows: &[
@@ -345,6 +402,33 @@ pub const ZH: Strings = Strings {
     sub_effort_na_kiro: "Kiro 不支持思考档位",
     sub_model_required: "模型不能为空",
     sub_gone: "这条订阅已不存在",
+
+    vm_title: "虚拟模型",
+    vm_mode_seq: "顺序",
+    vm_mode_rr: "轮询",
+    vm_mode_sticky: "会话",
+    vm_mode_unknown: "未知",
+    vm_mode_full_seq: "顺序 (sequential)",
+    vm_mode_full_rr: "轮询 (round_robin)",
+    vm_mode_full_sticky: "会话亲和 (sticky)",
+    vm_mode_full_unknown: "未知",
+    vm_members_summary: |mode, n| format!("{mode} · {n} 个订阅"),
+    vm_empty: "还没有绑定订阅,按 a 加入",
+    vm_missing: "(已删除)",
+    vm_will_skip: "将被跳过",
+    vm_nothing_to_add: "所有订阅都已在列表里",
+    vm_pick_add_title: |vm| format!("给 {vm} 加入订阅"),
+    vm_unknown_mode: "这个调度模式当前版本不认识,请在桌面 app 里修改",
+    vm_help_rows: &[
+        ("↑↓ / j k", "上一项 / 下一项"),
+        ("⏎ / → / l", "进入订阅列表"),
+        ("Esc / ← / h", "返回虚拟模型列表"),
+        ("J / K", "下移 / 上移当前订阅"),
+        ("a", "加入订阅"),
+        ("x", "移除当前订阅"),
+        ("m", "切换调度模式"),
+        ("s", "保存修改"),
+    ],
 };
 
 pub fn strings(lang: Lang) -> &'static Strings {

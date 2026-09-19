@@ -17,10 +17,12 @@ use crate::widgets::toast::ToastKind;
 pub mod overview;
 pub mod placeholder;
 pub mod subscriptions;
+pub mod virtual_models;
 
 use overview::Overview;
 use placeholder::Placeholder;
 use subscriptions::Subscriptions;
+use virtual_models::VirtualModels;
 
 /// 画一帧需要的只读环境 + 动效入口。
 pub struct DrawCtx<'a> {
@@ -87,6 +89,7 @@ pub trait Component {
 pub struct Pages {
     pub overview: Overview,
     pub subscriptions: Subscriptions,
+    pub virtual_models: VirtualModels,
     pub placeholder: Placeholder,
 }
 
@@ -97,7 +100,8 @@ impl Pages {
         match tab {
             Tab::Overview => &self.overview,
             Tab::Subscriptions => &self.subscriptions,
-            Tab::VirtualModels | Tab::Live | Tab::Logs => &self.placeholder,
+            Tab::VirtualModels => &self.virtual_models,
+            Tab::Live | Tab::Logs => &self.placeholder,
         }
     }
 
@@ -106,16 +110,18 @@ impl Pages {
         match tab {
             Tab::Overview => &mut self.overview,
             Tab::Subscriptions => &mut self.subscriptions,
-            Tab::VirtualModels | Tab::Live | Tab::Logs => &mut self.placeholder,
+            Tab::VirtualModels => &mut self.virtual_models,
+            Tab::Live | Tab::Logs => &mut self.placeholder,
         }
     }
 
-    /// 给每个页面各恰好一次的机会 (占位页被 `VirtualModels` / `Live` / `Logs` 三个 `Tab` 共用,
-    /// 这里也只调一次, 不是三次)。`App::notify_subscriptions_changed` 用它取代手写的「一个个列出
-    /// 字段名」, 以后加新页面只改这一处。
+    /// 给每个页面各恰好一次的机会 (占位页被 `Live` / `Logs` 两个 `Tab` 共用, 这里也只调一次,
+    /// 不是两次)。`App::notify_subscriptions_changed` 用它取代手写的「一个个列出字段名」, 以后加
+    /// 新页面只改这一处。
     pub fn for_each_mut(&mut self, mut f: impl FnMut(&mut dyn Component)) {
         f(&mut self.overview);
         f(&mut self.subscriptions);
+        f(&mut self.virtual_models);
         f(&mut self.placeholder);
     }
 }
@@ -129,6 +135,6 @@ mod tests {
         let mut pages = Pages::default();
         let mut count = 0;
         pages.for_each_mut(|_| count += 1);
-        assert_eq!(count, 3, "总览 / 订阅 / 占位三个页面字段各恰好一次, 占位页不该因为被多个 Tab 共用就多算");
+        assert_eq!(count, 4, "总览 / 订阅 / 虚拟模型 / 占位四个页面字段各恰好一次, 占位页不该因为被多个 Tab 共用就多算");
     }
 }

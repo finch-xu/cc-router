@@ -11,7 +11,7 @@ use cc_router_tui::app::{App, AppOptions, MIN_HEIGHT};
 use cc_router_tui::client::dto::{
     BalanceCache, BalanceEntry, BalanceSeverity, BalanceSnapshot, ModelCache, ModelInfo, ModelSlots, OverallStats, ProxyStatus,
     QuotaPeriod, QuotaUsage, RefreshBalanceResult, RefreshModelsResult, RoutingMode, SeriesPoint, Settings, SlotEfforts, Subscription,
-    SubscriptionState, TestConnectionResult, EFFORT_CHOICES,
+    SubscriptionState, TestConnectionResult, VirtualModel, EFFORT_CHOICES,
 };
 use cc_router_tui::i18n::ZH;
 use cc_router_tui::pages::Pages;
@@ -301,8 +301,9 @@ fn help_popup_80x24() {
 #[test]
 fn placeholder_page_80x24() {
     let mut a = loaded(false);
-    // 订阅页 (Tab::Subscriptions) 从 Task 3 起是真页面了, 占位快照换一个仍然占位的标签。
-    a.update(Action::SwitchTab(Tab::VirtualModels));
+    // 订阅页 (Tab::Subscriptions) 从 Task 3 起、虚拟模型页 (Tab::VirtualModels) 从 Task 6 起都是
+    // 真页面了, 占位快照换一个仍然占位的标签 (Tab::Live)。
+    a.update(Action::SwitchTab(Tab::Live));
     insta::assert_snapshot!(render(&mut a, 80, 24));
 }
 
@@ -1174,6 +1175,8 @@ fn only_the_visible_page_polls_and_only_while_connected() {
     assert_eq!(sub_fetches, vec![Cmd::Fetch(Fetch::Subscriptions)], "订阅页可见时轮询应该发 Fetch::Subscriptions");
 }
 
+/// 订阅相关的 SSE 事件在总览页 / 订阅页 (Task 5) / 虚拟模型页 (Task 6) 都会重拉订阅列表——三个
+/// 页面都在 `update()` 里消费 `SSE_REFETCH`; 只有仍是占位的标签 (`Tab::Live`) 才会忽略它。
 #[test]
 fn subscription_events_refetch_the_list_only_on_the_overview() {
     let ev = |name: &str| Action::Sse { name: name.into(), data: "\"1\"".into() };
@@ -1181,7 +1184,7 @@ fn subscription_events_refetch_the_list_only_on_the_overview() {
     assert_eq!(a.update(ev("subscription_state_changed")), vec![Cmd::Fetch(Fetch::Subscriptions)]);
     assert_eq!(a.update(ev("subscription_quota_reached")), vec![Cmd::Fetch(Fetch::Subscriptions)]);
     assert!(a.update(ev("route_attempt_started")).is_empty());
-    a.update(Action::SwitchTab(Tab::VirtualModels));
+    a.update(Action::SwitchTab(Tab::Live));
     assert!(a.update(ev("subscription_state_changed")).is_empty());
 }
 
@@ -1415,6 +1418,37 @@ fn drawing_the_same_state_twice_gives_the_same_frame() {
     let first = render(&mut i, 80, 24);
     let second = render(&mut i, 80, 24);
     assert_eq!(first, second, "有草稿的状态应该幂等");
+
+    // Task 6: 虚拟模型页 — Models 焦点 (默认态)。
+    let mut j = vm_app(false);
+    let first = render(&mut j, 80, 24);
+    let second = render(&mut j, 80, 24);
+    assert_eq!(first, second, "虚拟模型页 Models 焦点应该幂等");
+
+    // Task 6: 焦点在右栏 (Members)。
+    let mut k = vm_app(false);
+    k.handle_key(key(KeyCode::Right));
+    let first = render(&mut k, 80, 24);
+    let second = render(&mut k, 80, 24);
+    assert_eq!(first, second, "虚拟模型页 Members 焦点应该幂等");
+
+    // Task 6: 有未保存草稿的状态 (标题带 `*`)。
+    let mut l = vm_app(false);
+    l.handle_key(key(KeyCode::Right));
+    l.handle_key(key(KeyCode::Char('J')));
+    let first = render(&mut l, 80, 24);
+    let second = render(&mut l, 80, 24);
+    assert_eq!(first, second, "虚拟模型页草稿态应该幂等");
+
+    // Task 6: 保存中 (右栏标题 spinner) 的状态也应该幂等。
+    let mut m = vm_app(false);
+    m.handle_key(key(KeyCode::Right));
+    m.handle_key(key(KeyCode::Char('J')));
+    let mutation = m.handle_key(key(KeyCode::Char('s'))).expect("有草稿时 s 应该产出 Action");
+    m.update(mutation);
+    let first = render(&mut m, 80, 24);
+    let second = render(&mut m, 80, 24);
+    assert_eq!(first, second, "虚拟模型页忙碌态应该幂等");
 }
 
 /// F3: 空列表加载时没有「旧」行可以比较, 不该把更早排队、还没画出来的闪烁带到后面某一帧。
@@ -2405,4 +2439,422 @@ fn subscriptions_dirty_80x24() {
     a.handle_key(key(KeyCode::Enter));
     a.update(Action::PickerDone { tag: PickerTag::SlotModel { slot: Slot::Fable }, choice: PickerChoice::Item("m3".into()) });
     insta::assert_snapshot!(render(&mut a, 80, 24));
+}
+
+// ---------- 虚拟模型页 (Task 6) ----------
+
+/// 定位左栏「这个虚拟模型」所在的列表行——不能只 `find(|l| l.contains(name))`: 右栏边框的
+/// `title_top` 在选中这个虚拟模型时也会显示同一个名字, 且排在左栏列表行前面 (border 行先画)。
+/// 左栏列表行同时带着模式短名, 用这个多一条件把它跟边框标题行区分开。
+fn vm_list_row<'a>(out: &'a str, name: &str) -> &'a str {
+    let modes = [ZH.vm_mode_seq, ZH.vm_mode_rr, ZH.vm_mode_sticky, ZH.vm_mode_unknown];
+    out.lines()
+        .find(|l| l.contains(name) && modes.iter().any(|m| l.contains(m)))
+        .unwrap_or_else(|| panic!("找不到 {name} 所在的列表行\n{out}"))
+}
+
+/// 5 条订阅, 覆盖虚拟模型页要用到的每条规则:
+///   - "1" 智谱主号: 健康, api_key, 无兜底槽。
+///   - "2" Kimi 备用: 限流, api_key。
+///   - "3" 示例中转: 凭证失效, api_key——放进 model-fallback 验证「api_key 类永远不标记跳过」。
+///   - "4" Gemini 中转: 翻译类 (`auth_type` 非 api_key) 且没配兜底槽——放进 model-fallback 验证
+///     「将被跳过」标记。
+///   - "5" Gemini 有兜底: 翻译类但配了兜底槽——验证「配了兜底槽的不标记」。
+fn vm_subs() -> Vec<Subscription> {
+    let zhipu = sub("1", "智谱主号", SubscriptionState::Healthy);
+    let mut kimi = sub("2", "Kimi 备用", SubscriptionState::RateLimited);
+    kimi.provider_display_name = "Moonshot".into();
+    let mut relay = sub("3", "示例中转", SubscriptionState::AuthFailed);
+    relay.provider_display_name = "自定义".into();
+    let mut gemini = sub("4", "Gemini 中转", SubscriptionState::Healthy);
+    gemini.provider_display_name = "Gemini".into();
+    gemini.auth_type = "gemini_api_key".into();
+    let mut gemini_fb = sub("5", "Gemini 有兜底", SubscriptionState::Healthy);
+    gemini_fb.provider_display_name = "Gemini".into();
+    gemini_fb.auth_type = "gemini_api_key".into();
+    gemini_fb.model_slots.fallback = "gemini-2.5-flash".into();
+    vec![zhipu, kimi, relay, gemini, gemini_fb]
+}
+
+/// 5 个虚拟模型, 后端固定顺序。`model-fable` 的列表里混进一个 `Store` 里找不到的 id (「已删除」的
+/// 订阅), `model-haiku` 留空 (测 `vm_empty`), `model-fallback` 覆盖三种「将被跳过」判定。
+fn vm_list() -> Vec<VirtualModel> {
+    vec![
+        VirtualModel {
+            name: "model-fable".into(),
+            mode: RoutingMode::Sequential,
+            subscription_ids: vec!["1".into(), "ghost-legacy-sub-999".into()],
+        },
+        VirtualModel { name: "model-opus".into(), mode: RoutingMode::RoundRobin, subscription_ids: vec!["1".into(), "2".into(), "3".into()] },
+        VirtualModel { name: "model-sonnet".into(), mode: RoutingMode::Sticky, subscription_ids: vec!["1".into(), "2".into(), "4".into()] },
+        VirtualModel { name: "model-haiku".into(), mode: RoutingMode::Sequential, subscription_ids: vec![] },
+        VirtualModel {
+            name: "model-fallback".into(),
+            mode: RoutingMode::Sequential,
+            subscription_ids: vec!["3".into(), "4".into(), "5".into()],
+        },
+    ]
+}
+
+fn vm_done(issued: u64, vms: Vec<VirtualModel>) -> Action {
+    Action::FetchDone { fetch: Fetch::VirtualModels, issued, result: Ok(FetchData::VirtualModels(vms)) }
+}
+
+/// 连上 + 切到虚拟模型页 + 喂一份虚拟模型列表与订阅列表。
+fn vm_app_with(fx_enabled: bool, vms: Vec<VirtualModel>, subs: Vec<Subscription>) -> App {
+    let mut a = app(fx_enabled);
+    a.update(Action::Connected { app_version: VERSION.into() });
+    a.update(Action::SwitchTab(Tab::VirtualModels));
+    a.update(vm_done(1, vms));
+    a.update(subs_done(1, subs));
+    a
+}
+
+fn vm_app(fx_enabled: bool) -> App {
+    vm_app_with(fx_enabled, vm_list(), vm_subs())
+}
+
+#[test]
+fn virtual_models_80x24() {
+    insta::assert_snapshot!(render(&mut vm_app(false), 80, 24));
+}
+
+#[test]
+fn virtual_models_120x40() {
+    insta::assert_snapshot!(render(&mut vm_app(false), 120, 40));
+}
+
+#[test]
+fn virtual_models_dirty_80x24() {
+    let mut a = vm_app(false);
+    a.handle_key(key(KeyCode::Right));
+    a.handle_key(key(KeyCode::Char('J')));
+    insta::assert_snapshot!(render(&mut a, 80, 24));
+}
+
+#[test]
+fn lists_five_models_with_mode_and_count() {
+    let out = render(&mut vm_app(false), 80, 24);
+    for name in ["model-fable", "model-opus", "model-sonnet", "model-haiku", "model-fallback"] {
+        assert!(out.contains(name), "缺 {name}\n{out}");
+    }
+    assert!(out.contains(ZH.vm_mode_seq) && out.contains(ZH.vm_mode_rr) && out.contains(ZH.vm_mode_sticky), "{out}");
+
+    let fable_line = vm_list_row(&out, "model-fable");
+    assert!(fable_line.contains('2'), "model-fable 应该显示 2 个订阅\n{fable_line}");
+    let haiku_line = vm_list_row(&out, "model-haiku");
+    assert!(haiku_line.contains('0'), "model-haiku 应该显示 0 个订阅\n{haiku_line}");
+    let fallback_line = vm_list_row(&out, "model-fallback");
+    assert!(fallback_line.contains('3'), "model-fallback 应该显示 3 个订阅\n{fallback_line}");
+}
+
+#[test]
+fn members_show_names_badges_and_missing_ids() {
+    // 默认选中 model-fable (ids: ["1", "ghost-legacy-sub-999"])。
+    let out = render(&mut vm_app(false), 80, 24);
+    let zhipu_line = out.lines().find(|l| l.contains("智谱主号")).unwrap_or_else(|| panic!("{out}"));
+    assert!(zhipu_line.contains('●'), "健康订阅应该带对应的 badge 符号\n{zhipu_line}");
+    assert!(out.contains(ZH.vm_missing), "缺失的订阅 id 应该标 vm_missing\n{out}");
+    assert!(out.contains("ghost-le"), "缺失订阅应该显示 id 前 8 位\n{out}");
+}
+
+#[test]
+fn fallback_marks_translated_subscriptions_without_a_fallback_slot() {
+    let mut a = vm_app(false);
+    for _ in 0..4 {
+        a.handle_key(key(KeyCode::Down)); // fable -> opus -> sonnet -> haiku -> fallback
+    }
+    let out = render(&mut a, 80, 24);
+
+    let relay_line = out.lines().find(|l| l.contains("示例中转")).unwrap_or_else(|| panic!("{out}"));
+    assert!(!relay_line.contains(ZH.vm_will_skip), "api_key 类不该标记\n{relay_line}");
+
+    let gemini_line = out.lines().find(|l| l.contains("Gemini 中转")).unwrap_or_else(|| panic!("{out}"));
+    assert!(gemini_line.contains(ZH.vm_will_skip), "无兜底槽的翻译类应该标记\n{gemini_line}");
+
+    let gemini_fb_line = out.lines().find(|l| l.contains("Gemini 有兜底")).unwrap_or_else(|| panic!("{out}"));
+    assert!(!gemini_fb_line.contains(ZH.vm_will_skip), "配了兜底槽的不该标记\n{gemini_fb_line}");
+}
+
+#[test]
+fn focus_moves_between_panes_and_the_border_follows() {
+    let theme = Theme::new(ColorMode::TrueColor);
+    let mut a = vm_app(false);
+    // 内容区顶边在屏幕第 3 行; 左栏左上角 x=0, 右栏左上角 x=LEFT_WIDTH=32。
+    let buf = render_buffer(&mut a, 80, 24);
+    assert_eq!(buf[(0, 3)].style().fg, Some(theme.accent), "Models 焦点时左栏边框应该是 accent 色");
+    assert_eq!(buf[(32, 3)].style().fg, Some(theme.border), "Models 焦点时右栏边框应该是普通 border 色");
+
+    a.handle_key(key(KeyCode::Right)); // 切到 Members 焦点
+    let buf2 = render_buffer(&mut a, 80, 24);
+    assert_eq!(buf2[(0, 3)].style().fg, Some(theme.border), "Members 焦点时左栏边框应该变回普通 border 色");
+    assert_eq!(buf2[(32, 3)].style().fg, Some(theme.accent), "Members 焦点时右栏边框应该是 accent 色");
+}
+
+/// Step 4 咬合检查 (a): `J` 在最后一项上应该原地不动而不是尝试越界 swap; `K` 在第一项上同理。
+#[test]
+fn capital_j_k_reorder_and_clamp() {
+    let mut a = vm_app(false);
+    a.handle_key(key(KeyCode::Right)); // Members, model-fable ids=["1", ghost]
+    let out0 = render(&mut a, 80, 24);
+    assert!(out0.find("智谱主号").unwrap() < out0.find(ZH.vm_missing).unwrap(), "初始顺序: 智谱主号在前\n{out0}");
+
+    a.handle_key(key(KeyCode::Char('J'))); // 下移第一项 -> [ghost, 1]
+    let out1 = render(&mut a, 80, 24);
+    assert!(out1.find(ZH.vm_missing).unwrap() < out1.find("智谱主号").unwrap(), "J 之后缺失项应该排到前面\n{out1}");
+
+    a.handle_key(key(KeyCode::Char('J'))); // 已经在末尾, 不该再变
+    let out2 = render(&mut a, 80, 24);
+    assert_eq!(out1, out2, "到底不该再交换 (越界保护去掉的话这里会 panic 或错位)");
+
+    a.handle_key(key(KeyCode::Char('K')));
+    a.handle_key(key(KeyCode::Char('K'))); // 已经在顶部, 不该再变
+    let out3 = render(&mut a, 80, 24);
+    assert_eq!(out3, out0, "K 两次移回顶部之后应该恢复原始顺序 (与 Store 相等, 视觉上与初始帧一致)");
+}
+
+#[test]
+fn a_offers_only_unbound_subscriptions_and_appends() {
+    let mut a = vm_app(false);
+    a.handle_key(key(KeyCode::Right)); // Members, model-fable ids=["1", ghost]
+    let action = a.handle_key(key(KeyCode::Char('a')));
+    let Some(Action::OpenPicker(spec)) = action else { panic!("{action:?}") };
+    assert_eq!(spec.tag, PickerTag::VmAddSubscription);
+    let ids: Vec<&str> = spec.items.iter().map(|i| i.id.as_str()).collect();
+    assert_eq!(ids, vec!["2", "3", "4", "5"], "候选应该排除已经在列表里的 \"1\"\n{ids:?}");
+
+    a.update(Action::OpenPicker(spec));
+    let done = Action::PickerDone { tag: PickerTag::VmAddSubscription, choice: PickerChoice::Item("2".into()) };
+    assert!(a.update(done).is_empty(), "PickerDone 不产出 Cmd");
+    let out = render(&mut a, 80, 24);
+    assert!(out.contains("Kimi 备用"), "新加入的订阅应该出现在成员列表里\n{out}");
+
+    let action2 = a.handle_key(key(KeyCode::Char('a')));
+    let Some(Action::OpenPicker(spec2)) = action2 else { panic!("{action2:?}") };
+    let ids2: Vec<&str> = spec2.items.iter().map(|i| i.id.as_str()).collect();
+    assert_eq!(ids2, vec!["3", "4", "5"], "刚加入的 \"2\" 不该再出现在候选里\n{ids2:?}");
+}
+
+#[test]
+fn a_with_nothing_left_toasts() {
+    let mut a = vm_app(false);
+    a.handle_key(key(KeyCode::Right)); // Members, model-fable ids=["1", ghost]
+    for id in ["2", "3", "4", "5"] {
+        let action = a.handle_key(key(KeyCode::Char('a')));
+        let Some(Action::OpenPicker(spec)) = action else { panic!("{action:?}") };
+        a.update(Action::OpenPicker(spec));
+        assert!(a.update(Action::PickerDone { tag: PickerTag::VmAddSubscription, choice: PickerChoice::Item(id.into()) }).is_empty());
+    }
+    let action = a.handle_key(key(KeyCode::Char('a')));
+    assert_eq!(action, Some(Action::Notify { kind: ToastKind::Info, text: ZH.vm_nothing_to_add.into() }), "所有订阅都绑定后应该就地提示");
+}
+
+#[test]
+fn x_removes_and_keeps_the_cursor_in_range() {
+    let mut a = vm_app(false);
+    a.handle_key(key(KeyCode::Down)); // model-opus, ids=["1","2","3"]
+    a.handle_key(key(KeyCode::Right)); // Members
+    a.handle_key(key(KeyCode::Down));
+    a.handle_key(key(KeyCode::Down)); // 光标移到最后一项 "示例中转"
+    a.handle_key(key(KeyCode::Char('x')));
+    let out = render(&mut a, 80, 24);
+    assert!(!out.contains("示例中转"), "移除的订阅不该再出现\n{out}");
+
+    // 光标应该钳制在新的最后一项 ("Kimi 备用") 上, 再删一次应该删掉它而不是越界。
+    a.handle_key(key(KeyCode::Char('x')));
+    let out2 = render(&mut a, 80, 24);
+    assert!(!out2.contains("Kimi 备用"), "{out2}");
+    assert!(out2.contains("智谱主号"), "剩下的那条不该被误删\n{out2}");
+}
+
+#[test]
+fn m_cycles_the_mode_in_either_pane() {
+    let mut a = vm_app(false); // model-fable 初始是 Sequential (顺序)
+    a.handle_key(key(KeyCode::Char('m'))); // Models 焦点下也可用: 顺序 -> 轮询
+    let out1 = render(&mut a, 80, 24);
+    let fable_line = vm_list_row(&out1, "model-fable");
+    assert!(fable_line.contains(ZH.vm_mode_rr), "第一次 m 应该切到轮询\n{fable_line}");
+
+    a.handle_key(key(KeyCode::Right)); // 进 Members, 草稿还在
+    a.handle_key(key(KeyCode::Char('m'))); // 轮询 -> 会话
+    let out2 = render(&mut a, 80, 24);
+    let fable_line2 = vm_list_row(&out2, "model-fable");
+    assert!(fable_line2.contains(ZH.vm_mode_sticky), "Members 焦点下 m 应该继续切到会话\n{fable_line2}");
+}
+
+#[test]
+fn reverting_every_change_clears_dirty() {
+    let mut a = vm_app(false); // model-fable 初始是 Sequential
+    a.handle_key(key(KeyCode::Char('m'))); // 顺序 -> 轮询
+    a.handle_key(key(KeyCode::Char('m'))); // 轮询 -> 会话
+    a.handle_key(key(KeyCode::Char('m'))); // 会话 -> 顺序 (改回原值)
+    let out = render(&mut a, 80, 24);
+    assert!(!out.contains(" *"), "改回原值应该清脏\n{out}");
+}
+
+#[test]
+fn s_sends_the_draft_in_order() {
+    let mut a = vm_app(false);
+    a.handle_key(key(KeyCode::Right)); // Members, model-fable ids=["1", ghost]
+    a.handle_key(key(KeyCode::Char('J'))); // -> [ghost, "1"]
+    let action = a.handle_key(key(KeyCode::Char('s')));
+    assert_eq!(
+        action,
+        Some(Action::Mutate(Mutation::UpdateVirtualModel {
+            name: "model-fable".into(),
+            mode: RoutingMode::Sequential,
+            subscription_ids: vec!["ghost-legacy-sub-999".into(), "1".into()],
+        }))
+    );
+}
+
+#[test]
+fn s_refuses_offline_and_ignores_while_busy() {
+    let mut a = vm_app(false);
+    a.handle_key(key(KeyCode::Right)); // Members
+    assert_eq!(a.handle_key(key(KeyCode::Char('s'))), None, "不脏时 s 不该有动作");
+
+    a.handle_key(key(KeyCode::Char('J'))); // 造草稿
+    let mutation = Mutation::UpdateVirtualModel {
+        name: "model-fable".into(),
+        mode: RoutingMode::Sequential,
+        subscription_ids: vec!["ghost-legacy-sub-999".into(), "1".into()],
+    };
+    assert_eq!(a.handle_key(key(KeyCode::Char('s'))), Some(Action::Mutate(mutation.clone())));
+
+    a.update(Action::ConnectionLost);
+    assert!(a.update(Action::Mutate(mutation.clone())).is_empty(), "断线时不该真的发");
+    let out = render(&mut a, 80, 24);
+    assert!(out.contains(ZH.toast_offline), "{out}");
+
+    // 恢复在线, 真的发一次占住忙碌键; 忙碌期间再发一次应该被拒绝。
+    a.update(Action::Connected { app_version: VERSION.into() });
+    assert_eq!(a.update(Action::Mutate(mutation.clone())), vec![Cmd::Mutate(Box::new(mutation.clone()))]);
+    assert!(a.update(Action::Mutate(mutation)).is_empty(), "同一虚拟模型忙碌中应该被忽略");
+}
+
+#[test]
+fn draft_survives_polling_and_clears_on_successful_save_only() {
+    let mut a = vm_app(false);
+    a.handle_key(key(KeyCode::Right));
+    a.handle_key(key(KeyCode::Char('J')));
+    let dirty_out = render(&mut a, 80, 24);
+    assert!(dirty_out.contains(" *"), "{dirty_out}");
+
+    a.update(vm_done(2, vm_list()));
+    a.update(subs_done(2, vm_subs()));
+    let out_after_polls = render(&mut a, 80, 24);
+    assert!(out_after_polls.contains(" *"), "轮询不该冲掉草稿\n{out_after_polls}");
+
+    let mutation = Mutation::UpdateVirtualModel {
+        name: "model-fable".into(),
+        mode: RoutingMode::Sequential,
+        subscription_ids: vec!["ghost-legacy-sub-999".into(), "1".into()],
+    };
+    a.update(Action::Mutate(mutation.clone()));
+    a.update(Action::MutationDone { mutation: mutation.clone(), barrier: 0, result: Err("网络错误".into()) });
+    // 失败会弹一条 toast, 80 列下它贴右边缘, 会盖住右栏标题上那颗 `*`——先画一帧让它记下
+    // `shown_at`, 再把表调到过期之后重画一次, 把它弹出队列, 这样才能干净地看到标题。
+    render(&mut a, 80, 24);
+    a.update(Action::Tick { now_ms: NOW + 4_000 });
+    let out_after_fail = render(&mut a, 80, 24);
+    assert!(out_after_fail.contains(" *"), "失败应该保留草稿\n{out_after_fail}");
+
+    a.update(Action::Mutate(mutation.clone()));
+    a.update(Action::MutationDone { mutation, barrier: 0, result: Ok(MutationOutcome::VirtualModelSaved) });
+    let out_after_ok = render(&mut a, 80, 24);
+    assert!(!out_after_ok.contains(" *"), "成功后草稿应该被清掉\n{out_after_ok}");
+}
+
+#[test]
+fn changing_the_selected_model_with_a_draft_asks_first() {
+    let mut a = vm_app(false);
+    a.handle_key(key(KeyCode::Char('m'))); // Models 焦点造草稿 (fable: 顺序 -> 轮询)
+    let action = a.handle_key(key(KeyCode::Down));
+    assert_eq!(action, Some(Action::OpenConfirm { prompt: ZH.confirm_discard.into(), on_yes: Box::new(Action::DiscardDraft) }));
+    assert!(a.update(action.unwrap()).is_empty());
+    let out = render(&mut a, 80, 24);
+    assert!(out.contains(ZH.confirm_discard), "{out}");
+
+    assert_eq!(a.handle_key(key(KeyCode::Char('y'))), Some(Action::Confirmed(Box::new(Action::DiscardDraft))));
+    a.update(Action::Confirmed(Box::new(Action::DiscardDraft)));
+    let out2 = render(&mut a, 80, 24);
+    assert!(!out2.contains(" *"), "{out2}");
+    let fable_line = vm_list_row(&out2, "model-fable");
+    assert!(fable_line.contains(ZH.vm_mode_seq), "确认后应该停在原位 (草稿被丢弃, 选中项没变)\n{fable_line}");
+}
+
+#[test]
+fn esc_in_members_with_a_draft_asks_and_yes_returns_to_models() {
+    let theme = Theme::new(ColorMode::TrueColor);
+    let mut a = vm_app(false);
+    a.handle_key(key(KeyCode::Right));
+    a.handle_key(key(KeyCode::Char('J')));
+    let action = a.handle_key(key(KeyCode::Esc));
+    assert_eq!(action, Some(Action::OpenConfirm { prompt: ZH.confirm_discard.into(), on_yes: Box::new(Action::DiscardDraft) }));
+    assert!(a.update(action.unwrap()).is_empty());
+    let out = render(&mut a, 80, 24);
+    assert!(out.contains(ZH.confirm_discard), "{out}");
+
+    assert_eq!(a.handle_key(key(KeyCode::Char('y'))), Some(Action::Confirmed(Box::new(Action::DiscardDraft))));
+    a.update(Action::Confirmed(Box::new(Action::DiscardDraft)));
+    let out2 = render(&mut a, 80, 24);
+    assert!(!out2.contains(" *"), "{out2}");
+    let buf = render_buffer(&mut a, 80, 24);
+    assert_eq!(buf[(0, 3)].style().fg, Some(theme.accent), "确认放弃后焦点应该回到 Models (左栏)");
+}
+
+#[test]
+fn leaving_the_tab_with_a_draft_asks() {
+    let mut a = vm_app(false);
+    a.handle_key(key(KeyCode::Right));
+    a.handle_key(key(KeyCode::Char('J')));
+    assert!(a.update(Action::SwitchTab(Tab::Overview)).is_empty(), "有草稿时切页应该先确认");
+    let out = render(&mut a, 80, 24);
+    assert!(out.contains(ZH.confirm_discard), "{out}");
+}
+
+#[test]
+fn entering_the_tab_fetches_models_and_subscriptions() {
+    let mut a = loaded(false);
+    let cmds = a.update(Action::SwitchTab(Tab::VirtualModels));
+    assert_eq!(cmds, vec![Cmd::Fetch(Fetch::VirtualModels), Cmd::Fetch(Fetch::Subscriptions)], "进这一页应该同时补拉两份数据");
+
+    // 停在这一页时重连也该照样补一次。
+    let cmds2 = a.update(Action::Connected { app_version: VERSION.into() });
+    assert_eq!(cmds2, vec![Cmd::Fetch(Fetch::VirtualModels), Cmd::Fetch(Fetch::Subscriptions)]);
+}
+
+#[test]
+fn polling_on_this_tab_fetches_both() {
+    let mut a = loaded(false);
+    a.update(Action::SwitchTab(Tab::VirtualModels));
+    let cmds: Vec<Cmd> = (1..=20).flat_map(|i| a.update(Action::Tick { now_ms: NOW + i * 250 })).collect();
+    assert_eq!(cmds, vec![Cmd::Fetch(Fetch::VirtualModels), Cmd::Fetch(Fetch::Subscriptions)], "5 秒后应该轮询一次, 两条 Fetch 都要");
+}
+
+/// 草稿的调度模式是 `RoutingMode::Unknown` (后端某天加的新模式, 这版 TUI 不认得) 时, `s` 必须拒绝,
+/// 不能静默保存——`RoutingMode::Unknown.as_wire()` 会降级成 `"sequential"`, 静默发出去等于替用户
+/// 悄悄改了调度模式。`m` 应该把它挪到 `Sequential`, 之后才允许保存。
+#[test]
+fn unknown_mode_is_never_saved_silently() {
+    let mut vms = vm_list();
+    vms[0].mode = RoutingMode::Unknown; // model-fable
+    let mut a = vm_app_with(false, vms, vm_subs());
+
+    a.handle_key(key(KeyCode::Right)); // Members
+    a.handle_key(key(KeyCode::Char('J'))); // 造草稿 (mode 仍是 Unknown, 只是重排了订阅)
+    let action = a.handle_key(key(KeyCode::Char('s')));
+    assert_eq!(
+        action,
+        Some(Action::Notify { kind: ToastKind::Info, text: ZH.vm_unknown_mode.into() }),
+        "Unknown 模式不该被静默保存"
+    );
+
+    a.handle_key(key(KeyCode::Char('m'))); // Unknown -> Sequential
+    let action2 = a.handle_key(key(KeyCode::Char('s')));
+    assert!(
+        matches!(action2, Some(Action::Mutate(Mutation::UpdateVirtualModel { mode: RoutingMode::Sequential, .. }))),
+        "挪到已知模式之后应该允许保存, 实际 {action2:?}"
+    );
 }
