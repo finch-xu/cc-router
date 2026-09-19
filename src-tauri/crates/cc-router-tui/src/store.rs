@@ -4,35 +4,87 @@
 
 use crate::client::dto::Subscription;
 
+/// 一份带发起序号的后端数据。晚到的旧结果 (`issued` 小于已接受的序号) 与不晚于屏障的结果
+/// (`issued` <= `barrier`) 都丢弃。`barrier` 是就地操作 (Task 4 的 `Mutation`) 完成那一刻盖的一条
+/// 「此后这个序号以内的结果一律不算数」的线——挡住那些在变更完成前就已经发起、内容还是变更前
+/// 旧值的加载, 不让它们晚到时把乐观更新过的新状态冲回去。
+#[derive(Debug)]
+pub struct Versioned<T> {
+    value: T,
+    issued: u64,
+    barrier: u64,
+    loaded: bool,
+}
+
+impl<T: Default> Default for Versioned<T> {
+    fn default() -> Self {
+        Self { value: T::default(), issued: 0, barrier: 0, loaded: false }
+    }
+}
+
+impl<T> Versioned<T> {
+    pub fn get(&self) -> &T {
+        &self.value
+    }
+
+    /// 仅供乐观更新用, 不动序号: 调用方确定这是一次「先斩后奏」的本地纠正, 后端权威结果落地时
+    /// 该按原来的 `issued` / `barrier` 规则正常覆盖它。
+    pub fn get_mut(&mut self) -> &mut T {
+        &mut self.value
+    }
+
+    pub fn loaded(&self) -> bool {
+        self.loaded
+    }
+
+    /// 接受则返回 `Some(旧值)`, 调用方据此做 diff; 丢弃返回 `None`。
+    pub fn accept(&mut self, issued: u64, value: T) -> Option<T> {
+        if self.loaded && issued < self.issued {
+            return None;
+        }
+        if issued <= self.barrier {
+            return None;
+        }
+        self.issued = issued;
+        self.loaded = true;
+        Some(std::mem::replace(&mut self.value, value))
+    }
+
+    /// 一次变更完成时调用: 此后 `issued` <= `barrier` 的结果一律丢弃。只增不减——两次变更前后脚
+    /// 完成时, 后一次的屏障不该被前一次更小的值盖回去。
+    pub fn set_barrier(&mut self, barrier: u64) {
+        if barrier > self.barrier {
+            self.barrier = barrier;
+        }
+    }
+}
+
 #[derive(Debug, Default)]
 pub struct Store {
     /// 后端给的原始顺序; 排序由各页面在画的时候按需要的口径自己排。
-    subscriptions: Vec<Subscription>,
-    /// 已接受的最新一次加载的序号。
-    subs_issued: u64,
-    subs_loaded: bool,
+    subscriptions: Versioned<Vec<Subscription>>,
 }
 
 impl Store {
     pub fn subscriptions(&self) -> &[Subscription] {
-        &self.subscriptions
+        self.subscriptions.get()
     }
 
     pub fn subscriptions_loaded(&self) -> bool {
-        self.subs_loaded
+        self.subscriptions.loaded()
     }
 
     pub fn subscription(&self, id: &str) -> Option<&Subscription> {
-        self.subscriptions.iter().find(|s| s.id == id)
+        self.subscriptions.get().iter().find(|s| s.id == id)
     }
 
     /// 乐观更新: `set_subscription_enabled` 成功后立刻把这条订阅的 `enabled` 改过来, 不等下一次
     /// `apply_subscriptions`——否则「按 e、还没等到重拉结果就又按一次 e」会读到没改过的旧值,
     /// 算出同一个目标值发给后端 (变成 no-op), 且第二次 toast 文案与第一次相同被去重规则吞掉,
-    /// 用户毫无反馈。**刻意不碰 `subs_issued`**: 这只是本地临时纠正, 后端权威结果 (`Fetch::Subscriptions`
-    /// 刷新) 落地时该按原来的序号规则正常覆盖它。返回 `true` 表示找到了这条订阅并改了。
+    /// 用户毫无反馈。**刻意不碰序号**: 这只是本地临时纠正, 后端权威结果 (`Fetch::Subscriptions`
+    /// 刷新) 落地时该按原来的序号 / 屏障规则正常覆盖它。返回 `true` 表示找到了这条订阅并改了。
     pub fn set_enabled(&mut self, id: &str, enabled: bool) -> bool {
-        match self.subscriptions.iter_mut().find(|s| s.id == id) {
+        match self.subscriptions.get_mut().iter_mut().find(|s| s.id == id) {
             Some(sub) => {
                 sub.enabled = enabled;
                 true
@@ -41,29 +93,34 @@ impl Store {
         }
     }
 
-    /// 接受一份订阅列表。`issued` 小于已接受的序号 → 丢弃, 返回 `None` (晚到的旧结果)。
-    /// 否则替换并返回「状态变了的订阅 id」(首次加载返回空 —— 首次不算变化): 以
-    /// `(state, enabled, is_dispatchable)` 三元组比较, 只比两边都有的 id。
+    /// 接受一份订阅列表。晚到的旧结果 (序号小于已接受的) 或不晚于屏障的结果 (见
+    /// [`Store::set_subscriptions_barrier`]) → 丢弃, 返回 `None`。否则替换并返回「状态变了的
+    /// 订阅 id」(首次加载返回空 —— 首次不算变化): 以 `(state, enabled, is_dispatchable)` 三元组
+    /// 比较, 只比两边都有的 id。
     pub fn apply_subscriptions(&mut self, issued: u64, subs: Vec<Subscription>) -> Option<Vec<String>> {
-        if self.subs_loaded && issued < self.subs_issued {
-            return None;
-        }
-        let changed = if self.subs_loaded {
-            subs.iter()
+        let was_loaded = self.subscriptions.loaded();
+        let old = self.subscriptions.accept(issued, subs)?;
+        let changed = if was_loaded {
+            self.subscriptions
+                .get()
+                .iter()
                 .filter(|new| {
-                    self.subscriptions.iter().find(|old| old.id == new.id).is_some_and(|old| {
-                        (old.state, old.enabled, old.is_dispatchable) != (new.state, new.enabled, new.is_dispatchable)
-                    })
+                    old.iter()
+                        .find(|o| o.id == new.id)
+                        .is_some_and(|o| (o.state, o.enabled, o.is_dispatchable) != (new.state, new.enabled, new.is_dispatchable))
                 })
                 .map(|s| s.id.clone())
                 .collect()
         } else {
             Vec::new()
         };
-        self.subscriptions = subs;
-        self.subs_issued = issued;
-        self.subs_loaded = true;
         Some(changed)
+    }
+
+    /// 一次订阅相关的就地操作完成时调用: 此后 `issued` <= `barrier` 的订阅列表一律丢弃, 挡住
+    /// 「晚到的、内容还是变更前旧值」的加载把乐观更新冲回去。
+    pub fn set_subscriptions_barrier(&mut self, barrier: u64) {
+        self.subscriptions.set_barrier(barrier);
     }
 }
 
@@ -180,11 +237,50 @@ mod tests {
         assert!(store.set_enabled("a", false));
         assert!(!store.subscription("a").unwrap().enabled);
 
-        // 不该动 subs_issued: 晚到的、序号更旧的后端结果仍然按老规则被丢弃 (不受这次乐观更新影响)。
+        // 不该动内部序号: 晚到的、序号更旧的后端结果仍然按老规则被丢弃 (不受这次乐观更新影响)。
         let changed = store.apply_subscriptions(3, vec![sub("a", SubscriptionState::RateLimited)]);
         assert_eq!(changed, None, "issued=3 仍然晚于已接受的 issued=5, 乐观更新不该让这条判断失效");
         assert!(!store.subscription("a").unwrap().enabled, "旧结果被丢弃, 乐观更新的值应该保留");
 
         assert!(!store.set_enabled("missing", true), "订阅不在 Store 里时应该返回 false, 不 panic");
+    }
+
+    #[test]
+    fn versioned_drops_stale_and_barred_results() {
+        let mut v: Versioned<i32> = Versioned::default();
+        assert_eq!(v.accept(5, 1), Some(0), "首次接受, 旧值是 T::default()");
+        assert_eq!(v.accept(3, 2), None, "issued=3 晚于已接受的 issued=5, 应该被丢弃");
+        v.set_barrier(7);
+        assert_eq!(v.accept(7, 3), None, "issued=7 不大于屏障 7, 应该被丢弃");
+        assert_eq!(v.accept(8, 4), Some(1), "issued=8 大于屏障, 应该被接受, 返回值是屏障生效前的旧值");
+        assert_eq!(*v.get(), 4);
+    }
+
+    #[test]
+    fn barrier_never_decreases() {
+        let mut v: Versioned<i32> = Versioned::default();
+        v.set_barrier(10);
+        v.set_barrier(3);
+        assert_eq!(v.accept(10, 1), None, "屏障应该仍是 10, 不该被更小的值降回去");
+        assert_eq!(v.accept(11, 1), Some(0), "大于屏障的序号应该正常被接受");
+    }
+
+    #[test]
+    fn accept_returns_the_previous_value() {
+        let mut v: Versioned<i32> = Versioned::default();
+        v.accept(1, 10);
+        assert_eq!(v.accept(2, 20), Some(10));
+        assert_eq!(*v.get(), 20);
+    }
+
+    #[test]
+    fn get_mut_does_not_touch_the_sequence() {
+        let mut v: Versioned<i32> = Versioned::default();
+        v.accept(5, 1);
+        *v.get_mut() = 99;
+        assert_eq!(*v.get(), 99);
+        // 序号没被 get_mut 动过: 一份更旧的结果 (issued=3 < 已接受的 5) 仍然按原规则被丢弃。
+        assert_eq!(v.accept(3, 2), None);
+        assert_eq!(*v.get(), 99, "旧结果被丢弃, get_mut 改过的值应该保留");
     }
 }

@@ -13,14 +13,11 @@ use ratatui::widgets::{Block, BorderType, Tabs};
 use ratatui::Frame;
 use throbber_widgets_tui::{Throbber, BRAILLE_SIX};
 
-use crate::action::{Action, Cmd, Fetch, FetchData, Mutation, MutationOutcome, Tab};
+use crate::action::{Action, BusyKey, Cmd, Fetch, FetchData, Mutation, MutationOutcome, Tab};
 use crate::client::dto::{RefreshBalanceResult, RefreshModelsResult};
 use crate::fx::{self, Dir, Fx};
 use crate::i18n::Strings;
-use crate::pages::overview::Overview;
-use crate::pages::placeholder::Placeholder;
-use crate::pages::subscriptions::Subscriptions;
-use crate::pages::{Component, DrawCtx};
+use crate::pages::{Component, DrawCtx, Pages};
 use crate::store::Store;
 use crate::theme::Theme;
 use crate::widgets::toast::{self, Toast, ToastKind};
@@ -69,9 +66,7 @@ pub struct App {
     tui_version: &'static str,
     tab: Tab,
     store: Store,
-    overview: Overview,
-    subscriptions: Subscriptions,
-    placeholder: Placeholder,
+    pages: Pages,
     popup: Option<Popup>,
     popup_area: Option<Rect>,
     pending_popup_fx: Option<PopupFx>,
@@ -82,9 +77,10 @@ pub struct App {
     app_version: Option<String>,
     now_ms: i64,
     tick: u64,
-    /// 正在进行的就地操作, 键是订阅 id。**按订阅 id 判重, 不按 `Mutation` 整体** —— 同一条订阅
-    /// 同时只能有一个操作在跑, 但不同操作 (比如先 `t` 再 `e`) 仍然互斥, 不是各自独立排队。
-    busy: HashMap<String, Mutation>,
+    /// 正在进行的就地操作, 键是 [`BusyKey`] (目前只会出现 `Subscription` 变体)。**按
+    /// `Mutation::busy_key()` 判重, 不按 `Mutation` 整体** —— 同一条订阅同时只能有一个操作在跑,
+    /// 但不同操作 (比如先 `t` 再 `e`) 仍然互斥, 不是各自独立排队。
+    busy: HashMap<BusyKey, Mutation>,
     /// 每条订阅最近一次就地操作的结果, 与对应 toast 用的是**同一份文本** (I1 fix): toast 只能显示
     /// 一行 (≤72 列, 3 秒就消失), 详情面板的「上次操作」行拿这份存档展示完整文案。发起新操作时
     /// (`start_mutation` 真的派发出去那一刻) 移除对应条目, 不是等结果回来才清。
@@ -100,9 +96,7 @@ impl App {
             tui_version: opts.tui_version,
             tab: Tab::Overview,
             store: Store::default(),
-            overview: Overview::default(),
-            subscriptions: Subscriptions::default(),
-            placeholder: Placeholder,
+            pages: Pages::default(),
             popup: None,
             popup_area: None,
             pending_popup_fx: None,
@@ -121,36 +115,6 @@ impl App {
     /// 有动效在播: 主循环应该按约 60fps 继续画; 否则等下一个事件再画。
     pub fn wants_fast_frames(&self) -> bool {
         self.fx.is_running()
-    }
-
-    /// 按 `tab` 从几个不相交的字段里选一个页面。写成拿具体字段引用的关联函数 (而不是
-    /// `&mut self` 的 helper 方法), 这样调用方在拿到 `&mut dyn Component` 的同时还能借用
-    /// `self` 的其它字段 (比如 `self.store`) —— `&mut self` 的方法做不到这一点。
-    fn select_page<'a>(
-        tab: Tab,
-        overview: &'a mut Overview,
-        subscriptions: &'a mut Subscriptions,
-        placeholder: &'a mut Placeholder,
-    ) -> &'a mut dyn Component {
-        match tab {
-            Tab::Overview => overview,
-            Tab::Subscriptions => subscriptions,
-            Tab::VirtualModels | Tab::Live | Tab::Logs => placeholder,
-        }
-    }
-
-    /// 同上, 只读版本 (帮助弹窗只需要 `help()`, 不需要 `&mut`)。
-    fn select_page_ref<'a>(
-        tab: Tab,
-        overview: &'a Overview,
-        subscriptions: &'a Subscriptions,
-        placeholder: &'a Placeholder,
-    ) -> &'a dyn Component {
-        match tab {
-            Tab::Overview => overview,
-            Tab::Subscriptions => subscriptions,
-            Tab::VirtualModels | Tab::Live | Tab::Logs => placeholder,
-        }
     }
 
     fn version_mismatch(&self) -> Option<String> {
@@ -180,7 +144,7 @@ impl App {
             KeyCode::Tab => Some(Action::NextTab),
             KeyCode::BackTab => Some(Action::PrevTab),
             KeyCode::Char(c @ '1'..='5') => Tab::from_index(c as usize - '1' as usize).map(Action::SwitchTab),
-            _ => Self::select_page(self.tab, &mut self.overview, &mut self.subscriptions, &mut self.placeholder).handle_key(key, &self.store),
+            _ => self.pages.get_mut(self.tab).handle_key(key, &self.store),
         }
     }
 
@@ -192,7 +156,7 @@ impl App {
         self.pending_page_fx = Some(dir);
         // 不可见的页面不轮询, 所以切回来的那一刻要补一次。
         if self.conn == Conn::Connected {
-            Self::select_page(self.tab, &mut self.overview, &mut self.subscriptions, &mut self.placeholder).update(&Action::Refresh, &self.store)
+            self.pages.get_mut(self.tab).update(&Action::Refresh, &self.store)
         } else {
             Vec::new()
         }
@@ -208,9 +172,7 @@ impl App {
     /// 全部页面字段的地方 —— 以后加新页面只改这一处, 不会出现"某个 FetchDone 分支忘了通知新
     /// 页面"这种只有部分刷新路径才触发、没有测试能咬住的漏更 (fix round 1, I1)。
     fn notify_subscriptions_changed(&mut self, changed: &[String]) {
-        self.overview.on_subscriptions_changed(changed);
-        self.subscriptions.on_subscriptions_changed(changed);
-        self.placeholder.on_subscriptions_changed(changed);
+        self.pages.for_each_mut(|page| page.on_subscriptions_changed(changed));
     }
 
     /// 两处 toast 入口共用: 与最新排队的一条重复 (同 kind 同 text) 就丢弃, 否则挤掉最旧的排队项
@@ -235,39 +197,56 @@ impl App {
     /// 拒绝; 余额刷新在不支持的 provider 上 → 就地回答, 不发请求。三条判定都不进忙碌表, 只有真的
     /// 要发的那条才 `insert`。
     fn start_mutation(&mut self, m: Mutation) -> Vec<Cmd> {
-        let id = m.subscription_id();
+        let key = m.busy_key();
         // 断线判定必须排在忙碌表前面: 断线期间按在一条正忙的订阅上 (比如上一次操作还没跑完就掉线了)
         // 也该看到「未连接」提示, 而不是被忙碌表悄悄吞掉、什么反馈都没有。
         if self.conn != Conn::Connected {
             self.push_toast(Toast::new(ToastKind::Error, self.s.toast_offline));
             return Vec::new();
         }
-        if self.busy.contains_key(id) {
+        if self.busy.contains_key(&key) {
             return Vec::new();
         }
         if matches!(m, Mutation::RefreshBalance { .. }) {
             // 订阅不在 Store 里 (理论上不该发生, 因为发起方是页面自己选中的一条) 时保守放行,
             // 交给后端去报错, 不在这里就地拦。
-            let supported = self.store.subscription(id).is_none_or(|s| s.balance_supported);
-            if !supported {
-                self.push_toast(Toast::new(ToastKind::Info, self.s.sub_balance_unsupported));
-                return Vec::new();
+            if let BusyKey::Subscription(id) = &key {
+                let supported = self.store.subscription(id).is_none_or(|s| s.balance_supported);
+                if !supported {
+                    self.push_toast(Toast::new(ToastKind::Info, self.s.sub_balance_unsupported));
+                    return Vec::new();
+                }
             }
         }
-        self.busy.insert(id.to_string(), m.clone());
+        self.busy.insert(key.clone(), m.clone());
         // I1 fix: 这条订阅上一次操作的结果 (如果还挂在详情面板上) 已经过时了, 新操作一发起就该
         // 隐去它, 不能让用户以为「上次操作」显示的是这次刚发出去的操作的结果。
-        self.last_outcome.remove(id);
+        if let BusyKey::Subscription(id) = &key {
+            self.last_outcome.remove(id);
+        }
         vec![Cmd::Mutate(m)]
     }
 
-    /// `Action::MutationDone`: 从忙碌表移除, 按结果弹一条 toast, **无论成败都追加一次订阅列表
-    /// 刷新** —— 状态 / 缓存 / 错误信息可能都变了。toast 与 `last_outcome`（I1 fix）**共用同一份
-    /// 文本**: toast 只能显示一行 (≤72 列, 3 秒就消失), 详情面板的「上次操作」行拿 `last_outcome`
-    /// 展示完整文案, 不受 toast 单行截断的限制。
-    fn finish_mutation(&mut self, mutation: Mutation, result: Result<MutationOutcome, String>) -> Vec<Cmd> {
-        let id = mutation.subscription_id().to_string();
-        self.busy.remove(&id);
+    /// `Action::MutationDone`: 从忙碌表移除, 先对 `mutation.refetch()` 里每个目标调对应的
+    /// `set_*_barrier(barrier)` (挡住晚到的、内容还是变更前旧值的加载), 再按结果弹一条 toast,
+    /// **无论成败都追加一次 `mutation.refetch()` 声明的重拉** —— 状态 / 缓存 / 错误信息可能都变了。
+    /// toast 与 `last_outcome`（I1 fix）**共用同一份文本**: toast 只能显示一行 (≤72 列, 3 秒就
+    /// 消失), 详情面板的「上次操作」行拿 `last_outcome` 展示完整文案, 不受 toast 单行截断的限制。
+    /// `last_outcome` 只对 `BusyKey::Subscription` 的变更写——目前四种就地操作都是, 但这里写成
+    /// 显式判断而不是假设, 为将来的 `BusyKey::VirtualModel` 变更 (Task 4 起) 留好退路。
+    fn finish_mutation(&mut self, mutation: Mutation, barrier: u64, result: Result<MutationOutcome, String>) -> Vec<Cmd> {
+        let key = mutation.busy_key();
+        self.busy.remove(&key);
+        for fetch in mutation.refetch() {
+            match fetch {
+                Fetch::Subscriptions => self.store.set_subscriptions_barrier(barrier),
+                Fetch::Overview => {}
+            }
+        }
+        let refetch_cmds: Vec<Cmd> = mutation.refetch().iter().copied().map(Cmd::Fetch).collect();
+        let BusyKey::Subscription(id) = key else {
+            return refetch_cmds;
+        };
         let name = self.subscription_name(&id);
         let (kind, text) = match &result {
             Ok(MutationOutcome::EnabledSet) => {
@@ -296,7 +275,7 @@ impl App {
         };
         self.push_toast(Toast::new(kind, text.clone()));
         self.last_outcome.insert(id, (kind, text));
-        vec![Cmd::Fetch(Fetch::Subscriptions)]
+        refetch_cmds
     }
 
     pub fn update(&mut self, action: Action) -> Vec<Cmd> {
@@ -328,7 +307,7 @@ impl App {
                     self.toasts.pop_front();
                 }
                 if self.conn == Conn::Connected && self.tick.is_multiple_of(POLL_EVERY_TICKS) {
-                    Self::select_page(self.tab, &mut self.overview, &mut self.subscriptions, &mut self.placeholder).update(&Action::Refresh, &self.store)
+                    self.pages.get_mut(self.tab).update(&Action::Refresh, &self.store)
                 } else {
                     Vec::new()
                 }
@@ -339,7 +318,7 @@ impl App {
                 }
                 self.conn = Conn::Connected;
                 self.app_version = Some(app_version.clone());
-                Self::select_page(self.tab, &mut self.overview, &mut self.subscriptions, &mut self.placeholder).update(&action, &self.store)
+                self.pages.get_mut(self.tab).update(&action, &self.store)
             }
             Action::ConnectionLost => {
                 self.conn = Conn::Reconnecting;
@@ -366,7 +345,7 @@ impl App {
                     }
                     let action = Action::FetchDone { fetch, issued, result: Ok(FetchData::Overview(data)) };
                     // 加载结果永远交给发起它的页面, 哪怕用户已经切走了。
-                    self.overview.update(&action, &self.store)
+                    self.pages.overview.update(&action, &self.store)
                 }
                 // 单独的订阅列表刷新 (SSE 触发): 只进 Store, 不需要转给任何页面的 update ——
                 // 各页面画的时候直接读 ctx.store。
@@ -379,11 +358,9 @@ impl App {
                     Vec::new()
                 }
             },
-            Action::Refresh | Action::Sse { .. } => {
-                Self::select_page(self.tab, &mut self.overview, &mut self.subscriptions, &mut self.placeholder).update(&action, &self.store)
-            }
+            Action::Refresh | Action::Sse { .. } => self.pages.get_mut(self.tab).update(&action, &self.store),
             Action::Mutate(m) => self.start_mutation(m),
-            Action::MutationDone { mutation, result } => self.finish_mutation(mutation, result),
+            Action::MutationDone { mutation, barrier, result } => self.finish_mutation(mutation, barrier, result),
         }
     }
 
@@ -481,7 +458,7 @@ impl App {
             busy: &self.busy,
             last_outcome: &self.last_outcome,
         };
-        let page = Self::select_page(self.tab, &mut self.overview, &mut self.subscriptions, &mut self.placeholder);
+        let page = self.pages.get_mut(self.tab);
         page.draw(frame, content, &mut ctx);
         let mut left = page.hints(s);
         left.insert(0, ("1-5", s.key_switch_tab));
@@ -492,7 +469,7 @@ impl App {
         if self.popup.is_some() {
             // 压暗背景用静态的 DIM 修饰符而不是动效: 16 色 / 无色终端下同样成立。
             frame.buffer_mut().set_style(screen, Style::new().add_modifier(Modifier::DIM));
-            let page_rows = Self::select_page_ref(self.tab, &self.overview, &self.subscriptions, &self.placeholder).help(s);
+            let page_rows = self.pages.get(self.tab).help(s);
             let area = help::area(screen, s, page_rows);
             help::draw(frame, area, &self.theme, s, page_rows);
             self.popup_area = Some(area);
@@ -500,7 +477,7 @@ impl App {
 
         if !self.startup_played {
             self.startup_played = true;
-            self.fx.startup(self.overview.logo_area().unwrap_or_default(), screen, self.theme.border);
+            self.fx.startup(self.pages.overview.logo_area().unwrap_or_default(), screen, self.theme.border);
         }
         if let Some(dir) = self.pending_page_fx.take() {
             self.fx.page_enter(dir, content, self.theme.border);

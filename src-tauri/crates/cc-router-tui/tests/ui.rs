@@ -1126,6 +1126,7 @@ fn drawing_the_same_state_twice_gives_the_same_frame() {
     e.update(Action::Mutate(mutation.clone()));
     e.update(Action::MutationDone {
         mutation,
+        barrier: 0,
         result: Ok(MutationOutcome::Tested(TestConnectionResult {
             ok: true,
             message: "ok".into(),
@@ -1305,7 +1306,7 @@ fn a_second_toggle_right_after_the_first_goes_the_other_way() {
     let mutation = Mutation::SetEnabled { id: "1".into(), enabled: false };
     a.update(Action::Mutate(mutation.clone()));
     // 结果回来了 (忙碌表已清), 但 subs_done 刷新还没跑完——Store 里原始的 enabled=true 没变。
-    a.update(Action::MutationDone { mutation, result: Ok(MutationOutcome::EnabledSet) });
+    a.update(Action::MutationDone { mutation, barrier: 0, result: Ok(MutationOutcome::EnabledSet) });
 
     assert_eq!(
         a.handle_key(key(KeyCode::Char('e'))),
@@ -1317,6 +1318,55 @@ fn a_second_toggle_right_after_the_first_goes_the_other_way() {
         vec![Cmd::Mutate(Mutation::SetEnabled { id: "1".into(), enabled: true })],
         "这次应该真的发出去, 不是 no-op"
     );
+}
+
+/// Task 1: 一份晚到的、`issued` 不大于变更完成时盖下的 `barrier` 的订阅列表, 就算内容还是变更前的
+/// 旧值, 也不该把乐观更新过的状态冲回去——哪怕它的 `issued` 数值比首次加载 (`subs_app` 用的
+/// issued=1) 还大。`barrier` 之后的列表则应该正常接受。
+#[test]
+fn a_list_issued_before_a_mutation_finished_cannot_revert_it() {
+    let mut a = subs_app(false); // id "1" (智谱主号) 默认 enabled=true, 首次加载 issued=1。
+    assert_eq!(
+        a.handle_key(key(KeyCode::Char('e'))),
+        Some(Action::Mutate(Mutation::SetEnabled { id: "1".into(), enabled: false }))
+    );
+    let mutation = Mutation::SetEnabled { id: "1".into(), enabled: false };
+    a.update(Action::Mutate(mutation.clone()));
+    // 变更完成, 带 barrier=10 (模拟此刻之前已经发起过好几轮加载)。
+    let cmds = a.update(Action::MutationDone { mutation, barrier: 10, result: Ok(MutationOutcome::EnabledSet) });
+    assert_eq!(cmds, vec![Cmd::Fetch(Fetch::Subscriptions)], "无论成败都该按 refetch() 追加一次订阅列表刷新");
+    // 让这次操作的 toast 过期: 否则它的浮层会叠在列表行上面, 干扰下面按文字找行的断言
+    // (与 `a_failed_test_connection_stays_readable_in_the_detail` 同一手法)。
+    render(&mut a, 80, 24);
+    a.update(Action::Tick { now_ms: NOW + 3_000 });
+
+    // 一份晚到的列表 (issued=9 <= barrier=10), 内容是乐观更新之前的旧值 (enabled 仍是 true):
+    // 应该被丢弃, 渲染里这条订阅必须保持乐观更新过的新状态 (停用, 符号从 ● 变成 ○)。
+    let mut stale = detail_subs();
+    stale[0].enabled = true;
+    a.update(subs_done(9, stale));
+
+    let out = render(&mut a, 80, 24);
+    let zhipu_line = out.lines().find(|l| l.contains("智谱主号")).unwrap_or_else(|| panic!("{out}"));
+    assert!(
+        !zhipu_line.contains('●') && zhipu_line.contains('○'),
+        "issued=9 <= barrier=10, 这份晚到的旧列表不该把乐观更新的停用状态冲回去\n{zhipu_line}"
+    );
+
+    // 此时再按 e, 应该发出反方向 (重新启用), 而不是从被丢弃的旧值算出同一个目标 (no-op)。
+    assert_eq!(
+        a.handle_key(key(KeyCode::Char('e'))),
+        Some(Action::Mutate(Mutation::SetEnabled { id: "1".into(), enabled: true })),
+        "晚到的旧列表被丢弃, 再按 e 应该基于乐观更新过的状态朝反方向走"
+    );
+
+    // 一份更新的列表 (issued=11 > barrier=10) 应该被正常接受。
+    let mut fresh = detail_subs();
+    fresh[0].enabled = true;
+    a.update(subs_done(11, fresh));
+    let out2 = render(&mut a, 80, 24);
+    let zhipu_line2 = out2.lines().find(|l| l.contains("智谱主号")).unwrap_or_else(|| panic!("{out2}"));
+    assert!(zhipu_line2.contains('●'), "issued=11 > barrier=10, 应该被接受\n{zhipu_line2}");
 }
 
 /// 同一订阅的操作同时只跑一个 (按订阅 id 判重, 不按 `Mutation` 整体): 连按两次 `t` 第二次被丢弃;
@@ -1345,7 +1395,7 @@ fn a_mutation_is_issued_once_per_subscription_until_it_finishes() {
         model_used: None,
         state_reset: false,
     }));
-    a.update(Action::MutationDone { mutation: m1.clone(), result });
+    a.update(Action::MutationDone { mutation: m1.clone(), barrier: 0, result });
     assert_eq!(a.update(Action::Mutate(m1.clone())), vec![Cmd::Mutate(m1)], "MutationDone 之后应该可以再发");
 }
 
@@ -1468,7 +1518,7 @@ fn every_mutation_outcome_toasts_and_refetches() {
     for (mutation, result, expect) in cases {
         let mut a = subs_app(false);
         a.update(Action::Mutate(mutation.clone()));
-        let cmds = a.update(Action::MutationDone { mutation, result });
+        let cmds = a.update(Action::MutationDone { mutation, barrier: 0, result });
         assert_eq!(cmds, vec![Cmd::Fetch(Fetch::Subscriptions)], "无论成败都该追加一次订阅列表刷新");
         let out = render(&mut a, 80, 24);
         assert!(out.contains(expect), "缺 {expect:?}\n{out}");
@@ -1534,7 +1584,7 @@ fn subscription_name_falls_back_to_the_id_in_toasts() {
         model_used: None,
         state_reset: true,
     }));
-    a.update(Action::MutationDone { mutation, result });
+    a.update(Action::MutationDone { mutation, barrier: 0, result });
     let out = render(&mut a, 80, 24);
     assert!(out.contains("1：连接正常"), "订阅不在 Store 里时应该退回用 id\n{out}");
 }
@@ -1569,6 +1619,7 @@ fn a_failed_test_connection_stays_readable_in_the_detail() {
     a.update(Action::Mutate(mutation.clone()));
     a.update(Action::MutationDone {
         mutation,
+        barrier: 0,
         result: Ok(MutationOutcome::Tested(TestConnectionResult {
             ok: false,
             message: long_message.clone(),
@@ -1605,6 +1656,7 @@ fn last_outcome_is_cleared_when_a_new_mutation_starts() {
     a.update(Action::Mutate(mutation.clone()));
     a.update(Action::MutationDone {
         mutation: mutation.clone(),
+        barrier: 0,
         result: Ok(MutationOutcome::Tested(TestConnectionResult {
             ok: false,
             message: "上游拒绝".into(),

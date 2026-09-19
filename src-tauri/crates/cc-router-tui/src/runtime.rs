@@ -108,7 +108,10 @@ async fn call_mutation(client: &Client, mutation: &Mutation) -> Result<MutationO
 fn spawn_mutation(client: Arc<Client>, tx: UnboundedSender<Action>, mutation: Mutation) {
     tokio::spawn(async move {
         let result = call_mutation(&client, &mutation).await.map_err(|e: ClientError| e.to_string());
-        let _ = tx.send(Action::MutationDone { mutation, result });
+        // `barrier: 0` 只是占位符: 真正的值由 `process_action`/`stamp_barrier` 在主循环收到这条
+        // 消息的那一刻补盖, 用的是那一刻的发起计数器, 不是 spawn 这一刻的 (两者之间可能已经又issued
+        // 出去好几次加载, 全都得算进屏障)。
+        let _ = tx.send(Action::MutationDone { mutation, barrier: 0, result });
     });
 }
 
@@ -120,6 +123,22 @@ impl Issued {
     fn next(&mut self) -> u64 {
         self.0 += 1;
         self.0
+    }
+
+    /// 当前已经发起过的加载总数, 不推进计数器。`process_action` 在收到 `Action::MutationDone` 时
+    /// 读它当 `barrier`——此后 `issued <= barrier` 的加载结果一律丢弃, 而这次变更自己触发的补跑
+    /// (发生在读到这个值**之后**) 会拿到一个严格更大的号, 不会把自己挡住。
+    fn current(&self) -> u64 {
+        self.0
+    }
+}
+
+/// `Action::MutationDone` 收到时把它的 `barrier` 字段补盖成当前的发起计数器值; 其它 `Action`
+/// 不动。抽成独立函数, 方便单独测「补盖用的是接收那一刻的计数器值」这件事本身, 不用驱动完整的
+/// `process_action` (含真实的 `Fetches` / `App` 状态机)。
+fn stamp_barrier(action: &mut Action, issued: &Issued) {
+    if let Action::MutationDone { barrier, .. } = action {
+        *barrier = issued.current();
     }
 }
 
@@ -213,13 +232,17 @@ pub async fn run(client: Arc<Client>, mut app: App) -> std::io::Result<()> {
 /// 单个 action 的处理逻辑抽成这个函数, 供 `select!` 拿到的那一个和抽干队列时的每一个共用。
 /// 返回 `true` 表示主循环该退出 (`Cmd::Quit`)。
 fn process_action(
-    action: Action,
+    mut action: Action,
     client: &Arc<Client>,
     tx: &UnboundedSender<Action>,
     fetches: &mut Fetches,
     issued: &mut Issued,
     app: &mut App,
 ) -> bool {
+    // 必须排在下面的 `issued.next()` 之前: `MutationDone` 的 barrier 要反映「变更完成那一刻」
+    // 已经发起过的所有加载, 这次消息自己触发的补跑 (在 `app.update` 之后才会真正 issue) 不该算
+    // 在内, 否则会把自己刚发出去的补跑也挡住。
+    stamp_barrier(&mut action, issued);
     if let Action::FetchDone { fetch, .. } = &action {
         if fetches.finished(*fetch) {
             spawn_fetch(client.clone(), tx.clone(), *fetch, issued.next());
@@ -550,6 +573,7 @@ mod tests {
             rx.recv().await,
             Some(Action::MutationDone {
                 mutation: Mutation::SetEnabled { id: "1".into(), enabled: false },
+                barrier: 0,
                 result: Ok(MutationOutcome::EnabledSet),
             })
         );
@@ -559,6 +583,7 @@ mod tests {
             rx.recv().await,
             Some(Action::MutationDone {
                 mutation: Mutation::TestConnection { id: "1".into() },
+                barrier: 0,
                 result: Ok(MutationOutcome::Tested(TestConnectionResult {
                     ok: true,
                     message: "连接正常".into(),
@@ -574,6 +599,7 @@ mod tests {
             rx.recv().await,
             Some(Action::MutationDone {
                 mutation: Mutation::RefreshModels { id: "1".into() },
+                barrier: 0,
                 result: Ok(MutationOutcome::Models(RefreshModelsResult::Auto { models: vec![], fetched_at: 1 })),
             })
         );
@@ -583,9 +609,45 @@ mod tests {
             rx.recv().await,
             Some(Action::MutationDone {
                 mutation: Mutation::RefreshBalance { id: "1".into() },
+                barrier: 0,
                 result: Ok(MutationOutcome::Balance(RefreshBalanceResult::Unsupported)),
             })
         );
+    }
+
+    /// Task 1: `spawn_mutation` 发出的 `MutationDone.barrier` 只是占位符 `0`; 真正的值由
+    /// `stamp_barrier` 在主循环收到这条消息那一刻补盖成当时的发起计数器值。用 wiremock 真的跑一次
+    /// 变更走完 `spawn_mutation` 这条真实路径, 确认占位符是 0, 再验证 `stamp_barrier` 补盖出来的值
+    /// 就是调用那一刻 `Issued` 的当前值 (即 "变更完成那一刻已经发起过的所有加载的序号")——不多不少。
+    #[tokio::test]
+    async fn mutation_done_carries_a_barrier_not_smaller_than_any_issued_fetch() {
+        let server = MockServer::start().await;
+        Mock::given(method("POST"))
+            .and(path("/ui/api/cmd/test_connection"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(
+                json!({"ok": true, "message": "ok", "http_status": 200, "model_used": null, "state_reset": false}),
+            ))
+            .mount(&server)
+            .await;
+        let dir = tempfile::tempdir().unwrap();
+        write_runtime(dir.path(), server.address().port(), "s", "9.9.9-test");
+        let client = Arc::new(Client::connect(dir.path()).unwrap());
+        let (tx, mut rx) = unbounded_channel::<Action>();
+
+        spawn_mutation(client, tx, Mutation::TestConnection { id: "1".into() });
+        let mut done = rx.recv().await.expect("channel 关闭了");
+        let Action::MutationDone { barrier, .. } = &done else { panic!("{done:?}") };
+        assert_eq!(*barrier, 0, "spawn_mutation 发出时应该只是占位符, 真正的值由主循环收到时补盖");
+
+        // 模拟「此刻之前已经发起过 3 次加载」——不管它们是否已经跑完, 都已经计入发起计数器。
+        let mut issued = Issued::default();
+        issued.next();
+        issued.next();
+        issued.next();
+
+        stamp_barrier(&mut done, &issued);
+        let Action::MutationDone { barrier, .. } = &done else { panic!("{done:?}") };
+        assert_eq!(*barrier, 3, "补盖后的 barrier 应该等于此刻发起计数器的值, 覆盖此前发起过的全部 3 次加载");
     }
 
     /// M7: `process_action` 是主循环真正的路由——`mutations_are_never_coalesced` 只调了

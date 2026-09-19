@@ -13,7 +13,7 @@ use throbber_widgets_tui::{Throbber, BRAILLE_SIX};
 use unicode_width::UnicodeWidthStr;
 
 use super::{Component, DrawCtx};
-use crate::action::{Action, Cmd, Fetch, Mutation};
+use crate::action::{Action, BusyKey, Cmd, Fetch, Mutation};
 use crate::client::dto::{BalanceSeverity, QuotaUsage, Subscription};
 use crate::format::{compact, fit};
 use crate::i18n::Strings;
@@ -174,7 +174,7 @@ impl Subscriptions {
                 let muted_style = ctx.theme.muted_style();
                 // 忙碌的订阅: 第一列的状态符号换成 spinner (与总览页的加载态同一套 throbber_set),
                 // 不再显示 badge 的颜色/符号——正在跑的操作可能就是要把这个状态改掉。
-                let symbol = if ctx.busy.contains_key(&sub.id) {
+                let symbol = if ctx.busy.contains_key(&BusyKey::Subscription(sub.id.clone())) {
                     let glyph = Throbber::default().throbber_set(BRAILLE_SIX).to_symbol_span(&spinner_state(ctx.tick));
                     Span::styled(fit(glyph.content.as_ref(), SYMBOL_COL as usize), muted_style)
                 } else {
@@ -511,7 +511,7 @@ fn detail_rows(sub: &Subscription, ctx: &DrawCtx, width: u16) -> Vec<DetailRow> 
     let b = badge(sub, theme, s);
     let status = format!("{} {}", b.symbol, status_text(sub, &b, ctx.now_ms));
     let mut status_spans = vec![Span::styled(status, Style::new().fg(b.color))];
-    if let Some(m) = ctx.busy.get(&sub.id) {
+    if let Some(m) = ctx.busy.get(&BusyKey::Subscription(sub.id.clone())) {
         let busy_text = match m {
             Mutation::SetEnabled { .. } => s.sub_busy_toggling,
             Mutation::TestConnection { .. } => s.sub_busy_testing,

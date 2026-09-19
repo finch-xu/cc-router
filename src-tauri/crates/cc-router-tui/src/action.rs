@@ -78,14 +78,29 @@ pub enum Mutation {
     RefreshBalance { id: String },
 }
 
+/// 忙碌表 (`App::busy`) 判重用的键。目前四种就地操作都作用于订阅, 只产生 `Subscription` 变体;
+/// `VirtualModel` 留给虚拟模型页的编辑操作 (Task 4 起) 用, 本 Task 只定义不产出。
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub enum BusyKey {
+    Subscription(String),
+    VirtualModel(String),
+}
+
 impl Mutation {
-    pub fn subscription_id(&self) -> &str {
+    /// 取代旧的 `subscription_id()`: 旧函数假设「所有变更都作用于某条订阅」, 虚拟模型页的编辑
+    /// 操作不满足这个假设, 需要一个能区分「这次变更判重键属于哪一类」的类型。
+    pub fn busy_key(&self) -> BusyKey {
         match self {
             Mutation::SetEnabled { id, .. }
             | Mutation::TestConnection { id }
             | Mutation::RefreshModels { id }
-            | Mutation::RefreshBalance { id } => id,
+            | Mutation::RefreshBalance { id } => BusyKey::Subscription(id.clone()),
         }
+    }
+
+    /// 这次变更完成后该重新拉取哪些加载。现有四种都只影响订阅列表。
+    pub fn refetch(&self) -> &'static [Fetch] {
+        &[Fetch::Subscriptions]
     }
 }
 
@@ -126,13 +141,30 @@ pub enum Action {
     FetchDone { fetch: Fetch, issued: u64, result: Result<FetchData, String> },
     /// 订阅页的一次就地操作。
     Mutate(Mutation),
-    /// 一次就地操作跑完了 (成功或失败)。
-    MutationDone { mutation: Mutation, result: Result<MutationOutcome, String> },
+    /// 一次就地操作跑完了 (成功或失败)。`barrier`: 变更完成那一刻已发起的所有加载的最大序号——
+    /// 由 `runtime.rs::process_action` 在**收到**这条消息时补盖 (`spawn_mutation` 发送时只是占位符
+    /// `0`); `App` 据此对 `mutation.refetch()` 里每个目标调用对应的 `set_*_barrier`, 挡住那些在
+    /// 变更完成前就已经发起、内容还是变更前旧值的加载晚到时把乐观更新冲回去。
+    MutationDone { mutation: Mutation, barrier: u64, result: Result<MutationOutcome, String> },
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn every_mutation_declares_its_busy_key_and_refetch() {
+        let cases = [
+            Mutation::SetEnabled { id: "1".into(), enabled: true },
+            Mutation::TestConnection { id: "1".into() },
+            Mutation::RefreshModels { id: "1".into() },
+            Mutation::RefreshBalance { id: "1".into() },
+        ];
+        for m in cases {
+            assert_eq!(m.busy_key(), BusyKey::Subscription("1".into()), "{m:?} 应该产出 Subscription 忙碌键");
+            assert_eq!(m.refetch(), &[Fetch::Subscriptions], "{m:?} 完成后应该重拉订阅列表");
+        }
+    }
 
     #[test]
     fn tab_index_round_trips_and_wraps() {
