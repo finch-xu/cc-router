@@ -74,16 +74,26 @@ fn target_model<'a>(row: &'a SubscriptionRow, client_model: &str) -> Option<&'a 
 /// 否则请求体逐字节原样转发。
 /// Outbound headers: auth + the subscription's required_headers ({api_key} filled) + content-type.
 /// Cloudflare's gateway needs cf-aig-gateway-id; OpenRouter's attribution headers are harmless here.
+///
+/// Errors are complete user-facing messages (the dispatch returns them as a 400 verbatim).
 pub fn build_outbound(row: &SubscriptionRow, raw_body: &Bytes, client_model: &str) -> Result<Outbound, String> {
     let (body, real_model, rewritten) = match target_model(row, client_model) {
         Some(target) if target != client_model => {
-            let mut v: Value = serde_json::from_slice(raw_body).map_err(|e| e.to_string())?;
+            let body_err = |e: serde_json::Error| format!("请求体解析失败: {e}");
+            let mut v: Value = serde_json::from_slice(raw_body).map_err(body_err)?;
             v["model"] = Value::String(target.to_string());
-            let bytes = serde_json::to_vec(&v).map_err(|e| e.to_string())?;
+            let bytes = serde_json::to_vec(&v).map_err(body_err)?;
             (Bytes::from(bytes), target.to_string(), true)
         }
         _ => (raw_body.clone(), client_model.to_string(), false),
     };
+    let template = row.messages_url();
+    // The model becomes a URL path segment here (Cloudflare `/run/@cf/.../{model}`); a client
+    // controlled `../` / `%2e%2e` / `?` / `#` would otherwise reach arbitrary upstream paths
+    // with the subscription's credentials attached.
+    if template.contains("{model}") && !is_path_safe_model(&real_model) {
+        return Err(format!("model 名称含非法字符: {real_model:?} (只允许字母、数字和 . _ : -, 且须以字母或数字开头)"));
+    }
     let mut headers = ReqHeaderMap::new();
     if let (Ok(name), Ok(value)) = (
         ReqHeaderName::try_from(row.auth_header_name.as_str()),
@@ -97,8 +107,15 @@ pub fn build_outbound(row: &SubscriptionRow, raw_body: &Bytes, client_model: &st
         }
     }
     headers.insert(CONTENT_TYPE, ReqHeaderValue::from_static("application/json"));
-    let url = crate::provider::url_template::fill_model(&row.messages_url(), &real_model);
+    let url = crate::provider::url_template::fill_model(&template, &real_model);
     Ok(Outbound { url, headers, body, real_model, rewritten, wire: row.systemone_wire })
+}
+
+/// `^[A-Za-z0-9][A-Za-z0-9._:-]*$`: safe to splice into a URL path as one segment.
+fn is_path_safe_model(model: &str) -> bool {
+    let mut bytes = model.bytes();
+    bytes.next().is_some_and(|b| b.is_ascii_alphanumeric())
+        && bytes.all(|b| b.is_ascii_alphanumeric() || matches!(b, b'.' | b'_' | b':' | b'-'))
 }
 
 /// 改写过 model 时把响应 model 恢复成客户端写的名字 (与 fallback 兜底槽的回显规则一致);
@@ -422,7 +439,7 @@ pub async fn dispatch(state: &AppState, raw_body: Bytes, client_model: String, c
         let outbound = match build_outbound(&g.row, &raw_body, &client_model) {
             Ok(o) => o,
             Err(e) => {
-                return error_response(StatusCode::BAD_REQUEST, "invalid_request_error", &format!("请求体解析失败: {e}"));
+                return error_response(StatusCode::BAD_REQUEST, "invalid_request_error", &e);
             }
         };
         cands.push(Candidate {
@@ -688,6 +705,57 @@ mod tests {
         assert_eq!(out.headers.get("content-type").unwrap(), "application/json");
         let body: Value = serde_json::from_slice(&out.body).unwrap();
         assert_eq!(body["model"], "clef-flash");
+    }
+
+    #[test]
+    fn cloudflare_url_rejects_model_that_could_escape_the_path() {
+        for bad in [
+            "x/../../../../../../user/tokens/verify",
+            "%2e%2e",
+            "clef?x=1",
+            "clef#frag",
+            "a/b",
+            "",
+            "-clef",
+            ".clef",
+        ] {
+            let raw = Bytes::from(serde_json::to_vec(&serde_json::json!({"model": bad, "state": "s"})).unwrap());
+            let err = build_outbound(&cf_row(), &raw, bad).expect_err(bad);
+            assert!(err.starts_with("model 名称含非法字符"), "{bad}: {err}");
+        }
+    }
+
+    #[test]
+    fn cloudflare_url_accepts_plain_model_names() {
+        for good in ["clef-flash", "clef", "clef_v1.2:beta"] {
+            let raw = Bytes::from(serde_json::to_vec(&serde_json::json!({"model": good, "state": "s"})).unwrap());
+            let out = build_outbound(&cf_row(), &raw, good).unwrap();
+            assert!(out.url.ends_with(&format!("/run/@cf/cloudflare/{good}")), "{}", out.url);
+        }
+    }
+
+    #[test]
+    fn rewritten_slot_model_is_also_checked_for_templated_urls() {
+        let mut row = cf_row();
+        row.model_slots.jev = "../evil".into();
+        let raw = Bytes::from_static(br#"{"model":"clef","state":"s"}"#);
+        assert!(build_outbound(&row, &raw, "clef").is_err());
+    }
+
+    #[test]
+    fn standard_wire_rows_do_not_validate_model_names() {
+        // No {model} in the URL: the model only travels in the body, any string is fine.
+        let raw = Bytes::from_static(br#"{"model":"x/../y?z#w","state":"s"}"#);
+        let out = build_outbound(&systemone_row(""), &raw, "x/../y?z#w").unwrap();
+        assert_eq!(out.real_model, "x/../y?z#w");
+        assert!(!out.url.contains("x/../y"));
+    }
+
+    #[test]
+    fn unparseable_body_error_is_labelled_as_body_error() {
+        let raw = Bytes::from_static(b"not json");
+        let err = build_outbound(&systemone_row("clef-flash"), &raw, "jev-latest").unwrap_err();
+        assert!(err.starts_with("请求体解析失败"), "{err}");
     }
 
     #[test]
