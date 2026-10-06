@@ -50,9 +50,39 @@ echo "ok"
 echo "== 3/3 以用户 $check_user 启动, ${wait_secs}s 内须出现标题为 \"$window_title\" 的窗口, 且渲染进程存活"
 id "$check_user" >/dev/null 2>&1 || sudo useradd --create-home "$check_user"
 # -ac: 关闭 X 访问控制, 让另一个用户能连上这个 display
-Xvfb :99 -screen 0 1280x800x24 -ac >/dev/null 2>&1 &
+xvfb_log="$(mktemp)"
+Xvfb :99 -screen 0 1280x800x24 -ac >"$xvfb_log" 2>&1 &
 xvfb_pid=$!
+cleanup() {
+  sudo pkill -u "$check_user" >/dev/null 2>&1 || true
+  kill "$xvfb_pid" >/dev/null 2>&1 || true
+}
+trap cleanup EXIT
+
 log="$(mktemp)"
+
+# 失败时打印 Xvfb 的状态与输出: GTK 只会说 "Failed to initialize GTK", 连不上 display 的原因在这里
+dump_xvfb() {
+  if kill -0 "$xvfb_pid" 2>/dev/null; then
+    echo "---- Xvfb 仍在运行 (pid $xvfb_pid) ----"
+  else
+    echo "---- Xvfb 已退出 ----"
+  fi
+  tail -n 30 "$xvfb_log"
+}
+
+# 先等 Xvfb 就绪, 再以检查用户的身份连一次: 区分「X 没起来」与「换了用户连不上」
+for _ in $(seq 1 20); do
+  DISPLAY=:99 xwininfo -root >/dev/null 2>&1 && break
+  sleep 0.5
+done
+if ! sudo -u "$check_user" env -i DISPLAY=:99 xwininfo -root >/dev/null 2>&1; then
+  echo "::error::用户 $check_user 连不上 Xvfb :99"
+  dump_xvfb
+  exit 1
+fi
+
+started=$SECONDS
 # 日志由当前 shell 重定向写入, 应用进程本身不需要对它有权限
 # shellcheck disable=SC2024
 # 与 AppImageHub 的测试环境一致: Xvfb 没有 GPU, WebKitGTK 的 DMABUF / 合成模式会因 EGL 报错退出
@@ -61,12 +91,6 @@ sudo -u "$check_user" env -i \
   WEBKIT_DISABLE_DMABUF_RENDERER=1 WEBKIT_DISABLE_COMPOSITING_MODE=1 \
   "$root/AppRun" >"$log" 2>&1 &
 app_pid=$!
-
-cleanup() {
-  sudo pkill -u "$check_user" >/dev/null 2>&1 || true
-  kill "$xvfb_pid" >/dev/null 2>&1 || true
-}
-trap cleanup EXIT
 
 result="timeout"
 for _ in $(seq 1 "$wait_secs"); do
@@ -83,12 +107,13 @@ done
 
 if [ "$result" != "window" ]; then
   if [ "$result" = "exited" ]; then
-    echo "::error::应用在出现窗口之前就退出了"
+    echo "::error::应用在出现窗口之前就退出了 (启动后 $((SECONDS - started))s)"
   else
     echo "::error::${wait_secs}s 内没有出现 \"$window_title\" 窗口"
   fi
   echo "---- 应用输出 (末尾 60 行) ----"
   tail -n 60 "$log"
+  dump_xvfb
   exit 1
 fi
 
