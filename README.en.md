@@ -315,7 +315,7 @@ Outbound is grouped into three protocol families, plus a group of OAuth-based su
 <details>
 <summary><b>Jev System One</b> <code>/v1/systemone</code> — serves <code>model-jev</code> only, passed through as-is</summary>
 
-- Built in: TypeSafe, OpenRouter (System One endpoint), Ollama 0.35+ (local System One endpoint); pick the provider's System One endpoint on the "Add subscription" page
+- Built in: TypeSafe, OpenRouter (System One endpoint), Ollama 0.35+ (local System One endpoint), Cloudflare Clef; pick the provider's System One endpoint on the "Add subscription" page
 - These subscriptions have a single optional Jev model slot; when it is empty, the rewrite / pass-through rules from the inbound section apply
 - A subscription's protocol is fixed once created and can't be switched between a chat endpoint and a System One endpoint; create a new subscription instead
 

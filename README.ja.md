@@ -315,7 +315,7 @@ curl http://127.0.0.1:23456/v1/systemone \
 <details>
 <summary><b>Jev System One</b> <code>/v1/systemone</code> —— <code>model-jev</code> 専用、そのまま透過</summary>
 
-- 内蔵：TypeSafe、OpenRouter（System One エンドポイント）、Ollama 0.35+（ローカルの System One エンドポイント）。「サブスクリプションを追加」画面で各プロバイダの System One エンドポイントを選ぶだけです
+- 内蔵：TypeSafe、OpenRouter（System One エンドポイント）、Ollama 0.35+（ローカルの System One エンドポイント）、Cloudflare Clef。「サブスクリプションを追加」画面で各プロバイダの System One エンドポイントを選ぶだけです
 - このサブスクリプションには任意の Jev モデルスロットが 1 つだけあり、空欄の場合は入口のセクションで説明した書き換え / 透過のルールに従います
 - サブスクリプションのプロトコルは作成後に固定され、会話用エンドポイントと System One エンドポイントの間で切り替えることはできません。変更したい場合は新しく作成してください
 

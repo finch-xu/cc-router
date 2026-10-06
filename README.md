@@ -315,7 +315,7 @@ curl http://127.0.0.1:23456/v1/systemone \
 <details>
 <summary><b>Jev System One</b> <code>/v1/systemone</code> —— 只服务 <code>model-jev</code>，原样透传</summary>
 
-- 内置：TypeSafe、OpenRouter（System One 接入点）、Ollama 0.35+（本地 System One 接入点）；在「添加订阅」里选对应厂商的 System One 接入点即可
+- 内置：TypeSafe、OpenRouter（System One 接入点）、Ollama 0.35+（本地 System One 接入点）、Cloudflare Clef；在「添加订阅」里选对应厂商的 System One 接入点即可
 - 这类订阅只有一个可选的 Jev 模型槽，留空时按上文入口一节的规则改写或透传
 - 订阅创建后协议固定，不能在对话接入点和 System One 接入点之间切换，要换请新建订阅
 
