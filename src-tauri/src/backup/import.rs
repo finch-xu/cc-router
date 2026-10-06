@@ -1,6 +1,7 @@
 //! Import: preview, secret binding checks, and a pure `plan`; `apply` (Task 6) writes it.
 
 use std::collections::{BTreeMap, HashMap, HashSet};
+use std::sync::Arc;
 
 use chrono::{DateTime, Utc};
 use serde::Serialize;
@@ -12,13 +13,17 @@ use crate::commands::subscriptions::{
     validate_required_headers, validate_slot_efforts, validate_token_quotas,
 };
 use crate::error::{AppError, AppResult};
-use crate::provider::model::{AuthType, EndpointProtocol};
+use crate::provider::model::{AuthType, EndpointProtocol, Provider};
 use crate::subscription::model::SubscriptionRow;
+use crate::subscription::snapshot::{snapshot_connection, ConnectionSnapshot};
 use crate::virtual_model::model::{RoutingMode, VirtualModelName};
 
 pub struct LocalState {
     pub existing_ids: HashSet<Uuid>,
     pub bindings: HashMap<VirtualModelName, Vec<Uuid>>,
+    /// Built-in provider registry: built-in subscriptions get their connection re-snapshotted
+    /// from it instead of trusting the file (see [`rebuilt_connection`]).
+    pub providers: Arc<HashMap<String, Provider>>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
@@ -90,6 +95,29 @@ fn validate_entry(sub: &ExportSubscription) -> Result<(), String> {
     })
 }
 
+/// Built-in subscriptions' connection info only ever comes from the provider yaml
+/// (`update_subscription` rejects connection patches for them), so re-snapshotting it from the
+/// local registry is both more trustworthy than the (untrusted) file and restores the template
+/// headers a password-less export redacted (e.g. `cf-aig-authorization: Bearer {api_key}`, whose
+/// name looks sensitive but whose value is public). `None` = keep the file's values: user-defined
+/// subscription, provider / endpoint gone, url_params no longer valid, or the yaml changed the
+/// auth type / endpoint protocol underneath (binding isolation relies on the file's protocol).
+fn rebuilt_connection(
+    sub: &ExportSubscription,
+    providers: &HashMap<String, Provider>,
+) -> Option<ConnectionSnapshot> {
+    if sub.is_user_defined {
+        return None;
+    }
+    let provider = providers.get(&sub.provider_id)?;
+    if provider.auth.auth_type != sub.auth_type {
+        return None;
+    }
+    let endpoint = provider.endpoint(&sub.endpoint_id)?;
+    let snap = snapshot_connection(provider, endpoint, &sub.url_params).ok()?;
+    (snap.endpoint_protocol == sub.endpoint_protocol).then_some(snap)
+}
+
 enum Verdict {
     New,
     SkipExistingId,
@@ -134,7 +162,12 @@ pub fn preview(file: &ExportFile, local: &LocalState) -> ImportPreview {
                     provider_icon: s.provider_icon.clone(),
                     status,
                     has_api_key: s.has_api_key,
-                    redacted_headers: s.redacted_headers.clone(),
+                    // Re-snapshotted subscriptions get every header back from the registry.
+                    redacted_headers: if rebuilt_connection(s, &local.providers).is_some() {
+                        Vec::new()
+                    } else {
+                        s.redacted_headers.clone()
+                    },
                     invalid_reason,
                 }
             })
@@ -238,26 +271,41 @@ pub fn plan(
             Verdict::New => {}
         }
         let api_key = secrets.and_then(|s| s.api_keys.get(&sub.id)).cloned();
-        let recovered = secrets.and_then(|s| s.headers.get(&sub.id));
-        let mut headers = sub.required_headers.clone();
         let mut missing = sub.has_api_key && api_key.is_none();
-        for name in &sub.redacted_headers {
-            match recovered.and_then(|h| h.get(name)) {
-                Some(v) => {
-                    headers.insert(name.clone(), v.clone());
+        let rebuilt = rebuilt_connection(sub, &local.providers);
+        let headers = match &rebuilt {
+            Some(snap) => snap.required_headers.clone(),
+            None => {
+                let recovered = secrets.and_then(|s| s.headers.get(&sub.id));
+                let mut headers = sub.required_headers.clone();
+                for name in &sub.redacted_headers {
+                    match recovered.and_then(|h| h.get(name)) {
+                        Some(v) => {
+                            headers.insert(name.clone(), v.clone());
+                        }
+                        None => {
+                            // Keep the header name so the edit page shows what still needs filling in.
+                            headers.insert(name.clone(), String::new());
+                            missing = true;
+                        }
+                    }
                 }
-                None => {
-                    // Keep the header name so the edit page shows what still needs filling in.
-                    headers.insert(name.clone(), String::new());
-                    missing = true;
-                }
+                headers
             }
-        }
+        };
         if missing {
             report.disabled_missing_key.push(sub.display_name.clone());
         }
         let enabled = sub.enabled && !missing;
-        inserts.push(export_to_row(sub, api_key.unwrap_or_default(), headers, enabled, now));
+        let mut row = export_to_row(sub, api_key.unwrap_or_default(), headers, enabled, now);
+        if let Some(snap) = rebuilt {
+            row.base_url = snap.base_url;
+            row.messages_path = snap.messages_path;
+            row.model_discovery = snap.model_discovery;
+            row.systemone_wire = snap.systemone_wire;
+            row.url_params = snap.url_params;
+        }
+        inserts.push(row);
         new_ids.insert(sub.id);
     }
     report.imported = inserts.len();
@@ -364,7 +412,7 @@ mod tests {
     }
 
     fn empty_local() -> LocalState {
-        LocalState { existing_ids: HashSet::new(), bindings: HashMap::new() }
+        LocalState { existing_ids: HashSet::new(), bindings: HashMap::new(), providers: Arc::new(HashMap::new()) }
     }
 
     fn resolved(f: &Fixture) -> ResolvedSecrets {
@@ -414,6 +462,79 @@ mod tests {
         assert_eq!(a.required_headers.get("x-relay-key").map(String::as_str), Some(""), "保留头名, 值置空");
         let b = plan.inserts.iter().find(|r| r.id == f.rows[1].id).unwrap();
         assert!(b.enabled, "本来就没 Key 的订阅保持原启停状态");
+    }
+
+    /// A Cloudflare gateway subscription built exactly like create_subscription does.
+    fn cloudflare_gateway_row(providers: &HashMap<String, Provider>) -> SubscriptionRow {
+        let provider = &providers["cloudflare_clef"];
+        let params: BTreeMap<String, String> = [
+            ("account_id".to_string(), "0123456789abcdef0123456789abcdef".to_string()),
+            ("gateway_id".to_string(), "gw-1".to_string()),
+        ]
+        .into();
+        let snap = crate::subscription::snapshot::snapshot_connection(provider, provider.endpoint("gateway").unwrap(), &params)
+            .unwrap();
+        let mut row = SubscriptionRow::test_fixture("cloudflare_clef", "gateway");
+        row.display_name = "CF".into();
+        row.api_key = "cf-token".into();
+        row.auth_header_name = "Authorization".into();
+        row.base_url = snap.base_url;
+        row.messages_path = snap.messages_path;
+        row.required_headers = snap.required_headers;
+        row.model_discovery = snap.model_discovery;
+        row.endpoint_protocol = snap.endpoint_protocol;
+        row.systemone_wire = snap.systemone_wire;
+        row.url_params = snap.url_params;
+        row
+    }
+
+    #[test]
+    fn builtin_subscription_without_secrets_gets_template_headers_back_from_the_registry() {
+        let providers = Arc::new(crate::provider::loader::load_all().unwrap());
+        let row = cloudflare_gateway_row(&providers);
+        let file = build_export(std::slice::from_ref(&row), &[], None, "6.1.0", Utc::now()).unwrap();
+        let exported = &file.subscriptions[0];
+        assert!(exported.redacted_headers.contains(&"cf-aig-authorization".to_string()), "前提: 无密码导出时模板头被当成敏感头去掉");
+
+        let local = LocalState { providers: providers.clone(), ..empty_local() };
+        let plan = plan(&file, None, &local, Utc::now());
+        let got = &plan.inserts[0];
+        assert_eq!(got.required_headers.get("cf-aig-authorization").map(String::as_str), Some("Bearer {api_key}"));
+        assert_eq!(got.required_headers.get("cf-aig-gateway-id").map(String::as_str), Some("gw-1"));
+        assert_eq!(got.required_headers, row.required_headers);
+        assert_eq!(got.base_url, row.base_url);
+        assert_eq!(got.messages_path, row.messages_path);
+        assert_eq!(got.systemone_wire, row.systemone_wire);
+        assert_eq!(got.url_params, row.url_params);
+        assert!(!got.enabled, "API Key 仍然缺失, 照旧停用");
+        assert_eq!(plan.report.disabled_missing_key, vec!["CF".to_string()]);
+
+        let preview = preview(&file, &local);
+        assert!(preview.subscriptions[0].redacted_headers.is_empty(), "注册表能补回的头不再列为需要重填");
+    }
+
+    #[test]
+    fn builtin_subscription_connection_comes_from_the_registry_not_the_file() {
+        let providers = Arc::new(crate::provider::loader::load_all().unwrap());
+        let row = cloudflare_gateway_row(&providers);
+        let mut file = build_export(std::slice::from_ref(&row), &[], None, "6.1.0", Utc::now()).unwrap();
+        file.subscriptions[0].base_url = "https://evil.example/accounts/x/ai".into();
+        file.subscriptions[0].required_headers.insert("cf-aig-gateway-id".into(), "other".into());
+        let local = LocalState { providers, ..empty_local() };
+        let got = &plan(&file, None, &local, Utc::now()).inserts[0];
+        assert_eq!(got.base_url, row.base_url);
+        assert_eq!(got.required_headers.get("cf-aig-gateway-id").map(String::as_str), Some("gw-1"));
+    }
+
+    #[test]
+    fn unknown_provider_keeps_the_file_values() {
+        // The registry is empty here: same behaviour as before (redacted header kept blank).
+        let providers = crate::provider::loader::load_all().unwrap();
+        let row = cloudflare_gateway_row(&providers);
+        let file = build_export(std::slice::from_ref(&row), &[], None, "6.1.0", Utc::now()).unwrap();
+        let got = &plan(&file, None, &empty_local(), Utc::now()).inserts[0];
+        assert_eq!(got.required_headers.get("cf-aig-authorization").map(String::as_str), Some(""));
+        assert_eq!(got.required_headers.get("cf-aig-gateway-id").map(String::as_str), Some("gw-1"));
     }
 
     #[test]
