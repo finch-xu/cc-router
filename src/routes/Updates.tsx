@@ -9,6 +9,7 @@ import {
 import { useEffect } from "react";
 import { useSearchParams } from "react-router";
 import { version as VERSION } from "../../package.json";
+import { UpdateNotesView } from "@/components/release-notes/UpdateNotesView";
 import { LogoMark } from "@/components/sketch/LogoMark";
 import { useUpdater } from "@/hooks/useUpdater";
 import { useSettings, useUpdateSettings } from "@/hooks/useSettings";
@@ -219,7 +220,7 @@ function UpdaterStatusSection() {
             )}
           </div>
         </div>
-        {detected.body && <div className="update-notes">{detected.body}</div>}
+        {detected.body && <UpdateNotesView body={detected.body} />}
       </>
     );
   }

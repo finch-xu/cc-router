@@ -2910,18 +2910,30 @@ html:not([data-platform="macos"]) .main.flush { padding-top: 0; }
   background: var(--accent);
   transition: width 200ms ease;
 }
+/* 新版本内容: Markdown 渲染 (UpdateNotesView), 分节 / 列表沿用更新内容弹窗的 rn-* */
 .update-notes {
-  padding: 11px 13px;
+  padding: 4px 16px 14px;
   background: var(--surface-3);
   border-radius: var(--r-sm);
-  font-family: var(--font-mono);
-  font-size: 11.5px;
+  font-size: 13px;
   line-height: 1.75;
   color: var(--ink-2);
-  white-space: pre-wrap;
   overflow: auto;
   max-height: 50vh;
 }
+.update-notes > .rn-chip { margin-top: 16px; }
+.update-notes > .rn-sum { margin: 12px 0 0; }
+.update-notes .rn-ul code,
+.update-notes .rn-sum code { font-family: var(--font-mono); font-size: 12px; padding: 0 5px; border-radius: 5px; background: var(--surface-2); color: var(--ink); }
+.update-notes .rn-sum a { color: var(--accent-ink); text-decoration: underline; text-underline-offset: 2px; }
+.update-notes .rn-sum b { color: var(--ink); font-weight: 600; }
+.update-notes .un-h { margin: 14px 0 0; font-size: 13px; font-weight: 600; color: var(--ink); }
+.update-notes .un-code {
+  margin: 10px 0 0; padding: 8px 10px; border-radius: var(--r-sm);
+  background: var(--surface-2); font-family: var(--font-mono); font-size: 11.5px;
+  white-space: pre-wrap; overflow-x: auto;
+}
+.update-notes .un-rule { margin: 16px 0 4px; border: 0; border-top: 1.5px dashed var(--line-2); }
 
 /* 更新日志: 卡片内固定最大高度, 内部滚动 (更新页已改为普通卡片页, 不再撑满视口) */
 

@@ -24,7 +24,7 @@ function Inline({ part }: { part: NotesInline }) {
   );
 }
 
-function Inlines({ parts }: { parts: NotesInline[] }) {
+export function Inlines({ parts }: { parts: NotesInline[] }) {
   return (
     <>
       {parts.map((p, i) => (
