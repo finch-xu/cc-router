@@ -53,13 +53,61 @@ fn parse_single(raw: &str) -> AppResult<Provider> {
 
 /// schema 表达不了的跨字段约束。失败即该 yaml 加载失败 (load_all warn + 跳过, 单测在 CI 拦住)。
 fn validate_semantics(p: &Provider) -> AppResult<()> {
-    use crate::provider::model::{AuthType, EndpointProtocol};
+    use crate::provider::model::{AuthType, EndpointProtocol, SystemoneWire};
+    use crate::provider::url_template::{placeholders, RESERVED_API_KEY, RESERVED_MODEL};
+
+    let fail = |msg: String| Err(AppError::internal(msg));
+
+    // 1. declarations
+    let mut ids: Vec<&str> = Vec::new();
+    for param in &p.url_params {
+        let ok_ident = !param.id.is_empty() && param.id.bytes().all(|b| b.is_ascii_lowercase() || b == b'_');
+        if !ok_ident || param.id == RESERVED_MODEL || param.id == RESERVED_API_KEY {
+            return fail(format!("url_params '{}': id 只能是小写字母与下划线, 且不能是保留字 model / api_key", param.id));
+        }
+        if ids.contains(&param.id.as_str()) {
+            return fail(format!("url_params '{}' 重复声明", param.id));
+        }
+        if regex::Regex::new(&param.pattern).is_err() {
+            return fail(format!("url_params '{}': pattern 不是合法正则", param.id));
+        }
+        ids.push(&param.id);
+    }
+
+    // 2. every placeholder is declared, or a reserved name in its allowed place
+    let check = |place: &str, s: &str, allow: Option<&str>| -> AppResult<()> {
+        for name in placeholders(s) {
+            if ids.contains(&name.as_str()) || allow == Some(name.as_str()) {
+                continue;
+            }
+            return Err(AppError::internal(format!("{place}: 占位符 {{{name}}} 未在 url_params 声明或不允许出现在这里")));
+        }
+        Ok(())
+    };
     for e in &p.endpoints {
         if e.protocol == EndpointProtocol::Systemone && p.auth.auth_type != AuthType::ApiKey {
-            return Err(AppError::internal(format!(
-                "endpoint '{}': protocol systemone 只允许出现在 auth.type = api_key 的 provider 下",
-                e.id
-            )));
+            return fail(format!("endpoint '{}': protocol systemone 只允许出现在 auth.type = api_key 的 provider 下", e.id));
+        }
+        if e.systemone_wire != SystemoneWire::Standard && e.protocol != EndpointProtocol::Systemone {
+            return fail(format!("endpoint '{}': systemone_wire 只能用在 protocol: systemone 的端点", e.id));
+        }
+        check(&format!("endpoint '{}' base_url", e.id), &e.base_url, None)?;
+        check(&format!("endpoint '{}' messages_path", e.id), &e.messages_path, Some(RESERVED_MODEL))?;
+        for (k, v) in &e.headers {
+            check(&format!("endpoint '{}' header {k}", e.id), v, Some(RESERVED_API_KEY))?;
+        }
+    }
+    for (k, v) in &p.required_headers {
+        check(&format!("required_headers {k}"), v, Some(RESERVED_API_KEY))?;
+    }
+    if let Some(u) = p.model_discovery.url.as_deref() {
+        check("model_discovery.url", u, None)?;
+    }
+
+    // 3. every declared param is used by at least one endpoint
+    for param in &p.url_params {
+        if !p.endpoints.iter().any(|e| p.params_used(e).contains(&param.id)) {
+            return fail(format!("url_params '{}' 声明了但没有任何端点用到", param.id));
         }
     }
     Ok(())
@@ -105,6 +153,10 @@ mod tests {
         for e in &p.endpoints {
             out.push((format!("endpoints[{}].label", e.id), &e.label));
             out.extend(e.description.iter().map(|t| (format!("endpoints[{}].description", e.id), t)));
+        }
+        for u in &p.url_params {
+            out.push((format!("url_params[{}].label", u.id), &u.label));
+            out.extend(u.placeholder.iter().map(|t| (format!("url_params[{}].placeholder", u.id), t)));
         }
         out
     }
@@ -153,6 +205,109 @@ endpoints:
     messages_path: "/v1/messages"
 auth: { type: api_key, header_name: Authorization, header_format: bearer }
 "#;
+
+    const WITH_PARAMS: &str = r#"
+id: t
+display_name: "T"
+compatibility: verified
+url_params:
+  - id: account_id
+    label: {zh: "账户 ID", en: "Account ID", ja: "アカウント ID"}
+    pattern: "^[0-9a-f]{32}$"
+  - id: gateway_id
+    label: {zh: "网关 ID", en: "Gateway ID", ja: "ゲートウェイ ID"}
+    pattern: "^[A-Za-z0-9_-]{1,64}$"
+endpoints:
+  - id: direct
+    label: "Direct"
+    base_url: "https://api.example.com/accounts/{account_id}/ai"
+    messages_path: "/v1/chat/completions"
+  - id: gateway
+    label: "Gateway"
+    base_url: "https://api.example.com/accounts/{account_id}/ai"
+    messages_path: "/v1/chat/completions"
+    headers:
+      x-gw: "{gateway_id}"
+      x-gw-auth: "Bearer {api_key}"
+auth:
+  type: api_key
+  header_name: "Authorization"
+  header_format: bearer
+model_discovery:
+  enabled: true
+  url: "https://api.example.com/accounts/{account_id}/ai/models/search"
+"#;
+
+    #[test]
+    fn url_params_parse_and_params_used_is_per_endpoint() {
+        let p = parse_single(WITH_PARAMS).unwrap();
+        assert_eq!(p.url_params.len(), 2);
+        assert_eq!(p.params_used(p.endpoint("direct").unwrap()), vec!["account_id".to_string()]);
+        assert_eq!(
+            p.params_used(p.endpoint("gateway").unwrap()),
+            vec!["account_id".to_string(), "gateway_id".to_string()]
+        );
+    }
+
+    #[test]
+    fn undeclared_placeholder_is_rejected() {
+        let yaml = WITH_PARAMS.replace("/accounts/{account_id}/ai\"\n    messages_path: \"/v1/chat/completions\"\n  - id: gateway", "/accounts/{acct}/ai\"\n    messages_path: \"/v1/chat/completions\"\n  - id: gateway");
+        let err = parse_single(&yaml).unwrap_err().to_string();
+        assert!(err.contains("acct"), "{err}");
+    }
+
+    #[test]
+    fn api_key_placeholder_only_allowed_in_headers() {
+        let yaml = WITH_PARAMS.replacen("/accounts/{account_id}/ai\"", "/accounts/{account_id}/{api_key}\"", 1);
+        let err = parse_single(&yaml).unwrap_err().to_string();
+        assert!(err.contains("api_key"), "{err}");
+    }
+
+    #[test]
+    fn model_placeholder_only_allowed_in_messages_path() {
+        let yaml = WITH_PARAMS.replacen("x-gw: \"{gateway_id}\"", "x-gw: \"{model}\"", 1);
+        let err = parse_single(&yaml).unwrap_err().to_string();
+        assert!(err.contains("model"), "{err}");
+    }
+
+    #[test]
+    fn declared_but_unused_param_is_rejected() {
+        let yaml = WITH_PARAMS.replace("      x-gw: \"{gateway_id}\"\n", "");
+        let err = parse_single(&yaml).unwrap_err().to_string();
+        assert!(err.contains("gateway_id"), "{err}");
+    }
+
+    #[test]
+    fn bad_param_declarations_are_rejected() {
+        for (from, to) in [
+            ("id: gateway_id", "id: model"),         // reserved name
+            ("id: gateway_id", "id: Gateway"),       // not [a-z_]+
+            ("^[A-Za-z0-9_-]{1,64}$", "^[unclosed"), // pattern does not compile
+        ] {
+            let yaml = WITH_PARAMS.replace(from, to);
+            assert!(parse_single(&yaml).is_err(), "should reject {to}");
+        }
+    }
+
+    #[test]
+    fn systemone_wire_and_envelope_parse() {
+        let yaml = MINIMAL.replace(
+            "    messages_path: \"/v1/messages\"\n",
+            "    messages_path: \"/run/{model}\"\n    protocol: systemone\n    systemone_wire: cloudflare_run\n",
+        );
+        let p = parse_single(&yaml).unwrap();
+        assert_eq!(p.endpoints[0].systemone_wire, crate::provider::model::SystemoneWire::CloudflareRun);
+        assert_eq!(p.model_discovery.envelope, None);
+    }
+
+    #[test]
+    fn cloudflare_run_requires_systemone_protocol() {
+        let yaml = MINIMAL.replace(
+            "    messages_path: \"/v1/messages\"\n",
+            "    messages_path: \"/v1/messages\"\n    systemone_wire: cloudflare_run\n",
+        );
+        assert!(parse_single(&yaml).is_err());
+    }
 
     #[test]
     fn endpoint_protocol_defaults_to_messages() {

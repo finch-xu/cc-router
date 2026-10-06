@@ -231,6 +231,57 @@ impl FromStr for EndpointProtocol {
     }
 }
 
+/// Upstream dialect of a System One endpoint. `standard` = TypeSafe shape at `/v1/systemone`;
+/// `cloudflare_run` = Workers AI `/run/@cf/cloudflare/{model}` with the `{result, success, errors}`
+/// envelope (spec §2.1). Only meaningful when `protocol: systemone` (loader enforces).
+#[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum SystemoneWire {
+    #[default]
+    Standard,
+    CloudflareRun,
+}
+
+impl SystemoneWire {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Standard => "standard",
+            Self::CloudflareRun => "cloudflare_run",
+        }
+    }
+}
+
+impl FromStr for SystemoneWire {
+    type Err = String;
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s {
+            "standard" => Ok(Self::Standard),
+            "cloudflare_run" => Ok(Self::CloudflareRun),
+            other => Err(format!("无效 systemone_wire: {other}")),
+        }
+    }
+}
+
+/// A value the user fills in when creating a subscription; referenced as `{id}` in yaml strings.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct UrlParam {
+    pub id: String,
+    pub label: LocalizedText,
+    #[serde(default)]
+    pub placeholder: Option<LocalizedText>,
+    /// Regex the trimmed value must match (validated on create / edit, and in the UI).
+    pub pattern: String,
+}
+
+/// Response shape of a provider's model list endpoint. `None` in yaml = choose by auth type.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum ModelsEnvelopeKind {
+    Openai,
+    Gemini,
+    Cloudflare,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ProviderEndpoint {
     pub id: String,
@@ -250,6 +301,12 @@ pub struct ProviderEndpoint {
     /// 创建订阅时非空则写进订阅快照的 `model_discovery.example_models`。
     #[serde(default)]
     pub example_models: Vec<String>,
+    /// Endpoint-level extra headers, merged over provider `required_headers` when snapshotting
+    /// (endpoint wins). Values may use url_params and `{api_key}`.
+    #[serde(default)]
+    pub headers: std::collections::BTreeMap<String, String>,
+    #[serde(default)]
+    pub systemone_wire: SystemoneWire,
 }
 
 impl ProviderEndpoint {
@@ -272,6 +329,9 @@ pub struct ModelDiscovery {
     pub cache_ttl_hours: u32,
     #[serde(default)]
     pub example_models: Vec<String>,
+    /// Response shape of the model list. `None` = choose by auth type.
+    #[serde(default)]
+    pub envelope: Option<ModelsEnvelopeKind>,
 }
 
 /// 手写而不是 derive: derive 给出的是 `path: ""` / `cache_ttl_hours: 0`, 与上面的 serde 默认值
@@ -285,6 +345,7 @@ impl Default for ModelDiscovery {
             url: None,
             cache_ttl_hours: default_cache_ttl(),
             example_models: Vec::new(),
+            envelope: None,
         }
     }
 }
@@ -375,6 +436,10 @@ pub struct Provider {
     #[serde(default)]
     pub category: ProviderCategory,
 
+    /// User-supplied values referenced as `{id}` in endpoint / discovery strings (spec §3.2).
+    #[serde(default)]
+    pub url_params: Vec<UrlParam>,
+
     pub endpoints: Vec<ProviderEndpoint>,
     #[serde(default)]
     pub default_endpoint: Option<String>,
@@ -422,5 +487,25 @@ pub struct Provider {
 impl Provider {
     pub fn endpoint(&self, id: &str) -> Option<&ProviderEndpoint> {
         self.endpoints.iter().find(|e| e.id == id)
+    }
+
+    pub fn url_param(&self, id: &str) -> Option<&UrlParam> {
+        self.url_params.iter().find(|p| p.id == id)
+    }
+
+    /// Declared params referenced by this endpoint (or provider-level strings it inherits),
+    /// in declaration order.
+    pub fn params_used(&self, endpoint: &ProviderEndpoint) -> Vec<String> {
+        use crate::provider::url_template::placeholders;
+        let mut found: Vec<String> = Vec::new();
+        let mut scan = |s: &str| found.extend(placeholders(s));
+        scan(&endpoint.base_url);
+        scan(&endpoint.messages_path);
+        endpoint.headers.values().for_each(|v| scan(v));
+        self.required_headers.values().for_each(|v| scan(v));
+        if let Some(u) = self.model_discovery.url.as_deref() {
+            scan(u);
+        }
+        self.url_params.iter().filter(|p| found.contains(&p.id)).map(|p| p.id.clone()).collect()
     }
 }

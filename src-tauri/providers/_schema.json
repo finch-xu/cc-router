@@ -29,6 +29,19 @@
     "compatibility": { "enum": ["verified", "partial", "untested"] },
     "compatibility_notes": { "anyOf": [{ "$ref": "#/definitions/localizedText" }, { "type": "null" }] },
     "category": { "enum": ["first_party", "second_party", "aggregator"] },
+    "url_params": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["id", "label", "pattern"],
+        "properties": {
+          "id": { "type": "string" },
+          "label": { "$ref": "#/definitions/localizedText" },
+          "placeholder": { "$ref": "#/definitions/localizedText" },
+          "pattern": { "type": "string" }
+        }
+      }
+    },
     "endpoints": {
       "type": "array",
       "minItems": 1,
@@ -44,7 +57,9 @@
           "region": { "type": "string" },
           "billing": { "type": "string" },
           "protocol": { "enum": ["messages", "systemone"] },
-          "example_models": { "type": "array", "items": { "type": "string" } }
+          "example_models": { "type": "array", "items": { "type": "string" } },
+          "headers": { "type": "object", "additionalProperties": { "type": "string" } },
+          "systemone_wire": { "enum": ["standard", "cloudflare_run"] }
         }
       }
     },
@@ -73,6 +88,7 @@
         "path": { "type": "string" },
         "url": { "type": "string" },
         "cache_ttl_hours": { "type": "integer", "minimum": 0 },
+        "envelope": { "enum": ["openai", "gemini", "cloudflare"] },
         "example_models": {
           "type": "array",
           "items": { "type": "string" }

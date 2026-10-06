@@ -29,6 +29,7 @@ serde = { version = "1", features = ["derive"] }
 # 2.13.2 已实测可编译 dispatch2 0.3.1 (cargo clean -p dispatch2 && cargo check)。升级 bitflags 后若 macOS 构建
 # 报 "recursion limit reached while expanding __bitflags_flag_name!", 回到这里。
 bitflags = "2.13.2"
+regex = "1"
 tauri = { version = "2", features = ["tray-icon"] }
 tauri-plugin-clipboard-manager = "2"
 tauri-plugin-dialog = "2"

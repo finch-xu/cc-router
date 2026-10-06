@@ -475,6 +475,7 @@ mod tests {
             url: None,
             cache_ttl_hours: 0,
             example_models: Vec::new(),
+            envelope: None,
         };
 
         let found = fetch(&reqwest::Client::new(), &row).await.unwrap();
