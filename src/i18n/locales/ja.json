@@ -712,6 +712,8 @@
   "subscriptionNew.openaiChatAuthLocked": "OpenAI Chat Completions は Authorization: Bearer ヘッダ固定です。API Key をそのまま入力するだけで OK (通常 sk-... で始まります。Ollama のように認証不要な場合は任意の非空文字列で構いません)、認証方式の選択は不要です。",
   "subscriptionNew.errGeminiPathPlaceholder": "Gemini パステンプレートに {model} プレースホルダが必要です",
   "subscriptionNew.field.endpoint": "エンドポイント",
+  "subscriptionNew.urlParam.empty": "{label}を入力してください",
+  "subscriptionNew.urlParam.format": "{label}の形式が正しくありません",
   "subscriptionNew.endpointSelect": "エンドポイントを選択",
   "subscriptionNew.openApiKey": "公式サイトで API Key を取得",
   "subscriptionNew.field.providerName": "プロバイダ表示名",

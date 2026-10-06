@@ -712,6 +712,8 @@
   "subscriptionNew.openaiChatAuthLocked": "OpenAI Chat Completions endpoints always use Authorization: Bearer. Just paste your API key (usually starts with sk-...; for auth-free setups like Ollama, any non-empty string works), no auth method to pick.",
   "subscriptionNew.errGeminiPathPlaceholder": "Gemini path template must contain the {model} placeholder",
   "subscriptionNew.field.endpoint": "Endpoint",
+  "subscriptionNew.urlParam.empty": "Enter the {label}",
+  "subscriptionNew.urlParam.format": "{label} is not in the right format",
   "subscriptionNew.endpointSelect": "Select endpoint",
   "subscriptionNew.openApiKey": "Get API key from website",
   "subscriptionNew.field.providerName": "Provider display name",
