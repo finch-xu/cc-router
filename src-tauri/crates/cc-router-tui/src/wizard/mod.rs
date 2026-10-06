@@ -934,14 +934,19 @@ mod tests {
         jev.endpoints = vec![ep("systemone")];
         let mut both = provider("both");
         both.endpoints = vec![ep("messages"), ep("systemone")];
+        let mut oauth = provider("kiro");
+        oauth.endpoints = vec![ep("messages")];
+        oauth.auth.auth_type = "kiro_oauth".into();
         let mut w = basics_at(BasicsPhase::Editing);
-        let Some(Action::OpenPicker(spec)) = basics(&mut w).handle_key(key(KeyCode::Enter), &mut BasicsPhase::Editing, &[llm, jev, both], s)
+        let Some(Action::OpenPicker(spec)) =
+            basics(&mut w).handle_key(key(KeyCode::Enter), &mut BasicsPhase::Editing, &[llm, jev, both, oauth], s)
         else {
             panic!("厂商行 回车 应该开选择弹窗")
         };
         let labels: Vec<&str> = spec.items.iter().map(|i| i.label.as_str()).collect();
-        assert_eq!(&labels[..3], ["llm [LLM]", "jev [Jev]", "both [LLM] [Jev]"]);
-        assert!(labels[3..].iter().all(|l| l.ends_with(" [LLM]")), "{labels:?}");
+        let oauth_label = format!("kiro [LLM] · {}", s.wiz_desktop_only);
+        assert_eq!(&labels[..4], ["llm [LLM]", "jev [Jev]", "both [LLM] [Jev]", oauth_label.as_str()]);
+        assert!(labels[4..].iter().all(|l| l.ends_with(" [LLM]")), "{labels:?}");
     }
 
     /// Jev 槽可以留空 (= 透传): 直接保存, 发全空槽。选择弹窗置顶「清空」项。

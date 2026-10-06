@@ -132,8 +132,13 @@ impl BasicsForm {
             .iter()
             .map(|p| {
                 let (llm, jev) = p.capabilities();
-                let base = if p.is_oauth() { format!("{} · {}", p.display_name, s.wiz_desktop_only) } else { p.display_name.clone() };
-                PickerItem { id: p.id.clone(), label: format!("{base}{}", capability_suffix(llm, jev)), hint: p.description.clone() }
+                // Suffix before the desktop-only note: the note is long in ja and would push the
+                // suffix past the picker width.
+                let mut label = format!("{}{}", p.display_name, capability_suffix(llm, jev));
+                if p.is_oauth() {
+                    label = format!("{label} · {}", s.wiz_desktop_only);
+                }
+                PickerItem { id: p.id.clone(), label, hint: p.description.clone() }
             })
             .collect();
         for (protocol, label) in CustomProtocol::ALL.iter().zip(s.wiz_custom_labels.iter()) {

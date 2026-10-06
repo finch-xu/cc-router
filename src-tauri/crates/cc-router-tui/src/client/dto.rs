@@ -711,7 +711,6 @@ pub struct ModelDiscovery {
     pub example_models: Vec<String>,
 }
 
-/// 需要去桌面端添加的 auth type。TUI 不做设备码流程, 这两类在厂商选择器里置灰。
 /// Picker label suffix. Protocol names, identical in every language.
 pub fn capability_suffix(llm: bool, jev: bool) -> &'static str {
     match (llm, jev) {
@@ -722,6 +721,7 @@ pub fn capability_suffix(llm: bool, jev: bool) -> &'static str {
     }
 }
 
+/// 需要去桌面端添加的 auth type。TUI 不做设备码流程, 这两类在厂商选择器里置灰。
 pub const OAUTH_AUTH_TYPES: [&str; 2] = ["chatgpt_oauth", "kiro_oauth"];
 
 impl Provider {
@@ -752,7 +752,7 @@ impl Provider {
     /// `providerCapabilities.ts`; `tui_contract.rs` pins it against the backend.
     pub fn capabilities(&self) -> (bool, bool) {
         (
-            self.endpoints.iter().any(|e| !e.is_systemone()),
+            self.endpoints.iter().any(|e| e.protocol == "messages"),
             self.endpoints.iter().any(ProviderEndpoint::is_systemone),
         )
     }
@@ -1049,6 +1049,10 @@ mod tests {
         assert_eq!(p.capabilities(), (true, true));
         p.endpoints.truncate(1);
         assert_eq!(p.capabilities(), (true, false));
+        // Same literal rule as the desktop `providerCapabilities.ts`: an unknown future protocol
+        // is neither LLM nor Jev on both sides.
+        p.endpoints = vec![ep("c", "some_future_protocol")];
+        assert_eq!(p.capabilities(), (false, false));
         assert_eq!(capability_suffix(true, true), " [LLM] [Jev]");
         assert_eq!(capability_suffix(false, true), " [Jev]");
     }
