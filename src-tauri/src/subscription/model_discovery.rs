@@ -15,7 +15,7 @@ use sqlx::SqlitePool;
 use tracing::{info, warn};
 
 use crate::error::AppError;
-use crate::provider::model::{join_base_path, AuthType};
+use crate::provider::model::{join_base_path, AuthType, ModelsEnvelopeKind};
 use crate::subscription::{
     model::{ModelCache, ModelInfo, SubscriptionRow},
     store,
@@ -73,6 +73,7 @@ pub struct ProbeTarget {
     pub auth_header_name: String,
     pub auth_header_value: String,
     pub required_headers: BTreeMap<String, String>,
+    pub envelope: Option<ModelsEnvelopeKind>,
 }
 
 /// 协议家族约定俗成的模型列表路径 (相对 base_url)。
@@ -98,6 +99,7 @@ impl ProbeTarget {
             auth_header_name: row.auth_header_name.clone(),
             auth_header_value: row.auth_header_value(),
             required_headers: row.resolved_required_headers(),
+            envelope: row.model_discovery.envelope,
         };
         if row.is_user_defined {
             target.with_custom_defaults()
@@ -177,11 +179,7 @@ async fn fetch_url(
     }
     let text = resp.text().await?;
 
-    match target.auth_type {
-        // Gemini generateContent 与 Interactions 都用 /v1beta/models (Gemini envelope 格式)。
-        AuthType::GeminiApiKey | AuthType::GeminiInteractionsApiKey => parse_gemini_envelope(&text),
-        _ => parse_openai_envelope(&text),
-    }
+    parse_by_kind(target.envelope, target.auth_type, &text)
 }
 
 /// 按 [`candidate_model_urls`] 逐个尝试, 返回第一个成功的。全部失败时返回**首选地址**的错误
@@ -233,6 +231,42 @@ pub async fn fetch(
     let url = join_base_path(&row.base_url, &row.model_discovery.path);
     let models = fetch_url(client, &url, &target).await?;
     Ok(Discovered { models, url })
+}
+
+/// Envelope chosen by yaml `model_discovery.envelope`, else by auth type (historical rule).
+fn parse_by_kind(kind: Option<ModelsEnvelopeKind>, auth_type: AuthType, text: &str) -> Result<Vec<ModelInfo>, DiscoveryError> {
+    match kind {
+        Some(ModelsEnvelopeKind::Cloudflare) => parse_cloudflare_envelope(text),
+        Some(ModelsEnvelopeKind::Gemini) => parse_gemini_envelope(text),
+        Some(ModelsEnvelopeKind::Openai) => parse_openai_envelope(text),
+        None => match auth_type {
+            // Gemini generateContent 与 Interactions 都用 /v1beta/models (Gemini envelope 格式)。
+            AuthType::GeminiApiKey | AuthType::GeminiInteractionsApiKey => parse_gemini_envelope(text),
+            _ => parse_openai_envelope(text),
+        },
+    }
+}
+
+/// Workers AI `/ai/models/search`: `{"result": [{name, task: {name}}]}`. Keeps text-generation
+/// models usable on the chat endpoint: drops Clef (decision model, System One only) and LoRA
+/// bases (need an adapter).
+fn parse_cloudflare_envelope(text: &str) -> Result<Vec<ModelInfo>, DiscoveryError> {
+    let parsed: Value = serde_json::from_str(text)?;
+    let arr = parsed
+        .get("result")
+        .and_then(|m| m.as_array())
+        .ok_or_else(|| DiscoveryError::InvalidResponse("Cloudflare 响应缺少 result 数组".into()))?;
+    let out: Vec<ModelInfo> = arr
+        .iter()
+        .filter(|m| m.pointer("/task/name").and_then(Value::as_str) == Some("Text Generation"))
+        .filter_map(|m| m.get("name").and_then(Value::as_str))
+        .filter(|name| !name.starts_with("@cf/cloudflare/clef") && !name.ends_with("-lora"))
+        .map(|name| ModelInfo { id: name.to_string(), display_name: None })
+        .collect();
+    if out.is_empty() {
+        return Err(DiscoveryError::InvalidResponse("Cloudflare 响应中没有可用的对话模型".into()));
+    }
+    Ok(out)
 }
 
 fn parse_openai_envelope(text: &str) -> Result<Vec<ModelInfo>, DiscoveryError> {
@@ -305,6 +339,34 @@ fn parse_gemini_envelope(text: &str) -> Result<Vec<ModelInfo>, DiscoveryError> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::provider::model::ModelsEnvelopeKind;
+
+    const CLOUDFLARE_MODELS: &str = r#"{"result":[
+        {"name":"@cf/openai/gpt-oss-120b","task":{"name":"Text Generation"}},
+        {"name":"@cf/cloudflare/clef","task":{"name":"Text Generation"}},
+        {"name":"@cf/cloudflare/clef-flash","task":{"name":"Text Generation"}},
+        {"name":"@cf/google/gemma-2b-it-lora","task":{"name":"Text Generation"}},
+        {"name":"@cf/baai/bge-m3","task":{"name":"Text Embeddings"}},
+        {"name":"@cf/zai-org/glm-5.3","task":{"name":"Text Generation"}}
+    ],"success":true,"errors":[],"messages":[]}"#;
+
+    #[test]
+    fn cloudflare_envelope_keeps_chat_models_only() {
+        let ids: Vec<String> = parse_cloudflare_envelope(CLOUDFLARE_MODELS).unwrap().into_iter().map(|m| m.id).collect();
+        assert_eq!(ids, vec!["@cf/openai/gpt-oss-120b".to_string(), "@cf/zai-org/glm-5.3".to_string()]);
+    }
+
+    #[test]
+    fn cloudflare_envelope_empty_is_invalid() {
+        assert!(parse_cloudflare_envelope(r#"{"result":[],"success":true}"#).is_err());
+        assert!(parse_cloudflare_envelope(r#"{"data":[]}"#).is_err());
+    }
+
+    #[test]
+    fn envelope_kind_overrides_auth_type() {
+        assert!(matches!(parse_by_kind(Some(ModelsEnvelopeKind::Cloudflare), AuthType::OpenaiChatCompletionsApiKey, CLOUDFLARE_MODELS), Ok(v) if v.len() == 2));
+        assert!(parse_by_kind(None, AuthType::OpenaiChatCompletionsApiKey, CLOUDFLARE_MODELS).is_err(), "default stays OpenAI envelope");
+    }
 
     #[test]
     fn gemini_envelope_filters_non_generate_models() {
@@ -347,6 +409,7 @@ mod tests {
             auth_header_name: "authorization".into(),
             auth_header_value: "Bearer sk-test".into(),
             required_headers: BTreeMap::new(),
+            envelope: None,
         }
     }
 

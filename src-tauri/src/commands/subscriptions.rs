@@ -859,6 +859,7 @@ pub async fn probe_custom_models(
         auth_header_name: input.auth_header_name,
         auth_header_value: input.auth_header_format.apply(&input.api_key),
         required_headers: BTreeMap::new(),
+        envelope: None,
     }
     .with_custom_defaults();
 
