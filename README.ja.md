@@ -190,7 +190,7 @@ cc-router はツールと LLM プロバイダの間に入ります。ツール�
 | API Key | cc-router 設定画面の token。Codex は `OPENAI_API_KEY` または `~/.codex/auth.json` から読み込みます |
 | モデル名 | `gpt-5.6` / `gpt-5.5` / `gpt-5.4` / `gpt-5.4-mini`、または `openai/` プレフィックス、`gpt-*-sol/terra/luna/mini` のティア名。それぞれ fable / opus / sonnet / haiku に対応。`model-*` 記法も受け付けます |
 
-`~/.codex/config.toml` の断片（設定画面の「連携」からワンクリックで書き込めます。元ファイルは自動でバックアップされ、その後 `codex -p cc-router` で起動）：
+`~/.codex/config.toml` の断片（詳しい手順はアプリの「セットアップガイド → Codex」にあります。その後 `codex -p cc-router` で起動）：
 
 ```toml
 [model_providers.cc-router]

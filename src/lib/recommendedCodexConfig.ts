@@ -3,11 +3,9 @@
  *
  * - config.toml: 注入一个 `[model_providers.cc-router]` (wire_api = "responses") +
  *   一个 `[profiles.cc-router]`. 用户用 `codex -p cc-router` 走 cc-router.
- * - auth.json: 写入 `{ "OPENAI_API_KEY": "<cc-router token>" }`. cc-router 关鉴权时
- *   该 token 可被任意值替换, 这里写入它的好处是 token 轮换时一并同步.
+ * - auth.json: `{ "OPENAI_API_KEY": "<cc-router token>" }`. cc-router 关鉴权时该 token 可被任意值替换.
  *
- * 字段必须与 src-tauri/src/integrations/codex.rs::ConfigSnapshot 的判定 (provider_name="cc-router",
- * wire_api="responses", base_url=cc-router/v1) 严格对齐 — 写出来的文件要能立刻被 inspect 判 in_sync.
+ * 只用于接入指南页展示, 用户自己复制进 ~/.codex/ (cc-router 不写这两个文件).
  */
 
 export interface CodexSnapshot {
@@ -22,8 +20,6 @@ export interface CodexSnapshot {
  * 注意 base_url 后缀必须是 `/v1`, Codex 会在此基础上拼 `/responses` 走 OpenAI Responses 协议.
  *
  * `comment` 是文件头注释 (按界面语言, 由调用方经 i18n 传入), 每行自动加 `# `.
- * 注释不影响 inspect 的 in_sync 判定 (后端按 TOML 解析), 但会影响「插入」时与文件原文的逐字比较:
- * 换了界面语言再插入会被视为有改动, 这是可接受的。
  */
 export function buildRecommendedCodexConfig(snap: CodexSnapshot, comment: string): string {
   const header = comment
@@ -46,8 +42,7 @@ model = "model-sonnet"
 
 /**
  * 生成完整的 auth.json 推荐内容.
- * 顶层只放 `OPENAI_API_KEY` 一个字段, 不动用户原 ChatGPT OAuth 结构 — 但写入会覆盖, 所以
- * Rust 端 write_auth_in 在旧文件含 tokens.access_token 时会先备份 .cc-router.bak.
+ * 顶层只放 `OPENAI_API_KEY` 一个字段; 整份替换会覆盖原 ChatGPT 登录, 页面上提示用户先备份.
  */
 export function buildRecommendedCodexAuth(snap: CodexSnapshot): string {
   return JSON.stringify({ OPENAI_API_KEY: snap.token }, null, 2) + "\n";

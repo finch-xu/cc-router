@@ -190,7 +190,7 @@ The three chat entry points share the same subscriptions, virtual models, quotas
 | API Key | the token from cc-router's Settings page; Codex reads it from `OPENAI_API_KEY` or `~/.codex/auth.json` |
 | Model name | `gpt-5.6` / `gpt-5.5` / `gpt-5.4` / `gpt-5.4-mini`, or the `openai/` prefix and `gpt-*-sol/terra/luna/mini` tier names, mapping to fable / opus / sonnet / haiku respectively; the `model-*` form is accepted too |
 
-`~/.codex/config.toml` snippet (the "Integrations" tab in Settings can write it for you and backs up the original file; then launch with `codex -p cc-router`):
+`~/.codex/config.toml` snippet (full steps are in the app under "Setup guide → Codex"; then launch with `codex -p cc-router`):
 
 ```toml
 [model_providers.cc-router]

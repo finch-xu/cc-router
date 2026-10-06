@@ -14,6 +14,7 @@
  * 名字前一枚状态点 (实心 = 接入), 状态文案退到 title / aria-label。
  */
 import { useState } from "react";
+import { ChevronRight } from "lucide-react";
 import { ClientToolBadge } from "@/components/ClientToolBadge";
 import { useClientActivity } from "@/hooks/useClientActivity";
 import { useSettings } from "@/hooks/useSettings";
@@ -76,15 +77,15 @@ export function ClientAccessSection({ variant }: { variant: "sketch" | "classic"
                     onClick={() => setToggled((s) => ({ ...s, [g.key]: !open }))}
                   >
                     <span className={`${p}-client`}>
-                      <svg
-                        className={open ? `${p}-chev open` : `${p}-chev`}
-                        viewBox="0 0 16 16"
-                        width="13"
-                        height="13"
-                        aria-hidden="true"
-                      >
-                        <path d="M5.6 3.2 C 7.6 5, 9.2 6.6, 10.6 8 C 9.2 9.4, 7.6 11, 5.4 12.8" />
-                      </svg>
+                      {sketch ? (
+                        <SketchChevron className={open ? "ca-chev open" : "ca-chev"} />
+                      ) : (
+                        <ChevronRight
+                          className={open ? "lrc-ca-chev open" : "lrc-ca-chev"}
+                          size={13}
+                          aria-hidden="true"
+                        />
+                      )}
                       <StatusDot p={p} on={g.active} />
                       <span className={`${p}-gname`}>{CLIENT_GROUP_LABEL[g.key]}</span>
                     </span>
@@ -125,6 +126,27 @@ export function ClientAccessSection({ variant }: { variant: "sketch" | "classic"
         </div>
       </div>
     </section>
+  );
+}
+
+/**
+ * 手绘主题的展开箭头。按侧栏图标的 32 画板来画, 才能直接套 #ccr-rough-icon
+ * (滤镜参数按引用者的用户坐标生效, 换画板尺寸抖动幅度就跟着变)。
+ * 经典 / Win2000 用 lucide 的 ChevronRight, 与其他下拉箭头同一来源。
+ */
+function SketchChevron({ className }: { className: string }) {
+  return (
+    <svg
+      className={className}
+      viewBox="0 0 32 32"
+      width="13"
+      height="13"
+      aria-hidden="true"
+      focusable="false"
+      style={{ overflow: "visible" }}
+    >
+      <path filter="url(#ccr-rough-icon)" d="M11.2 6.4 C 15.2 10, 18.4 13.2, 21.2 16 C 18.4 18.8, 15.2 22, 10.8 25.6" />
+    </svg>
   );
 }
 

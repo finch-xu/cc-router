@@ -190,7 +190,7 @@ cc-router 夹在你的工具和大模型厂商中间：工具从**入口**连进
 | API Key | cc-router 设置页里的 token，Codex 从 `OPENAI_API_KEY` 或 `~/.codex/auth.json` 读取 |
 | 模型名 | `gpt-5.6` / `gpt-5.5` / `gpt-5.4` / `gpt-5.4-mini`，或 `openai/` 前缀、`gpt-*-sol/terra/luna/mini` 档位名，分别落到 fable / opus / sonnet / haiku；也接受 `model-*` 写法 |
 
-`~/.codex/config.toml` 片段（设置页「集成」可一键写入并自动备份原文件，之后用 `codex -p cc-router` 启动）：
+`~/.codex/config.toml` 片段（app 内「接入指南 → Codex」有完整步骤，之后用 `codex -p cc-router` 启动）：
 
 ```toml
 [model_providers.cc-router]

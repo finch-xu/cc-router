@@ -1,4 +1,4 @@
-//! 与外部客户端工具 (Claude Code / Codex CLI 等) 的配置文件集成.
+//! 与外部客户端工具 (Claude Code 等) 的配置文件集成.
 //!
 //! 每个子模块独立处理一个工具的 settings 文件: 读 / 状态探测 / 智能写入.
 
@@ -9,10 +9,9 @@ use tokio::fs;
 use crate::error::{AppError, AppResult};
 
 pub mod claude_code;
-pub mod codex;
 
 /// 解析用户主目录: Unix 用 HOME, Windows 用 USERPROFILE.
-/// 共享给所有 client-tool 集成 (CC / Codex / 未来的 Ollama 等), 避免每个 module 复制一份.
+/// 共享给所有 client-tool 集成 (CC / 未来的 Ollama 等), 避免每个 module 复制一份.
 pub fn home_dir() -> AppResult<PathBuf> {
     std::env::var_os("HOME")
         .map(PathBuf::from)
@@ -33,7 +32,7 @@ pub fn sibling_with_suffix(target: &Path, suffix: &str) -> PathBuf {
 }
 
 /// Atomic 写入: 同目录 .tmp + rename. 跨平台 (NTFS/APFS/ext4) 均原子.
-/// `tmp_suffix` 由调用者指定 (CC 用 `.cc-router.tmp`, Codex 也用同名), 同 target 不同 tmp 不冲突
+/// `tmp_suffix` 由调用者指定 (CC 用 `.cc-router.tmp`), 同 target 不同 tmp 不冲突
 /// (因为基于 target file_name 拼出来, 不同文件得到不同 tmp 名).
 pub async fn atomic_write(target: &Path, bytes: &[u8], tmp_suffix: &str) -> AppResult<()> {
     let tmp = sibling_with_suffix(target, tmp_suffix);

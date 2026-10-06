@@ -207,16 +207,10 @@ web_commands! {
     uninstall_tui_command() => Err::<(), AppError>(AppError::BadRequest(DESKTOP_ONLY.into())),
     // 托盘只属于桌面 app; 前端也只在桌面运行时才调它
     set_tray_update() => Err::<(), AppError>(AppError::BadRequest(DESKTOP_ONLY.into())),
-    // Claude Code / Codex integrations
+    // Claude Code integration
     read_claude_code_settings() => commands::integrations::read_claude_code_settings(st).await,
     inspect_claude_code_settings() => commands::integrations::inspect_claude_code_settings(st).await,
     write_claude_code_settings(new_content: String) => commands::integrations::write_claude_code_settings(st, args.new_content).await,
-    read_codex_config() => commands::integrations::read_codex_config(st).await,
-    read_codex_auth() => commands::integrations::read_codex_auth(st).await,
-    inspect_codex_config() => commands::integrations::inspect_codex_config(st).await,
-    inspect_codex_auth() => commands::integrations::inspect_codex_auth(st).await,
-    write_codex_config(new_content: String) => commands::integrations::write_codex_config(st, args.new_content).await,
-    write_codex_auth(new_content: String) => commands::integrations::write_codex_auth(st, args.new_content).await,
 }
 
 /// POST /ui/api/cmd/{name}

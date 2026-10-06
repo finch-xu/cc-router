@@ -863,7 +863,6 @@
   white-space: nowrap;
 }
 :where([data-art~="plain"]) .lrc-ca-chev { flex: none; transition: transform 0.15s ease; }
-:where([data-art~="plain"]) .lrc-ca-chev path { fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
 :where([data-art~="plain"]) .lrc-ca-chev.open { transform: rotate(90deg); }
 /* 本文件晚于 styles.css 加载 (main.tsx 靠源码顺序定胜负), 上面这条 transition 会把
    styles.css 里 prefers-reduced-motion 的复位盖掉, 所以在这里跟着复位一次 */

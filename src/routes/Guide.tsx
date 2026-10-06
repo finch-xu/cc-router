@@ -12,7 +12,6 @@ import OpenCode from "@lobehub/icons/es/OpenCode";
 import Qwen from "@lobehub/icons/es/Qwen";
 import RooCode from "@lobehub/icons/es/RooCode";
 import { ClaudeCodeSettingsEditor } from "@/components/ClaudeCodeSettingsEditor";
-import { CodexSettingsEditor } from "@/components/CodexSettingsEditor";
 import { CopyableBlock } from "@/components/CopyableBlock";
 import { useEnvSnippet, useProxyEndpoint, useSettings } from "@/hooks/useSettings";
 import { buildRecommendedCodexAuth, buildRecommendedCodexConfig } from "@/lib/recommendedCodexConfig";
@@ -47,7 +46,7 @@ export function GuidePage() {
   const TABS: { id: Tab; label: string; icon: ReactNode; disabled?: boolean }[] = [
     { id: "generic", label: t("guide.tab.generic"), icon: <Plug size={ICON_SIZE} /> },
     { id: "claude-code", label: "Claude Code", icon: <ClaudeCode.Color size={ICON_SIZE} /> },
-    { id: "codex", label: "Codex", icon: <Codex size={ICON_SIZE} />, disabled: true },
+    { id: "codex", label: "Codex", icon: <Codex size={ICON_SIZE} /> },
     { id: "cc-switch", label: "cc-switch", icon: <Bot size={ICON_SIZE} /> },
     { id: "openclaw", label: "OpenClaw", icon: <OpenClaw.Color size={ICON_SIZE} /> },
     { id: "hermes", label: "Hermes Agent", icon: <HermesAgent size={ICON_SIZE} /> },
@@ -212,7 +211,7 @@ function GenericTab() {
   const settings = useSettings();
   const authEnabled = settings.data?.auth_enabled ?? true;
   const origin = baseUrl ?? `http://127.0.0.1:${port}`;
-  // 与 CodexSettingsEditor「插入推荐配置」写出的文件逐字一致 (含真实 token), 复制即用.
+  // 与 Codex 标签里的片段同源 (含真实 token), 复制即用.
   const codexSnap = { baseUrl: origin, token };
   const codexToml = buildRecommendedCodexConfig(codexSnap, t("guide.codex.configComment")).trimEnd();
   const codexAuth = buildRecommendedCodexAuth(codexSnap).trimEnd();
@@ -802,10 +801,19 @@ function HermesAgentTab() {
   );
 }
 
+/**
+ * Codex CLI / Desktop: 纯文字教程, 用户自己改 ~/.codex 下两个文件.
+ * 片段由 recommendedCodexConfig 用真实端口 / token 生成, 与「通用接入方式」里 /v1/responses 卡片同源.
+ */
+const CODEX_SLOTS = ["model-fable", "model-opus", "model-sonnet", "model-haiku"] as const;
+
 function CodexTab() {
   const { t } = useT();
-  const { port, baseUrl, running } = useProxyEndpoint();
-  const effectiveBaseUrl = baseUrl ?? `http://127.0.0.1:${port}`;
+  const { port, baseUrl, token, running } = useProxyEndpoint();
+  const origin = baseUrl ?? `http://127.0.0.1:${port}`;
+  const snap = { baseUrl: origin, token };
+  const configToml = buildRecommendedCodexConfig(snap, t("guide.codex.configComment")).trimEnd();
+  const authJson = buildRecommendedCodexAuth(snap).trimEnd();
   const usageCmd = `codex -p cc-router "hello"`;
 
   return (
@@ -814,7 +822,7 @@ function CodexTab() {
         <div className="card-head">
           <div className="card-title">{t("guide.codex.path.title")}</div>
           <span className="card-sub mono">
-            {effectiveBaseUrl} ·{" "}
+            {origin} ·{" "}
             {running ? t("settings.proxy.statusRunning") : t("guide.proxy.statusNotStarted")}
           </span>
         </div>
@@ -846,7 +854,40 @@ function CodexTab() {
         </div>
       </div>
 
-      <CodexSettingsEditor />
+      <div className="card section">
+        <div className="card-head">
+          <div className="card-title">{t("guide.codex.config.title")}</div>
+          <span className="card-sub mono">~/.codex/config.toml</span>
+        </div>
+        <div className="card-body">
+          <div className="field-hint" style={{ marginBottom: 10 }}>
+            {t("guide.codex.config.desc")}
+          </div>
+          <CopyableBlock text={configToml} />
+          <ul className="guide-notes" style={{ marginTop: 10 }}>
+            <li>{t("guide.codex.config.note1")}</li>
+            <li>{t("guide.codex.config.note2")}</li>
+          </ul>
+        </div>
+      </div>
+
+      <div className="card section">
+        <div className="card-head">
+          <div className="card-title">{t("guide.codex.auth.title")}</div>
+          <span className="card-sub mono">~/.codex/auth.json</span>
+        </div>
+        <div className="card-body">
+          <div className="field-hint" style={{ marginBottom: 10 }}>
+            {t("guide.codex.auth.desc")}
+          </div>
+          <CopyableBlock text={authJson} />
+          <ul className="guide-notes" style={{ marginTop: 10 }}>
+            <li>{t("guide.codex.auth.note1")}</li>
+            <li>{t("guide.codex.auth.note2")}</li>
+            <li>{t("guide.codex.auth.note3")}</li>
+          </ul>
+        </div>
+      </div>
 
       <div className="card section">
         <div className="card-head">
@@ -858,8 +899,56 @@ function CodexTab() {
           </div>
           <CopyableBlock text={usageCmd} />
           <div className="field-hint" style={{ marginTop: 10 }}>
-            {t("guide.codex.usage.note")}
+            {t("guide.codex.usage.desktop")}
           </div>
+        </div>
+      </div>
+
+      <div className="card section">
+        <div className="card-head">
+          <div className="card-title">{t("guide.codex.slots.title")}</div>
+        </div>
+        <div className="card-body">
+          <div className="field-hint" style={{ marginBottom: 10 }}>
+            {t("guide.codex.slots.desc")}
+          </div>
+          <table className="table" style={{ fontSize: 12, tableLayout: "fixed", marginBottom: 10 }}>
+            <tbody>
+              {CODEX_SLOTS.map((m) => (
+                <tr key={m}>
+                  <td className="mono" style={{ width: 140 }}>{m}</td>
+                  <td style={{ color: "var(--ink-3)" }}>{t(`guide.codex.slots.${m}`)}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+          <div className="field-hint">{t("guide.codex.slots.note")}</div>
+        </div>
+      </div>
+
+      <div className="card section">
+        <div className="card-head">
+          <div className="card-title">{t("guide.codex.verify.title")}</div>
+        </div>
+        <div className="card-body">
+          <div className="field-hint" style={{ marginBottom: 10 }}>
+            {t("guide.codex.verify.desc1")}
+            <Link
+              to="/request-logs"
+              style={{ color: "var(--accent-ink)", textDecoration: "none", margin: "0 4px" }}
+            >
+              {t("guide.codex.verify.logsLink")}
+            </Link>
+            {t("guide.codex.verify.desc2")}
+          </div>
+          <div style={{ fontSize: 12, fontWeight: 600, marginBottom: 6 }}>
+            {t("guide.codex.trouble.title")}
+          </div>
+          <ul className="guide-notes">
+            {Array.from({ length: 5 }, (_, i) => (
+              <li key={i}>{t(`guide.codex.trouble.item${i + 1}`)}</li>
+            ))}
+          </ul>
         </div>
       </div>
     </>

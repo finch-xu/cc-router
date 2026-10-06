@@ -2605,7 +2605,8 @@ html:not([data-platform="macos"]) .main.flush { padding-top: 0; }
 .ca-client { display: inline-flex; align-items: center; gap: 6px; min-width: 0; }
 .ca-gname { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .ca-chev { flex: none; transition: transform 0.15s ease; }
-.ca-chev path { fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
+/* 32 画板 (见 SketchChevron), 3.6 ≈ 屏幕上 1.5px */
+.ca-chev path { fill: none; stroke: currentColor; stroke-width: 3.6; stroke-linecap: round; stroke-linejoin: round; }
 .ca-chev.open { transform: rotate(90deg); }
 /* 成员行缩进 = 组行箭头宽 + 间距, 与组行状态点同一条竖线, 名字也对齐 */
 .ca-row.member .ca-client { padding-left: 19px; }
