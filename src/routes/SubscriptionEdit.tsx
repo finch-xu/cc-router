@@ -376,18 +376,14 @@ export function SubscriptionEditPage() {
                 )}
 
                 {!isCustom && provider && selectedEndpointForParams && (
-                  <div className="grid grid-cols-[120px_1fr] gap-3 items-start">
-                    <div />
-                    <div>
-                      <UrlParamFields
-                        provider={provider}
-                        endpoint={selectedEndpointForParams}
-                        values={urlParams}
-                        onChange={(pid, v) => setUrlParams((prev) => ({ ...prev, [pid]: v }))}
-                        showErrors={showParamErrors}
-                      />
-                    </div>
-                  </div>
+                  <UrlParamFields
+                    provider={provider}
+                    endpoint={selectedEndpointForParams}
+                    values={urlParams}
+                    onChange={(pid, v) => setUrlParams((prev) => ({ ...prev, [pid]: v }))}
+                    showErrors={showParamErrors}
+                    layout="grid"
+                  />
                 )}
 
                 {/* 自定义订阅: base_url / messages_path / auth 可编辑 */}
