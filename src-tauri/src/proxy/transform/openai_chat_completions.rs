@@ -56,6 +56,9 @@ pub struct ChatCompletionsTransformConfig {
     /// stream=true 时是否自动注入 `stream_options: {include_usage: true}`.
     /// 默认 true (OpenAI 官方不主动发 usage, 必须 opt-in). 老版中转不识别时可关.
     pub inject_stream_options_include_usage: bool,
+    /// assistant 消息只有 tool_calls 时 content 写 `null` (true, OpenAI 规范; DeepSeek / Groq 拒 `""`,
+    /// issue #5) 还是 `""` (false; Cloudflare Workers AI 拒 null, 2026-10 实测 400 / 5006)。
+    pub null_content_with_tool_calls: bool,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -86,6 +89,7 @@ impl ChatCompletionsTransformConfig {
             merge_consecutive_system: true,
             tool_call_arguments_mode: ToolCallArgumentsMode::Incremental,
             inject_stream_options_include_usage: true,
+            null_content_with_tool_calls: true,
         }
     }
 }
@@ -323,15 +327,17 @@ fn translate_message(
         // assistant content 规则:
         // - 多 text/image 块 → array
         // - 单 text 块 → string
-        // - 空 + 有 tool_calls → null (修 #5: OpenAI 规范允许 null 但禁空字符串 ""
-        //   与 tool_calls 共存; DeepSeek/Groq 等严格中转会直接 400)
+        // - 空 + 有 tool_calls → null/""? (修 #5: OpenAI 规范允许 null 但禁空字符串 ""
+        //   与 tool_calls 共存; DeepSeek/Groq 等严格中转会直接 400. Cloudflare 反之拒 null)
         // - 空 + 无 tool_calls → "" (保持 string 兜底, 防止上游 schema 拒收 null)
         if !text_parts.is_empty() {
             msg.insert("content".into(), collapse_text_parts(&text_parts));
         } else if tool_calls.is_empty() {
             msg.insert("content".into(), Value::String(String::new()));
-        } else {
+        } else if config.null_content_with_tool_calls {
             msg.insert("content".into(), Value::Null);
+        } else {
+            msg.insert("content".into(), Value::String(String::new()));
         }
         if !tool_calls.is_empty() {
             msg.insert("tool_calls".into(), Value::Array(tool_calls));
@@ -1177,6 +1183,23 @@ impl ChatCompletionsSseConverter {
 }
 
 // ============================================================
+// 上游方言检测
+// ============================================================
+
+/// Cloudflare Workers AI rejects `content: null` next to `tool_calls`. Chosen by URL (not yaml) so
+/// users pointing `custom-openai-chat` at Cloudflare get it too — same approach as
+/// `detect_responses_dialect`.
+pub fn allows_null_tool_call_content(url: &str) -> bool {
+    let lower = url.to_ascii_lowercase();
+    let host = lower
+        .split("://")
+        .nth(1)
+        .and_then(|rest| rest.split('/').next())
+        .unwrap_or("");
+    host != "api.cloudflare.com"
+}
+
+// ============================================================
 // 单测
 // ============================================================
 
@@ -1193,6 +1216,18 @@ mod tests {
             reasoning_effort: None,
             expose_reasoning: true,
         }
+    }
+
+    fn tool_use_only_request() -> Value {
+        json!({
+            "model": "m",
+            "messages": [
+                {"role": "user", "content": "search"},
+                {"role": "assistant", "content": [
+                    {"type": "tool_use", "id": "c1", "name": "s", "input": {"q": "rust"}},
+                ]},
+            ],
+        })
     }
 
     // -------- 请求方向 --------
@@ -1844,16 +1879,7 @@ mod tests {
     /// DeepSeek/Groq 等严格中转 400.
     #[test]
     fn anthropic_to_chat_assistant_with_only_tool_use_emits_null_content() {
-        let body = json!({
-            "model": "m",
-            "messages": [
-                {"role": "user", "content": "search"},
-                {"role": "assistant", "content": [
-                    {"type": "tool_use", "id": "c1", "name": "s", "input": {"q": "rust"}},
-                ]},
-            ],
-        });
-        let out = anthropic_to_openai_chat(&body, &cfg(), &extras()).unwrap();
+        let out = anthropic_to_openai_chat(&tool_use_only_request(), &cfg(), &extras()).unwrap();
         let assistant = &out["messages"][1];
         assert_eq!(assistant["role"], "assistant");
         assert!(assistant["content"].is_null(), "无 text 时 content 必须 null");
@@ -1977,5 +2003,44 @@ mod tests {
             .0;
         let tool_start_pos = joined.find("\"type\":\"tool_use\"").unwrap();
         assert!(text_stop_pos < tool_start_pos);
+    }
+
+    #[test]
+    fn cloudflare_upstream_gets_empty_string_content_with_tool_calls() {
+        let mut cfg = ChatCompletionsTransformConfig::permissive();
+        cfg.null_content_with_tool_calls = false;
+        let out = anthropic_to_openai_chat(&tool_use_only_request(), &cfg, &extras()).unwrap();
+        let assistant = out["messages"].as_array().unwrap()
+            .iter()
+            .find(|m| m["role"] == "assistant")
+            .unwrap();
+        assert_eq!(assistant["content"], serde_json::json!(""));
+        assert!(assistant["tool_calls"].is_array());
+    }
+
+    #[test]
+    fn null_content_detection_by_host() {
+        assert!(!allows_null_tool_call_content("https://api.cloudflare.com/client/v4/accounts/x/ai/v1/chat/completions"));
+        assert!(!allows_null_tool_call_content("HTTPS://API.CLOUDFLARE.COM/client/v4/accounts/x/ai/v1/chat/completions"));
+        assert!(allows_null_tool_call_content("https://api.deepseek.com/v1/chat/completions"));
+        assert!(allows_null_tool_call_content("https://example.com/api.cloudflare.com/proxy"));
+    }
+
+    #[test]
+    fn cloudflare_incremental_usage_and_double_finish_reason() {
+        let sse = concat!(
+            "data: {\"id\":\"id-1\",\"model\":\"@cf/openai/gpt-oss-120b\",\"object\":\"chat.completion.chunk\",\"choices\":[{\"delta\":{\"content\":\"\",\"role\":\"assistant\"},\"finish_reason\":null,\"index\":0}],\"usage\":{\"prompt_tokens\":122,\"completion_tokens\":0,\"total_tokens\":122}}\n\n",
+            "data: {\"id\":\"id-1\",\"object\":\"chat.completion.chunk\",\"choices\":[{\"delta\":{\"content\":\"Hi\"},\"finish_reason\":null,\"index\":0}],\"usage\":{\"prompt_tokens\":0,\"completion_tokens\":4,\"total_tokens\":4}}\n\n",
+            "data: {\"id\":\"id-1\",\"object\":\"chat.completion.chunk\",\"choices\":[{\"index\":0,\"delta\":{},\"finish_reason\":\"stop\"}],\"usage\":{\"prompt_tokens\":0,\"completion_tokens\":0,\"total_tokens\":0}}\n\n",
+            "data: {\"id\":\"id-1\",\"object\":\"chat.completion.chunk\",\"choices\":[{\"index\":0,\"delta\":{},\"finish_reason\":\"stop\"}],\"usage\":{\"prompt_tokens\":122,\"completion_tokens\":51,\"total_tokens\":173}}\n\n",
+            "data: [DONE]\n\n",
+        );
+        let frames: Vec<&str> = sse.split_inclusive("\n\n").collect();
+        let mut c = ChatCompletionsSseConverter::new(cfg(), "id-1".into(), "@cf/openai/gpt-oss-120b".into());
+        let out = collect_sse(&mut c, &frames);
+        assert_eq!(c.final_input_tokens(), Some(122));
+        assert_eq!(c.final_output_tokens(), Some(51));
+        let stops = out.iter().filter(|e| e.contains("message_stop")).count();
+        assert_eq!(stops, 1, "duplicate finish_reason must not emit two message_stop");
     }
 }

@@ -51,8 +51,9 @@ use crate::proxy::handler::error_response;
 use crate::proxy::oauth_dispatch::OAuthDispatchError;
 use crate::proxy::sse_framing::find_sse_frame_boundary;
 use crate::proxy::transform::openai_chat_completions::{
-    anthropic_to_openai_chat, chat_json_to_anthropic, parse_token_count, ChatCompletionsExtras,
-    ChatCompletionsSseConverter, ChatCompletionsTransformConfig,
+    allows_null_tool_call_content, anthropic_to_openai_chat, chat_json_to_anthropic,
+    parse_token_count, ChatCompletionsExtras, ChatCompletionsSseConverter,
+    ChatCompletionsTransformConfig,
 };
 use crate::proxy::upstream;
 use crate::subscription::model::SubscriptionRuntime;
@@ -148,6 +149,7 @@ pub async fn dispatch_openai_chat_completions_attempt(
     // 应用 yaml 兜底 (Phase 1 仅 expose_reasoning); 其他 quirks 留给 Phase 2 暴露到 yaml/订阅级
     let mut effective_config = transform_config.clone();
     effective_config.expose_reasoning = extras.expose_reasoning;
+    effective_config.null_content_with_tool_calls = allows_null_tool_call_content(&url);
 
     // 1. 翻译 body (跟随客户端 stream, 自动注入 stream_options.include_usage)
     let mut translated_body =
