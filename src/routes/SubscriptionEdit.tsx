@@ -349,7 +349,7 @@ export function SubscriptionEditPage() {
                 {!isCustom && (
                   <div className="grid grid-cols-[120px_1fr] gap-3 items-start">
                     <Label className="mt-2">{t("subscriptionNew.field.endpoint")}</Label>
-                    <div className="space-y-1">
+                    <div className="space-y-1 min-w-0">
                       <Select value={endpointId} onValueChange={setEndpointId}>
                         <SelectTrigger>
                           <SelectValue />
@@ -362,7 +362,7 @@ export function SubscriptionEditPage() {
                           ))}
                         </SelectContent>
                       </Select>
-                      <div className="font-mono text-[10px] text-muted-foreground">
+                      <div className="font-mono text-[10px] text-muted-foreground break-all">
                         {sub.base_url}
                         {sub.messages_path}
                       </div>
