@@ -55,6 +55,7 @@ import type {
 import { uniformSlots } from "@/lib/modelSlots";
 import { lastErrorText, testResultText } from "@/lib/backendText";
 import { providerName } from "@/lib/providerText";
+import { UrlParamFields, urlParamErrors } from "@/components/UrlParamFields";
 import { formatTokenShorthand, parseTokenShorthand } from "@/lib/quota";
 import { errorText } from "@/lib/errorText";
 
@@ -86,6 +87,8 @@ export function SubscriptionEditPage() {
   );
 
   const [endpointId, setEndpointId] = useState<string>("");
+  const [urlParams, setUrlParams] = useState<Record<string, string>>({});
+  const [showParamErrors, setShowParamErrors] = useState(false);
   const [displayName, setDisplayName] = useState<string>("");
   const [slots, setSlots] = useState<ModelSlots>(uniformSlots(""));
   const [slotEfforts, setSlotEfforts] = useState<SlotEfforts>({});
@@ -118,6 +121,8 @@ export function SubscriptionEditPage() {
   useEffect(() => {
     if (subQuery.data) {
       setEndpointId(subQuery.data.endpoint_id);
+      setUrlParams(subQuery.data.url_params ?? {});
+      setShowParamErrors(false);
       setDisplayName(subQuery.data.display_name);
       setSlots(subQuery.data.model_slots);
       setSlotEfforts(subQuery.data.slot_efforts ?? {});
@@ -198,7 +203,19 @@ export function SubscriptionEditPage() {
       };
     } else {
       // 内置订阅: 切 endpoint 走 endpoint_id patch (后端 re-snapshot)
-      if (endpointId !== sub.endpoint_id) {
+      const selectedEndpoint = provider?.endpoints.find((e) => e.id === endpointId);
+      if (provider && selectedEndpoint) {
+        if (Object.keys(urlParamErrors(provider, selectedEndpoint, urlParams)).length > 0) {
+          setShowParamErrors(true);
+          return;
+        }
+        const currentParams = Object.fromEntries(
+          selectedEndpoint.url_params_used.map((pid) => [pid, (urlParams[pid] ?? "").trim()]),
+        );
+        const paramsChanged = JSON.stringify(currentParams) !== JSON.stringify(sub.url_params ?? {});
+        if (endpointId !== sub.endpoint_id) patch.endpoint_id = endpointId;
+        if (paramsChanged || endpointId !== sub.endpoint_id) patch.url_params = currentParams;
+      } else if (endpointId !== sub.endpoint_id) {
         patch.endpoint_id = endpointId;
       }
     }
@@ -261,6 +278,7 @@ export function SubscriptionEditPage() {
   }
 
   const isCustom = sub.is_user_defined;
+  const selectedEndpointForParams = provider?.endpoints.find((e) => e.id === endpointId);
 
   return (
     <>
@@ -353,6 +371,21 @@ export function SubscriptionEditPage() {
                           {t("subscriptionEdit.endpointChangeWarn")}
                         </div>
                       )}
+                    </div>
+                  </div>
+                )}
+
+                {!isCustom && provider && selectedEndpointForParams && (
+                  <div className="grid grid-cols-[120px_1fr] gap-3 items-start">
+                    <div />
+                    <div>
+                      <UrlParamFields
+                        provider={provider}
+                        endpoint={selectedEndpointForParams}
+                        values={urlParams}
+                        onChange={(pid, v) => setUrlParams((prev) => ({ ...prev, [pid]: v }))}
+                        showErrors={showParamErrors}
+                      />
                     </div>
                   </div>
                 )}

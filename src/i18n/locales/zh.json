@@ -712,6 +712,8 @@
   "subscriptionNew.openaiChatMessagesPathHint": "URL 路径, 通常是 /v1/chat/completions。中转站可能用不同路径请按其文档填。",
   "subscriptionNew.openaiChatAuthLocked": "OpenAI Chat Completions 固定使用 Authorization: Bearer header, API Key 直接填即可 (一般是 sk-... 开头; Ollama 等无鉴权场景可填任意非空值)。",
   "subscriptionNew.field.endpoint": "接入点",
+  "subscriptionNew.urlParam.empty": "请填写{label}",
+  "subscriptionNew.urlParam.format": "{label}格式不正确",
   "subscriptionNew.endpointSelect": "选择接入点",
   "subscriptionNew.openApiKey": "去官网获取 API Key",
   "subscriptionNew.field.providerName": "厂商显示名",

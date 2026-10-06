@@ -6,6 +6,7 @@ import { useQueryClient } from "@tanstack/react-query";
 import { ProviderBadge } from "@/components/ProviderBadge";
 import { ProviderLogo } from "@/components/ProviderLogo";
 import { ProviderCapabilityTags } from "@/components/ProviderCapabilityTags";
+import { UrlParamFields, urlParamErrors } from "@/components/UrlParamFields";
 import { CUSTOM_CAPABILITIES, providerCapabilities } from "@/lib/providerCapabilities";
 import { Spinner } from "@/components/Spinner";
 import { ModelSlotPicker } from "@/components/ModelSlotPicker";
@@ -164,6 +165,9 @@ export function SubscriptionNewPage() {
   const [step, setStep] = useState<Step>(1);
   const [providerId, setProviderId] = useState<string>("");
   const [endpointId, setEndpointId] = useState<string>("");
+  // 厂商 URL 参数 (账户 ID / 网关 ID); 换厂商清空, 换端点保留
+  const [urlParams, setUrlParams] = useState<Record<string, string>>({});
+  const [showParamErrors, setShowParamErrors] = useState(false);
   const [apiKey, setApiKey] = useState<string>("");
   const [displayName, setDisplayName] = useState<string>("");
 
@@ -259,6 +263,8 @@ export function SubscriptionNewPage() {
     setModels(null);
     setModelFetchError(null);
     setCustomProbe(null);
+    setUrlParams({});
+    setShowParamErrors(false);
     if (v === CUSTOM_VALUE || LOCKED_CUSTOM_VALUES.includes(v)) {
       setEndpointId("");
       // 自定义路径备注名自动: <自定义厂商名> <随机后缀>
@@ -446,6 +452,10 @@ export function SubscriptionNewPage() {
   async function goToStep2() {
     if (!provider || !endpoint) return;
     if (!apiKey || !displayName) return;
+    if (Object.keys(urlParamErrors(provider, endpoint, urlParams)).length > 0) {
+      setShowParamErrors(true);
+      return;
+    }
 
     setFetchingModels(true);
     setModelFetchError(null);
@@ -460,6 +470,9 @@ export function SubscriptionNewPage() {
           kind: "from_template",
           provider_id: provider.id,
           endpoint_id: endpoint.id,
+          url_params: Object.fromEntries(
+            endpoint.url_params_used.map((id) => [id, (urlParams[id] ?? "").trim()]),
+          ),
         },
       };
       const created = await createMut.mutateAsync(input);
@@ -914,6 +927,16 @@ export function SubscriptionNewPage() {
                       </div>
                     )}
                   </div>
+                )}
+
+                {provider && !isCustom && endpoint && (
+                  <UrlParamFields
+                    provider={provider}
+                    endpoint={endpoint}
+                    values={urlParams}
+                    onChange={(id, v) => setUrlParams((prev) => ({ ...prev, [id]: v }))}
+                    showErrors={showParamErrors}
+                  />
                 )}
 
                 {/* 自定义路径: 厂商显示名 / base_url / messages_path / 鉴权方式 */}
