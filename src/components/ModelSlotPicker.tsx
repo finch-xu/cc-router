@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { RefreshCw, CircleAlert, CircleQuestionMark } from "lucide-react";
 import { useT, type TFunction } from "@/i18n";
 import { SLOT_EFFORT_LEVELS } from "@/lib/modelSlots";
+import { MODEL_RENDER_LIMIT, searchModels } from "@/lib/modelSearch";
 import {
   Select,
   SelectContent,
@@ -364,16 +365,20 @@ function ModelSelect({
     const timer = setTimeout(() => inputRef.current?.focus(), 0);
     return () => clearTimeout(timer);
   }, [open, query]);
-  const q = query.trim().toLowerCase();
-  // 当前选中项永远保留: 它一旦被过滤卸载, Radix 会把焦点从搜索框抢回 listbox (丢按键)
-  const filtered = q
-    ? models.filter(
-        (m) =>
-          m.id === current ||
-          m.id.toLowerCase().includes(q) ||
-          (m.display_name ?? "").toLowerCase().includes(q),
-      )
-    : models;
+  const typed = query.trim();
+  // 模糊匹配 + 截到上限; 当前选中项永远保留 (卸载它会让 Radix 把焦点从搜索框抢回 listbox, 丢按键)
+  const { shown, total } = searchModels(models, typed, current);
+  // 列表里没有的名字 (网关第三方模型 / 刚上线的模型) 也能直接选, 不必切到手动模式
+  const customName =
+    typed && typed !== current && !models.some((m) => m.id === typed) ? typed : null;
+  // 有真实匹配时「使用 …」放末尾: 放最前容易被顺手点中, 把上游并不存在的片段 (如 glm5) 填进槽位
+  const customFirst = !shown.some((m) => m.id !== current);
+  const customItem = customName && (
+    // 固定 key: 输入时只换 value, 不反复卸载重挂
+    <SelectItem key="__custom__" value={customName} className="font-mono">
+      {t("modelSlot.useCustom", { name: customName })}
+    </SelectItem>
+  );
   return (
     <Select
       // 核心槽空值只是未选提示 → Radix placeholder; 兜底槽空值是合法选择 (= 透传) → sentinel 项
@@ -422,12 +427,19 @@ function ModelSelect({
             {t("modelSlot.historicalSuffix")}
           </SelectItem>
         )}
-        {filtered.map((m) => (
+        {customFirst && customItem}
+        {shown.map((m) => (
           <SelectItem key={m.id} value={m.id} className="font-mono">
             {m.display_name || m.id}
           </SelectItem>
         ))}
-        {filtered.length === 0 && (
+        {!customFirst && customItem}
+        {total > MODEL_RENDER_LIMIT && (
+          <div style={{ padding: "8px 10px", fontSize: 12, color: "var(--ink-4)" }}>
+            {t("modelSlot.moreResults", { count: total - MODEL_RENDER_LIMIT })}
+          </div>
+        )}
+        {shown.length === 0 && !customName && (
           <div style={{ padding: "8px 10px", fontSize: 12, color: "var(--ink-4)" }}>
             {t("modelSlot.searchNoResult")}
           </div>
