@@ -171,23 +171,35 @@ pub fn normalize_response(wire: SystemoneWire, r: AttemptResult) -> AttemptResul
     match r {
         AttemptResult::Http { status, body, .. } if wire == SystemoneWire::CloudflareRun => {
             if status.is_success() {
-                return match body.get("result").filter(|v| v.is_object()) {
-                    Some(result) => AttemptResult::Http { status, body: result.clone(), body_text: None },
-                    None => detail_result(StatusCode::BAD_GATEWAY, "api_error", "Cloudflare 响应缺少 result"),
-                };
+                // `success: false` is a failure even on 2xx; a missing flag counts as success.
+                let flagged_ok = body.get("success") != Some(&Value::Bool(false));
+                if let Some(result) = body.get("result").filter(|v| flagged_ok && v.is_object()) {
+                    return AttemptResult::Http { status, body: result.clone(), body_text: None };
+                }
+                warn!(
+                    status = status.as_u16(),
+                    body = %truncate_body(&body.to_string(), ERROR_BODY_LIMIT),
+                    "cloudflare 2xx reply is not a successful result envelope"
+                );
+                let fallback = if flagged_ok { "Cloudflare 响应缺少 result" } else { "Cloudflare 响应 success=false" };
+                let message = cloudflare_error_message(&body).unwrap_or_else(|| fallback.to_string());
+                return detail_result(StatusCode::BAD_GATEWAY, "api_error", &message);
             }
-            let first = body.get("errors").and_then(|e| e.get(0));
-            let msg = first.and_then(|e| e.get("message")).and_then(Value::as_str);
-            let code = first.and_then(|e| e.get("code")).and_then(Value::as_i64);
-            let message = match (msg, code) {
-                (Some(m), Some(c)) => format!("{m} (cloudflare code {c})"),
-                (Some(m), None) => m.to_string(),
-                _ => format!("HTTP {}", status.as_u16()),
-            };
+            let message = cloudflare_error_message(&body).unwrap_or_else(|| format!("HTTP {}", status.as_u16()));
             detail_result(status, error_type_for(status), &message)
         }
         other => other,
     }
+}
+
+/// `errors[0]` of a Cloudflare envelope as "message (cloudflare code N)".
+fn cloudflare_error_message(body: &Value) -> Option<String> {
+    let first = body.get("errors").and_then(|e| e.get(0))?;
+    let msg = first.get("message").and_then(Value::as_str)?;
+    Some(match first.get("code").and_then(Value::as_i64) {
+        Some(c) => format!("{msg} (cloudflare code {c})"),
+        None => msg.to_string(),
+    })
 }
 
 pub struct Candidate {
@@ -802,6 +814,25 @@ mod tests {
         let AttemptResult::Http { status, body, .. } = r else { panic!() };
         assert_eq!(status, StatusCode::BAD_GATEWAY);
         assert_eq!(body["detail"]["error_type"], "api_error");
+    }
+
+    #[test]
+    fn cloudflare_2xx_with_success_false_is_an_error() {
+        let body = serde_json::json!({"success":false,"errors":[{"message":"AiError: something","code":5007}],"result":{},"messages":[]});
+        let AttemptResult::Http { status, body, body_text } = normalize_response(SystemoneWire::CloudflareRun, http(200, body)) else { panic!() };
+        assert_eq!(status, StatusCode::BAD_GATEWAY);
+        assert_eq!(body["detail"]["error_type"], "api_error");
+        assert_eq!(body["detail"]["message"], "AiError: something (cloudflare code 5007)");
+        assert!(body_text.is_some());
+    }
+
+    #[test]
+    fn cloudflare_2xx_with_success_false_and_no_errors_is_still_bad_gateway() {
+        let body = serde_json::json!({"success":false,"result":{"answers":{}}});
+        let AttemptResult::Http { status, body, .. } = normalize_response(SystemoneWire::CloudflareRun, http(200, body)) else { panic!() };
+        assert_eq!(status, StatusCode::BAD_GATEWAY);
+        assert_eq!(body["detail"]["error_type"], "api_error");
+        assert_eq!(body["detail"]["message"], "Cloudflare 响应 success=false");
     }
 
     #[test]

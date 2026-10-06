@@ -1189,14 +1189,13 @@ impl ChatCompletionsSseConverter {
 /// Cloudflare Workers AI rejects `content: null` next to `tool_calls`. Chosen by URL (not yaml) so
 /// users pointing `custom-openai-chat` at Cloudflare get it too — same approach as
 /// `detect_responses_dialect`.
+/// Unparseable URL → true (the default `null` behaviour).
 pub fn allows_null_tool_call_content(url: &str) -> bool {
-    let lower = url.to_ascii_lowercase();
-    let host = lower
-        .split("://")
-        .nth(1)
-        .and_then(|rest| rest.split('/').next())
-        .unwrap_or("");
-    host != "api.cloudflare.com"
+    let is_cloudflare = reqwest::Url::parse(url)
+        .ok()
+        .and_then(|u| u.host_str().map(|h| h.trim_end_matches('.').eq_ignore_ascii_case("api.cloudflare.com")))
+        .unwrap_or(false);
+    !is_cloudflare
 }
 
 // ============================================================
@@ -2024,6 +2023,12 @@ mod tests {
         assert!(!allows_null_tool_call_content("HTTPS://API.CLOUDFLARE.COM/client/v4/accounts/x/ai/v1/chat/completions"));
         assert!(allows_null_tool_call_content("https://api.deepseek.com/v1/chat/completions"));
         assert!(allows_null_tool_call_content("https://example.com/api.cloudflare.com/proxy"));
+        assert!(!allows_null_tool_call_content("https://api.cloudflare.com:443/client/v4/accounts/x/ai/v1/chat/completions"));
+        assert!(!allows_null_tool_call_content("https://user:pw@api.cloudflare.com/client/v4/accounts/x/ai/v1/chat/completions"));
+        assert!(!allows_null_tool_call_content("https://api.cloudflare.com./client/v4/accounts/x/ai/v1/chat/completions"));
+        assert!(!allows_null_tool_call_content("https://api.cloudflare.com?x=1"));
+        assert!(allows_null_tool_call_content("https://api.cloudflare.com.evil.example/v1/chat/completions"));
+        assert!(allows_null_tool_call_content("not a url"), "unparseable URL keeps the default null behaviour");
     }
 
     #[test]

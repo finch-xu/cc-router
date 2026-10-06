@@ -97,7 +97,10 @@ fn validate_semantics(p: &Provider) -> AppResult<()> {
             return fail(format!("endpoint '{}': systemone_wire 只能用在 protocol: systemone 的端点", e.id));
         }
         check(&format!("endpoint '{}' base_url", e.id), &e.base_url, None)?;
-        check(&format!("endpoint '{}' messages_path", e.id), &e.messages_path, Some(RESERVED_MODEL))?;
+        // Only the systemone and Gemini dispatches fill {model}; anywhere else it would be sent literally.
+        let fills_model = e.protocol == EndpointProtocol::Systemone
+            || matches!(p.auth.auth_type, AuthType::GeminiApiKey | AuthType::GeminiInteractionsApiKey);
+        check(&format!("endpoint '{}' messages_path", e.id), &e.messages_path, fills_model.then_some(RESERVED_MODEL))?;
         for (k, v) in &e.headers {
             check(&format!("endpoint '{}' header {k}", e.id), v, Some(RESERVED_API_KEY))?;
         }
@@ -273,6 +276,28 @@ model_discovery:
         let yaml = WITH_PARAMS.replacen("x-gw: \"{gateway_id}\"", "x-gw: \"{model}\"", 1);
         let err = parse_single(&yaml).unwrap_err().to_string();
         assert!(err.contains("model"), "{err}");
+    }
+
+    #[test]
+    fn model_placeholder_in_messages_path_needs_a_dispatch_that_fills_it() {
+        // messages-protocol api_key provider: the Anthropic passthrough never fills {model}
+        let yaml = WITH_PARAMS.replacen("messages_path: \"/v1/chat/completions\"", "messages_path: \"/run/{model}\"", 1);
+        let err = parse_single(&yaml).unwrap_err().to_string();
+        assert!(err.contains("{model}"), "{err}");
+        // systemone endpoint: allowed
+        let yaml = WITH_PARAMS.replacen(
+            "messages_path: \"/v1/chat/completions\"",
+            "messages_path: \"/run/{model}\"\n    protocol: systemone",
+            1,
+        );
+        parse_single(&yaml).unwrap();
+        // gemini auth types: allowed
+        for ty in ["gemini_api_key", "gemini_interactions_api_key"] {
+            let yaml = WITH_PARAMS
+                .replacen("messages_path: \"/v1/chat/completions\"", "messages_path: \"/run/{model}\"", 1)
+                .replace("type: api_key", &format!("type: {ty}"));
+            parse_single(&yaml).unwrap_or_else(|e| panic!("{ty}: {e}"));
+        }
     }
 
     #[test]
