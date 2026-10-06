@@ -627,16 +627,27 @@ mod tests {
         use crate::backup::format::subscription_to_export;
         let providers = crate::provider::loader::load_all().unwrap();
         for p in providers.values() {
+            // Sample value satisfies every declared url_param pattern (cloudflare's two).
+            let sample: std::collections::BTreeMap<String, String> = p
+                .url_params
+                .iter()
+                .map(|u| (u.id.clone(), "0123456789abcdef0123456789abcdef".to_string()))
+                .collect();
             for ep in &p.endpoints {
                 let mut row = SubscriptionRow::test_fixture(&p.id, &ep.id);
                 row.auth_type = p.auth.auth_type;
-                row.base_url = ep.base_url.clone();
+                row.base_url = crate::provider::url_template::resolve(&ep.base_url, &sample);
                 row.messages_path = ep.messages_path.clone();
                 row.auth_header_name = p.auth.header_name.clone();
                 row.auth_header_format = p.auth.header_format.clone();
                 row.required_headers = p.required_headers.clone();
                 row.forward_headers = p.forward_headers.clone();
                 row.model_discovery = p.model_discovery.clone();
+                row.model_discovery.url = row
+                    .model_discovery
+                    .url
+                    .as_deref()
+                    .map(|u| crate::provider::url_template::resolve(u, &sample));
                 row.balance_discovery = p.balance_discovery.clone();
                 let (exp, _) = subscription_to_export(&row);
                 if let Err(reason) = validate_entry(&exp) {

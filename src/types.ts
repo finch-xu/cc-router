@@ -129,6 +129,16 @@ export interface ProviderEndpointInfo {
   protocol: EndpointProtocol;
   /** 仅本端点的模型输入提示; 空数组 = 用 provider 级 model_discovery.example_models */
   example_models: string[];
+  /** 本端点用到的 url_params id (顺序 = 出现顺序); 订阅表单据此只渲染需要的输入框 */
+  url_params_used: string[];
+}
+
+/** 用户需要填的 URL 占位符 (如 Cloudflare 的 account_id)。label / placeholder 是界面语言 (useProviders 已换好)。 */
+export interface UrlParamInfo {
+  id: string;
+  label: string;
+  placeholder?: string;
+  pattern: string;
 }
 
 export interface ProviderInfo {
@@ -160,6 +170,7 @@ export interface ProviderInfo {
    * 英日文在这里 (后端保证三语齐全)。界面里不要直接读, 走 useProviders() —— 它已经按界面语言换好了。
    */
   translations: Record<"en" | "ja", ProviderText>;
+  url_params: UrlParamInfo[];
 }
 
 export interface ProviderText {
@@ -168,6 +179,8 @@ export interface ProviderText {
   compatibility_notes?: string;
   /** key 是 endpoint id */
   endpoints: Record<string, { label: string; description?: string }>;
+  /** key 是 url_param id */
+  url_params: Record<string, { label: string; placeholder?: string }>;
 }
 
 /** 后端 provider::model::LocalizedText: 三语各一份。 */
@@ -371,6 +384,8 @@ export type CreateSource =
       kind: "from_template";
       provider_id: string;
       endpoint_id: string;
+      /** provider 声明的 url_params 取值; 缺省 = 空 */
+      url_params?: Record<string, string>;
     }
   | {
       kind: "custom";
@@ -453,6 +468,8 @@ export interface SubscriptionPatch {
   forward_client_headers?: boolean;
   /** 内置订阅: 切换 endpoint, 后端 re-snapshot */
   endpoint_id?: string;
+  /** 内置订阅: 改 url_params (可与 endpoint_id 同发), 后端与现有值合并后整体重新快照; 自定义订阅会被拒绝 */
+  url_params?: Record<string, string>;
   /** 自定义订阅: 改连接信息 */
   connection?: ConnectionPatch;
 }

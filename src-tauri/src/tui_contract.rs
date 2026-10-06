@@ -906,9 +906,11 @@ fn create_subscription_input_matches() {
     assert_eq!(input.api_key, "sk-test");
     assert_eq!(input.model_slots.fable, "f");
     match input.source {
-        CreateSource::FromTemplate { provider_id, endpoint_id } => {
+        CreateSource::FromTemplate { provider_id, endpoint_id, url_params } => {
             assert_eq!(provider_id, "zhipu");
             assert_eq!(endpoint_id, "default");
+            // TUI does not send url_params yet: the backend must read it as empty.
+            assert!(url_params.is_empty());
         }
         other => panic!("应该是 FromTemplate: {other:?}"),
     }

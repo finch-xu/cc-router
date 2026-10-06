@@ -10,8 +10,7 @@ use uuid::Uuid;
 
 use crate::error::{AppError, AppResult};
 use crate::provider::model::{
-    AuthHeaderFormat, AuthType, EndpointProtocol, ModelDiscovery, Provider, ProviderEndpoint,
-    SystemoneWire,
+    AuthHeaderFormat, AuthType, EndpointProtocol, ModelDiscovery, SystemoneWire,
 };
 use crate::state::AppState;
 use crate::subscription::{
@@ -71,6 +70,9 @@ pub enum CreateSource {
     FromTemplate {
         provider_id: String,
         endpoint_id: String,
+        /// Values for the provider's `url_params` (spec §3.2). Missing = empty.
+        #[serde(default)]
+        url_params: BTreeMap<String, String>,
     },
     /// 自定义路径: 用户在表单里填完整连接信息。
     /// `protocol` 缺省 → Anthropic 透传; `Gemini` → `auth_type=GeminiApiKey` + `custom-gemini` provider_id.
@@ -120,19 +122,6 @@ pub(crate) fn protocol_switch_rejection(
     (from != to).then_some("切换端点不能改变协议类型 (对话 ↔ System One), 请新建订阅")
 }
 
-/// 订阅创建 / 换端点时的 model_discovery 快照: 端点自带 example_models 时覆盖 provider 级的
-/// (System One 端点的提示与对话端点不同), 探测 (ping::pick_test_model) 与向导占位都读这份快照。
-fn snapshot_discovery(provider: &Provider, endpoint: &ProviderEndpoint) -> ModelDiscovery {
-    if endpoint.example_models.is_empty() {
-        provider.model_discovery.clone()
-    } else {
-        ModelDiscovery {
-            example_models: endpoint.example_models.clone(),
-            ..provider.model_discovery.clone()
-        }
-    }
-}
-
 /// 校验 patch 里的槽位 effort 都在白名单内 (空/缺失 = auto, 合法)。
 /// 显式列四个槽位而不是遍历: 将来给 ModelSlots 加槽位时这里会因缺字段而被注意到。
 pub(crate) fn validate_slot_efforts(e: &SlotEfforts) -> AppResult<()> {
@@ -168,6 +157,9 @@ pub struct SubscriptionPatch {
     /// 内置订阅: 切到同 provider 的另一个 endpoint, 后端 re-snapshot base_url/messages_path。
     /// 自定义订阅传该字段会被拒绝。
     pub endpoint_id: Option<String>,
+    /// 内置订阅: 改 url_params (与 endpoint_id 一起或单独), 后端用 yaml 模板整体重新快照。
+    /// 与 row 里现有值合并 (patch 覆盖)。自定义订阅传该字段会被拒绝。
+    pub url_params: Option<BTreeMap<String, String>>,
     /// 自定义订阅: 改连接信息。内置订阅传该字段会被拒绝。
     pub connection: Option<ConnectionPatch>,
 }
@@ -268,6 +260,7 @@ pub async fn create_subscription(
         CreateSource::FromTemplate {
             provider_id,
             endpoint_id,
+            url_params,
         } => {
             let provider = state
                 .providers
@@ -276,6 +269,8 @@ pub async fn create_subscription(
             let endpoint = provider
                 .endpoint(&endpoint_id)
                 .ok_or_else(|| AppError::EndpointNotFound(endpoint_id.clone()))?;
+            let snap = crate::subscription::snapshot::snapshot_connection(provider, endpoint, &url_params)
+                .map_err(AppError::BadRequest)?;
             SubscriptionRow {
                 id,
                 provider_id: provider_id.clone(),
@@ -292,18 +287,17 @@ pub async fn create_subscription(
                 last_error_message: None,
                 created_at: now,
                 updated_at: now,
-                base_url: endpoint.base_url.clone(),
-                messages_path: endpoint.messages_path.clone(),
+                base_url: snap.base_url,
+                messages_path: snap.messages_path,
                 auth_header_name: provider.auth.header_name.clone(),
                 auth_header_format: provider.auth.header_format.clone(),
-                required_headers: provider.required_headers.clone(),
+                required_headers: snap.required_headers,
                 forward_headers: provider.forward_headers.clone(),
                 forward_client_headers: false,
-                endpoint_protocol: endpoint.protocol,
-                // Task 4 replaces these with the resolved snapshot
-                url_params: BTreeMap::new(),
-                systemone_wire: endpoint.systemone_wire,
-                model_discovery: snapshot_discovery(provider, endpoint),
+                endpoint_protocol: snap.endpoint_protocol,
+                url_params: snap.url_params,
+                systemone_wire: snap.systemone_wire,
+                model_discovery: snap.model_discovery,
                 balance_discovery: provider.balance_discovery.clone(),
                 provider_display_name: provider.display_name.zh.clone(),
                 provider_icon: provider.icon.clone().unwrap_or_default(),
@@ -473,38 +467,47 @@ pub async fn update_subscription(
     };
 
     // 先做所有校验/反查 (不持锁), 失败时不会留下半应用的内存修改。
-    if patch.endpoint_id.is_some() && patch.connection.is_some() {
+    if (patch.endpoint_id.is_some() || patch.url_params.is_some()) && patch.connection.is_some() {
         return Err(AppError::BadRequest(
-            "endpoint_id 与 connection patch 不能同时存在".into(),
+            "endpoint_id / url_params 与 connection patch 不能同时存在".into(),
         ));
     }
-    let endpoint_resnapshot = if let Some(new_endpoint_id) = patch.endpoint_id.as_ref() {
-        let is_user_defined = rt.read().await.row.is_user_defined;
+    // model_discovery / required_headers 也跟着 yaml 重拍: 内置订阅的这些只来自 yaml
+    // (不像自定义订阅会写回探测结果), 老快照可能带着写死的旧域名 url, 切到别的区域后会拿新区域的
+    // Key 去查旧域名。
+    let resnapshot = if patch.endpoint_id.is_some() || patch.url_params.is_some() {
+        let (is_user_defined, provider_id, current_endpoint, current_protocol, mut params) = {
+            let g = rt.read().await;
+            (
+                g.row.is_user_defined,
+                g.row.provider_id.clone(),
+                g.row.endpoint_id.clone(),
+                g.row.endpoint_protocol,
+                g.row.url_params.clone(),
+            )
+        };
         if is_user_defined {
             return Err(AppError::BadRequest(
-                "自定义订阅不支持切 endpoint, 请用 connection patch 改连接信息".into(),
+                "自定义订阅不支持切 endpoint / url_params, 请用 connection patch 改连接信息".into(),
             ));
         }
-        let provider_id = rt.read().await.row.provider_id.clone();
         let provider = state
             .providers
             .get(&provider_id)
             .ok_or_else(|| AppError::ProviderNotFound(provider_id.clone()))?;
+        let endpoint_id = patch.endpoint_id.clone().unwrap_or(current_endpoint);
         let endpoint = provider
-            .endpoint(new_endpoint_id)
-            .ok_or_else(|| AppError::EndpointNotFound(new_endpoint_id.clone()))?;
-        let current = rt.read().await.row.endpoint_protocol;
-        if let Some(msg) = protocol_switch_rejection(current, endpoint.protocol) {
+            .endpoint(&endpoint_id)
+            .ok_or_else(|| AppError::EndpointNotFound(endpoint_id.clone()))?;
+        if let Some(msg) = protocol_switch_rejection(current_protocol, endpoint.protocol) {
             return Err(AppError::BadRequest(msg.into()));
         }
-        // model_discovery 也跟着 yaml 重拍: 内置订阅的这份只来自 yaml (不像自定义订阅会写回探测结果),
-        // 老快照可能带着写死的旧域名 url, 切到别的区域后会拿新区域的 Key 去查旧域名。
-        Some((
-            new_endpoint_id.clone(),
-            endpoint.base_url.clone(),
-            endpoint.messages_path.clone(),
-            snapshot_discovery(provider, endpoint),
-        ))
+        if let Some(over) = patch.url_params.as_ref() {
+            params.extend(over.clone());
+        }
+        let snap = crate::subscription::snapshot::snapshot_connection(provider, endpoint, &params)
+            .map_err(AppError::BadRequest)?;
+        Some((endpoint_id, snap))
     } else {
         None
     };
@@ -548,11 +551,14 @@ pub async fn update_subscription(
         if let Some(v) = patch.forward_client_headers {
             guard.row.forward_client_headers = v;
         }
-        if let Some((eid, base, path, discovery)) = endpoint_resnapshot {
+        if let Some((eid, snap)) = resnapshot {
             guard.row.endpoint_id = eid;
-            guard.row.base_url = base;
-            guard.row.messages_path = path;
-            guard.row.model_discovery = discovery;
+            guard.row.base_url = snap.base_url;
+            guard.row.messages_path = snap.messages_path;
+            guard.row.required_headers = snap.required_headers;
+            guard.row.model_discovery = snap.model_discovery;
+            guard.row.systemone_wire = snap.systemone_wire;
+            guard.row.url_params = snap.url_params;
         }
         if let Some(conn) = patch.connection {
             if let Some(v) = conn.base_url {

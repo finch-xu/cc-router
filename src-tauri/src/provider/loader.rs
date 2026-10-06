@@ -51,6 +51,11 @@ fn parse_single(raw: &str) -> AppResult<Provider> {
     Ok(provider)
 }
 
+#[cfg(test)]
+pub(crate) fn parse_single_for_test(raw: &str) -> Provider {
+    parse_single(raw).unwrap_or_else(|e| panic!("test yaml 解析失败: {e}"))
+}
+
 /// schema 表达不了的跨字段约束。失败即该 yaml 加载失败 (load_all warn + 跳过, 单测在 CI 拦住)。
 fn validate_semantics(p: &Provider) -> AppResult<()> {
     use crate::provider::model::{AuthType, EndpointProtocol, SystemoneWire};

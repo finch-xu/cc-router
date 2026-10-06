@@ -17,6 +17,10 @@ export function localizeProvider(p: ProviderInfo, locale: Locale): ProviderInfo 
       const t = text.endpoints[e.id];
       return t ? { ...e, label: t.label, description: t.description } : e;
     }),
+    url_params: p.url_params.map((u) => {
+      const tx = text.url_params?.[u.id];
+      return tx ? { ...u, label: tx.label, placeholder: tx.placeholder } : u;
+    }),
   };
 }
 
