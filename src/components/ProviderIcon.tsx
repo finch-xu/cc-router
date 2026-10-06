@@ -19,6 +19,7 @@ import ModelScope from "@lobehub/icons/es/ModelScope";
 import OpenAI from "@lobehub/icons/es/OpenAI";
 import Gemini from "@lobehub/icons/es/Gemini";
 import Grok from "@lobehub/icons/es/Grok";
+import Cloudflare from "@lobehub/icons/es/Cloudflare";
 import Requesty from "@/components/RequestyIcon";
 import { cn } from "@/lib/utils";
 
@@ -51,6 +52,7 @@ const BRAND_MAP: Record<string, BrandIcon> = {
   google: Gemini as unknown as BrandIcon,
   google_ai_studio: Gemini as unknown as BrandIcon,
   xai: Grok as unknown as BrandIcon,
+  cloudflare: Cloudflare as unknown as BrandIcon,
   requesty: Requesty as unknown as BrandIcon,
 };
 

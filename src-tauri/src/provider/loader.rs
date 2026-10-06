@@ -361,4 +361,28 @@ model_discovery:
         // 原有对话端点不受影响
         assert_eq!(ep("ollama", "localhost").protocol, crate::provider::model::EndpointProtocol::Messages);
     }
+
+    #[test]
+    fn cloudflare_providers_are_wired_as_designed() {
+        use crate::provider::model::{AuthType, EndpointProtocol, ModelsEnvelopeKind, SystemoneWire};
+        let all = load_all().unwrap();
+
+        let llm = &all["cloudflare"];
+        assert_eq!(llm.auth.auth_type, AuthType::OpenaiChatCompletionsApiKey);
+        assert_eq!(llm.model_discovery.envelope, Some(ModelsEnvelopeKind::Cloudflare));
+        assert!(llm.endpoints.iter().all(|e| e.protocol == EndpointProtocol::Messages));
+        assert_eq!(llm.params_used(llm.endpoint("direct").unwrap()), vec!["account_id".to_string()]);
+        let gw = llm.endpoint("gateway").unwrap();
+        assert_eq!(gw.headers.get("cf-aig-authorization").map(String::as_str), Some("Bearer {api_key}"));
+
+        let clef = &all["cloudflare_clef"];
+        assert_eq!(clef.auth.auth_type, AuthType::ApiKey);
+        for e in &clef.endpoints {
+            assert_eq!(e.protocol, EndpointProtocol::Systemone);
+            assert_eq!(e.systemone_wire, SystemoneWire::CloudflareRun);
+            assert_eq!(e.messages_path, "/run/@cf/cloudflare/{model}");
+        }
+        assert!(!clef.model_discovery.enabled);
+        assert_eq!(clef.model_discovery.example_models, vec!["clef-flash".to_string(), "clef".to_string()]);
+    }
 }

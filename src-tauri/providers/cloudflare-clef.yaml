@@ -1,0 +1,87 @@
+# Cloudflare Clef (决策模型, System One) provider
+#
+# 实测 (2026-10-06):
+#   - POST .../ai/run/@cf/cloudflare/{clef|clef-flash}, body 就是 System One {model, state, questions}
+#   - body model 只认 clef / clef-flash (正则), 写 jev-latest 返回 400 / 5006 → Jev 槽或示例模型改写
+#   - 响应包 {result, success, errors, messages}, 由 systemone_wire: cloudflare_run 解包
+#   - stream:true 返回 422; output_tokens 恒为 0 (只按输入计费)
+#   - 经 AI Gateway 同 cloudflare.yaml (cf-aig-gateway-id 头)
+
+id: cloudflare_clef
+display_name: "Cloudflare Clef"
+category: first_party
+icon: cloudflare
+description:
+  zh: "Cloudflare 的 Clef 决策模型 (System One), 只用于 model-jev"
+  en: "Cloudflare's Clef decision models (System One), for model-jev only"
+  ja: "Cloudflare の Clef 意思決定モデル（System One）。model-jev 専用"
+homepage: "https://developers.cloudflare.com/workers-ai/models/clef/"
+api_key_url: "https://dash.cloudflare.com/profile/api-tokens"
+
+compatibility: verified
+compatibility_notes:
+  zh: |
+    1. Clef 不生成文本, 不能给 Claude Code 对话用; 订阅只能绑定到 model-jev, 经 POST /v1/systemone 调用.
+    2. 模型: clef-flash (9B, 便宜) 或 clef (27B). 与 Jev 请求格式兼容, 但不支持 stream.
+    3. API Token 需要 Workers AI 权限; 经 AI Gateway 时还需要 AI Gateway 权限.
+  en: |
+    1. Clef does not generate text and cannot be used for Claude Code chat; subscriptions can only be bound
+       to model-jev and are called through POST /v1/systemone.
+    2. Models: clef-flash (9B, cheaper) or clef (27B). Request format is compatible with Jev, but stream is not supported.
+    3. The API token needs the Workers AI permission; through AI Gateway it also needs the AI Gateway permission.
+  ja: |
+    1. Clef はテキストを生成しないため Claude Code の会話には使えません。サブスクリプションは model-jev にのみ
+       割り当てられ、POST /v1/systemone 経由で呼び出されます。
+    2. モデル: clef-flash（9B、低価格）または clef（27B）。Jev とリクエスト形式は互換ですが、stream は非対応です。
+    3. API トークンには Workers AI の権限が必要です。AI Gateway 経由の場合は AI Gateway の権限も必要です。
+
+url_params:
+  - id: account_id
+    label: {zh: "账户 ID", en: "Account ID", ja: "アカウント ID"}
+    placeholder: {zh: "32 位十六进制", en: "32 hex characters", ja: "16 進数 32 文字"}
+    pattern: "^[0-9a-f]{32}$"
+  - id: gateway_id
+    label: {zh: "网关 ID", en: "Gateway ID", ja: "ゲートウェイ ID"}
+    placeholder: {zh: "在 AI Gateway 控制台创建的网关名", en: "Gateway name created in the AI Gateway dashboard", ja: "AI Gateway ダッシュボードで作成したゲートウェイ名"}
+    pattern: "^[A-Za-z0-9_-]{1,64}$"
+
+endpoints:
+  - id: direct
+    label:
+      zh: "直连 · System One"
+      en: "Direct · System One"
+      ja: "直接接続 · System One"
+    base_url: "https://api.cloudflare.com/client/v4/accounts/{account_id}/ai"
+    messages_path: "/run/@cf/cloudflare/{model}"
+    protocol: systemone
+    systemone_wire: cloudflare_run
+    region: global
+    billing: pay_as_you_go
+  - id: gateway
+    label:
+      zh: "经 AI Gateway · System One"
+      en: "Through AI Gateway · System One"
+      ja: "AI Gateway 経由 · System One"
+    base_url: "https://api.cloudflare.com/client/v4/accounts/{account_id}/ai"
+    messages_path: "/run/@cf/cloudflare/{model}"
+    protocol: systemone
+    systemone_wire: cloudflare_run
+    headers:
+      cf-aig-gateway-id: "{gateway_id}"
+      cf-aig-authorization: "Bearer {api_key}"
+    region: global
+    billing: pay_as_you_go
+
+default_endpoint: direct
+
+auth:
+  type: api_key
+  header_name: "Authorization"
+  header_format: bearer
+
+required_headers: {}
+forward_headers: []
+
+model_discovery:
+  enabled: false
+  example_models: ["clef-flash", "clef"]

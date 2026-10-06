@@ -1,0 +1,97 @@
+# Cloudflare Workers AI (对话模型) provider
+#
+# 实测 (2026-10-06, Workers 免费计划):
+#   - 没有 Anthropic 入口: /ai/v1/messages 不支持 @cf 模型 → 走 Chat Completions 翻译
+#   - 鉴权 Authorization: Bearer <API token>; URL 带账户 ID
+#   - 每个 SSE chunk 带增量 usage, 末帧是总数; tool_calls 消息 content:null 被拒 (翻译层按 host 写 "")
+#   - 免费计划下 kimi-k2.7-code / glm-5.3 返回 403 / 5035; gpt-oss 可用
+#   - 经 AI Gateway = 同地址 + cf-aig-gateway-id 头 (新 REST API); 旧域名 gateway.ai.cloudflare.com 不用
+#   - cf-aig-authorization 在未开认证的网关上被忽略, 网关端点总是带 (复用同一 token)
+
+id: cloudflare
+display_name: "Cloudflare Workers AI"
+category: first_party
+icon: cloudflare
+description:
+  zh: "Cloudflare Workers AI 上的开源对话模型 (gpt-oss / Kimi / GLM 等), 可经 AI Gateway 转发"
+  en: "Open models on Cloudflare Workers AI (gpt-oss, Kimi, GLM, ...), optionally routed through AI Gateway"
+  ja: "Cloudflare Workers AI 上のオープンモデル（gpt-oss / Kimi / GLM など）。AI Gateway 経由も可"
+homepage: "https://developers.cloudflare.com/workers-ai/"
+api_key_url: "https://dash.cloudflare.com/profile/api-tokens"
+
+compatibility: partial
+compatibility_notes:
+  zh: |
+    1. 经 OpenAI Chat Completions 协议翻译, thinking 签名、cache_control 等 Anthropic 专有内容会丢失.
+    2. Workers 免费计划只能用部分模型 (gpt-oss 可用; Kimi / GLM 需付费计划), 不可用的模型会返回 403, 订阅会被标为鉴权失败.
+    3. API Token 需要 Workers AI 权限; 经 AI Gateway 时还需要 AI Gateway 权限, 并先在控制台创建网关.
+    4. 账户 ID 在 Cloudflare 控制台首页右侧栏可以复制.
+  en: |
+    1. Translated through the OpenAI Chat Completions protocol; Anthropic-only content such as thinking signatures
+       and cache_control is dropped.
+    2. The Workers Free plan only allows some models (gpt-oss works; Kimi / GLM need a paid plan). Unavailable models
+       return 403 and the subscription is marked as an auth failure.
+    3. The API token needs the Workers AI permission; through AI Gateway it also needs the AI Gateway permission,
+       and the gateway must be created in the dashboard first.
+    4. Copy the Account ID from the right sidebar of the Cloudflare dashboard home page.
+  ja: |
+    1. OpenAI Chat Completions プロトコル経由で変換するため、thinking の署名や cache_control など Anthropic 固有の
+       内容は失われます。
+    2. Workers 無料プランでは一部のモデルのみ利用できます（gpt-oss は可、Kimi / GLM は有料プランが必要）。
+       利用できないモデルは 403 を返し、サブスクリプションは認証失敗として扱われます。
+    3. API トークンには Workers AI の権限が必要です。AI Gateway 経由の場合は AI Gateway の権限も必要で、
+       事前にダッシュボードでゲートウェイを作成してください。
+    4. アカウント ID は Cloudflare ダッシュボードのホーム右サイドバーからコピーできます。
+
+url_params:
+  - id: account_id
+    label: {zh: "账户 ID", en: "Account ID", ja: "アカウント ID"}
+    placeholder: {zh: "32 位十六进制", en: "32 hex characters", ja: "16 進数 32 文字"}
+    pattern: "^[0-9a-f]{32}$"
+  - id: gateway_id
+    label: {zh: "网关 ID", en: "Gateway ID", ja: "ゲートウェイ ID"}
+    placeholder: {zh: "在 AI Gateway 控制台创建的网关名", en: "Gateway name created in the AI Gateway dashboard", ja: "AI Gateway ダッシュボードで作成したゲートウェイ名"}
+    pattern: "^[A-Za-z0-9_-]{1,64}$"
+
+endpoints:
+  - id: direct
+    label:
+      zh: "直连 Workers AI"
+      en: "Workers AI (direct)"
+      ja: "Workers AI（直接接続）"
+    base_url: "https://api.cloudflare.com/client/v4/accounts/{account_id}/ai"
+    messages_path: "/v1/chat/completions"
+    region: global
+    billing: pay_as_you_go
+  - id: gateway
+    label:
+      zh: "经 AI Gateway"
+      en: "Through AI Gateway"
+      ja: "AI Gateway 経由"
+    description:
+      zh: "请求经过你的网关, 可在控制台查看日志、开缓存和限流"
+      en: "Requests go through your gateway for logs, caching and rate limits in the dashboard"
+      ja: "リクエストはゲートウェイを経由し、ダッシュボードでログ・キャッシュ・レート制限を利用できます"
+    base_url: "https://api.cloudflare.com/client/v4/accounts/{account_id}/ai"
+    messages_path: "/v1/chat/completions"
+    headers:
+      cf-aig-gateway-id: "{gateway_id}"
+      cf-aig-authorization: "Bearer {api_key}"
+    region: global
+    billing: pay_as_you_go
+
+default_endpoint: direct
+
+auth:
+  type: openai_chat_completions_api_key
+  header_name: "Authorization"
+  header_format: bearer
+
+required_headers: {}
+forward_headers: []
+
+model_discovery:
+  enabled: true
+  url: "https://api.cloudflare.com/client/v4/accounts/{account_id}/ai/models/search?task=Text%20Generation&per_page=100"
+  envelope: cloudflare
+  example_models: ["@cf/openai/gpt-oss-120b", "@cf/moonshotai/kimi-k2.7-code", "@cf/zai-org/glm-5.3"]
