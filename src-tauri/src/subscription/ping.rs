@@ -139,7 +139,7 @@ async fn probe(
     ) {
         headers.insert(name, value);
     }
-    for (k, v) in row.required_headers.iter() {
+    for (k, v) in row.resolved_required_headers().iter() {
         if let (Ok(name), Ok(value)) = (
             ReqHeaderName::try_from(k.as_str()),
             ReqHeaderValue::from_str(v),
@@ -260,7 +260,7 @@ pub async fn probe_subscription(
                 false,
                 Vec::new(),
                 HeaderMap::new(),
-                row.required_headers.clone(),
+                row.resolved_required_headers(),
                 extras,
             )
             .await;
@@ -279,7 +279,7 @@ pub async fn probe_subscription(
                 false,
                 Vec::new(),
                 HeaderMap::new(),
-                row.required_headers.clone(),
+                row.resolved_required_headers(),
             )
             .await;
             dispatch_result_to_probe(res)
@@ -302,7 +302,7 @@ pub async fn probe_subscription(
                 false,
                 Vec::new(),
                 HeaderMap::new(),
-                row.required_headers.clone(),
+                row.resolved_required_headers(),
                 extras,
             )
             .await;
@@ -326,7 +326,7 @@ pub async fn probe_subscription(
                 false,
                 Vec::new(),
                 HeaderMap::new(),
-                row.required_headers.clone(),
+                row.resolved_required_headers(),
                 extras,
                 Uuid::new_v4(),
                 None,
@@ -354,7 +354,7 @@ pub async fn probe_subscription(
                 false,
                 Vec::new(),
                 HeaderMap::new(),
-                row.required_headers.clone(),
+                row.resolved_required_headers(),
                 extras,
             )
             .await;
@@ -378,7 +378,7 @@ pub async fn probe_subscription(
                 false,
                 Vec::new(),
                 HeaderMap::new(),
-                row.required_headers.clone(),
+                row.resolved_required_headers(),
                 extras,
             )
             .await;

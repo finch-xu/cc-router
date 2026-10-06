@@ -97,7 +97,7 @@ impl ProbeTarget {
             auth_type: row.auth_type,
             auth_header_name: row.auth_header_name.clone(),
             auth_header_value: row.auth_header_value(),
-            required_headers: row.required_headers.clone(),
+            required_headers: row.resolved_required_headers(),
         };
         if row.is_user_defined {
             target.with_custom_defaults()

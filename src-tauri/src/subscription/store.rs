@@ -11,7 +11,7 @@ use std::str::FromStr;
 
 use crate::error::{AppError, AppResult};
 use crate::provider::model::{
-    AuthHeaderFormat, AuthType, BalanceDiscovery, EndpointProtocol, ModelDiscovery,
+    AuthHeaderFormat, AuthType, BalanceDiscovery, EndpointProtocol, ModelDiscovery, SystemoneWire,
 };
 use crate::subscription::model::{
     BalanceSnapshot, ModelCache, ModelInfo, ModelSlots, OAuthMetadata, SlotEfforts,
@@ -37,7 +37,8 @@ pub async fn load_runtime(
                 required_headers, forward_headers, forward_client_headers,
                 model_discovery, balance_discovery,
                 provider_display_name, provider_icon, is_user_defined,
-                auth_type, oauth_metadata, slot_efforts, token_quotas, endpoint_protocol
+                auth_type, oauth_metadata, slot_efforts, token_quotas, endpoint_protocol,
+                url_params, systemone_wire
          FROM subscriptions",
     )
     .fetch_all(pool)
@@ -109,6 +110,16 @@ fn row_to_row(row: &sqlx::sqlite::SqliteRow) -> AppResult<SubscriptionRow> {
     let protocol_str: String = row.try_get("endpoint_protocol")?;
     let endpoint_protocol =
         EndpointProtocol::from_str(&protocol_str).map_err(AppError::internal)?;
+    // url_params / systemone_wire 在 migration 024 加. 与 slot_efforts 同样宽容降级:
+    // 坏 JSON 只丢失编辑回显, 不该让整条订阅加载失败。
+    let url_params_json: String = row.try_get("url_params")?;
+    let url_params: BTreeMap<String, String> =
+        serde_json::from_str(&url_params_json).unwrap_or_else(|e| {
+            warn!(error = %e, "url_params JSON 解析失败, 回退为空");
+            BTreeMap::new()
+        });
+    let wire_str: String = row.try_get("systemone_wire")?;
+    let systemone_wire = SystemoneWire::from_str(&wire_str).unwrap_or_default();
     let oauth_metadata_json: String = row.try_get("oauth_metadata")?;
     let oauth_metadata: OAuthMetadata = serde_json::from_str(&oauth_metadata_json)
         .map_err(|e| AppError::internal(format!("oauth_metadata JSON 解析失败: {e}")))?;
@@ -180,6 +191,8 @@ fn row_to_row(row: &sqlx::sqlite::SqliteRow) -> AppResult<SubscriptionRow> {
             v != 0
         },
         endpoint_protocol,
+        url_params,
+        systemone_wire,
         model_discovery,
         balance_discovery,
         provider_display_name: row.try_get("provider_display_name")?,
@@ -214,6 +227,7 @@ pub async fn insert_on(conn: &mut SqliteConnection, sub: &SubscriptionRow) -> Ap
     let oauth_json = serde_json::to_string(&sub.oauth_metadata)?;
     let slot_efforts_json = serde_json::to_string(&sub.slot_efforts)?;
     let token_quotas_json = serde_json::to_string(&sub.token_quotas)?;
+    let url_params_json = serde_json::to_string(&sub.url_params)?;
     sqlx::query(
         "INSERT INTO subscriptions (id, provider_id, endpoint_id, display_name, api_key,
             model_slot_fable, model_slot_opus, model_slot_sonnet, model_slot_haiku,
@@ -223,12 +237,14 @@ pub async fn insert_on(conn: &mut SqliteConnection, sub: &SubscriptionRow) -> Ap
             required_headers, forward_headers, forward_client_headers,
             model_discovery, balance_discovery,
             provider_display_name, provider_icon, is_user_defined,
-            auth_type, oauth_metadata, slot_efforts, token_quotas, endpoint_protocol)
+            auth_type, oauth_metadata, slot_efforts, token_quotas, endpoint_protocol,
+            url_params, systemone_wire)
          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
                  ?, ?, ?, ?,
                  ?, ?, ?, ?, ?,
                  ?, ?, ?,
-                 ?, ?, ?, ?, ?)",
+                 ?, ?, ?, ?, ?,
+                 ?, ?)",
     )
     .bind(sub.id.to_string())
     .bind(&sub.provider_id)
@@ -263,6 +279,8 @@ pub async fn insert_on(conn: &mut SqliteConnection, sub: &SubscriptionRow) -> Ap
     .bind(slot_efforts_json)
     .bind(token_quotas_json)
     .bind(sub.endpoint_protocol.as_str())
+    .bind(url_params_json)
+    .bind(sub.systemone_wire.as_str())
     .execute(&mut *conn)
     .await?;
     Ok(())
@@ -306,6 +324,7 @@ pub async fn update_row(pool: &SqlitePool, sub: &SubscriptionRow) -> AppResult<(
     let balance_discovery_json = opt_to_json(sub.balance_discovery.as_ref())?;
     let slot_efforts_json = serde_json::to_string(&sub.slot_efforts)?;
     let token_quotas_json = serde_json::to_string(&sub.token_quotas)?;
+    let url_params_json = serde_json::to_string(&sub.url_params)?;
     sqlx::query(
         "UPDATE subscriptions SET
             endpoint_id = ?, display_name = ?,
@@ -317,7 +336,8 @@ pub async fn update_row(pool: &SqlitePool, sub: &SubscriptionRow) -> AppResult<(
             base_url = ?, messages_path = ?, auth_header_name = ?, auth_header_format = ?,
             required_headers = ?, forward_headers = ?, forward_client_headers = ?,
             model_discovery = ?, balance_discovery = ?,
-            provider_display_name = ?, provider_icon = ?, is_user_defined = ?
+            provider_display_name = ?, provider_icon = ?, is_user_defined = ?,
+            url_params = ?, systemone_wire = ?
          WHERE id = ?",
     )
     .bind(&sub.endpoint_id)
@@ -346,6 +366,8 @@ pub async fn update_row(pool: &SqlitePool, sub: &SubscriptionRow) -> AppResult<(
     .bind(&sub.provider_display_name)
     .bind(&sub.provider_icon)
     .bind(sub.is_user_defined as i64)
+    .bind(url_params_json)
+    .bind(sub.systemone_wire.as_str())
     .bind(sub.id.to_string())
     .execute(pool)
     .await?;
@@ -843,6 +865,29 @@ mod jev_tests {
         let rt = loaded.get(&row.id).unwrap().read().await;
         assert_eq!(rt.row.endpoint_protocol, EndpointProtocol::Systemone);
         assert_eq!(rt.row.model_slots.jev, "clef-pro");
+    }
+
+    #[tokio::test]
+    async fn url_params_and_wire_round_trip() {
+        let pool = SqlitePoolOptions::new().max_connections(1).connect("sqlite::memory:").await.unwrap();
+        run_migrations(&pool).await.unwrap();
+        let mut row = SubscriptionRow::test_fixture("cloudflare", "systemone");
+        row.url_params.insert("account_id".into(), "abc".into());
+        row.systemone_wire = SystemoneWire::CloudflareRun;
+        insert(&pool, &row).await.unwrap();
+        let loaded = load_runtime(&pool).await.unwrap();
+        {
+            let rt = loaded.get(&row.id).unwrap().read().await;
+            assert_eq!(rt.row.url_params.get("account_id").map(String::as_str), Some("abc"));
+            assert_eq!(rt.row.systemone_wire, SystemoneWire::CloudflareRun);
+        }
+
+        // update_row writes both columns too
+        row.url_params.insert("account_id".into(), "xyz".into());
+        update_row(&pool, &row).await.unwrap();
+        let loaded = load_runtime(&pool).await.unwrap();
+        let rt = loaded.get(&row.id).unwrap().read().await;
+        assert_eq!(rt.row.url_params.get("account_id").map(String::as_str), Some("xyz"));
     }
 
     #[tokio::test]

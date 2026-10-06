@@ -301,7 +301,7 @@ pub async fn dispatch(
                 guard.row.auth_header_format.clone(),
                 guard.row.auth_header_value(),
                 guard.row.api_key.clone(),
-                guard.row.required_headers.clone(),
+                guard.row.resolved_required_headers(),
                 guard.row.forward_headers.clone(),
                 guard.row.forward_client_headers,
                 guard.row.auth_type,

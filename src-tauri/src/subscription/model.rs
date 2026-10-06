@@ -6,7 +6,7 @@ use uuid::Uuid;
 
 use crate::provider::model::{
     join_base_path, AuthHeaderFormat, AuthType, BalanceDiscovery, EndpointProtocol, LocalizedText,
-    ModelDiscovery,
+    ModelDiscovery, SystemoneWire,
 };
 use crate::provider::Provider;
 use crate::subscription::quota::{QuotaPeriod, QuotaUsage, TokenQuotas};
@@ -268,6 +268,12 @@ pub struct SubscriptionRow {
     pub forward_client_headers: bool,
     /// 创建时快照的端点协议, 之后不可变 (migration 023)。决定订阅只能绑哪类虚拟模型。
     pub endpoint_protocol: EndpointProtocol,
+    /// User-supplied provider params as entered (migration 024). The resolved strings are
+    /// already snapshotted into base_url / headers / discovery url, this copy is for editing
+    /// and export.
+    pub url_params: BTreeMap<String, String>,
+    /// System One upstream dialect snapshot (migration 024). `Standard` for every non-systemone row.
+    pub systemone_wire: SystemoneWire,
     pub model_discovery: ModelDiscovery,
     /// 余额查询配置 snapshot. provider yaml 不声明则为 None, UI 不显示余额卡片.
     pub balance_discovery: Option<BalanceDiscovery>,
@@ -294,10 +300,18 @@ impl SubscriptionRow {
         req: reqwest::RequestBuilder,
     ) -> reqwest::RequestBuilder {
         let mut req = req.header(&self.auth_header_name, self.auth_header_value());
-        for (k, v) in self.required_headers.iter() {
+        for (k, v) in self.resolved_required_headers().iter() {
             req = req.header(k, v);
         }
         req
+    }
+
+    /// Headers as sent upstream: `{api_key}` in values is filled at send time, never stored.
+    pub fn resolved_required_headers(&self) -> BTreeMap<String, String> {
+        self.required_headers
+            .iter()
+            .map(|(k, v)| (k.clone(), crate::provider::url_template::fill_api_key(v, &self.api_key)))
+            .collect()
     }
 }
 
@@ -507,6 +521,9 @@ pub struct SubscriptionDto {
     /// 端点协议 (`messages` / `systemone`)。客户端据此决定显示四槽还是 Jev 槽、能绑哪些虚拟模型。
     #[serde(default)]
     pub endpoint_protocol: EndpointProtocol,
+    /// 用户填的 provider 参数原值 (如 account_id), 编辑时回显用。
+    #[serde(default)]
+    pub url_params: BTreeMap<String, String>,
     pub model_discovery: ModelDiscovery,
     /// Whether this subscription's provider exposes a balance/quota endpoint.
     /// Derived from `balance_discovery.is_some_and(|b| b.enabled)` server-side;
@@ -599,6 +616,8 @@ impl SubscriptionRow {
             forward_headers: Vec::new(),
             forward_client_headers: false,
             endpoint_protocol: EndpointProtocol::Messages,
+            url_params: BTreeMap::new(),
+            systemone_wire: SystemoneWire::Standard,
             model_discovery: ModelDiscovery::default(),
             balance_discovery: None,
             provider_display_name: String::new(),
@@ -669,6 +688,7 @@ impl SubscriptionDto {
             forward_headers: rt.row.forward_headers.clone(),
             forward_client_headers: rt.row.forward_client_headers,
             endpoint_protocol: rt.row.endpoint_protocol,
+            url_params: rt.row.url_params.clone(),
             model_discovery: rt.row.model_discovery.clone(),
             balance_supported: rt
                 .row
@@ -862,6 +882,29 @@ mod tests {
         assert_eq!(slots.jev_model(), None);
         let slots = ModelSlots { jev: "  jev-latest ".into(), ..slots };
         assert_eq!(slots.jev_model(), Some("jev-latest"));
+    }
+
+    #[test]
+    fn resolved_required_headers_fills_api_key_and_keeps_others() {
+        let mut row = SubscriptionRow::test_fixture("p", "e");
+        row.api_key = "k-123".into();
+        row.required_headers.insert("cf-aig-authorization".into(), "Bearer {api_key}".into());
+        row.required_headers.insert("cf-aig-gateway-id".into(), "gw1".into());
+        let h = row.resolved_required_headers();
+        assert_eq!(h["cf-aig-authorization"], "Bearer k-123");
+        assert_eq!(h["cf-aig-gateway-id"], "gw1");
+        // the row itself still holds the template
+        assert_eq!(row.required_headers["cf-aig-authorization"], "Bearer {api_key}");
+    }
+
+    #[test]
+    fn dto_exposes_url_params() {
+        let mut row = SubscriptionRow::test_fixture("cloudflare", "gateway");
+        row.url_params.insert("account_id".into(), "abc".into());
+        let rt = SubscriptionRuntime::from_row(row);
+        let dto = SubscriptionDto::from_runtime(&rt, vec![], &HashMap::new());
+        let json = serde_json::to_value(&dto).unwrap();
+        assert_eq!(json["url_params"]["account_id"], "abc");
     }
 
     #[test]

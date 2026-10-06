@@ -338,6 +338,8 @@ export interface SubscriptionDto {
   forward_client_headers: boolean;
   /** 创建时快照的端点协议, 之后不可变。systemone 订阅只能绑 model-jev, 反之亦然。 */
   endpoint_protocol: EndpointProtocol;
+  /** Provider params as entered (e.g. account_id); resolved strings are already in base_url etc. */
+  url_params: Record<string, string>;
   model_discovery: ModelDiscoveryDto;
   /** true 表示该 provider 声明且启用了余额查询接口. */
   balance_supported: boolean;

@@ -11,6 +11,7 @@ use uuid::Uuid;
 use crate::error::{AppError, AppResult};
 use crate::provider::model::{
     AuthHeaderFormat, AuthType, EndpointProtocol, ModelDiscovery, Provider, ProviderEndpoint,
+    SystemoneWire,
 };
 use crate::state::AppState;
 use crate::subscription::{
@@ -299,6 +300,9 @@ pub async fn create_subscription(
                 forward_headers: provider.forward_headers.clone(),
                 forward_client_headers: false,
                 endpoint_protocol: endpoint.protocol,
+                // Task 4 replaces these with the resolved snapshot
+                url_params: BTreeMap::new(),
+                systemone_wire: endpoint.systemone_wire,
                 model_discovery: snapshot_discovery(provider, endpoint),
                 balance_discovery: provider.balance_discovery.clone(),
                 provider_display_name: provider.display_name.zh.clone(),
@@ -431,6 +435,8 @@ pub async fn create_subscription(
                 forward_client_headers: false,
                 // 自定义入口暂不支持 systemone
                 endpoint_protocol: EndpointProtocol::Messages,
+                url_params: BTreeMap::new(),
+                systemone_wire: SystemoneWire::Standard,
                 model_discovery: discovery,
                 balance_discovery: None,
                 provider_display_name,

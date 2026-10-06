@@ -8,6 +8,7 @@ use uuid::Uuid;
 
 use crate::provider::model::{
     AuthHeaderFormat, AuthType, BalanceDiscovery, EndpointProtocol, ModelDiscovery,
+    SystemoneWire,
 };
 use crate::subscription::model::{ModelSlots, OAuthMetadata, SlotEfforts, SubscriptionRow};
 use crate::subscription::quota::TokenQuotas;
@@ -63,6 +64,12 @@ pub struct ExportSubscription {
     /// 端点协议快照; 旧导出文件没有该字段, 按对话协议 (messages) 处理。
     #[serde(default)]
     pub endpoint_protocol: EndpointProtocol,
+    /// User-supplied provider params (account_id etc), plaintext: not secrets.
+    #[serde(default)]
+    pub url_params: BTreeMap<String, String>,
+    /// System One upstream dialect snapshot; old exports default to `standard`.
+    #[serde(default)]
+    pub systemone_wire: SystemoneWire,
     #[serde(default)]
     pub model_discovery: ModelDiscovery,
     #[serde(default)]
@@ -219,6 +226,8 @@ pub fn subscription_to_export(row: &SubscriptionRow) -> (ExportSubscription, Ext
         forward_headers,
         forward_client_headers,
         endpoint_protocol,
+        url_params,
+        systemone_wire,
         model_discovery,
         balance_discovery,
         provider_display_name,
@@ -256,6 +265,8 @@ pub fn subscription_to_export(row: &SubscriptionRow) -> (ExportSubscription, Ext
         forward_headers: forward_headers.clone(),
         forward_client_headers: *forward_client_headers,
         endpoint_protocol: *endpoint_protocol,
+        url_params: url_params.clone(),
+        systemone_wire: *systemone_wire,
         model_discovery: model_discovery.clone(),
         balance_discovery: balance_discovery.clone(),
         provider_display_name: provider_display_name.clone(),
@@ -304,6 +315,8 @@ pub fn export_to_row(
         forward_headers: sub.forward_headers.clone(),
         forward_client_headers: sub.forward_client_headers,
         endpoint_protocol: sub.endpoint_protocol,
+        url_params: sub.url_params.clone(),
+        systemone_wire: sub.systemone_wire,
         model_discovery: sub.model_discovery.clone(),
         balance_discovery: sub.balance_discovery.clone(),
         provider_display_name: sub.provider_display_name.clone(),
@@ -425,6 +438,39 @@ mod tests {
             ],
             "changing this breaks every encrypted v1 export, bump VERSION instead"
         );
+    }
+
+    #[test]
+    fn url_params_and_wire_survive_export_round_trip() {
+        let mut row = SubscriptionRow::test_fixture("cloudflare", "gateway");
+        row.base_url = "https://api.example.com".into();
+        row.messages_path = "/v1/chat/completions".into();
+        row.url_params.insert("account_id".into(), "abc".into());
+        row.systemone_wire = crate::provider::model::SystemoneWire::CloudflareRun;
+        let (exp, _secrets) = subscription_to_export(&row);
+        let json = serde_json::to_value(&exp).unwrap();
+        assert_eq!(json["url_params"]["account_id"], "abc");
+        assert_eq!(json["systemone_wire"], "cloudflare_run");
+        let back: ExportSubscription = serde_json::from_value(json).unwrap();
+        assert_eq!(back.url_params.get("account_id").map(String::as_str), Some("abc"));
+        assert_eq!(back.systemone_wire, crate::provider::model::SystemoneWire::CloudflareRun);
+        let restored = export_to_row(&back, String::new(), BTreeMap::new(), true, Utc::now());
+        assert_eq!(restored.url_params.get("account_id").map(String::as_str), Some("abc"));
+        assert_eq!(restored.systemone_wire, crate::provider::model::SystemoneWire::CloudflareRun);
+    }
+
+    #[test]
+    fn old_export_without_new_fields_still_parses() {
+        let mut row = SubscriptionRow::test_fixture("p", "e");
+        row.base_url = "https://api.example.com".into();
+        row.messages_path = "/v1/messages".into();
+        let (exp, _) = subscription_to_export(&row);
+        let mut json = serde_json::to_value(&exp).unwrap();
+        json.as_object_mut().unwrap().remove("url_params");
+        json.as_object_mut().unwrap().remove("systemone_wire");
+        let back: ExportSubscription = serde_json::from_value(json).unwrap();
+        assert!(back.url_params.is_empty());
+        assert_eq!(back.systemone_wire, crate::provider::model::SystemoneWire::Standard);
     }
 
     #[test]
