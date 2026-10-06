@@ -1035,6 +1035,7 @@
   "liveRouting.clientAccess.col.client": "Client",
   "liveRouting.clientAccess.col.lastSeen": "Last request",
   "liveRouting.clientAccess.col.count": "Requests",
+  "liveRouting.clientAccess.col.tokens": "Tokens",
   "liveRouting.clientAccess.connected": "Connected",
   "liveRouting.clientAccess.notConnected": "Not connected",
   "liveRouting.clientAccess.empty": "No request in the retention window yet — once a client talks to cc-router, it shows up here row by row.",

@@ -2567,12 +2567,12 @@ html:not([data-platform="macos"]) .main.flush { padding-top: 0; }
 
 /* === 客户端接入 (被动流量检测, 与上方路由图便签同源数据) === */
 .ca-list { display: flex; flex-direction: column; }
-/* 三列 5:3:2 比例铺开: 客户端列独占 1fr 时, 名字 (≤160px) 和两个数值列之间会空出
+/* 四列 5:3:2:2 比例铺开 (token 列 2026-10 追加): 客户端列独占 1fr 时, 名字 (≤160px) 和两个数值列之间会空出
    几百像素的死区, 时间/请求数挤在右角; 按比例分配后三个锚点均匀占满整行。
    数值列仍右对齐, minmax 下限护住最长时间串 ("59 minutes ago") 和表头文字 */
 .ca-row {
   display: grid;
-  grid-template-columns: minmax(0, 5fr) minmax(110px, 3fr) minmax(84px, 2fr);
+  grid-template-columns: minmax(0, 5fr) minmax(110px, 3fr) minmax(84px, 2fr) minmax(76px, 2fr);
   align-items: center;
   gap: 10px;
   padding: 7px 2px;

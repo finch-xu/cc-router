@@ -1035,6 +1035,7 @@
   "liveRouting.clientAccess.col.client": "客户端",
   "liveRouting.clientAccess.col.lastSeen": "最近请求",
   "liveRouting.clientAccess.col.count": "请求数",
+  "liveRouting.clientAccess.col.tokens": "Token 数",
   "liveRouting.clientAccess.connected": "已接入",
   "liveRouting.clientAccess.notConnected": "未接入",
   "liveRouting.clientAccess.empty": "保留期内还没有任何请求 —— 客户端接入 cc-router 后, 这里会按客户端逐行列出来。",

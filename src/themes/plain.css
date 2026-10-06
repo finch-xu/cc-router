@@ -821,11 +821,11 @@
   color: var(--ink-4);
 }
 :where([data-art~="plain"]) .lrc-ca-list { display: flex; flex-direction: column; margin-top: 8px; }
-/* 三列 5:3:2 比例铺开 (与手绘版同一套比例): 通栏比手绘卡更宽且不限宽,
+/* 四列 5:3:2:2 比例铺开 (与手绘版同一套比例): 通栏比手绘卡更宽且不限宽,
    定宽数值列会把时间/请求数挤在右角, 名字后面留下几百像素死区 */
 :where([data-art~="plain"]) .lrc-ca-row {
   display: grid;
-  grid-template-columns: minmax(0, 5fr) minmax(110px, 3fr) minmax(84px, 2fr);
+  grid-template-columns: minmax(0, 5fr) minmax(110px, 3fr) minmax(84px, 2fr) minmax(76px, 2fr);
   align-items: center;
   gap: 10px;
   padding: 6px 0;

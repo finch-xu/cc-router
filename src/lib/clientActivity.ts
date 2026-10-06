@@ -60,6 +60,8 @@ export interface ClientGroupActivity {
   lastSeen: number | null;
   /** 组内请求总数 */
   count: number;
+  /** 组内 token 总数 (输入 + 输出) */
+  tokens: number;
 }
 
 export interface ClientActivityRow {
@@ -68,6 +70,8 @@ export interface ClientActivityRow {
   connected: boolean;
   /** 未接入的已知客户端为 0 */
   count: number;
+  /** 输入 + 输出 token; 未接入为 0 */
+  tokens: number;
   lastSeen: number | null;
 }
 
@@ -87,7 +91,12 @@ export interface ClientActivitySummary {
   table: ClientGroupSection[];
 }
 
-const emptyGroup = (): ClientGroupActivity => ({ active: false, lastSeen: null, count: 0 });
+const emptyGroup = (): ClientGroupActivity => ({
+  active: false,
+  lastSeen: null,
+  count: 0,
+  tokens: 0,
+});
 
 /**
  * 汇总后端聚合结果。`data === undefined` (加载中/失败) 返回 null ——
@@ -113,15 +122,22 @@ export function summarizeActivity(
     const g = groups[id ? (GROUP_BY_ID.get(id) ?? "others") : "others"];
     g.active = true;
     g.count += r.request_count;
+    g.tokens += r.total_tokens;
     g.lastSeen = g.lastSeen === null ? r.last_seen : Math.max(g.lastSeen, r.last_seen);
 
     if (!id) {
-      unknownRow = { connected: true, count: r.request_count, lastSeen: r.last_seen };
+      unknownRow = {
+        connected: true,
+        count: r.request_count,
+        tokens: r.total_tokens,
+        lastSeen: r.last_seen,
+      };
     } else if (KNOWN_IDS.has(id)) {
       connectedById.set(id as ClientToolId, {
         toolId: id as ClientToolId,
         connected: true,
         count: r.request_count,
+        tokens: r.total_tokens,
         lastSeen: r.last_seen,
       });
     }
@@ -138,7 +154,7 @@ export function summarizeActivity(
       .sort((a, b) => (b.lastSeen ?? 0) - (a.lastSeen ?? 0));
     const notConnectedRows: ClientActivityRow[] = memberIds
       .filter((id) => !connectedById.has(id))
-      .map((id) => ({ toolId: id, connected: false, count: 0, lastSeen: null }));
+      .map((id) => ({ toolId: id, connected: false, count: 0, tokens: 0, lastSeen: null }));
     const rows =
       def.key === "others" && unknownRow
         ? [...connectedRows, ...notConnectedRows, unknownRow]

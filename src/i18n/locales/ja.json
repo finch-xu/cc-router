@@ -1035,6 +1035,7 @@
   "liveRouting.clientAccess.col.client": "クライアント",
   "liveRouting.clientAccess.col.lastSeen": "最終リクエスト",
   "liveRouting.clientAccess.col.count": "リクエスト数",
+  "liveRouting.clientAccess.col.tokens": "トークン数",
   "liveRouting.clientAccess.connected": "接続済み",
   "liveRouting.clientAccess.notConnected": "未接続",
   "liveRouting.clientAccess.empty": "保持期間内にリクエストがまだありません。クライアントが cc-router に接続すると、ここに 1 行ずつ表示されます。",

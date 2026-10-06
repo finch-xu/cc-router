@@ -360,6 +360,9 @@ pub struct ClientActivityDto {
     pub request_count: i64,
     /// 最近一次请求时间 (ms epoch)
     pub last_seen: i64,
+    /// 上游输入 + 输出 token 之和 (不含缓存读写), 与统计页按订阅汇总同一口径;
+    /// 拿不到用量的行 (失败 / 老日志) 按 0 计, 同日聚合表的 `unwrap_or(0)`
+    pub total_tokens: i64,
 }
 
 /// 按 client_tool 聚合 requests: 条数 + 最近时间, 按最近时间倒序。
@@ -369,7 +372,9 @@ pub(crate) async fn query_client_activity(
     pool: &sqlx::SqlitePool,
 ) -> Result<Vec<ClientActivityDto>, sqlx::Error> {
     let rows = sqlx::query(
-        "SELECT client_tool, COUNT(*) AS request_count, MAX(timestamp) AS last_seen
+        "SELECT client_tool, COUNT(*) AS request_count, MAX(timestamp) AS last_seen,
+                SUM(COALESCE(upstream_input_tokens, 0) + COALESCE(upstream_output_tokens, 0))
+                    AS total_tokens
          FROM requests
          GROUP BY client_tool
          ORDER BY last_seen DESC",
@@ -382,6 +387,7 @@ pub(crate) async fn query_client_activity(
                 client_tool: r.try_get("client_tool")?,
                 request_count: r.try_get("request_count")?,
                 last_seen: r.try_get("last_seen")?,
+                total_tokens: r.try_get("total_tokens")?,
             })
         })
         .collect()
@@ -399,15 +405,24 @@ mod tests {
     use super::{csv_field, CSV_HEADER};
 
     /// 插入一行最小可用的 requests 记录 (只关心 client_tool / timestamp 聚合)。
-    async fn insert_request(pool: &sqlx::SqlitePool, id: &str, ts: i64, tool: Option<&str>) {
+    async fn insert_request(
+        pool: &sqlx::SqlitePool,
+        id: &str,
+        ts: i64,
+        tool: Option<&str>,
+        tokens: Option<(i64, i64)>,
+    ) {
         sqlx::query(
             "INSERT INTO requests (id, timestamp, virtual_model_name, subscription_id, provider_id,
-             endpoint_id, real_model_name, is_streaming, status, client_tool)
-             VALUES (?, ?, 'vm', 's', 'p', 'e', 'm', 0, 'success', ?)",
+             endpoint_id, real_model_name, is_streaming, status, client_tool,
+             upstream_input_tokens, upstream_output_tokens)
+             VALUES (?, ?, 'vm', 's', 'p', 'e', 'm', 0, 'success', ?, ?, ?)",
         )
         .bind(id)
         .bind(ts)
         .bind(tool)
+        .bind(tokens.map(|t| t.0))
+        .bind(tokens.map(|t| t.1))
         .execute(pool)
         .await
         .unwrap();
@@ -425,10 +440,10 @@ mod tests {
             .await
             .unwrap();
         run_migrations(&pool).await.unwrap();
-        insert_request(&pool, "r1", 1000, Some("claude-code")).await;
-        insert_request(&pool, "r2", 3000, Some("claude-code")).await;
-        insert_request(&pool, "r3", 2000, Some("codex-cli")).await;
-        insert_request(&pool, "r4", 4000, None).await;
+        insert_request(&pool, "r1", 1000, Some("claude-code"), Some((100, 20))).await;
+        insert_request(&pool, "r2", 3000, Some("claude-code"), Some((1_000, 5))).await;
+        insert_request(&pool, "r3", 2000, Some("codex-cli"), None).await;
+        insert_request(&pool, "r4", 4000, None, Some((7, 0))).await;
 
         let rows = super::query_client_activity(&pool).await.unwrap();
         assert_eq!(rows.len(), 3, "NULL 独立成组, 不与任何已知工具合并");
@@ -445,6 +460,9 @@ mod tests {
             (Some("claude-code"), 2, 3000)
         );
         assert_eq!(rows[2].client_tool.as_deref(), Some("codex-cli"));
+        // token = 输入 + 输出; 全组都没有用量 (NULL) 时是 0 而不是 NULL
+        let tokens: Vec<i64> = rows.iter().map(|r| r.total_tokens).collect();
+        assert_eq!(tokens, vec![7, 1_125, 0]);
     }
 
     /// CSV 列数锁 —— 加字段时必须同步改 header / SELECT / 行写入三处, 漏一处就会串列。

@@ -18,7 +18,7 @@ import { ChevronRight } from "lucide-react";
 import { ClientToolBadge } from "@/components/ClientToolBadge";
 import { useClientActivity } from "@/hooks/useClientActivity";
 import { useSettings } from "@/hooks/useSettings";
-import { fmtNum, fmtRelativeTime } from "@/lib/format";
+import { fmtCompact, fmtNum, fmtRelativeTime } from "@/lib/format";
 import {
   CLIENT_GROUP_LABEL,
   summarizeActivity,
@@ -65,6 +65,7 @@ export function ClientAccessSection({ variant }: { variant: "sketch" | "classic"
               <span>{t("liveRouting.clientAccess.col.client")}</span>
               <span className={`${p}-time`}>{t("liveRouting.clientAccess.col.lastSeen")}</span>
               <span className={`${p}-count-head`}>{t("liveRouting.clientAccess.col.count")}</span>
+              <span className={`${p}-count-head`}>{t("liveRouting.clientAccess.col.tokens")}</span>
             </div>
             {summary?.table.map((g) => {
               const open = toggled[g.key] ?? g.active;
@@ -93,6 +94,7 @@ export function ClientAccessSection({ variant }: { variant: "sketch" | "classic"
                       {g.lastSeen === null ? "—" : fmtRelativeTime(g.lastSeen, t)}
                     </span>
                     <span className={`${p}-count`}>{fmtNum(g.count)}</span>
+                    <TokenCell p={p} n={g.tokens} />
                   </button>
                   {open &&
                     g.rows.map((r) => (
@@ -108,6 +110,7 @@ export function ClientAccessSection({ variant }: { variant: "sketch" | "classic"
                           {r.lastSeen === null ? "—" : fmtRelativeTime(r.lastSeen, t)}
                         </span>
                         <span className={`${p}-count`}>{fmtNum(r.count)}</span>
+                        <TokenCell p={p} n={r.tokens} />
                       </div>
                     ))}
                 </div>
@@ -147,6 +150,15 @@ function SketchChevron({ className }: { className: string }) {
     >
       <path filter="url(#ccr-rough-icon)" d="M11.2 6.4 C 15.2 10, 18.4 13.2, 21.2 16 C 18.4 18.8, 15.2 22, 10.8 25.6" />
     </svg>
+  );
+}
+
+/** token 列: 紧凑单位 (K / M / B) 只为好看, 悬停给精确值 */
+function TokenCell({ p, n }: { p: string; n: number }) {
+  return (
+    <span className={`${p}-count`} title={n >= 1000 ? fmtNum(n) : undefined}>
+      {fmtCompact(n)}
+    </span>
   );
 }
 

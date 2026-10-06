@@ -834,6 +834,8 @@ export interface ClientActivityDto {
   request_count: number;
   /** 最近一次请求时间 (ms epoch) */
   last_seen: number;
+  /** 上游输入 + 输出 token 之和 (不含缓存读写), 拿不到用量的请求按 0 计 */
+  total_tokens: number;
 }
 
 // ===== Receipts (commands/receipts.rs) =====
