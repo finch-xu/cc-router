@@ -544,7 +544,10 @@ jobs:
             librsvg2-dev \
             patchelf \
             libayatana-appindicator3-dev \
-            file
+            file \
+            squashfs-tools \
+            xvfb \
+            x11-utils
 
       - name: Install frontend deps
         run: pnpm install --frozen-lockfile
@@ -564,14 +567,38 @@ jobs:
           fi
           echo "TAURI signing secrets present."
 
+      # tauri-bundler 把下载的 AppImage 启动器写成 0770 (tauri-apps/tauri#16155, CLI 2.12.1 仍是如此),
+      # x64 包里它变成 root 属主的 AppRun.wrapped, firejail / AppImageHub 这类「root 挂载、
+      # 换用户运行」的场景直接 Permission denied。打包器只在缓存里没有这个文件时才下载,
+      # 所以先放一份 0755 的进去。arm64 包目前没中招, 一并处理, 免得 linuxdeploy 换版本后复发。
+      - name: Seed AppImage launcher with world-executable mode
+        run: |
+          set -euo pipefail
+          cache="${XDG_CACHE_HOME:-$HOME/.cache}/tauri"
+          mkdir -p "$cache"
+          curl -fsSL --retry 3 -o "$cache/AppRun-x86_64.part" \
+            https://github.com/tauri-apps/binary-releases/releases/download/apprun-old/AppRun-x86_64
+          chmod 0755 "$cache/AppRun-x86_64.part"
+          mv "$cache/AppRun-x86_64.part" "$cache/AppRun-x86_64"
+          ls -l "$cache/AppRun-x86_64"
+
       - name: Build
         uses: tauri-apps/tauri-action@v0
         env:
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+          # AppImage 不带 libwayland, 用宿主机的: 包里 22.04 的 libwayland 1.20 会先于系统库加载,
+          # 而新系统 Mesa 的 libEGL_mesa 要 1.23+ 才有的符号 (Ubuntu 26.04 / Mesa 26 实测),
+          # 加载失败 → WebKit 报 EGL_BAD_PARAMETER 退出渲染进程 → 窗口白屏。
+          # libwayland 向后兼容, 且是 GTK3 的依赖, 任何能跑 GTK 程序的桌面都有。
+          # 由 tauri-bundler 调用的 linuxdeploy 读取 (按文件名 fnmatch, 分号分隔)。
+          LINUXDEPLOY_EXCLUDED_LIBRARIES: "libwayland-*"
         with:
           # 显式只打 deb + AppImage; 跳过 rpm (Ubuntu runner 上工具链不稳)
           args: --target x86_64-unknown-linux-gnu --bundles deb,appimage
+
+      - name: Check AppImage runs as another user
+        run: bash scripts/check-appimage.sh src-tauri/target/x86_64-unknown-linux-gnu/release/bundle/appimage/*.AppImage
 
       - name: List bundle contents (diagnostic)
         if: always()
@@ -667,7 +694,10 @@ jobs:
             librsvg2-dev \
             patchelf \
             libayatana-appindicator3-dev \
-            file
+            file \
+            squashfs-tools \
+            xvfb \
+            x11-utils
 
       - name: Install frontend deps
         run: pnpm install --frozen-lockfile
@@ -687,14 +717,38 @@ jobs:
           fi
           echo "TAURI signing secrets present."
 
+      # tauri-bundler 把下载的 AppImage 启动器写成 0770 (tauri-apps/tauri#16155, CLI 2.12.1 仍是如此),
+      # x64 包里它变成 root 属主的 AppRun.wrapped, firejail / AppImageHub 这类「root 挂载、
+      # 换用户运行」的场景直接 Permission denied。打包器只在缓存里没有这个文件时才下载,
+      # 所以先放一份 0755 的进去。arm64 包目前没中招, 一并处理, 免得 linuxdeploy 换版本后复发。
+      - name: Seed AppImage launcher with world-executable mode
+        run: |
+          set -euo pipefail
+          cache="${XDG_CACHE_HOME:-$HOME/.cache}/tauri"
+          mkdir -p "$cache"
+          curl -fsSL --retry 3 -o "$cache/AppRun-aarch64.part" \
+            https://github.com/tauri-apps/binary-releases/releases/download/apprun-old/AppRun-aarch64
+          chmod 0755 "$cache/AppRun-aarch64.part"
+          mv "$cache/AppRun-aarch64.part" "$cache/AppRun-aarch64"
+          ls -l "$cache/AppRun-aarch64"
+
       - name: Build
         uses: tauri-apps/tauri-action@v0
         env:
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+          # AppImage 不带 libwayland, 用宿主机的: 包里 22.04 的 libwayland 1.20 会先于系统库加载,
+          # 而新系统 Mesa 的 libEGL_mesa 要 1.23+ 才有的符号 (Ubuntu 26.04 / Mesa 26 实测),
+          # 加载失败 → WebKit 报 EGL_BAD_PARAMETER 退出渲染进程 → 窗口白屏。
+          # libwayland 向后兼容, 且是 GTK3 的依赖, 任何能跑 GTK 程序的桌面都有。
+          # 由 tauri-bundler 调用的 linuxdeploy 读取 (按文件名 fnmatch, 分号分隔)。
+          LINUXDEPLOY_EXCLUDED_LIBRARIES: "libwayland-*"
         with:
           # 显式只打 deb + AppImage; 跳过 rpm (Ubuntu runner 上工具链不稳)
           args: --target aarch64-unknown-linux-gnu --bundles deb,appimage
+
+      - name: Check AppImage runs as another user
+        run: bash scripts/check-appimage.sh src-tauri/target/aarch64-unknown-linux-gnu/release/bundle/appimage/*.AppImage
 
       - name: List bundle contents (diagnostic)
         if: always()
