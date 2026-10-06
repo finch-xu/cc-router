@@ -10,7 +10,7 @@ use super::form_state::FormState;
 use super::text::TextInput;
 use super::{follow_display_name, BasicsPhase, Paint};
 use crate::action::{Action, WizardCmd};
-use crate::client::dto::{CreateInput, CreateSource, CustomProtocol, ModelSlots, Provider};
+use crate::client::dto::{capability_suffix, CreateInput, CreateSource, CustomProtocol, ModelSlots, Provider};
 use crate::i18n::Strings;
 use crate::store::Store;
 use crate::widgets::form::{self, FormView};
@@ -126,12 +126,13 @@ impl BasicsForm {
         let mut items: Vec<PickerItem> = providers
             .iter()
             .map(|p| {
-                let label = if p.is_oauth() { format!("{} · {}", p.display_name, s.wiz_desktop_only) } else { p.display_name.clone() };
-                PickerItem { id: p.id.clone(), label, hint: p.description.clone() }
+                let (llm, jev) = p.capabilities();
+                let base = if p.is_oauth() { format!("{} · {}", p.display_name, s.wiz_desktop_only) } else { p.display_name.clone() };
+                PickerItem { id: p.id.clone(), label: format!("{base}{}", capability_suffix(llm, jev)), hint: p.description.clone() }
             })
             .collect();
         for (protocol, label) in CustomProtocol::ALL.iter().zip(s.wiz_custom_labels.iter()) {
-            items.push(PickerItem { id: format!("custom:{}", protocol.as_wire()), label: (*label).to_string(), hint: None });
+            items.push(PickerItem { id: format!("custom:{}", protocol.as_wire()), label: format!("{label}{}", capability_suffix(true, false)), hint: None });
         }
         Action::OpenPicker(PickerSpec {
             tag: PickerTag::WizardProvider,

@@ -1141,3 +1141,17 @@ fn systemone_entry_kind_reaches_the_tui() {
     let real = crate::proxy::client_fingerprint::RequestEntryKind::SystemOne.as_str();
     assert_eq!(real, "systemone", "TUI 日志详情按 /v1/{{entry_kind}} 渲染");
 }
+
+#[test]
+fn capability_rule_matches_between_backend_and_tui() {
+    use crate::provider::model::EndpointProtocol;
+    let providers = crate::provider::loader::load_all().unwrap();
+    for p in providers.values() {
+        let tui: dto::Provider = through_json(&ProviderInfo::from(p));
+        let backend = (
+            p.endpoints.iter().any(|e| e.protocol == EndpointProtocol::Messages),
+            p.endpoints.iter().any(|e| e.protocol == EndpointProtocol::Systemone),
+        );
+        assert_eq!(tui.capabilities(), backend, "{}", p.id);
+    }
+}

@@ -914,6 +914,33 @@ mod tests {
         assert_eq!(form.examples, vec!["clef-flash".to_string()]);
     }
 
+    /// 厂商选择弹窗的每一项都带能力标记: 对话 / Jev / 两者都有 / 自定义项恒为 LLM。
+    #[test]
+    fn provider_picker_labels_carry_capability_suffixes() {
+        let s = &crate::i18n::EN;
+        let ep = |protocol: &str| crate::client::dto::ProviderEndpoint {
+            id: protocol.into(),
+            label: protocol.into(),
+            base_url: "u".into(),
+            protocol: protocol.into(),
+            example_models: vec![],
+        };
+        let mut llm = provider("llm");
+        llm.endpoints = vec![ep("messages")];
+        let mut jev = provider("jev");
+        jev.endpoints = vec![ep("systemone")];
+        let mut both = provider("both");
+        both.endpoints = vec![ep("messages"), ep("systemone")];
+        let mut w = basics_at(BasicsPhase::Editing);
+        let Some(Action::OpenPicker(spec)) = basics(&mut w).handle_key(key(KeyCode::Enter), &mut BasicsPhase::Editing, &[llm, jev, both], s)
+        else {
+            panic!("厂商行 回车 应该开选择弹窗")
+        };
+        let labels: Vec<&str> = spec.items.iter().map(|i| i.label.as_str()).collect();
+        assert_eq!(&labels[..3], ["llm [LLM]", "jev [Jev]", "both [LLM] [Jev]"]);
+        assert!(labels[3..].iter().all(|l| l.ends_with(" [LLM]")), "{labels:?}");
+    }
+
     /// Jev 槽可以留空 (= 透传): 直接保存, 发全空槽。选择弹窗置顶「清空」项。
     #[test]
     fn systemone_slots_save_with_an_empty_jev_slot() {

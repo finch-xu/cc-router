@@ -687,6 +687,16 @@ pub struct ModelDiscovery {
 }
 
 /// 需要去桌面端添加的 auth type。TUI 不做设备码流程, 这两类在厂商选择器里置灰。
+/// Picker label suffix. Protocol names, identical in every language.
+pub fn capability_suffix(llm: bool, jev: bool) -> &'static str {
+    match (llm, jev) {
+        (true, true) => " [LLM] [Jev]",
+        (true, false) => " [LLM]",
+        (false, true) => " [Jev]",
+        (false, false) => "",
+    }
+}
+
 pub const OAUTH_AUTH_TYPES: [&str; 2] = ["chatgpt_oauth", "kiro_oauth"];
 
 impl Provider {
@@ -705,6 +715,15 @@ impl Provider {
             }
         }
         self
+    }
+
+    /// `(llm, jev)`: has a chat endpoint / has a System One endpoint. Same rule as the desktop
+    /// `providerCapabilities.ts`; `tui_contract.rs` pins it against the backend.
+    pub fn capabilities(&self) -> (bool, bool) {
+        (
+            self.endpoints.iter().any(|e| !e.is_systemone()),
+            self.endpoints.iter().any(ProviderEndpoint::is_systemone),
+        )
     }
 
     pub fn is_oauth(&self) -> bool {
@@ -958,6 +977,33 @@ pub enum ProbeModelsResult {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn capabilities_follow_endpoint_protocols() {
+        let ep = |id: &str, protocol: &str| ProviderEndpoint {
+            id: id.into(),
+            label: id.into(),
+            base_url: "u".into(),
+            protocol: protocol.into(),
+            example_models: vec![],
+        };
+        let text = ProviderText { display_name: "p".into(), description: None, endpoints: Default::default() };
+        let mut p = Provider {
+            id: "p".into(),
+            display_name: "p".into(),
+            description: None,
+            endpoints: vec![ep("a", "messages"), ep("b", "systemone")],
+            default_endpoint: None,
+            auth: ProviderAuth { auth_type: "api_key".into() },
+            model_discovery: ModelDiscovery { enabled: true, example_models: vec![] },
+            translations: ProviderTranslations { en: text.clone(), ja: text },
+        };
+        assert_eq!(p.capabilities(), (true, true));
+        p.endpoints.truncate(1);
+        assert_eq!(p.capabilities(), (true, false));
+        assert_eq!(capability_suffix(true, true), " [LLM] [Jev]");
+        assert_eq!(capability_suffix(false, true), " [Jev]");
+    }
 
     #[test]
     fn unknown_state_does_not_break_the_list() {
