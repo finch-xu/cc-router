@@ -39,26 +39,26 @@ A locally-running LLM aggregation gateway with a desktop GUI, zero-code setup: b
 Architecture and request flow at a glance:
 
 ```text
- Claude Code  OpenCode   OpenClaw  pi ...   Codex ...           Open WebUI ...       your code / agents
-      |           |          |        |         |                      |                      |
-      ---------------------------------         |                      |                      |
-                      |                         |                      |                      |
-                  Anthropic                  OpenAI                 OpenAI                   Jev
-                Messages API              Responses API      Chat Completions API        System One
-               (/v1/messages)            (/v1/responses)    (/v1/chat/completions)     (/v1/systemone)
-                      |                         |                      |                      |
-                      -------------------------------------------------------------------------
-                                                          |  inbound · virtual models
-                                                          |
-                                                      cc-router
-                                               (local 127.0.0.1:23456)
-                                                          |
-                                                          |  outbound · real models
-                    ------------------------------------------------------------------------------
-                    |          |          |          |          |          |          |          |
-                DeepSeek      GLM       Kimi     Anthropic   OpenAI     Gemini       Jev      ......
-                   API      Coding     Coding    Messages  Responses &    API    System One
-                             Plan       Plan        API    Completions
+ Claude Code  OpenCode   pi ...      Codex ...           Open WebUI ...       your code / agents
+      |           |         |            |                      |                      |
+      -----------------------            |                      |                      |
+                 |                       |                      |                      |
+             Anthropic                OpenAI                 OpenAI                   Jev
+           Messages API            Responses API      Chat Completions API        System One
+          (/v1/messages)          (/v1/responses)    (/v1/chat/completions)     (/v1/systemone)
+                 |                       |                      |                      |
+                 -----------------------------------------------------------------------
+                                                    |  inbound · virtual models
+                                                    |
+                                                cc-router
+                                         (local 127.0.0.1:23456)
+                                                    |
+                                                    |  outbound · real models
+              ------------------------------------------------------------------------------
+              |          |          |          |          |          |          |          |
+          DeepSeek      GLM       Kimi     Anthropic   OpenAI     Gemini       Jev      ......
+             API      Coding     Coding    Messages  Responses &    API    System One
+                       Plan       Plan        API    Completions
 ```
 
 Highlights:

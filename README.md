@@ -39,26 +39,26 @@
 架构与请求走向一览：
 
 ```text
- Claude Code  OpenCode   OpenClaw  pi ...   Codex ...           Open WebUI ...      你的代码 / Agent 框架
-      |           |          |        |         |                      |                      |
-      ---------------------------------         |                      |                      |
-                      |                         |                      |                      |
-                  Anthropic                  OpenAI                 OpenAI                   Jev
-                Messages API              Responses API      Chat Completions API        System One
-               (/v1/messages)            (/v1/responses)    (/v1/chat/completions)     (/v1/systemone)
-                      |                         |                      |                      |
-                      -------------------------------------------------------------------------
-                                                          |  入口 · 虚拟模型
-                                                          |
-                                                      cc-router
-                                               (本地 127.0.0.1:23456)
-                                                          |
-                                                          |  出口 · 真实模型
-                    ------------------------------------------------------------------------------
-                    |          |          |          |          |          |          |          |
-                DeepSeek      GLM       Kimi     Anthropic   OpenAI     Gemini       Jev      ......
-                   API      Coding     Coding    Messages  Responses &    API    System One
-                             Plan       Plan        API    Completions
+ Claude Code  OpenCode   pi ...      Codex ...           Open WebUI ...      你的代码 / Agent 框架
+      |           |         |            |                      |                      |
+      -----------------------            |                      |                      |
+                 |                       |                      |                      |
+             Anthropic                OpenAI                 OpenAI                   Jev
+           Messages API            Responses API      Chat Completions API        System One
+          (/v1/messages)          (/v1/responses)    (/v1/chat/completions)     (/v1/systemone)
+                 |                       |                      |                      |
+                 -----------------------------------------------------------------------
+                                                    |  入口 · 虚拟模型
+                                                    |
+                                                cc-router
+                                         (本地 127.0.0.1:23456)
+                                                    |
+                                                    |  出口 · 真实模型
+              ------------------------------------------------------------------------------
+              |          |          |          |          |          |          |          |
+          DeepSeek      GLM       Kimi     Anthropic   OpenAI     Gemini       Jev      ......
+             API      Coding     Coding    Messages  Responses &    API    System One
+                       Plan       Plan        API    Completions
 ```
 
 功能亮点：

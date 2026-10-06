@@ -39,26 +39,26 @@
 アーキテクチャとリクエストの流れ：
 
 ```text
- Claude Code  OpenCode   OpenClaw  pi ...   Codex ...           Open WebUI ...       自作コード / Agent
-      |           |          |        |         |                      |                      |
-      ---------------------------------         |                      |                      |
-                      |                         |                      |                      |
-                  Anthropic                  OpenAI                 OpenAI                   Jev
-                Messages API              Responses API      Chat Completions API        System One
-               (/v1/messages)            (/v1/responses)    (/v1/chat/completions)     (/v1/systemone)
-                      |                         |                      |                      |
-                      -------------------------------------------------------------------------
-                                                          |  入口 · 仮想モデル
-                                                          |
-                                                      cc-router
-                                             (ローカル 127.0.0.1:23456)
-                                                          |
-                                                          |  出口 · 実モデル
-                    ------------------------------------------------------------------------------
-                    |          |          |          |          |          |          |          |
-                DeepSeek      GLM       Kimi     Anthropic   OpenAI     Gemini       Jev      ......
-                   API      Coding     Coding    Messages  Responses &    API    System One
-                             Plan       Plan        API    Completions
+ Claude Code  OpenCode   pi ...      Codex ...           Open WebUI ...       自作コード / Agent
+      |           |         |            |                      |                      |
+      -----------------------            |                      |                      |
+                 |                       |                      |                      |
+             Anthropic                OpenAI                 OpenAI                   Jev
+           Messages API            Responses API      Chat Completions API        System One
+          (/v1/messages)          (/v1/responses)    (/v1/chat/completions)     (/v1/systemone)
+                 |                       |                      |                      |
+                 -----------------------------------------------------------------------
+                                                    |  入口 · 仮想モデル
+                                                    |
+                                                cc-router
+                                       (ローカル 127.0.0.1:23456)
+                                                    |
+                                                    |  出口 · 実モデル
+              ------------------------------------------------------------------------------
+              |          |          |          |          |          |          |          |
+          DeepSeek      GLM       Kimi     Anthropic   OpenAI     Gemini       Jev      ......
+             API      Coding     Coding    Messages  Responses &    API    System One
+                       Plan       Plan        API    Completions
 ```
 
 機能ハイライト：
