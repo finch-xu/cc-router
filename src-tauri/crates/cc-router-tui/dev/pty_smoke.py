@@ -164,6 +164,25 @@ DATA = {
             "model_discovery": {"enabled": False, "example_models": []},
             "translations": {lang: {"display_name": "ChatGPT", "description": None, "endpoints": {}} for lang in ("en", "ja")},
         },
+        # 带 url_params 的厂商 (照 cloudflare 精简): 只保证新字段不会让 TUI 崩, 脚本不走它。
+        {
+            "id": "cloudflare", "display_name": "Cloudflare", "description": None,
+            "endpoints": [
+                {"id": "direct", "label": "直连", "base_url": "https://api.cloudflare.com/client/v4/accounts/{account_id}/ai/v1",
+                 "url_params_used": ["account_id"]},
+            ],
+            "default_endpoint": "direct", "auth": {"type": "openai_chat_completions_api_key"},
+            "model_discovery": {"enabled": True, "example_models": []},
+            "url_params": [
+                {"id": "account_id", "label": "账户 ID", "placeholder": "32 位十六进制", "pattern": "^[0-9a-f]{32}$"},
+            ],
+            "translations": {
+                lang: {"display_name": "Cloudflare", "description": None,
+                       "endpoints": {"direct": {"label": "Direct"}},
+                       "url_params": {"account_id": {"label": "Account ID", "placeholder": "32 hex chars"}}}
+                for lang in ("en", "ja")
+            },
+        },
     ],
     "probe_custom_models": {
         "kind": "auto",

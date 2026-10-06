@@ -876,6 +876,7 @@ dependencies = [
  "futures-util",
  "insta",
  "ratatui",
+ "regex",
  "reqwest",
  "serde",
  "serde_json",

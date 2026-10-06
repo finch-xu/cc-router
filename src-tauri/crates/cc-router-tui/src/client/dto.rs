@@ -629,6 +629,25 @@ pub struct Provider {
     /// 顶层的 `display_name` / `description` / 端点 `label` 是中文; 英日文在这里,
     /// 由 [`Provider::localized`] 叠加。
     pub translations: ProviderTranslations,
+    /// 厂商级的 URL 参数声明 (账户 ID / 网关 ID 等); 端点用到哪些见 `ProviderEndpoint::url_params_used`。
+    #[serde(default)]
+    pub url_params: Vec<UrlParam>,
+}
+
+#[derive(Debug, Clone, Deserialize, PartialEq, Eq)]
+pub struct UrlParam {
+    pub id: String,
+    pub label: String,
+    #[serde(default)]
+    pub placeholder: Option<String>,
+    pub pattern: String,
+}
+
+#[derive(Debug, Clone, Deserialize, PartialEq, Eq)]
+pub struct UrlParamText {
+    pub label: String,
+    #[serde(default)]
+    pub placeholder: Option<String>,
 }
 
 #[derive(Debug, Clone, Deserialize, PartialEq, Eq)]
@@ -640,6 +659,9 @@ pub struct ProviderEndpoint {
     pub protocol: String,
     #[serde(default)]
     pub example_models: Vec<String>,
+    /// 这个端点的 base_url 用到的参数 id, 按声明顺序 (后端算好的)。
+    #[serde(default)]
+    pub url_params_used: Vec<String>,
 }
 
 impl ProviderEndpoint {
@@ -662,6 +684,9 @@ pub struct ProviderText {
     /// key 是 endpoint id
     #[serde(default)]
     pub endpoints: BTreeMap<String, EndpointText>,
+    /// key 是 url param id
+    #[serde(default)]
+    pub url_params: BTreeMap<String, UrlParamText>,
 }
 
 #[derive(Debug, Clone, Deserialize, PartialEq, Eq)]
@@ -704,14 +729,20 @@ impl Provider {
     pub fn localized(mut self, lang: Lang) -> Self {
         let text = match lang {
             Lang::Zh => return self,
-            Lang::En => &self.translations.en,
-            Lang::Ja => &self.translations.ja,
+            Lang::En => self.translations.en.clone(),
+            Lang::Ja => self.translations.ja.clone(),
         };
         self.display_name = text.display_name.clone();
         self.description = text.description.clone();
         for e in &mut self.endpoints {
             if let Some(t) = text.endpoints.get(&e.id) {
                 e.label = t.label.clone();
+            }
+        }
+        for u in &mut self.url_params {
+            if let Some(t) = text.url_params.get(&u.id) {
+                u.label = t.label.clone();
+                u.placeholder = t.placeholder.clone();
             }
         }
         self
@@ -869,7 +900,7 @@ pub struct CreateInput {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum CreateSource {
-    Builtin { provider_id: String, endpoint_id: String },
+    Builtin { provider_id: String, endpoint_id: String, url_params: BTreeMap<String, String> },
     Custom(Box<CustomSource>),
 }
 
@@ -891,8 +922,13 @@ impl CreateSource {
     /// 没有 `rename_all`。
     fn to_args(&self) -> serde_json::Value {
         match self {
-            CreateSource::Builtin { provider_id, endpoint_id } => {
-                serde_json::json!({ "kind": "from_template", "provider_id": provider_id, "endpoint_id": endpoint_id })
+            CreateSource::Builtin { provider_id, endpoint_id, url_params } => {
+                let mut obj = serde_json::json!({ "kind": "from_template", "provider_id": provider_id, "endpoint_id": endpoint_id });
+                // 空的不发: 没有参数的厂商保持原有的线上形状。
+                if !url_params.is_empty() {
+                    obj["url_params"] = serde_json::json!(url_params);
+                }
+                obj
             }
             CreateSource::Custom(custom) => {
                 let mut obj = serde_json::json!({
@@ -979,6 +1015,16 @@ mod tests {
     use super::*;
 
     #[test]
+    fn builtin_source_sends_url_params_only_when_present() {
+        let without = CreateSource::Builtin { provider_id: "p".into(), endpoint_id: "e".into(), url_params: BTreeMap::new() }.to_args();
+        assert!(without.get("url_params").is_none(), "keep the old wire shape when empty");
+        let mut params = BTreeMap::new();
+        params.insert("account_id".to_string(), "abc".to_string());
+        let with = CreateSource::Builtin { provider_id: "p".into(), endpoint_id: "e".into(), url_params: params }.to_args();
+        assert_eq!(with["url_params"]["account_id"], "abc");
+    }
+
+    #[test]
     fn capabilities_follow_endpoint_protocols() {
         let ep = |id: &str, protocol: &str| ProviderEndpoint {
             id: id.into(),
@@ -986,8 +1032,9 @@ mod tests {
             base_url: "u".into(),
             protocol: protocol.into(),
             example_models: vec![],
+            url_params_used: vec![],
         };
-        let text = ProviderText { display_name: "p".into(), description: None, endpoints: Default::default() };
+        let text = ProviderText { display_name: "p".into(), description: None, endpoints: Default::default(), url_params: Default::default() };
         let mut p = Provider {
             id: "p".into(),
             display_name: "p".into(),
@@ -997,6 +1044,7 @@ mod tests {
             auth: ProviderAuth { auth_type: "api_key".into() },
             model_discovery: ModelDiscovery { enabled: true, example_models: vec![] },
             translations: ProviderTranslations { en: text.clone(), ja: text },
+            url_params: vec![],
         };
         assert_eq!(p.capabilities(), (true, true));
         p.endpoints.truncate(1);
@@ -1131,7 +1179,7 @@ mod tests {
             display_name: "智谱主号".into(),
             api_key: Secret::new(api_key),
             model_slots: ModelSlots { fable: "f".into(), opus: "o".into(), sonnet: "s".into(), haiku: "h".into(), fallback: String::new(), jev: String::new() },
-            source: CreateSource::Builtin { provider_id: "zhipu".into(), endpoint_id: "default".into() },
+            source: CreateSource::Builtin { provider_id: "zhipu".into(), endpoint_id: "default".into(), url_params: BTreeMap::new() },
         }
     }
 

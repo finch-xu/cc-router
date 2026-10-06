@@ -12,7 +12,7 @@ use cc_router_tui::app::{App, AppOptions, MIN_HEIGHT};
 use cc_router_tui::client::dto::{
     AuthHeaderFormat, BalanceCache, BalanceEntry, BalanceSeverity, BalanceSnapshot, CreateInput, CreateSource, CreatedSubscription,
     CustomProtocol, CustomSource, ModelCache, ModelDiscovery, ModelInfo, ModelSlots, OverallStats, ProbeInput, ProbeModelsResult, Provider,
-    ProviderAuth, ProviderEndpoint, ProviderText, ProviderTranslations, ProxyStatus, QuotaPeriod, QuotaUsage, RefreshBalanceResult, RefreshModelsResult, RequestFilters,
+    ProviderAuth, ProviderEndpoint, ProviderText, ProviderTranslations, ProxyStatus, UrlParam, QuotaPeriod, QuotaUsage, RefreshBalanceResult, RefreshModelsResult, RequestFilters,
     RequestLog, RequestPage, RequestQuery, RequestStatus, RoutingMode, SeriesPoint, Settings, SlotEfforts, Subscription, SubscriptionState,
     TestConnectionResult, VirtualModel, EFFORT_CHOICES,
 };
@@ -391,19 +391,20 @@ fn zhipu_provider() -> Provider {
         display_name: "智谱 AI".into(),
         description: Some("智谱 AI 大模型".into()),
         endpoints: vec![
-            ProviderEndpoint { id: "cn".into(), label: "国内版".into(), base_url: "https://open.bigmodel.cn/api/anthropic".into(), protocol: "messages".into(), example_models: vec![] },
-            ProviderEndpoint { id: "intl".into(), label: "国际版".into(), base_url: "https://api.z.ai/api/anthropic".into(), protocol: "messages".into(), example_models: vec![] },
+            ProviderEndpoint { id: "cn".into(), label: "国内版".into(), base_url: "https://open.bigmodel.cn/api/anthropic".into(), protocol: "messages".into(), example_models: vec![], url_params_used: vec![] },
+            ProviderEndpoint { id: "intl".into(), label: "国际版".into(), base_url: "https://api.z.ai/api/anthropic".into(), protocol: "messages".into(), example_models: vec![], url_params_used: vec![] },
         ],
         default_endpoint: Some("cn".into()),
         auth: ProviderAuth { auth_type: "api_key".into() },
         model_discovery: ModelDiscovery { enabled: true, example_models: vec!["glm-4-plus".into(), "glm-4.5-flash".into()] },
         // 向导收到的是 runtime 已经按界面语言换好的列表 (`Provider::localized`), 这里的译文不会上屏。
         translations: ProviderTranslations { en: provider_text("Zhipu AI"), ja: provider_text("Zhipu AI") },
+        url_params: vec![],
     }
 }
 
 fn provider_text(name: &str) -> ProviderText {
-    ProviderText { display_name: name.into(), description: None, endpoints: Default::default() }
+    ProviderText { display_name: name.into(), description: None, endpoints: Default::default(), url_params: Default::default() }
 }
 
 /// OAuth 类厂商 (ChatGPT), TUI 不做设备码流程, 选中只给提示、不设值。
@@ -417,6 +418,7 @@ fn chatgpt_provider() -> Provider {
         auth: ProviderAuth { auth_type: "chatgpt_oauth".into() },
         model_discovery: ModelDiscovery { enabled: false, example_models: vec![] },
         translations: ProviderTranslations { en: provider_text("ChatGPT"), ja: provider_text("ChatGPT") },
+        url_params: vec![],
     }
 }
 
@@ -635,6 +637,82 @@ fn wizard_basics_80x24() {
     insta::assert_snapshot!(render(&mut a, 80, 24));
 }
 
+/// Cloudflare 形状的假厂商: `direct` 端点要 account_id, `gateway` 端点再要 gateway_id。
+fn cloudflare_provider() -> Provider {
+    let ep = |id: &str, used: &[&str]| ProviderEndpoint {
+        id: id.into(),
+        label: id.into(),
+        base_url: "https://api.cloudflare.com".into(),
+        protocol: "messages".into(),
+        example_models: vec![],
+        url_params_used: used.iter().map(|s| s.to_string()).collect(),
+    };
+    Provider {
+        id: "cloudflare".into(),
+        display_name: "Cloudflare".into(),
+        description: None,
+        endpoints: vec![ep("direct", &["account_id"]), ep("gateway", &["account_id", "gateway_id"])],
+        default_endpoint: Some("direct".into()),
+        auth: ProviderAuth { auth_type: "openai_chat_completions_api_key".into() },
+        model_discovery: ModelDiscovery { enabled: true, example_models: vec![] },
+        translations: ProviderTranslations { en: provider_text("Cloudflare"), ja: provider_text("Cloudflare") },
+        url_params: vec![
+            UrlParam { id: "account_id".into(), label: "账户 ID".into(), placeholder: None, pattern: "^[0-9a-f]{32}$".into() },
+            UrlParam { id: "gateway_id".into(), label: "网关 ID".into(), placeholder: None, pattern: "^[A-Za-z0-9_-]{1,64}$".into() },
+        ],
+    }
+}
+
+fn select_cloudflare(a: &mut App) {
+    let open_action = a.handle_key(key(KeyCode::Enter)).expect("Provider 行 ⏎ 应该产出 Action::OpenPicker");
+    a.update(open_action);
+    a.update(Action::PickerDone { tag: PickerTag::WizardProvider, choice: PickerChoice::Item("cloudflare".into()) });
+}
+
+/// 选了带 URL 参数的厂商: 接入点行下面多出一行「账户 ID」, 切到 gateway 端点再多一行「网关 ID」,
+/// 已经填的账户 ID 保留。
+#[test]
+fn wizard_basics_with_url_params_80x24() {
+    let mut a = wizard_with_providers(vec![cloudflare_provider()]);
+    select_cloudflare(&mut a);
+    focus_row(&mut a, "账户 ID");
+    type_str(&mut a, "0123456789abcdef0123456789abcdef");
+    insta::assert_snapshot!("wizard_basics_url_param_direct_80x24", render(&mut a, 80, 24));
+
+    a.update(Action::PickerDone { tag: PickerTag::WizardEndpoint, choice: PickerChoice::Item("gateway".into()) });
+    insta::assert_snapshot!("wizard_basics_url_param_gateway_80x24", render(&mut a, 80, 24));
+}
+
+/// 参数没填或格式不对时提交被拦在参数行上, 通过后 `Create` 带着 `url_params` (trim 后)。
+#[test]
+fn url_params_are_validated_and_sent_with_the_create_command() {
+    let mut a = wizard_with_providers(vec![cloudflare_provider()]);
+    select_cloudflare(&mut a);
+    focus_row(&mut a, ZH.wiz_f_api_key);
+    type_str(&mut a, "sk-test");
+
+    focus_row(&mut a, ZH.wiz_btn_next);
+    assert_eq!(a.handle_key(key(KeyCode::Enter)), None, "账户 ID 为空不该发请求");
+    assert!(render(&mut a, 80, 24).contains(ZH.wiz_err_url_param_empty), "应该提示请填写此项");
+    assert_focus(&mut a, "账户 ID");
+
+    type_str(&mut a, "xyz");
+    focus_row(&mut a, ZH.wiz_btn_next);
+    assert_eq!(a.handle_key(key(KeyCode::Enter)), None, "格式不对不该发请求");
+    assert!(render(&mut a, 80, 24).contains(ZH.wiz_err_url_param_format), "应该提示格式不正确");
+
+    focus_row(&mut a, "账户 ID");
+    a.handle_key(KeyEvent::new(KeyCode::Char('u'), KeyModifiers::CONTROL));
+    type_str(&mut a, "  0123456789abcdef0123456789abcdef  ");
+    focus_row(&mut a, ZH.wiz_btn_next);
+    let submit = a.handle_key(key(KeyCode::Enter)).expect("提交应该产出 Action");
+    let Action::WizardRequest(cmd) = submit else { panic!("应该是 WizardRequest, 实际 {submit:?}") };
+    let WizardCmd::Create(input) = *cmd else { panic!("应该是 Create") };
+    let CreateSource::Builtin { url_params, .. } = input.source else { panic!("应该是 Builtin") };
+    assert_eq!(url_params.get("account_id").map(String::as_str), Some("0123456789abcdef0123456789abcdef"));
+    assert_eq!(url_params.len(), 1);
+}
+
 /// 选 `chatgpt_oauth` 那一项之后 `provider_id` 仍然是空 (`Endpoint` 行 `⏎` 应该被拒绝, 而不是
 /// 打开一个空的接入点列表), 且屏幕上出现 `ZH.wiz_desktop_only`。
 #[test]
@@ -671,7 +749,7 @@ fn the_wizard_builds_a_create_command_with_pending_slots() {
             display_name: "智谱 AI".into(),
             api_key: Secret::new("sk-test"),
             model_slots: ModelSlots::pending(),
-            source: CreateSource::Builtin { provider_id: "zhipu".into(), endpoint_id: "cn".into() },
+            source: CreateSource::Builtin { provider_id: "zhipu".into(), endpoint_id: "cn".into(), url_params: Default::default() },
         })))]
     );
 }

@@ -2,7 +2,7 @@
 //! 一份草稿, 算出要画哪些行、哪些字段不合法。没有 `Frame`, 没有 `Cmd`, 好测。
 
 use super::text::{SecretField, TextField, TextInput};
-use crate::client::dto::{AuthHeaderFormat, CustomProtocol, ModelInfo, ModelSlots, Slot};
+use crate::client::dto::{AuthHeaderFormat, CustomProtocol, ModelInfo, ModelSlots, Provider, Slot};
 use crate::i18n::Strings;
 use crate::store::Store;
 
@@ -13,6 +13,33 @@ pub struct BasicsDraft {
     pub endpoint_id: String,
     pub api_key: SecretField,
     pub display_name: TextField,
+    /// 当前接入点需要的 URL 参数行, 由 `sync_url_params` 随厂商 / 接入点重建。
+    pub url_params: Vec<UrlParamDraft>,
+}
+
+/// 一个 URL 参数行的草稿: 声明里的 id / 标签 / 格式, 加上用户输入的值。
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct UrlParamDraft {
+    pub id: String,
+    pub label: String,
+    pub pattern: String,
+    pub value: TextField,
+}
+
+/// Rebuild the param rows for the chosen endpoint, keeping values the user already typed for
+/// ids that are still needed (direct -> gateway keeps the account id).
+pub fn sync_url_params(current: &[UrlParamDraft], provider: &Provider, endpoint_id: &str) -> Vec<UrlParamDraft> {
+    let Some(ep) = provider.endpoints.iter().find(|e| e.id == endpoint_id) else { return Vec::new() };
+    ep.url_params_used
+        .iter()
+        .filter_map(|id| provider.url_params.iter().find(|u| &u.id == id))
+        .map(|u| UrlParamDraft {
+            id: u.id.clone(),
+            label: u.label.clone(),
+            pattern: u.pattern.clone(),
+            value: current.iter().find(|c| c.id == u.id).map(|c| c.value.clone()).unwrap_or_default(),
+        })
+        .collect()
 }
 
 impl BasicsDraft {
@@ -21,6 +48,7 @@ impl BasicsDraft {
         match field {
             BasicsField::ApiKey => Some(&mut self.api_key),
             BasicsField::DisplayName => Some(&mut self.display_name),
+            BasicsField::UrlParam(i) => self.url_params.get_mut(i).map(|p| &mut p.value as &mut dyn TextInput),
             BasicsField::Provider | BasicsField::Endpoint | BasicsField::Submit => None,
         }
     }
@@ -31,6 +59,8 @@ impl BasicsDraft {
 pub enum BasicsField {
     Provider,
     Endpoint,
+    /// 下标指向 `BasicsDraft.url_params`。
+    UrlParam(usize),
     ApiKey,
     DisplayName,
     Submit,
@@ -39,10 +69,22 @@ pub enum BasicsField {
 impl BasicsField {
     pub const ALL: [BasicsField; 5] =
         [BasicsField::Provider, BasicsField::Endpoint, BasicsField::ApiKey, BasicsField::DisplayName, BasicsField::Submit];
+
+    /// Field order with the endpoint's params inserted after `Endpoint`.
+    pub fn order(param_count: usize) -> Vec<BasicsField> {
+        let mut out = Vec::with_capacity(Self::ALL.len() + param_count);
+        for field in Self::ALL {
+            out.push(field);
+            if field == BasicsField::Endpoint {
+                out.extend((0..param_count).map(BasicsField::UrlParam));
+            }
+        }
+        out
+    }
 }
 
 /// 校验失败的字段与原因 (原因是 `Strings` 的字段, 不是字面量)。第一个不合法的字段决定光标落点——
-/// 顺序与 `BasicsField::ALL` 一致: 厂商 → 接入点 → API Key → 备注名 (`Submit` 本身不参与校验,
+/// 顺序与 `BasicsField::order` 一致: 厂商 → 接入点 → URL 参数 → API Key → 备注名 (`Submit` 本身不参与校验,
 /// 它是触发校验的那个按钮, 不可能是校验失败的对象)。
 pub fn validate_basics(d: &BasicsDraft, s: &'static Strings) -> Option<(BasicsField, &'static str)> {
     if d.provider_id.is_empty() {
@@ -50,6 +92,15 @@ pub fn validate_basics(d: &BasicsDraft, s: &'static Strings) -> Option<(BasicsFi
     }
     if d.endpoint_id.is_empty() {
         return Some((BasicsField::Endpoint, s.wiz_err_endpoint));
+    }
+    for (i, p) in d.url_params.iter().enumerate() {
+        let v = p.value.value().trim();
+        if v.is_empty() {
+            return Some((BasicsField::UrlParam(i), s.wiz_err_url_param_empty));
+        }
+        if !regex::Regex::new(&p.pattern).is_ok_and(|re| re.is_match(v)) {
+            return Some((BasicsField::UrlParam(i), s.wiz_err_url_param_format));
+        }
     }
     if d.api_key.is_empty() {
         return Some((BasicsField::ApiKey, s.wiz_err_api_key));
@@ -299,7 +350,48 @@ mod tests {
             endpoint_id: "default".into(),
             api_key: SecretField::new("sk-test"),
             display_name: TextField::new("智谱 AI"),
+            url_params: vec![],
         }
+    }
+
+    #[test]
+    fn basics_field_order_inserts_params_after_endpoint() {
+        assert_eq!(BasicsField::order(0), BasicsField::ALL.to_vec());
+        assert_eq!(
+            BasicsField::order(2),
+            vec![
+                BasicsField::Provider,
+                BasicsField::Endpoint,
+                BasicsField::UrlParam(0),
+                BasicsField::UrlParam(1),
+                BasicsField::ApiKey,
+                BasicsField::DisplayName,
+                BasicsField::Submit
+            ]
+        );
+    }
+
+    #[test]
+    fn url_param_fields_are_validated_in_order() {
+        let s = &crate::i18n::ZH;
+        let mut d = BasicsDraft {
+            provider_id: "p".into(),
+            endpoint_id: "e".into(),
+            api_key: SecretField::new("k"),
+            display_name: TextField::new("n"),
+            ..Default::default()
+        };
+        d.url_params = vec![UrlParamDraft {
+            id: "account_id".into(),
+            label: "Account ID".into(),
+            pattern: "^[0-9a-f]{32}$".into(),
+            value: TextField::new(""),
+        }];
+        assert_eq!(validate_basics(&d, s), Some((BasicsField::UrlParam(0), s.wiz_err_url_param_empty)));
+        d.url_params[0].value = TextField::new("xyz");
+        assert_eq!(validate_basics(&d, s), Some((BasicsField::UrlParam(0), s.wiz_err_url_param_format)));
+        d.url_params[0].value = TextField::new("0123456789abcdef0123456789abcdef");
+        assert_eq!(validate_basics(&d, s), None);
     }
 
     #[test]
@@ -495,5 +587,52 @@ mod tests {
 
         d.base_url.set("https://relay.example.com");
         assert_eq!(d.models_url(), Some("https://relay.example.com/v1/models"), "改回去应该又生效");
+    }
+}
+
+#[cfg(test)]
+mod url_param_tests {
+    use super::*;
+    use crate::client::dto::{ModelDiscovery, Provider, ProviderAuth, ProviderEndpoint, ProviderText, ProviderTranslations, UrlParam};
+
+    fn cf_provider() -> Provider {
+        let ep = |id: &str, used: &[&str]| ProviderEndpoint {
+            id: id.into(),
+            label: id.into(),
+            base_url: "https://api.example.com".into(),
+            protocol: "messages".into(),
+            example_models: vec![],
+            url_params_used: used.iter().map(|s| s.to_string()).collect(),
+        };
+        let text = || ProviderText { display_name: "cf".into(), description: None, endpoints: Default::default(), url_params: Default::default() };
+        Provider {
+            id: "cloudflare".into(),
+            display_name: "cf".into(),
+            description: None,
+            endpoints: vec![ep("direct", &["account_id"]), ep("gateway", &["account_id", "gateway_id"])],
+            default_endpoint: Some("direct".into()),
+            auth: ProviderAuth { auth_type: "openai_chat_completions_api_key".into() },
+            model_discovery: ModelDiscovery { enabled: true, example_models: vec![] },
+            translations: ProviderTranslations { en: text(), ja: text() },
+            url_params: vec![
+                UrlParam { id: "account_id".into(), label: "Account ID".into(), placeholder: None, pattern: "^[0-9a-f]{32}$".into() },
+                UrlParam { id: "gateway_id".into(), label: "Gateway ID".into(), placeholder: None, pattern: "^[A-Za-z0-9_-]{1,64}$".into() },
+            ],
+        }
+    }
+
+    #[test]
+    fn sync_url_params_keeps_typed_values() {
+        let p = cf_provider();
+        let mut rows = sync_url_params(&[], &p, "direct");
+        assert_eq!(rows.len(), 1);
+        rows[0].value = TextField::new("abc");
+        let rows = sync_url_params(&rows, &p, "gateway");
+        assert_eq!(rows.len(), 2);
+        assert_eq!(rows[0].id, "account_id");
+        assert_eq!(rows[0].value.value(), "abc");
+        assert_eq!(rows[1].id, "gateway_id");
+        assert_eq!(rows[1].value.value(), "");
+        assert!(sync_url_params(&rows, &p, "nope").is_empty());
     }
 }

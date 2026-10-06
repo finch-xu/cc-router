@@ -172,7 +172,7 @@ impl Wizard {
     fn apply_picker_choice(&mut self, tag: &PickerTag, choice: &PickerChoice, store: &Store, s: &'static Strings) {
         match (tag, &mut self.stage) {
             (PickerTag::WizardProvider, _) => self.apply_provider_choice(choice, store, s),
-            (PickerTag::WizardEndpoint, Stage::Basics { form, .. }) => form.apply_endpoint_choice(choice),
+            (PickerTag::WizardEndpoint, Stage::Basics { form, .. }) => form.apply_endpoint_choice(choice, &self.providers),
             (PickerTag::WizardSlot { slot }, Stage::Slots { form, .. }) => form.apply_slot_choice(*slot, choice),
             (PickerTag::WizardSlot { slot }, Stage::Custom { form, .. }) => form.apply_slot_choice(*slot, choice),
             (PickerTag::WizardProtocol, Stage::Custom { form, .. }) => form.apply_protocol_choice(choice),
@@ -505,11 +505,12 @@ mod tests {
             auth: crate::client::dto::ProviderAuth { auth_type: "api_key".into() },
             model_discovery: crate::client::dto::ModelDiscovery { enabled: true, example_models: vec![] },
             translations: crate::client::dto::ProviderTranslations { en: text(id), ja: text(id) },
+            url_params: vec![],
         }
     }
 
     fn text(name: &str) -> crate::client::dto::ProviderText {
-        crate::client::dto::ProviderText { display_name: name.to_string(), description: None, endpoints: Default::default() }
+        crate::client::dto::ProviderText { display_name: name.to_string(), description: None, endpoints: Default::default(), url_params: Default::default() }
     }
 
     fn key(code: KeyCode) -> KeyEvent {
@@ -865,6 +866,7 @@ mod tests {
             base_url: "http://localhost:11434".into(),
             protocol: "systemone".into(),
             example_models: vec!["clef-flash".into()],
+            url_params_used: vec![],
         }];
         p.default_endpoint = Some("systemone".into());
         p
@@ -924,6 +926,7 @@ mod tests {
             base_url: "u".into(),
             protocol: protocol.into(),
             example_models: vec![],
+            url_params_used: vec![],
         };
         let mut llm = provider("llm");
         llm.endpoints = vec![ep("messages")];

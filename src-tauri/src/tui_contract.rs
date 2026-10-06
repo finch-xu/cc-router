@@ -888,6 +888,30 @@ auth: { type: chatgpt_oauth, header_name: Authorization, header_format: bearer }
     assert!(oauth_view.is_oauth());
 }
 
+/// Cloudflare 的 url_params / url_params_used / translations.*.url_params 都能被 TUI 读到。
+#[test]
+fn provider_url_params_reach_the_tui() {
+    let providers = crate::provider::loader::load_all().unwrap();
+    let cf = providers.get("cloudflare").expect("cloudflare 内置厂商应该存在");
+    let view: dto::Provider = through_json(&ProviderInfo::from(cf));
+    assert_eq!(view.url_params.len(), 2);
+    assert_eq!(view.url_params[0].id, "account_id");
+    assert_eq!(view.url_params[1].id, "gateway_id");
+    assert!(!view.url_params[0].pattern.is_empty());
+    assert!(!view.url_params[0].label.is_empty());
+    let direct = view.endpoints.iter().find(|e| e.id == "direct").unwrap();
+    assert_eq!(direct.url_params_used, vec!["account_id".to_string()]);
+    let gateway = view.endpoints.iter().find(|e| e.id == "gateway").unwrap();
+    assert_eq!(gateway.url_params_used, vec!["account_id".to_string(), "gateway_id".to_string()]);
+
+    // 英日文标签经 localized 叠加到参数上, 且与中文不同 (界面没有回退)。
+    for lang in [Lang::En, Lang::Ja] {
+        let localized = view.clone().localized(lang);
+        assert_eq!(localized.url_params.len(), 2);
+        assert_ne!(localized.url_params[0].label, view.url_params[0].label, "{lang:?}: 参数标签应该被译文替换");
+    }
+}
+
 /// `CreateInput::to_args()["input"]` 能被后端 `CreateSubscriptionInput` 反序列化——内置模板
 /// (`from_template`) 与自定义 (`custom`) 两个 source 变体各来一次; `custom` 再单独验证
 /// `models_url = None` 时整个键都不出现 (不是发 `null`), 有值时正常带上。
@@ -897,7 +921,7 @@ fn create_subscription_input_matches() {
         display_name: "智谱主号".into(),
         api_key: Secret::new("sk-test"),
         model_slots: dto::ModelSlots { fable: "f".into(), opus: "o".into(), sonnet: "s".into(), haiku: "h".into(), fallback: String::new(), jev: String::new() },
-        source: dto::CreateSource::Builtin { provider_id: "zhipu".into(), endpoint_id: "default".into() },
+        source: dto::CreateSource::Builtin { provider_id: "zhipu".into(), endpoint_id: "default".into(), url_params: Default::default() },
     };
     let args = via_template.to_args();
     let input: CreateSubscriptionInput = serde_json::from_value(args["input"].clone())
@@ -909,9 +933,27 @@ fn create_subscription_input_matches() {
         CreateSource::FromTemplate { provider_id, endpoint_id, url_params } => {
             assert_eq!(provider_id, "zhipu");
             assert_eq!(endpoint_id, "default");
-            // TUI does not send url_params yet: the backend must read it as empty.
+            // 没有参数时 TUI 不发这个键: 后端必须读成空。
             assert!(url_params.is_empty());
         }
+        other => panic!("应该是 FromTemplate: {other:?}"),
+    }
+    assert!(args["input"]["source"].get("url_params").is_none(), "空参数不发 url_params 键");
+
+    // 带参数的内置厂商 (Cloudflare 形状): 后端读到同样的键值。
+    let mut params = std::collections::BTreeMap::new();
+    params.insert("account_id".to_string(), "abc".to_string());
+    let with_params = dto::CreateInput {
+        display_name: "cf".into(),
+        api_key: Secret::new("sk-test"),
+        model_slots: dto::ModelSlots::pending(),
+        source: dto::CreateSource::Builtin { provider_id: "cloudflare".into(), endpoint_id: "direct".into(), url_params: params },
+    };
+    let args = with_params.to_args();
+    let input: CreateSubscriptionInput = serde_json::from_value(args["input"].clone())
+        .unwrap_or_else(|e| panic!("后端读不了带 url_params 的 from_template: {e}\n{args:#}"));
+    match input.source {
+        CreateSource::FromTemplate { url_params, .. } => assert_eq!(url_params["account_id"], "abc"),
         other => panic!("应该是 FromTemplate: {other:?}"),
     }
 

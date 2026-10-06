@@ -5,7 +5,7 @@ use ratatui::layout::Rect;
 use ratatui::Frame;
 
 use super::common::{self, Cell, FieldKind, FormFields, KeyOutcome, RowHints, Rows};
-use super::fields::{validate_basics, BasicsDraft, BasicsField};
+use super::fields::{sync_url_params, validate_basics, BasicsDraft, BasicsField};
 use super::form_state::FormState;
 use super::text::TextInput;
 use super::{follow_display_name, BasicsPhase, Paint};
@@ -54,14 +54,14 @@ impl FormFields for BasicsForm {
     }
 
     fn order(&self) -> Vec<BasicsField> {
-        BasicsField::ALL.to_vec()
+        BasicsField::order(self.draft.url_params.len())
     }
 
     fn kind(&self, field: BasicsField, s: &'static Strings) -> FieldKind {
         match field {
             BasicsField::Provider | BasicsField::Endpoint => FieldKind::Pick,
             BasicsField::ApiKey => FieldKind::Secret,
-            BasicsField::DisplayName => FieldKind::Text,
+            BasicsField::DisplayName | BasicsField::UrlParam(_) => FieldKind::Text,
             BasicsField::Submit => FieldKind::Button(s.wiz_btn_next),
         }
     }
@@ -74,6 +74,7 @@ impl FormFields for BasicsForm {
         match field {
             BasicsField::ApiKey => Some(self.draft.api_key.visual_cursor()),
             BasicsField::DisplayName => Some(self.draft.display_name.visual_cursor()),
+            BasicsField::UrlParam(i) => self.draft.url_params.get(i).map(|p| p.value.visual_cursor()),
             BasicsField::Provider | BasicsField::Endpoint | BasicsField::Submit => None,
         }
     }
@@ -87,7 +88,7 @@ impl BasicsForm {
             KeyOutcome::Activate(BasicsField::Provider) => Some(self.provider_picker(providers, s)),
             KeyOutcome::Activate(BasicsField::Endpoint) => Some(self.endpoint_picker(providers, s)),
             KeyOutcome::Activate(BasicsField::Submit) => self.submit(phase, providers, s),
-            KeyOutcome::Activate(BasicsField::ApiKey | BasicsField::DisplayName) => None,
+            KeyOutcome::Activate(BasicsField::ApiKey | BasicsField::DisplayName | BasicsField::UrlParam(_)) => None,
         }
     }
 
@@ -104,7 +105,11 @@ impl BasicsForm {
             display_name: self.draft.display_name.value().trim().to_string(),
             api_key: self.draft.api_key.secret(),
             model_slots: if self.selected_endpoint_is_systemone(providers) { ModelSlots::default() } else { ModelSlots::pending() },
-            source: CreateSource::Builtin { provider_id: self.draft.provider_id.clone(), endpoint_id: self.draft.endpoint_id.clone() },
+            source: CreateSource::Builtin {
+                provider_id: self.draft.provider_id.clone(),
+                endpoint_id: self.draft.endpoint_id.clone(),
+                url_params: self.draft.url_params.iter().map(|p| (p.id.clone(), p.value.value().trim().to_string())).collect(),
+            },
         });
         *phase = BasicsPhase::Creating;
         Some(Action::WizardRequest(Box::new(cmd)))
@@ -169,6 +174,7 @@ impl BasicsForm {
         }
         self.draft.provider_id = provider.id.clone();
         self.draft.endpoint_id = provider.default_endpoint().map(|e| e.id.clone()).unwrap_or_default();
+        self.draft.url_params = sync_url_params(&[], provider, &self.draft.endpoint_id);
         self.state.clear(BasicsField::Endpoint);
         if follow_display_name(&mut self.draft.display_name, &mut self.last_auto_name, &provider.display_name, store) {
             self.state.clear(BasicsField::DisplayName);
@@ -176,9 +182,12 @@ impl BasicsForm {
         self.state.focus_on(BasicsField::ApiKey);
     }
 
-    pub(super) fn apply_endpoint_choice(&mut self, choice: &PickerChoice) {
+    pub(super) fn apply_endpoint_choice(&mut self, choice: &PickerChoice, providers: &[Provider]) {
         if let PickerChoice::Item(id) = choice {
             self.draft.endpoint_id = id.clone();
+            if let Some(p) = providers.iter().find(|p| p.id == self.draft.provider_id) {
+                self.draft.url_params = sync_url_params(&self.draft.url_params, p, &self.draft.endpoint_id);
+            }
             self.state.clear(BasicsField::Endpoint);
         }
     }
@@ -215,6 +224,9 @@ impl BasicsForm {
         rows.note(self.note.as_deref());
         rows.field(BasicsField::Provider, Cell { label: s.wiz_f_provider, value: &provider_label, ..Cell::default() });
         rows.field(BasicsField::Endpoint, Cell { label: s.wiz_f_endpoint, value: &endpoint_label, ..Cell::default() });
+        for (i, p) in self.draft.url_params.iter().enumerate() {
+            rows.field(BasicsField::UrlParam(i), Cell { label: &p.label, value: p.value.value(), ..Cell::default() });
+        }
         rows.field(BasicsField::ApiKey, Cell { label: s.wiz_f_api_key, value: &api_key_text, ..Cell::default() });
         rows.field(
             BasicsField::DisplayName,
