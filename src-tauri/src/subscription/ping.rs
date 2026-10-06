@@ -179,14 +179,22 @@ async fn probe(
 /// System One 订阅的探测: 与真实 dispatch 共用 [`crate::proxy::systemone::build_outbound`]
 /// (同一套出站头与 model 改写规则), 发一道最小 noul 题。
 async fn probe_systemone(client: &reqwest::Client, row: &SubscriptionRow, model: &str) -> ProbeResult {
-    use crate::proxy::systemone::{build_outbound, probe_body};
+    use crate::proxy::systemone::{build_outbound, normalize_response, probe_body, AttemptResult};
     let raw = bytes::Bytes::from(serde_json::to_vec(&probe_body(model)).unwrap_or_default());
     let out = match build_outbound(row, &raw, model) {
         Ok(o) => o,
         Err(e) => return ProbeResult::noted(false, None, ProbeNote::Network { detail: e }),
     };
-    match crate::proxy::upstream::send(client, &out.url, out.body.to_vec(), out.headers, false).await {
-        Ok(crate::proxy::upstream::UpstreamResponse::NonStreaming { status, body_text, .. }) => {
+    let wire = out.wire;
+    let r = match crate::proxy::upstream::send(client, &out.url, out.body.to_vec(), out.headers, false).await {
+        Ok(crate::proxy::upstream::UpstreamResponse::NonStreaming { status, body, body_text, .. }) => {
+            AttemptResult::Http { status, body, body_text }
+        }
+        Ok(_) => return ProbeResult::noted(true, None, ProbeNote::Ok),
+        Err(e) => return ProbeResult::noted(false, None, ProbeNote::Network { detail: e.to_string() }),
+    };
+    match normalize_response(wire, r) {
+        AttemptResult::Http { status, body_text, .. } => {
             let s = status.as_u16();
             if status.is_success() {
                 ProbeResult::noted(true, Some(s), ProbeNote::Ok)
@@ -196,8 +204,7 @@ async fn probe_systemone(client: &reqwest::Client, row: &SubscriptionRow, model:
                 ProbeResult { ok: false, http_status: Some(s), message, note: None }
             }
         }
-        Ok(_) => ProbeResult::noted(true, None, ProbeNote::Ok),
-        Err(e) => ProbeResult::noted(false, None, ProbeNote::Network { detail: e.to_string() }),
+        AttemptResult::Network(detail) => ProbeResult::noted(false, None, ProbeNote::Network { detail }),
     }
 }
 

@@ -37,7 +37,7 @@ use chrono::Utc;
 use tracing::{info, warn};
 
 use crate::observability::events;
-use crate::provider::model::EndpointProtocol;
+use crate::provider::model::{EndpointProtocol, SystemoneWire};
 use crate::proxy::pipeline::{emit_attempt_finished, emit_attempt_started};
 use crate::proxy::upstream;
 use crate::state::AppState;
@@ -54,6 +54,8 @@ pub struct Outbound {
     pub real_model: String,
     /// 是否改写过 `body.model`; 决定成功响应的 model 是否恢复成客户端原值。
     pub rewritten: bool,
+    /// 上游响应的外形 (决定 [`normalize_response`] 是否拆信封)。
+    pub wire: SystemoneWire,
 }
 
 /// 发往上游的 model。客户端写虚拟名 `model-jev` (可带 `anthropic/` / `openai/` 前缀) 时
@@ -69,8 +71,9 @@ fn target_model<'a>(row: &'a SubscriptionRow, client_model: &str) -> Option<&'a 
 }
 
 /// 目标 model 与客户端 model 不同时改写 `body.model` (重序列化, 语义相等);
-/// 否则请求体逐字节原样转发。出站头只有 auth + content-type:
-/// provider 级 `required_headers` / `forward_headers` 是对话协议的 (如 `anthropic-version`), 不消费。
+/// 否则请求体逐字节原样转发。
+/// Outbound headers: auth + the subscription's required_headers ({api_key} filled) + content-type.
+/// Cloudflare's gateway needs cf-aig-gateway-id; OpenRouter's attribution headers are harmless here.
 pub fn build_outbound(row: &SubscriptionRow, raw_body: &Bytes, client_model: &str) -> Result<Outbound, String> {
     let (body, real_model, rewritten) = match target_model(row, client_model) {
         Some(target) if target != client_model => {
@@ -88,8 +91,14 @@ pub fn build_outbound(row: &SubscriptionRow, raw_body: &Bytes, client_model: &st
     ) {
         headers.insert(name, value);
     }
+    for (k, v) in row.resolved_required_headers() {
+        if let (Ok(name), Ok(value)) = (ReqHeaderName::try_from(k.as_str()), ReqHeaderValue::from_str(&v)) {
+            headers.insert(name, value);
+        }
+    }
     headers.insert(CONTENT_TYPE, ReqHeaderValue::from_static("application/json"));
-    Ok(Outbound { url: row.messages_url(), headers, body, real_model, rewritten })
+    let url = crate::provider::url_template::fill_model(&row.messages_url(), &real_model);
+    Ok(Outbound { url, headers, body, real_model, rewritten, wire: row.systemone_wire })
 }
 
 /// 改写过 model 时把响应 model 恢复成客户端写的名字 (与 fallback 兜底槽的回显规则一致);
@@ -123,6 +132,45 @@ pub fn probe_body(model: &str) -> Value {
 pub enum AttemptResult {
     Http { status: StatusCode, body: Value, body_text: Option<String> },
     Network(String),
+}
+
+fn error_type_for(status: StatusCode) -> &'static str {
+    match status.as_u16() {
+        401 | 403 => "authentication_error",
+        429 => "rate_limit_error",
+        400..=499 => "api_usage_error",
+        _ => "api_error",
+    }
+}
+
+fn detail_result(status: StatusCode, error_type: &str, message: &str) -> AttemptResult {
+    let body = error_body(error_type, message);
+    let body_text = Some(body.to_string());
+    AttemptResult::Http { status, body, body_text }
+}
+
+/// Map an upstream reply onto the standard System One shape (spec 2.1 / 3.3).
+pub fn normalize_response(wire: SystemoneWire, r: AttemptResult) -> AttemptResult {
+    match r {
+        AttemptResult::Http { status, body, .. } if wire == SystemoneWire::CloudflareRun => {
+            if status.is_success() {
+                return match body.get("result").filter(|v| v.is_object()) {
+                    Some(result) => AttemptResult::Http { status, body: result.clone(), body_text: None },
+                    None => detail_result(StatusCode::BAD_GATEWAY, "api_error", "Cloudflare 响应缺少 result"),
+                };
+            }
+            let first = body.get("errors").and_then(|e| e.get(0));
+            let msg = first.and_then(|e| e.get("message")).and_then(Value::as_str);
+            let code = first.and_then(|e| e.get("code")).and_then(Value::as_i64);
+            let message = match (msg, code) {
+                (Some(m), Some(c)) => format!("{m} (cloudflare code {c})"),
+                (Some(m), None) => m.to_string(),
+                _ => format!("HTTP {}", status.as_u16()),
+            };
+            detail_result(status, error_type_for(status), &message)
+        }
+        other => other,
+    }
 }
 
 pub struct Candidate {
@@ -310,6 +358,7 @@ impl AttemptSink for LiveSink<'_> {
                 }
                 Err(e) => AttemptResult::Network(e.to_string()),
             };
+            let r = normalize_response(c.outbound.wire, r);
             let ok = matches!(&r, AttemptResult::Http { status, .. } if status.is_success());
             emit_attempt_finished(self.state, c.sub_id, VirtualModelName::Jev, ok);
             r
@@ -543,13 +592,14 @@ mod tests {
     }
 
     #[test]
-    fn outbound_headers_are_only_auth_and_content_type() {
+    fn outbound_headers_are_auth_required_and_content_type() {
         let raw = Bytes::from_static(RAW.as_bytes());
         let out = build_outbound(&systemone_row(""), &raw, "jev-latest").unwrap();
-        assert_eq!(out.headers.len(), 2, "{:?}", out.headers);
+        assert_eq!(out.headers.len(), 3, "{:?}", out.headers);
         assert_eq!(out.headers["authorization"], "Bearer k");
         assert_eq!(out.headers["content-type"], "application/json");
-        assert!(out.headers.get("anthropic-version").is_none(), "不消费 required_headers");
+        // systemone 现在发送订阅的 required_headers (spec §3.3)
+        assert_eq!(out.headers["anthropic-version"], "2023-06-01");
     }
 
     #[test]
@@ -614,6 +664,89 @@ mod tests {
 
     fn ok_body() -> Value {
         serde_json::json!({"model": "jev-1.13.0", "answers": {"a": {"type": "noul", "noul": 0.9}}, "usage": {"input_tokens": 300, "output_tokens": 20}})
+    }
+
+    fn cf_row() -> SubscriptionRow {
+        let mut row = systemone_row("");
+        row.base_url = "https://api.cloudflare.com/client/v4/accounts/acct/ai".into();
+        row.messages_path = "/run/@cf/cloudflare/{model}".into();
+        row.model_discovery.example_models = vec!["clef-flash".into()];
+        row.systemone_wire = crate::provider::model::SystemoneWire::CloudflareRun;
+        row.api_key = "k-1".into();
+        row.required_headers.insert("cf-aig-gateway-id".into(), "gw".into());
+        row.required_headers.insert("cf-aig-authorization".into(), "Bearer {api_key}".into());
+        row
+    }
+
+    #[test]
+    fn cloudflare_url_carries_model_and_headers_are_sent() {
+        let raw = Bytes::from_static(br#"{"model":"model-jev","state":"s","questions":{}}"#);
+        let out = build_outbound(&cf_row(), &raw, "model-jev").unwrap();
+        assert_eq!(out.url, "https://api.cloudflare.com/client/v4/accounts/acct/ai/run/@cf/cloudflare/clef-flash");
+        assert_eq!(out.headers.get("cf-aig-gateway-id").unwrap(), "gw");
+        assert_eq!(out.headers.get("cf-aig-authorization").unwrap(), "Bearer k-1");
+        assert_eq!(out.headers.get("content-type").unwrap(), "application/json");
+        let body: Value = serde_json::from_slice(&out.body).unwrap();
+        assert_eq!(body["model"], "clef-flash");
+    }
+
+    #[test]
+    fn cloudflare_success_envelope_is_unwrapped() {
+        // spec 2.1 real bytes
+        let body = serde_json::json!({"result":{"model":"clef-flash","answers":{"refund":{"type":"noul","noul":0.9803}},"usage":{"input_tokens":160,"output_tokens":0}},"success":true,"errors":[],"messages":[]});
+        let AttemptResult::Http { status, body, body_text } = normalize_response(SystemoneWire::CloudflareRun, http(200, body)) else { panic!() };
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(body["answers"]["refund"]["noul"], 0.9803);
+        assert_eq!(body["usage"]["input_tokens"], 160);
+        assert!(body.get("success").is_none());
+        assert!(body_text.is_none());
+    }
+
+    #[test]
+    fn cloudflare_errors_become_detail_shape() {
+        let cases = [
+            (400, 5006, "AiError: Bad input", "api_usage_error"),
+            (422, 5012, "AiError: Request body failed validation", "api_usage_error"),
+            (400, 7000, "No route for that URI", "api_usage_error"),
+            (401, 10000, "Authentication error", "authentication_error"),
+            (429, 3040, "Capacity temporarily exceeded", "rate_limit_error"),
+            (500, 3043, "Internal server error", "api_error"),
+        ];
+        for (status, code, msg, ty) in cases {
+            let body = serde_json::json!({"errors":[{"message":msg,"code":code}],"success":false,"result":{},"messages":[]});
+            let AttemptResult::Http { status: s, body, body_text } = normalize_response(SystemoneWire::CloudflareRun, http(status, body)) else { panic!() };
+            assert_eq!(s.as_u16(), status);
+            assert_eq!(body["detail"]["error_type"], ty);
+            assert_eq!(body["detail"]["message"], format!("{msg} (cloudflare code {code})"));
+            assert_eq!(serde_json::from_str::<Value>(body_text.as_deref().unwrap()).unwrap(), body);
+        }
+    }
+
+    #[test]
+    fn cloudflare_error_without_errors_array_uses_http_status() {
+        let AttemptResult::Http { body, .. } = normalize_response(SystemoneWire::CloudflareRun, http(502, serde_json::json!({}))) else { panic!() };
+        assert_eq!(body["detail"]["message"], "HTTP 502");
+    }
+
+    #[test]
+    fn cloudflare_2xx_without_result_is_bad_gateway() {
+        let r = normalize_response(SystemoneWire::CloudflareRun, http(200, serde_json::json!({"success":true})));
+        let AttemptResult::Http { status, body, .. } = r else { panic!() };
+        assert_eq!(status, StatusCode::BAD_GATEWAY);
+        assert_eq!(body["detail"]["error_type"], "api_error");
+    }
+
+    #[test]
+    fn standard_wire_is_untouched() {
+        let body = ok_body();
+        let AttemptResult::Http { body: b, .. } = normalize_response(SystemoneWire::Standard, http(200, body.clone())) else { panic!() };
+        assert_eq!(b, body);
+    }
+
+    #[test]
+    fn network_error_is_untouched() {
+        let r = normalize_response(SystemoneWire::CloudflareRun, AttemptResult::Network("boom".into()));
+        assert!(matches!(r, AttemptResult::Network(m) if m == "boom"));
     }
 
     #[tokio::test]
