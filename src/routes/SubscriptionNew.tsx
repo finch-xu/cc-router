@@ -5,6 +5,8 @@ import { runtime } from "@/runtime";
 import { useQueryClient } from "@tanstack/react-query";
 import { ProviderBadge } from "@/components/ProviderBadge";
 import { ProviderLogo } from "@/components/ProviderLogo";
+import { ProviderCapabilityTags } from "@/components/ProviderCapabilityTags";
+import { CUSTOM_CAPABILITIES, providerCapabilities } from "@/lib/providerCapabilities";
 import { Spinner } from "@/components/Spinner";
 import { ModelSlotPicker } from "@/components/ModelSlotPicker";
 import { ChatGptOAuthDialog } from "@/components/ChatGptOAuthDialog";
@@ -754,9 +756,10 @@ export function SubscriptionNewPage() {
                               <SelectLabel>{t("subscriptionNew.group.firstParty")}</SelectLabel>
                               {firstParty.map((p) => (
                                 <SelectItem key={p.id} value={p.id}>
-                                  <span style={{ display: "inline-flex", alignItems: "center", gap: 8 }}>
+                                  <span style={{ display: "flex", alignItems: "center", gap: 8, width: "100%" }}>
                                     <ProviderLogo iconId={p.icon} size={20} />
                                     {p.display_name}
+                                  <ProviderCapabilityTags caps={providerCapabilities(p)} />
                                   </span>
                                 </SelectItem>
                               ))}
@@ -766,9 +769,10 @@ export function SubscriptionNewPage() {
                                 <SelectLabel>{t("subscriptionNew.group.secondParty")}</SelectLabel>
                                 {secondParty.map((p) => (
                                   <SelectItem key={p.id} value={p.id}>
-                                    <span style={{ display: "inline-flex", alignItems: "center", gap: 8 }}>
+                                    <span style={{ display: "flex", alignItems: "center", gap: 8, width: "100%" }}>
                                       <ProviderLogo iconId={p.icon} size={20} />
                                       {p.display_name}
+                                    <ProviderCapabilityTags caps={providerCapabilities(p)} />
                                     </span>
                                   </SelectItem>
                                 ))}
@@ -779,9 +783,10 @@ export function SubscriptionNewPage() {
                                 <SelectLabel>{t("subscriptionNew.group.aggregator")}</SelectLabel>
                                 {aggregators.map((p) => (
                                   <SelectItem key={p.id} value={p.id}>
-                                    <span style={{ display: "inline-flex", alignItems: "center", gap: 8 }}>
+                                    <span style={{ display: "flex", alignItems: "center", gap: 8, width: "100%" }}>
                                       <ProviderLogo iconId={p.icon} size={20} />
                                       {p.display_name}
+                                    <ProviderCapabilityTags caps={providerCapabilities(p)} />
                                     </span>
                                   </SelectItem>
                                 ))}
@@ -790,33 +795,38 @@ export function SubscriptionNewPage() {
                             <SelectGroup>
                               <SelectLabel>{t("subscriptionNew.group.custom")}</SelectLabel>
                               <SelectItem value={CUSTOM_VALUE}>
-                                <span style={{ display: "inline-flex", alignItems: "center", gap: 8 }}>
+                                <span style={{ display: "flex", alignItems: "center", gap: 8, width: "100%" }}>
                                   <ProviderLogo iconId="claude" size={20} />
                                   {t("subscriptionNew.customProvider")}
+                                <ProviderCapabilityTags caps={CUSTOM_CAPABILITIES} />
                                 </span>
                               </SelectItem>
                               <SelectItem value={CUSTOM_GEMINI_VALUE}>
-                                <span style={{ display: "inline-flex", alignItems: "center", gap: 8 }}>
+                                <span style={{ display: "flex", alignItems: "center", gap: 8, width: "100%" }}>
                                   <ProviderLogo iconId="google" size={20} />
                                   {t("subscriptionNew.customGeminiProvider")}
+                                <ProviderCapabilityTags caps={CUSTOM_CAPABILITIES} />
                                 </span>
                               </SelectItem>
                               <SelectItem value={CUSTOM_GEMINI_INTERACTIONS_VALUE}>
-                                <span style={{ display: "inline-flex", alignItems: "center", gap: 8 }}>
+                                <span style={{ display: "flex", alignItems: "center", gap: 8, width: "100%" }}>
                                   <ProviderLogo iconId="google" size={20} />
                                   {t("subscriptionNew.customGeminiInteractionsProvider")}
+                                <ProviderCapabilityTags caps={CUSTOM_CAPABILITIES} />
                                 </span>
                               </SelectItem>
                               <SelectItem value={CUSTOM_OPENAI_VALUE}>
-                                <span style={{ display: "inline-flex", alignItems: "center", gap: 8 }}>
+                                <span style={{ display: "flex", alignItems: "center", gap: 8, width: "100%" }}>
                                   <ProviderLogo iconId="openai" size={20} />
                                   {t("subscriptionNew.customOpenaiProvider")}
+                                <ProviderCapabilityTags caps={CUSTOM_CAPABILITIES} />
                                 </span>
                               </SelectItem>
                               <SelectItem value={CUSTOM_OPENAI_CHAT_VALUE}>
-                                <span style={{ display: "inline-flex", alignItems: "center", gap: 8 }}>
+                                <span style={{ display: "flex", alignItems: "center", gap: 8, width: "100%" }}>
                                   <ProviderLogo iconId="openai" size={20} />
                                   {t("subscriptionNew.customOpenaiChatProvider")}
+                                <ProviderCapabilityTags caps={CUSTOM_CAPABILITIES} />
                                 </span>
                               </SelectItem>
                             </SelectGroup>

@@ -766,6 +766,8 @@ html:not([data-platform="macos"]) .main.flush { padding-top: 0; }
 .pill.tag { background: transparent; border: 1.3px dashed var(--line-2); color: var(--ink-3); font-family: var(--font-mono); font-size: 10.5px; padding: 1px 7px; }
 /* 订阅列表厂商名后的区域标签: 文案含中日文, 不用等宽字体 */
 .pill.tag.region-tag { font-family: inherit; font-size: 10.5px; line-height: 1.4; padding: 0 6px; }
+.cap-tags { display: inline-flex; gap: 4px; margin-left: auto; padding-left: 12px; flex-shrink: 0; }
+.pill.tag.cap-jev { border-color: var(--accent); color: var(--accent-ink); }
 
 /* === Inputs === */
 /* 平时浅墨线, 悬停/聚焦加深为墨色; 聚焦时落一块黄油色投影, 替代柔光 focus ring */
