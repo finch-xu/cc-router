@@ -149,13 +149,13 @@
 
 | 虚拟模型 | 别名 |
 |---|---|
-|  `model-fable` |  `anthropic/model-fable` `anthropic/claude-fable*` `claude-fable*` `gpt-5.6` `gpt-*-sol` `openai/gpt-5.6` `openai/gpt-*-sol` |
-|  `model-opus` |  `anthropic/model-opus` `anthropic/claude-opus*` `claude-opus*` `gpt-5.5` `gpt-*-terra` `openai/gpt-5.5` `openai/gpt-*-terra` |
-|  `model-sonnet` |  `anthropic/model-sonnet` `anthropic/claude-sonnet*` `claude-sonnet*` `gpt-5.4` `gpt-*-luna` `openai/gpt-5.4` `openai/gpt-*-luna` |
-|  `model-haiku` |  `anthropic/model-haiku` `anthropic/claude-haiku*` `claude-haiku*`  `gpt-*-mini` `openai/gpt-*-mini` |
+|  `model-fable` |  `anthropic/model-fable` `anthropic/claude-fable*` `claude-fable*` `gpt-*-astra` `openai/gpt-*-astra` |
+|  `model-opus` |  `anthropic/model-opus` `anthropic/claude-opus*` `claude-opus*` `gpt-*-sol` `openai/gpt-*-sol` |
+|  `model-sonnet` |  `anthropic/model-sonnet` `anthropic/claude-sonnet*` `claude-sonnet*` `gpt-*-terra` `openai/gpt-*-terra` |
+|  `model-haiku` |  `anthropic/model-haiku` `anthropic/claude-haiku*` `claude-haiku*` `gpt-*-luna` `openai/gpt-*-luna` |
 |  `model-jev` |  `anthropic/model-jev` `openai/model-jev`（只在 `/v1/systemone` 入口可用，对话入口收到会返回 400） |
 
-> `claude-opus*` 的含义是模糊匹配，你可以传入任意符合规则的模型名，都会被归一为虚拟模型`model-opus`，比如 `claude-opus-4-8` `claude-opus-4-7-20260101` `claude-opus-100` 都没问题。`gpt-*-sol` 这类按档位段匹配：`gpt-5.6-sol` `gpt-6-sol` `gpt-5.6-sol-20261201` 都命中 sol 档（terra/luna/mini 同理）。
+> `claude-opus*` 的含义是模糊匹配，你可以传入任意符合规则的模型名，都会被归一为虚拟模型`model-opus`，比如 `claude-opus-4-8` `claude-opus-4-7-20260101` `claude-opus-100` 都没问题。`gpt-*-sol` 这类按档位段匹配：`gpt-6-sol` `gpt-6.1-sol` `gpt-5.6-sol-20261201` 都命中 sol 档（astra/terra/luna 同理）。只认档位名：`gpt-5.5` 这类纯版本号和 `gpt-*-mini` 不映射，会落到 `model-fallback`。
 
 ## 入口与出口
 
@@ -188,7 +188,7 @@ cc-router 夹在你的工具和大模型厂商中间：工具从**入口**连进
 |---|---|
 | Base URL | `http://127.0.0.1:23456/v1` |
 | API Key | cc-router 设置页里的 token，Codex 从 `OPENAI_API_KEY` 或 `~/.codex/auth.json` 读取 |
-| 模型名 | `gpt-5.6` / `gpt-5.5` / `gpt-5.4` / `gpt-5.4-mini`，或 `openai/` 前缀、`gpt-*-sol/terra/luna/mini` 档位名，分别落到 fable / opus / sonnet / haiku；也接受 `model-*` 写法 |
+| 模型名 | `gpt-*-astra` / `gpt-*-sol` / `gpt-*-terra` / `gpt-*-luna` 档位名（如 `gpt-6-sol`，可带 `openai/` 前缀），分别落到 fable / opus / sonnet / haiku；也接受 `model-*` 写法 |
 
 `~/.codex/config.toml` 片段（app 内「接入指南 → Codex」有完整步骤，之后用 `codex -p cc-router` 启动）：
 
@@ -221,7 +221,7 @@ Open WebUI、Cherry Studio、Cline、LobeChat 等只支持 OpenAI Chat Completio
 |---|---|
 | Base URL | `http://127.0.0.1:23456/v1`（有的工具要求不带 `/v1`，按工具提示调整） |
 | API Key | cc-router 设置页里的 token（关闭鉴权时随便填一个非空值） |
-| 模型名 | `model-fable` / `model-opus` / `model-sonnet` / `model-haiku`，或 `gpt-5.6` / `gpt-5.5` / `gpt-5.4` / `gpt-5.4-mini` 等别名，从 `GET /v1/models` 可直接拉取 |
+| 模型名 | `model-fable` / `model-opus` / `model-sonnet` / `model-haiku`，或 `gpt-6-astra` / `gpt-6-sol` / `gpt-6-terra` / `gpt-6-luna` 等档位别名，从 `GET /v1/models` 可直接拉取 |
 
 行为说明：
 

@@ -111,39 +111,35 @@ const GENERIC_ENTRIES: GenericEntry[] = [
 
 /**
  * 虚拟模型名与别名, 照抄 src-tauri/src/virtual_model/model.rs::parse —— 唯一事实来源.
- * exact: 精确匹配; fuzzy: 模糊模式 + 一个示例 (claude-* 前缀匹配, gpt-*-<tier> 按 '-' 分段匹配档位).
+ * fuzzy: 模糊模式 + 一个示例 (claude-* 前缀匹配, gpt-*-<tier> 按 '-' 分段匹配档位).
  */
-const VM_ALIASES: { vm: string; exact: string[]; fuzzy: { pattern: string; example: string }[] }[] = [
+const VM_ALIASES: { vm: string; fuzzy: { pattern: string; example: string }[] }[] = [
   {
     vm: "model-fable",
-    exact: ["gpt-5.6"],
     fuzzy: [
       { pattern: "claude-fable*", example: "claude-fable-5" },
-      { pattern: "gpt-*-sol", example: "gpt-5.6-sol" },
+      { pattern: "gpt-*-astra", example: "gpt-6-astra" },
     ],
   },
   {
     vm: "model-opus",
-    exact: ["gpt-5.5"],
     fuzzy: [
       { pattern: "claude-opus*", example: "claude-opus-4-7" },
-      { pattern: "gpt-*-terra", example: "gpt-5.6-terra" },
+      { pattern: "gpt-*-sol", example: "gpt-6-sol" },
     ],
   },
   {
     vm: "model-sonnet",
-    exact: ["gpt-5.4"],
     fuzzy: [
       { pattern: "claude-sonnet*", example: "claude-sonnet-4-6" },
-      { pattern: "gpt-*-luna", example: "gpt-5.6-luna" },
+      { pattern: "gpt-*-terra", example: "gpt-6-terra" },
     ],
   },
   {
     vm: "model-haiku",
-    exact: [],
     fuzzy: [
       { pattern: "claude-haiku*", example: "claude-haiku-4-5" },
-      { pattern: "gpt-*-mini", example: "gpt-5.4-mini" },
+      { pattern: "gpt-*-luna", example: "gpt-6-luna" },
     ],
   },
 ];
@@ -156,9 +152,6 @@ function VirtualModelNames() {
         <div className="vm-alias" key={a.vm}>
           <span className="mono strong">{a.vm}</span>
           <span className="vm-alias-list">
-            {a.exact.map((x) => (
-              <span className="mono" key={x}>{x}</span>
-            ))}
             {a.fuzzy.map((f) => (
               <span key={f.pattern}>
                 <span className="mono">{f.pattern}</span>

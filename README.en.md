@@ -149,13 +149,13 @@ Virtual models and aliases:
 
 | Virtual model | Aliases |
 |---|---|
-|  `model-fable` |  `anthropic/model-fable` `anthropic/claude-fable*` `claude-fable*` `gpt-5.6` `gpt-*-sol` `openai/gpt-5.6` `openai/gpt-*-sol` |
-|  `model-opus` |  `anthropic/model-opus` `anthropic/claude-opus*` `claude-opus*` `gpt-5.5` `gpt-*-terra` `openai/gpt-5.5` `openai/gpt-*-terra` |
-|  `model-sonnet` |  `anthropic/model-sonnet` `anthropic/claude-sonnet*` `claude-sonnet*` `gpt-5.4` `gpt-*-luna` `openai/gpt-5.4` `openai/gpt-*-luna` |
-|  `model-haiku` |  `anthropic/model-haiku` `anthropic/claude-haiku*` `claude-haiku*`  `gpt-*-mini` `openai/gpt-*-mini` |
+|  `model-fable` |  `anthropic/model-fable` `anthropic/claude-fable*` `claude-fable*` `gpt-*-astra` `openai/gpt-*-astra` |
+|  `model-opus` |  `anthropic/model-opus` `anthropic/claude-opus*` `claude-opus*` `gpt-*-sol` `openai/gpt-*-sol` |
+|  `model-sonnet` |  `anthropic/model-sonnet` `anthropic/claude-sonnet*` `claude-sonnet*` `gpt-*-terra` `openai/gpt-*-terra` |
+|  `model-haiku` |  `anthropic/model-haiku` `anthropic/claude-haiku*` `claude-haiku*` `gpt-*-luna` `openai/gpt-*-luna` |
 |  `model-jev` |  `anthropic/model-jev` `openai/model-jev` (only on the `/v1/systemone` entry point; the chat entry points return 400 for it) |
 
-> `claude-opus*` is a wildcard (prefix match): you can pass any model name that fits the pattern and it will be normalized to the `model-opus` virtual model — e.g. `claude-opus-4-8`, `claude-opus-4-7-20260101`, and `claude-opus-100` all work. `gpt-*-sol`-style aliases match by tier segment: `gpt-5.6-sol`, `gpt-6-sol`, and `gpt-5.6-sol-20261201` all hit the sol tier (same for terra/luna/mini).
+> `claude-opus*` is a wildcard (prefix match): you can pass any model name that fits the pattern and it will be normalized to the `model-opus` virtual model — e.g. `claude-opus-4-8`, `claude-opus-4-7-20260101`, and `claude-opus-100` all work. `gpt-*-sol`-style aliases match by tier segment: `gpt-6-sol`, `gpt-6.1-sol`, and `gpt-5.6-sol-20261201` all hit the sol tier (same for astra/terra/luna). Only tier names are recognized: bare version names such as `gpt-5.5` and `gpt-*-mini` are not mapped and go to `model-fallback`.
 
 ## Inbound & Outbound
 
@@ -188,7 +188,7 @@ The three chat entry points share the same subscriptions, virtual models, quotas
 |---|---|
 | Base URL | `http://127.0.0.1:23456/v1` |
 | API Key | the token from cc-router's Settings page; Codex reads it from `OPENAI_API_KEY` or `~/.codex/auth.json` |
-| Model name | `gpt-5.6` / `gpt-5.5` / `gpt-5.4` / `gpt-5.4-mini`, or the `openai/` prefix and `gpt-*-sol/terra/luna/mini` tier names, mapping to fable / opus / sonnet / haiku respectively; the `model-*` form is accepted too |
+| Model name | The `gpt-*-astra` / `gpt-*-sol` / `gpt-*-terra` / `gpt-*-luna` tier names (e.g. `gpt-6-sol`, optionally with the `openai/` prefix), mapping to fable / opus / sonnet / haiku respectively; the `model-*` form is accepted too |
 
 `~/.codex/config.toml` snippet (full steps are in the app under "Setup guide → Codex"; then launch with `codex -p cc-router`):
 
@@ -221,7 +221,7 @@ For tools that only speak OpenAI Chat Completions — Open WebUI, Cherry Studio,
 |---|---|
 | Base URL | `http://127.0.0.1:23456/v1` (some tools want it without `/v1`; follow the tool's hint) |
 | API Key | the token from cc-router's Settings page (any non-empty value when auth is disabled) |
-| Model name | `model-fable` / `model-opus` / `model-sonnet` / `model-haiku`, or aliases such as `gpt-5.6` / `gpt-5.5` / `gpt-5.4` / `gpt-5.4-mini`; `GET /v1/models` lists them |
+| Model name | `model-fable` / `model-opus` / `model-sonnet` / `model-haiku`, or tier aliases such as `gpt-6-astra` / `gpt-6-sol` / `gpt-6-terra` / `gpt-6-luna`; `GET /v1/models` lists them |
 
 Behavior notes:
 

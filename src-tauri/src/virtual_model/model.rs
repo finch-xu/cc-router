@@ -39,29 +39,29 @@ impl VirtualModelName {
         let s = s.strip_prefix("anthropic/").unwrap_or(s);
         let s = s.strip_prefix("openai/").unwrap_or(s);
 
-        // 虚拟模型名 + OpenAI Responses 别名: 这些不以 claude- 开头, 精确映射.
-        // gpt-5.6 给 fable: fable 能力在 opus(gpt-5.5) 之上, 故取更高档号.
-        // gpt-*-mini 类后缀名走下方档位段模糊匹配, 不在此枚举.
+        // 虚拟模型名: 精确映射.
         match s {
-            "model-fable" | "gpt-5.6" => return Some(Self::Fable),
-            "model-opus" | "gpt-5.5" => return Some(Self::Opus),
-            "model-sonnet" | "gpt-5.4" => return Some(Self::Sonnet),
+            "model-fable" => return Some(Self::Fable),
+            "model-opus" => return Some(Self::Opus),
+            "model-sonnet" => return Some(Self::Sonnet),
             "model-haiku" => return Some(Self::Haiku),
             "model-fallback" => return Some(Self::Fallback),
             "model-jev" => return Some(Self::Jev),
             _ => {}
         }
 
-        // ChatGPT 档位命名模糊匹配: gpt-*-sol / gpt-*-terra / gpt-*-luna / gpt-*-mini,
-        // 含日期后缀变种 (gpt-5.6-sol-20261201)。按 '-' 分段精确比对档位段,
-        // 避免 "gpt-5.6-solaris" 前缀撞名误命中。
+        // ChatGPT 四档命名模糊匹配: gpt-*-astra / gpt-*-sol / gpt-*-terra / gpt-*-luna,
+        // 与 fable / opus / sonnet / haiku 一一对应, 含其他版本号与日期后缀变种
+        // (gpt-6.1-sol / gpt-6-astra-20261201)。按 '-' 分段精确比对档位段, 避免
+        // "gpt-6-solaris" 前缀撞名误命中。只认档位名: 版本号不是档位, 纯版本号
+        // (gpt-5.5) 与 mini 后缀都不映射, 落 fallback。
         if s.starts_with("gpt-") {
             for seg in s.split('-') {
                 match seg {
-                    "sol" => return Some(Self::Fable),
-                    "terra" => return Some(Self::Opus),
-                    "luna" => return Some(Self::Sonnet),
-                    "mini" => return Some(Self::Haiku),
+                    "astra" => return Some(Self::Fable),
+                    "sol" => return Some(Self::Opus),
+                    "terra" => return Some(Self::Sonnet),
+                    "luna" => return Some(Self::Haiku),
                     _ => {}
                 }
             }
@@ -222,44 +222,48 @@ mod tests {
     }
 
     #[test]
-    fn parse_recognizes_openai_responses_aliases() {
-        // 无前缀
-        assert_eq!(VirtualModelName::parse("gpt-5.6"), Some(VirtualModelName::Fable));
-        assert_eq!(VirtualModelName::parse("gpt-5.5"), Some(VirtualModelName::Opus));
-        assert_eq!(VirtualModelName::parse("gpt-5.4"), Some(VirtualModelName::Sonnet));
-        assert_eq!(VirtualModelName::parse("gpt-5.4-mini"), Some(VirtualModelName::Haiku));
-        // openai/ 前缀
-        assert_eq!(VirtualModelName::parse("openai/gpt-5.6"), Some(VirtualModelName::Fable));
-        assert_eq!(VirtualModelName::parse("openai/gpt-5.5"), Some(VirtualModelName::Opus));
-        assert_eq!(VirtualModelName::parse("openai/gpt-5.4"), Some(VirtualModelName::Sonnet));
-        assert_eq!(VirtualModelName::parse("openai/gpt-5.4-mini"), Some(VirtualModelName::Haiku));
+    fn parse_strips_openai_prefix() {
+        assert_eq!(VirtualModelName::parse("openai/gpt-6-astra"), Some(VirtualModelName::Fable));
+        assert_eq!(VirtualModelName::parse("openai/gpt-6-sol"), Some(VirtualModelName::Opus));
+        assert_eq!(VirtualModelName::parse("openai/gpt-6-terra"), Some(VirtualModelName::Sonnet));
+        assert_eq!(VirtualModelName::parse("openai/gpt-6-luna"), Some(VirtualModelName::Haiku));
         // 交叉前缀 (openai/ 把 model- 别名也带过来) - 仍然能 parse, 因为 openai/ 只是被 strip 掉
         assert_eq!(VirtualModelName::parse("openai/model-sonnet"), Some(VirtualModelName::Sonnet));
     }
 
     #[test]
     fn parse_recognizes_gpt_tier_suffixes() {
-        // ChatGPT 新一代档位命名: gpt-*-sol / gpt-*-terra / gpt-*-luna / gpt-*-mini
-        assert_eq!(VirtualModelName::parse("gpt-5.6-sol"), Some(VirtualModelName::Fable));
-        assert_eq!(VirtualModelName::parse("gpt-5.6-terra"), Some(VirtualModelName::Opus));
-        assert_eq!(VirtualModelName::parse("gpt-5.6-luna"), Some(VirtualModelName::Sonnet));
-        assert_eq!(VirtualModelName::parse("gpt-5.6-mini"), Some(VirtualModelName::Haiku));
-        // 原精确别名 gpt-5.4-mini 由模糊规则接管, 行为不变
-        assert_eq!(VirtualModelName::parse("gpt-5.4-mini"), Some(VirtualModelName::Haiku));
-        // openai/ 前缀被 strip 后同样命中
-        assert_eq!(VirtualModelName::parse("openai/gpt-5.6-sol"), Some(VirtualModelName::Fable));
-        // 未来版本号 / 日期后缀变种
-        assert_eq!(VirtualModelName::parse("gpt-6-sol"), Some(VirtualModelName::Fable));
+        // ChatGPT 四档命名, 与 fable / opus / sonnet / haiku 一一对应
+        assert_eq!(VirtualModelName::parse("gpt-6-astra"), Some(VirtualModelName::Fable));
+        assert_eq!(VirtualModelName::parse("gpt-6-sol"), Some(VirtualModelName::Opus));
+        assert_eq!(VirtualModelName::parse("gpt-6-terra"), Some(VirtualModelName::Sonnet));
+        assert_eq!(VirtualModelName::parse("gpt-6-luna"), Some(VirtualModelName::Haiku));
+        // 档位只看名字不看代际: 5.6 代的旗舰 sol 同样落 opus
+        assert_eq!(VirtualModelName::parse("gpt-5.6-sol"), Some(VirtualModelName::Opus));
+        assert_eq!(VirtualModelName::parse("gpt-5.6-terra"), Some(VirtualModelName::Sonnet));
+        assert_eq!(VirtualModelName::parse("gpt-5.6-luna"), Some(VirtualModelName::Haiku));
+        // 其他版本号 / 日期后缀变种
+        assert_eq!(VirtualModelName::parse("gpt-6.1-sol"), Some(VirtualModelName::Opus));
         assert_eq!(
-            VirtualModelName::parse("gpt-5.6-sol-20261201"),
+            VirtualModelName::parse("gpt-6-astra-20261201"),
             Some(VirtualModelName::Fable)
         );
         // 边界: 档位段必须整段相等, 前缀撞名不误命中
-        assert_eq!(VirtualModelName::parse("gpt-5.6-solaris"), None);
+        assert_eq!(VirtualModelName::parse("gpt-6-solaris"), None);
+        assert_eq!(VirtualModelName::parse("gpt-6-astral"), None);
         // 边界: 非 gpt- 开头不进模糊匹配
         assert_eq!(VirtualModelName::parse("mistral-sol-7b"), None);
         // 边界: 未知厂商前缀不被 strip → 不以 gpt- 开头 → fallback(None)
-        assert_eq!(VirtualModelName::parse("google/gpt-5.6-sol"), None);
+        assert_eq!(VirtualModelName::parse("google/gpt-6-sol"), None);
+    }
+
+    #[test]
+    fn parse_rejects_gpt_names_without_a_tier() {
+        // 版本号不是档位: 纯版本号与 mini 后缀都不映射, 落 fallback
+        for name in ["gpt-5.6", "gpt-5.5", "gpt-5.4", "gpt-6", "gpt-5.4-mini", "gpt-6-mini"] {
+            assert_eq!(VirtualModelName::parse(name), None, "{name}");
+            assert_eq!(VirtualModelName::parse(&format!("openai/{name}")), None, "openai/{name}");
+        }
     }
 
     #[test]

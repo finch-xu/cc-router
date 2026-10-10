@@ -149,13 +149,13 @@ LiteLLM 形式の `anthropic/` プレフィックスにも対応しています:
 
 | 仮想モデル | エイリアス |
 |---|---|
-|  `model-fable` |  `anthropic/model-fable` `anthropic/claude-fable*` `claude-fable*` `gpt-5.6` `gpt-*-sol` `openai/gpt-5.6` `openai/gpt-*-sol` |
-|  `model-opus` |  `anthropic/model-opus` `anthropic/claude-opus*` `claude-opus*` `gpt-5.5` `gpt-*-terra` `openai/gpt-5.5` `openai/gpt-*-terra` |
-|  `model-sonnet` |  `anthropic/model-sonnet` `anthropic/claude-sonnet*` `claude-sonnet*` `gpt-5.4` `gpt-*-luna` `openai/gpt-5.4` `openai/gpt-*-luna` |
-|  `model-haiku` |  `anthropic/model-haiku` `anthropic/claude-haiku*` `claude-haiku*`  `gpt-*-mini` `openai/gpt-*-mini` |
+|  `model-fable` |  `anthropic/model-fable` `anthropic/claude-fable*` `claude-fable*` `gpt-*-astra` `openai/gpt-*-astra` |
+|  `model-opus` |  `anthropic/model-opus` `anthropic/claude-opus*` `claude-opus*` `gpt-*-sol` `openai/gpt-*-sol` |
+|  `model-sonnet` |  `anthropic/model-sonnet` `anthropic/claude-sonnet*` `claude-sonnet*` `gpt-*-terra` `openai/gpt-*-terra` |
+|  `model-haiku` |  `anthropic/model-haiku` `anthropic/claude-haiku*` `claude-haiku*` `gpt-*-luna` `openai/gpt-*-luna` |
 |  `model-jev` |  `anthropic/model-jev` `openai/model-jev`（`/v1/systemone` 入口でのみ有効。会話用の入口では 400 を返します） |
 
-> `claude-opus*` はワイルドカード（前方一致）です。パターンに一致するモデル名を渡せば、すべて仮想モデル `model-opus` に正規化されます。例えば `claude-opus-4-8`、`claude-opus-4-7-20260101`、`claude-opus-100` などはすべて問題なく動作します。`gpt-*-sol` 系のエイリアスはティアセグメントで一致します: `gpt-5.6-sol`、`gpt-6-sol`、`gpt-5.6-sol-20261201` はいずれも sol ティアに一致します（terra/luna/mini も同様）。
+> `claude-opus*` はワイルドカード（前方一致）です。パターンに一致するモデル名を渡せば、すべて仮想モデル `model-opus` に正規化されます。例えば `claude-opus-4-8`、`claude-opus-4-7-20260101`、`claude-opus-100` などはすべて問題なく動作します。`gpt-*-sol` 系のエイリアスはティアセグメントで一致します: `gpt-6-sol`、`gpt-6.1-sol`、`gpt-5.6-sol-20261201` はいずれも sol ティアに一致します（astra/terra/luna も同様）。認識するのはティア名だけです。`gpt-5.5` のようなバージョン番号のみの名前や `gpt-*-mini` は対応付けられず、`model-fallback` に回ります。
 
 ## 入口と出口
 
@@ -188,7 +188,7 @@ cc-router はツールと LLM プロバイダの間に入ります。ツール�
 |---|---|
 | Base URL | `http://127.0.0.1:23456/v1` |
 | API Key | cc-router 設定画面の token。Codex は `OPENAI_API_KEY` または `~/.codex/auth.json` から読み込みます |
-| モデル名 | `gpt-5.6` / `gpt-5.5` / `gpt-5.4` / `gpt-5.4-mini`、または `openai/` プレフィックス、`gpt-*-sol/terra/luna/mini` のティア名。それぞれ fable / opus / sonnet / haiku に対応。`model-*` 記法も受け付けます |
+| モデル名 | `gpt-*-astra` / `gpt-*-sol` / `gpt-*-terra` / `gpt-*-luna` のティア名（例: `gpt-6-sol`、`openai/` プレフィックスも可）。それぞれ fable / opus / sonnet / haiku に対応。`model-*` 記法も受け付けます |
 
 `~/.codex/config.toml` の断片（詳しい手順はアプリの「セットアップガイド → Codex」にあります。その後 `codex -p cc-router` で起動）：
 
@@ -221,7 +221,7 @@ Open WebUI、Cherry Studio、Cline、LobeChat など OpenAI Chat Completions し
 |---|---|
 | Base URL | `http://127.0.0.1:23456/v1`（ツールによっては `/v1` なしを要求するので、ツールの案内に従ってください） |
 | API Key | cc-router 設定画面の token（認証を無効にしている場合は空でない任意の値） |
-| モデル名 | `model-fable` / `model-opus` / `model-sonnet` / `model-haiku`、または `gpt-5.6` / `gpt-5.5` / `gpt-5.4` / `gpt-5.4-mini` などのエイリアス。`GET /v1/models` で一覧を取得できます |
+| モデル名 | `model-fable` / `model-opus` / `model-sonnet` / `model-haiku`、または `gpt-6-astra` / `gpt-6-sol` / `gpt-6-terra` / `gpt-6-luna` などのティア別名。`GET /v1/models` で一覧を取得できます |
 
 動作について：
 

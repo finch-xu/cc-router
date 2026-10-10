@@ -766,6 +766,38 @@ pub async fn systemone(
     systemone::dispatch(&state, body, model, &ctx).await
 }
 
+/// `GET /v1/models` 返回的固定清单: 虚拟模型名 + 各写法的代表性别名。
+/// 每一项都必须能被 `VirtualModelName::parse` 解析到四个对话虚拟模型之一 (单测锁住)。
+const MODEL_IDS: &[&str] = &[
+    // Anthropic 风格虚拟模型名 + 版本别名 + anthropic/ 前缀变种
+    "model-fable",
+    "model-opus",
+    "model-sonnet",
+    "model-haiku",
+    "claude-fable-5",
+    "claude-opus-4-7",
+    "claude-sonnet-4-6",
+    "claude-haiku-4-5",
+    "anthropic/claude-fable-5",
+    "anthropic/claude-opus-4-7",
+    "anthropic/claude-sonnet-4-6",
+    "anthropic/claude-haiku-4-5",
+    "anthropic/model-fable",
+    "anthropic/model-opus",
+    "anthropic/model-sonnet",
+    "anthropic/model-haiku",
+    // OpenAI 风格别名: ChatGPT 四档命名 astra / sol / terra / luna, 依次对应
+    // fable / opus / sonnet / haiku。按档位段模糊匹配, 这里每档只放一个代表名。
+    "gpt-6-astra",
+    "gpt-6-sol",
+    "gpt-6-terra",
+    "gpt-6-luna",
+    "openai/gpt-6-astra",
+    "openai/gpt-6-sol",
+    "openai/gpt-6-terra",
+    "openai/gpt-6-luna",
+];
+
 /// GET /v1/models
 /// 返回 cc-router 对外暴露的固定模型清单, 无鉴权 (与 /health 同级在 auth_layer 直通).
 ///
@@ -773,41 +805,6 @@ pub async fn systemone(
 /// (`type`+`object`, `display_name`+`owned_by`, `created_at`+`created`),
 /// 两边 SDK 都按 `extra: allow` 忽略未知字段, 共用同一路径对客户端透明。
 pub async fn models() -> Response {
-    const MODEL_IDS: &[&str] = &[
-        // Anthropic 风格虚拟模型名 + 版本别名 + anthropic/ 前缀变种
-        "model-fable",
-        "model-opus",
-        "model-sonnet",
-        "model-haiku",
-        "claude-fable-5",
-        "claude-opus-4-7",
-        "claude-sonnet-4-6",
-        "claude-haiku-4-5",
-        "anthropic/claude-fable-5",
-        "anthropic/claude-opus-4-7",
-        "anthropic/claude-sonnet-4-6",
-        "anthropic/claude-haiku-4-5",
-        "anthropic/model-fable",
-        "anthropic/model-opus",
-        "anthropic/model-sonnet",
-        "anthropic/model-haiku",
-        // OpenAI Responses 兼容入口别名 (v2.3+): 映射到 fable/opus/sonnet/haiku;
-        // sol/terra/luna 是 ChatGPT 新一代档位命名 (gpt-*-sol/terra/luna/mini 模糊匹配)
-        "gpt-5.6",
-        "gpt-5.5",
-        "gpt-5.4",
-        "gpt-5.4-mini",
-        "gpt-5.6-sol",
-        "gpt-5.6-terra",
-        "gpt-5.6-luna",
-        "openai/gpt-5.6",
-        "openai/gpt-5.5",
-        "openai/gpt-5.4",
-        "openai/gpt-5.4-mini",
-        "openai/gpt-5.6-sol",
-        "openai/gpt-5.6-terra",
-        "openai/gpt-5.6-luna",
-    ];
     const CREATED_AT_ISO: &str = "2026-01-01T00:00:00Z"; // Anthropic 字段 (ISO 字符串)
     const CREATED_UNIX: i64 = 1_767_225_600; // OpenAI 字段 (Unix 秒, 同一时刻)
 
@@ -839,4 +836,29 @@ pub async fn models() -> Response {
         "last_id": MODEL_IDS.last(),
     }))
     .into_response()
+}
+
+#[cfg(test)]
+mod models_tests {
+    use super::MODEL_IDS;
+    use crate::virtual_model::model::VirtualModelName;
+
+    #[test]
+    fn every_listed_model_id_routes_to_a_chat_virtual_model() {
+        for id in MODEL_IDS {
+            let vm = VirtualModelName::parse(id);
+            assert!(
+                matches!(
+                    vm,
+                    Some(
+                        VirtualModelName::Fable
+                            | VirtualModelName::Opus
+                            | VirtualModelName::Sonnet
+                            | VirtualModelName::Haiku
+                    )
+                ),
+                "{id} 在 /v1/models 清单里, 但 parse 得到 {vm:?}"
+            );
+        }
+    }
 }

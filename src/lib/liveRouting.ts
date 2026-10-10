@@ -8,10 +8,10 @@ import type { VirtualModelName } from "@/types";
  * `*` 表示模糊匹配; `anthropic/` `openai/` 前缀对所有别名通用, 抽到脚注里说明。
  */
 export const CLIENT_ALIASES: Record<VirtualModelName, string[]> = {
-  "model-fable": ["model-fable", "claude-fable*", "gpt-5.6", "gpt-*-sol"],
-  "model-opus": ["model-opus", "claude-opus*", "gpt-5.5", "gpt-*-terra"],
-  "model-sonnet": ["model-sonnet", "claude-sonnet*", "gpt-5.4", "gpt-*-luna"],
-  "model-haiku": ["model-haiku", "claude-haiku*", "gpt-*-mini"],
+  "model-fable": ["model-fable", "claude-fable*", "gpt-*-astra"],
+  "model-opus": ["model-opus", "claude-opus*", "gpt-*-sol"],
+  "model-sonnet": ["model-sonnet", "claude-sonnet*", "gpt-*-terra"],
+  "model-haiku": ["model-haiku", "claude-haiku*", "gpt-*-luna"],
   "model-fallback": [],
   "model-jev": ["model-jev"],
 };
