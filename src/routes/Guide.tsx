@@ -117,28 +117,28 @@ const VM_ALIASES: { vm: string; fuzzy: { pattern: string; example: string }[] }[
   {
     vm: "model-fable",
     fuzzy: [
-      { pattern: "claude-fable*", example: "claude-fable-5" },
+      { pattern: "claude-fable*", example: "claude-fable-5-5" },
       { pattern: "gpt-*-astra", example: "gpt-6-astra" },
     ],
   },
   {
     vm: "model-opus",
     fuzzy: [
-      { pattern: "claude-opus*", example: "claude-opus-4-7" },
+      { pattern: "claude-opus*", example: "claude-opus-5-5" },
       { pattern: "gpt-*-sol", example: "gpt-6-sol" },
     ],
   },
   {
     vm: "model-sonnet",
     fuzzy: [
-      { pattern: "claude-sonnet*", example: "claude-sonnet-4-6" },
+      { pattern: "claude-sonnet*", example: "claude-sonnet-5-5" },
       { pattern: "gpt-*-terra", example: "gpt-6-terra" },
     ],
   },
   {
     vm: "model-haiku",
     fuzzy: [
-      { pattern: "claude-haiku*", example: "claude-haiku-4-5" },
+      { pattern: "claude-haiku*", example: "claude-haiku-5-5" },
       { pattern: "gpt-*-luna", example: "gpt-6-luna" },
     ],
   },

@@ -769,19 +769,28 @@ pub async fn systemone(
 /// `GET /v1/models` 返回的固定清单: 虚拟模型名 + 各写法的代表性别名。
 /// 每一项都必须能被 `VirtualModelName::parse` 解析到四个对话虚拟模型之一 (单测锁住)。
 const MODEL_IDS: &[&str] = &[
-    // Anthropic 风格虚拟模型名 + 版本别名 + anthropic/ 前缀变种
+    // Anthropic 风格虚拟模型名 + 版本别名 (claude-* 前缀匹配, 每档放 5.5 与 6 两个代表名)
+    // + anthropic/ 前缀变种
     "model-fable",
     "model-opus",
     "model-sonnet",
     "model-haiku",
-    "claude-fable-5",
-    "claude-opus-4-7",
-    "claude-sonnet-4-6",
-    "claude-haiku-4-5",
-    "anthropic/claude-fable-5",
-    "anthropic/claude-opus-4-7",
-    "anthropic/claude-sonnet-4-6",
-    "anthropic/claude-haiku-4-5",
+    "claude-fable-5-5",
+    "claude-opus-5-5",
+    "claude-sonnet-5-5",
+    "claude-haiku-5-5",
+    "claude-fable-6",
+    "claude-opus-6",
+    "claude-sonnet-6",
+    "claude-haiku-6",
+    "anthropic/claude-fable-5-5",
+    "anthropic/claude-opus-5-5",
+    "anthropic/claude-sonnet-5-5",
+    "anthropic/claude-haiku-5-5",
+    "anthropic/claude-fable-6",
+    "anthropic/claude-opus-6",
+    "anthropic/claude-sonnet-6",
+    "anthropic/claude-haiku-6",
     "anthropic/model-fable",
     "anthropic/model-opus",
     "anthropic/model-sonnet",
