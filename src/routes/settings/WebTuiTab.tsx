@@ -55,7 +55,11 @@ export function WebTuiTab({ form }: { form: SettingsForm }) {
             </div>
           </div>
           {form.webUiEnabled && (
-            <WebUiAddresses listenAll={form.listenAll} authEnabled={form.webUiAuthEnabled} />
+            <WebUiAddresses
+              listenAll={form.listenAll}
+              authEnabled={form.webUiAuthEnabled}
+              token={form.settings.data?.auth_token ?? ""}
+            />
           )}
         </div>
       </div>
@@ -89,7 +93,10 @@ export function WebTuiTab({ form }: { form: SettingsForm }) {
   );
 }
 
-function WebUiAddresses({ listenAll, authEnabled }: { listenAll: boolean; authEnabled: boolean }) {
+/** 访问地址 + 登录令牌. 返回 fragment: 两个 `.setting-row` 都必须是 `.card-body` 的直接子元素.
+ * 令牌只在登录鉴权开着时展示 —— 它与「Token 鉴权」开关互相独立, 后者关着时安全与访问标签里
+ * 不显示 token, 这里是用户唯一能看到它的地方。 */
+function WebUiAddresses({ listenAll, authEnabled, token }: { listenAll: boolean; authEnabled: boolean; token: string }) {
   const { t } = useT();
   const proxy = useProxyStatus();
   const lan = useLanAddresses(listenAll);
@@ -100,22 +107,33 @@ function WebUiAddresses({ listenAll, authEnabled }: { listenAll: boolean; authEn
     for (const ip of lan.data ?? []) urls.push(`${scheme}://${ip}:${port}/ui/`);
   }
   return (
-    <div className="setting-row">
-      <div className="label-col">
-        {t("settings.webUi.addresses.label")}
-        {!listenAll && <div className="desc">{t("settings.webUi.addresses.localOnly")}</div>}
+    <>
+      <div className="setting-row">
+        <div className="label-col">
+          {t("settings.webUi.addresses.label")}
+          {!listenAll && <div className="desc">{t("settings.webUi.addresses.localOnly")}</div>}
+        </div>
+        <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+          {urls.map((u) => (
+            <CopyableBlock key={u} text={u} variant="inline" />
+          ))}
+          {listenAll && (
+            <div className={authEnabled ? "alert warn" : "alert err"} style={{ marginTop: 6 }}>
+              {authEnabled ? t("settings.webUi.warn.lanWithAuth") : t("settings.webUi.warn.lanNoAuth")}
+            </div>
+          )}
+        </div>
       </div>
-      <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-        {urls.map((u) => (
-          <CopyableBlock key={u} text={u} variant="inline" />
-        ))}
-        {listenAll && (
-          <div className={authEnabled ? "alert warn" : "alert err"} style={{ marginTop: 6 }}>
-            {authEnabled ? t("settings.webUi.warn.lanWithAuth") : t("settings.webUi.warn.lanNoAuth")}
+      {authEnabled && token && (
+        <div className="setting-row">
+          <div className="label-col">
+            {t("settings.webUi.token.label")}
+            <div className="desc">{t("settings.webUi.token.desc")}</div>
           </div>
-        )}
-      </div>
-    </div>
+          <CopyableBlock text={token} variant="inline" />
+        </div>
+      )}
+    </>
   );
 }
 
