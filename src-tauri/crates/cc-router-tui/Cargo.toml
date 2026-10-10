@@ -1,6 +1,6 @@
 [package]
 name = "cc-router-tui"
-version = "6.3.0"
+version = "6.3.1"
 edition = "2021"
 description = "cc-router 的终端界面"
 license = "MIT"
