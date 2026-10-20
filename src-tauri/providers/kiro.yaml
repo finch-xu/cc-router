@@ -96,8 +96,6 @@ model_discovery:
     - "claude-sonnet-4.0"
     - "claude-haiku-4.5"
     - "deepseek-3.2"
-    - "minimax-m2.5"
-    - "minimax-m2.1"
     - "glm-5"
     - "qwen3-coder-next"
 

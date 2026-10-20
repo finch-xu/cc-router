@@ -92,7 +92,7 @@ async fn scan_and_recheck(state: &AppState) {
         let sub_id = row.id;
         let display_name = row.display_name.clone();
 
-        let Some((model, slot)) = ping::pick_test_model(&row) else {
+        let Some((model, slot)) = ping::pick_test_model(&row, &state.providers) else {
             debug!(%sub_id, "recheck_worker: 无可用 model, 跳过");
             continue;
         };

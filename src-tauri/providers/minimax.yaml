@@ -2,17 +2,13 @@ id: minimax
 display_name: "MiniMax"
 icon: minimax
 category: first_party
-description:
-  zh: "MiniMax M3 / M2 系列模型"
-  zh-Hant: "MiniMax M3 / M2 系列模型"
-  en: "MiniMax M3 / M2 series models"
-  ja: "MiniMax M3 / M2 シリーズのモデル"
+description: "MiniMax-M3.1-Flash / MiniMax-M3"
 homepage: "https://platform.minimax.io"
 docs_url: "https://platform.minimax.io/docs"
 api_key_url: "https://platform.minimax.io/user-center/basic-information/interface-key"
 
 compatibility: untested
-compatibility_notes: 
+compatibility_notes: "Model examples apply to pay-as-you-go APIs. Check your Coding Plan for subscription model availability."
 
 endpoints:
   - id: china_coding_plan
@@ -79,7 +75,7 @@ endpoints:
     region: global
     billing: pay_as_you_go
 
-default_endpoint: china_coding_plan
+default_endpoint: china_paygo
 
 auth:
   type: api_key
@@ -96,13 +92,7 @@ model_discovery:
   enabled: false
   path: "/v1/models"
   cache_ttl_hours: 24
-  # 来源: https://platform.minimax.io/docs/guides/models-intro (2026-07 核对)
+  # Pay-as-you-go text models, preferred first. Legacy IDs remain valid manual input.
   example_models:
+    - "MiniMax-M3.1-Flash"
     - "MiniMax-M3"
-    - "MiniMax-M2.7"
-    - "MiniMax-M2.7-highspeed"
-    - "MiniMax-M2.5"
-    - "MiniMax-M2.5-highspeed"
-    - "MiniMax-M2.1"
-    - "MiniMax-M2.1-highspeed"
-    - "MiniMax-M2"

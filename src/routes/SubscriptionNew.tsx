@@ -1281,9 +1281,11 @@ export function SubscriptionNewPage() {
                   error={modelFetchError}
                   onRefresh={isSystemOne ? undefined : refreshModels}
                   exampleModels={
-                    isSystemOne && endpoint?.example_models.length
-                      ? endpoint.example_models
-                      : provider.model_discovery.example_models
+                    provider.id === "minimax" && endpoint?.billing === "subscription"
+                      ? []
+                      : isSystemOne && endpoint?.example_models.length
+                        ? endpoint.example_models
+                        : provider.model_discovery.example_models
                   }
                   systemone={isSystemOne}
                 />

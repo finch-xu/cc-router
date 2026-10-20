@@ -109,4 +109,3 @@ model_discovery:
     - "glm-5"
     - "deepseek-v3.2"
     - "kimi-k2.6"
-    - "minimax-m2.7"

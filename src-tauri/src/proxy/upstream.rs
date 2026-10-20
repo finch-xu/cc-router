@@ -102,6 +102,98 @@ mod tests {
     use tokio::io::{AsyncReadExt, AsyncWriteExt};
     use tokio::net::TcpListener;
 
+    #[tokio::test]
+    async fn minimax_catalog_models_reach_native_messages_over_http() {
+        use crate::provider::{loader::load_all, model::{AuthType, EndpointProtocol}};
+        use crate::subscription::{model::SubscriptionRow, snapshot::snapshot_connection};
+        use crate::proxy::{forward::build_anthropic_passthrough_headers, sanitize::strip_foreign_thinking_blocks};
+        use serde_json::json;
+        use std::collections::BTreeMap;
+        use wiremock::{Mock, MockServer, ResponseTemplate, matchers::{method, path, header}};
+
+        let providers = load_all().unwrap();
+        let provider = &providers["minimax"];
+        assert_eq!(provider.auth.auth_type, AuthType::ApiKey);
+        assert_eq!(provider.default_endpoint.as_deref(), Some("china_paygo"));
+        assert_eq!(provider.model_discovery.example_models, ["MiniMax-M3.1-Flash", "MiniMax-M3"]);
+        for (endpoint_id, origin) in [
+            ("china_paygo", "https://api.minimaxi.com"),
+            ("global_paygo", "https://api.minimax.io"),
+        ] {
+            let endpoint = provider.endpoint(endpoint_id).unwrap();
+            let snapshot = snapshot_connection(provider, endpoint, &BTreeMap::new()).unwrap();
+            assert_eq!(snapshot.endpoint_protocol, EndpointProtocol::Messages);
+            let mut row = SubscriptionRow::test_fixture("minimax", endpoint_id);
+            row.base_url = snapshot.base_url;
+            row.messages_path = snapshot.messages_path;
+            row.required_headers = snapshot.required_headers;
+            row.auth_header_name = provider.auth.header_name.clone();
+            row.auth_header_format = provider.auth.header_format.clone();
+            row.model_slots.sonnet.clear();
+            row.model_slots.haiku.clear();
+            row.model_slots.opus.clear();
+            row.model_discovery.example_models = vec!["MiniMax-M2.7".into()];
+            assert_eq!(crate::subscription::ping::pick_test_model(&row, &providers).unwrap().0, "MiniMax-M3.1-Flash");
+            assert_eq!(row.messages_url(), format!("{origin}/anthropic/v1/messages"));
+
+            // Only the origin is redirected to loopback. Path, auth, model and JSON
+            // use the same production helpers as the native Messages branch.
+            let server = MockServer::start().await;
+            row.base_url = format!("{}/anthropic", server.uri());
+            Mock::given(method("POST"))
+                .and(path("/anthropic/v1/messages"))
+                .and(header("authorization", "Bearer test-key"))
+                .and(header("anthropic-version", "2023-06-01"))
+                .and(header("content-type", "application/json"))
+                .respond_with(ResponseTemplate::new(200).set_body_json(json!({"type": "message", "content": []})))
+                .expect(6)
+                .mount(&server).await;
+            let client = build_client(Duration::from_secs(5)).unwrap();
+            for model in snapshot.model_discovery.example_models.iter().map(String::as_str)
+                .chain(["MiniMax-M2.7"]) {
+                row.model_slots.sonnet = if model == "MiniMax-M3.1-Flash" { String::new() } else { model.into() };
+                row.is_user_defined = model == "MiniMax-M2.7";
+                let (selected, _) = crate::subscription::ping::pick_test_model(&row, &providers).unwrap();
+                assert_eq!(selected, model);
+                for streaming in [false, true] {
+                    let mut body = json!({
+                        "model": selected, "max_tokens": 1024, "stream": streaming,
+                        "thinking": {"type": "adaptive"},
+                        "output_config": {"effort": "max"},
+                        "tools": [{"name": "lookup", "input_schema": {"type": "object"}}],
+                        "messages": [
+                            {"role": "user", "content": "Look up the answer"},
+                            {"role": "assistant", "content": [
+                                {"type": "thinking", "thinking": "Need a lookup", "signature": "native-signature"},
+                                {"type": "tool_use", "id": "call_1", "name": "lookup", "input": {}}
+                            ]},
+                            {"role": "user", "content": [{"type": "tool_result", "tool_use_id": "call_1", "content": "42"}]}
+                        ]
+                    });
+                    let expected = body.clone();
+                    assert_eq!(strip_foreign_thinking_blocks(&mut body, false), (0, 0));
+                    let headers = build_anthropic_passthrough_headers(
+                        &axum::http::HeaderMap::new(), false, &provider.forward_headers,
+                        &row.resolved_required_headers(), &row.auth_header_name, &row.auth_header_value(),
+                    );
+                    let response = send(&client, &row.messages_url(), serde_json::to_vec(&body).unwrap(), headers, streaming).await.unwrap();
+                    match response {
+                        UpstreamResponse::NonStreaming { status, .. } => assert!(status.is_success()),
+                        UpstreamResponse::Streaming { status, mut stream, .. } => {
+                            assert!(status.is_success());
+                            while let Some(chunk) = stream.next().await { chunk.unwrap(); }
+                        }
+                    }
+                    let requests = server.received_requests().await.unwrap();
+                    let sent: Value = requests.last().unwrap().body_json().unwrap();
+                    assert_eq!(sent, expected);
+                    assert!(sent.get("input").is_none());
+                    assert!(sent.get("reasoning_split").is_none());
+                }
+            }
+        }
+    }
+
     /// One-shot HTTP/1.1 server: reads the request head, then runs `respond` on the socket.
     async fn serve_once<F, Fut>(respond: F) -> String
     where

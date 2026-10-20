@@ -134,7 +134,6 @@ model_discovery:
     - "doubao-seed-2.0-pro"
     - "doubao-seed-2.0-lite"
     - "doubao-seed-code"
-    - "minimax-latest"
     - "glm-5.1"
     - "glm-4.7"
     - "deepseek-v3.2"

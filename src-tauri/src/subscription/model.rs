@@ -289,6 +289,23 @@ pub struct SubscriptionRow {
 }
 
 impl SubscriptionRow {
+    /// Current picker/probe suggestions, without changing the persisted snapshot or slots.
+    pub fn suggested_models(&self, providers: &HashMap<String, Provider>) -> Vec<String> {
+        let examples = if !self.is_user_defined && self.provider_id == "minimax" {
+            if !matches!(self.endpoint_id.as_str(), "china_paygo" | "global_paygo") {
+                return Vec::new();
+            }
+            providers.get("minimax").map(|p| &p.model_discovery.example_models)
+                .unwrap_or(&self.model_discovery.example_models)
+        } else {
+            &self.model_discovery.example_models
+        };
+        examples.iter()
+            .filter(|id| self.is_user_defined || crate::provider::is_current_text_suggestion(id))
+            .cloned()
+            .collect()
+    }
+
     pub fn messages_url(&self) -> String {
         join_base_path(&self.base_url, &self.messages_path)
     }
@@ -683,7 +700,10 @@ impl SubscriptionDto {
             referenced_by,
             model_cache: rt.model_cache.as_ref().map(|c| ModelCacheDto {
                 fetched_at: c.fetched_at.timestamp_millis(),
-                models: c.models.clone(),
+                models: c.models.iter()
+                    .filter(|m| rt.row.is_user_defined || crate::provider::is_current_text_suggestion(&m.id))
+                    .cloned()
+                    .collect(),
             }),
             base_url: rt.row.base_url.clone(),
             messages_path: rt.row.messages_path.clone(),
@@ -694,7 +714,11 @@ impl SubscriptionDto {
             forward_client_headers: rt.row.forward_client_headers,
             endpoint_protocol: rt.row.endpoint_protocol,
             url_params: rt.row.url_params.clone(),
-            model_discovery: rt.row.model_discovery.clone(),
+            model_discovery: {
+                let mut discovery = rt.row.model_discovery.clone();
+                discovery.example_models = rt.row.suggested_models(providers);
+                discovery
+            },
             balance_supported: rt
                 .row
                 .balance_discovery
@@ -832,6 +856,37 @@ mod tests {
         rt2.quota_usage.add(now, 1_000_000, 0, 0, 0);
         assert!(rt2.is_dispatchable(now));
         let _ = QuotaPeriod::Total;
+    }
+
+    #[test]
+    fn minimax_suggestions_refresh_without_rewriting_saved_or_custom_models() {
+        let providers = crate::provider::loader::load_all().unwrap();
+        let mut row = SubscriptionRow::test_fixture("minimax", "china_paygo");
+        row.model_slots.haiku = "MiniMax-M2.7".into();
+        row.model_discovery.example_models = vec!["MiniMax-M2.7".into()];
+        let mut rt = SubscriptionRuntime::from_row(row);
+        rt.model_cache = Some(ModelCache {
+            fetched_at: Utc::now(),
+            models: ["MiniMax-M2.7", "minimax/minimax-m3", "speech-2.8-hd"]
+                .into_iter().map(|id| ModelInfo { id: id.into(), display_name: None }).collect(),
+        });
+        let dto = SubscriptionDto::from_runtime(&rt, vec![], &providers);
+        assert_eq!(dto.model_discovery.example_models, ["MiniMax-M3.1-Flash", "MiniMax-M3"]);
+        assert_eq!(dto.model_slots.haiku, "MiniMax-M2.7");
+        assert_eq!(dto.endpoint_id, "china_paygo");
+        assert_eq!(dto.model_cache.unwrap().models.len(), 2);
+        assert_eq!(rt.row.model_discovery.example_models, ["MiniMax-M2.7"]);
+        assert_eq!(rt.model_cache.as_ref().unwrap().models.len(), 3);
+
+        rt.row.endpoint_id = "china_coding_plan".into();
+        let plan = SubscriptionDto::from_runtime(&rt, vec![], &providers);
+        assert!(plan.model_discovery.example_models.is_empty());
+        assert_eq!(plan.model_slots.haiku, "MiniMax-M2.7");
+        rt.row.is_user_defined = true;
+        let custom = SubscriptionDto::from_runtime(&rt, vec![], &providers);
+        assert_eq!(custom.model_discovery.example_models, ["MiniMax-M2.7"]);
+        assert_eq!(custom.model_slots.haiku, "MiniMax-M2.7");
+        assert_eq!(custom.model_cache.unwrap().models.len(), 3);
     }
 
     #[test]

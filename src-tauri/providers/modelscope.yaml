@@ -76,4 +76,3 @@ model_discovery:
     - "deepseek-ai/DeepSeek-V4-Flash"
     - "deepseek-ai/DeepSeek-V3.2"
     - "moonshotai/Kimi-K2.5"
-    - "MiniMax/MiniMax-M2.7"

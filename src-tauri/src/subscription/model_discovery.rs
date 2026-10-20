@@ -206,6 +206,17 @@ pub async fn fetch(
     client: &reqwest::Client,
     row: &SubscriptionRow,
 ) -> Result<Discovered, DiscoveryError> {
+    let mut discovered = fetch_unfiltered(client, row).await?;
+    if !row.is_user_defined {
+        discovered.models.retain(|m| crate::provider::is_current_text_suggestion(&m.id));
+    }
+    Ok(discovered)
+}
+
+async fn fetch_unfiltered(
+    client: &reqwest::Client,
+    row: &SubscriptionRow,
+) -> Result<Discovered, DiscoveryError> {
     let target = ProbeTarget::from_row(row);
 
     // models 接口与 messages 不同域时, 订阅 snapshot 里的 model_discovery.url 是完整 URL。
@@ -480,6 +491,38 @@ mod tests {
         assert!(worth_trying_next(&DiscoveryError::Http(404)));
         assert!(!worth_trying_next(&DiscoveryError::Http(401)));
         assert!(!worth_trying_next(&DiscoveryError::Http(500)));
+    }
+
+    #[tokio::test]
+    async fn minimax_discovery_filters_suggestions_but_preserves_custom_catalogs() {
+        let server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(path("/v1/models"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "data": [
+                    {"id": "minimax/minimax-m2.7"},
+                    {"id": "minimax/minimax-m3"},
+                    {"id": "minimax/minimax-m3.1-flash:free"},
+                    {"id": "speech-2.8-hd"},
+                    {"id": "minimax/minimax-music-2.6"},
+                    {"id": "other-model"}
+                ]
+            })))
+            .expect(2)
+            .mount(&server).await;
+        let mut row = SubscriptionRow::test_fixture("openrouter", "default");
+        row.base_url = server.uri();
+        row.auth_header_name = "Authorization".into();
+        row.model_discovery.enabled = true;
+        row.model_discovery.path = "/v1/models".into();
+        let client = reqwest::Client::new();
+        let built_in = fetch(&client, &row).await.unwrap();
+        assert_eq!(built_in.models.iter().map(|m| m.id.as_str()).collect::<Vec<_>>(),
+            ["minimax/minimax-m3", "minimax/minimax-m3.1-flash:free", "speech-2.8-hd", "minimax/minimax-music-2.6", "other-model"]);
+        row.is_user_defined = true;
+        let custom = fetch(&client, &row).await.unwrap();
+        assert_eq!(custom.models.len(), 6);
+        assert_eq!(custom.models[0].id, "minimax/minimax-m2.7");
     }
 
     #[tokio::test]

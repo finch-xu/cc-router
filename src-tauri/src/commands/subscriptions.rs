@@ -728,7 +728,7 @@ pub async fn test_connection(
         g.row.clone()
     };
 
-    let (model, slot) = match ping::pick_test_model(&row) {
+    let (model, slot) = match ping::pick_test_model(&row, &state.providers) {
         Some(m) => m,
         None => {
             let note = ping::ProbeNote::NoTestModel;

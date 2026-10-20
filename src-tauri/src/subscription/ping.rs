@@ -394,8 +394,8 @@ pub async fn probe_subscription(
     }
 }
 
-/// 选一个 model 名用于探测请求, 并一并返回它来自哪个槽位。优先 sonnet → haiku → opus
-/// (CC 主用 sonnet), 都为空时退到订阅 snapshot 的 model_discovery.example_models[0]。
+/// Pick a probe model and its slot: sonnet, haiku, then opus. When no slot is set,
+/// use current suggestions; saved explicit models always take precedence.
 /// "(pending)" 是 SubscriptionNewPage 两步向导留下的占位, 跳过。
 ///
 /// 返回槽位是为了让 [`probe_subscription`] 能取该槽位的 forced effort —— 否则用户给"只接受
@@ -404,7 +404,10 @@ pub async fn probe_subscription(
 ///
 /// 注: 刻意不遍历 fable (保持既有行为不变) —— 探测只验证连通性, 用最弱可用的槽位即可。
 /// 代价是只给 fable 槽设了 effort 的订阅, 探测不会带上那个 effort。
-pub fn pick_test_model(row: &SubscriptionRow) -> Option<(String, Option<SubscriptionSlot>)> {
+pub fn pick_test_model(
+    row: &SubscriptionRow,
+    providers: &std::collections::HashMap<String, crate::provider::Provider>,
+) -> Option<(String, Option<SubscriptionSlot>)> {
     // System One 订阅不用四槽: Jev 槽优先, 否则端点 example_models (创建时已快照进 model_discovery)。
     if row.endpoint_protocol == crate::provider::model::EndpointProtocol::Systemone {
         return row
@@ -425,10 +428,9 @@ pub fn pick_test_model(row: &SubscriptionRow) -> Option<(String, Option<Subscrip
             return Some((trimmed.to_string(), Some(slot)));
         }
     }
-    row.model_discovery
-        .example_models
-        .first()
-        .cloned()
+    row.suggested_models(providers)
+        .into_iter()
+        .next()
         .map(|m| (m, None))
 }
 
@@ -462,11 +464,29 @@ mod tests {
     // ---------- pick_test_model 返回槽位 ----------
 
     #[test]
+    fn minimax_probe_defaults_do_not_assume_coding_plan_entitlements() {
+        let providers = crate::provider::loader::load_all().unwrap();
+        let mut row = SubscriptionRow::test_fixture("minimax", "china_paygo");
+        row.model_slots.sonnet.clear();
+        row.model_slots.haiku.clear();
+        row.model_slots.opus.clear();
+        row.model_discovery.example_models = vec!["MiniMax-M2.7".into()];
+        assert_eq!(pick_test_model(&row, &providers), Some(("MiniMax-M3.1-Flash".into(), None)));
+        row.endpoint_id = "china_coding_plan".into();
+        assert_eq!(pick_test_model(&row, &providers), None);
+        row.model_slots.sonnet = "MiniMax-M2.7".into();
+        assert_eq!(pick_test_model(&row, &providers), Some(("MiniMax-M2.7".into(), Some(SubscriptionSlot::Sonnet))));
+        row.model_slots.sonnet.clear();
+        row.is_user_defined = true;
+        assert_eq!(pick_test_model(&row, &providers), Some(("MiniMax-M2.7".into(), None)));
+    }
+
+    #[test]
     fn pick_test_model_returns_sonnet_slot() {
         let row = SubscriptionRow::test_fixture("anthropic", "default");
         // fixture: fable="d", opus="a", sonnet="b", haiku="c"
         assert_eq!(
-            pick_test_model(&row),
+            pick_test_model(&row, &Default::default()),
             Some(("b".to_string(), Some(SubscriptionSlot::Sonnet)))
         );
     }
@@ -476,7 +496,7 @@ mod tests {
         let mut row = SubscriptionRow::test_fixture("anthropic", "default");
         row.model_slots.sonnet = String::new();
         assert_eq!(
-            pick_test_model(&row),
+            pick_test_model(&row, &Default::default()),
             Some(("c".to_string(), Some(SubscriptionSlot::Haiku)))
         );
     }
@@ -486,7 +506,7 @@ mod tests {
         let mut row = SubscriptionRow::test_fixture("anthropic", "default");
         row.model_slots.sonnet = "(pending)".into();
         assert_eq!(
-            pick_test_model(&row),
+            pick_test_model(&row, &Default::default()),
             Some(("c".to_string(), Some(SubscriptionSlot::Haiku)))
         );
     }
@@ -501,7 +521,7 @@ mod tests {
         row.model_slots.haiku = String::new();
         row.model_discovery.example_models = vec!["example-model".into()];
         assert_eq!(
-            pick_test_model(&row),
+            pick_test_model(&row, &Default::default()),
             Some(("example-model".to_string(), None))
         );
     }
@@ -548,8 +568,8 @@ mod tests {
         row.endpoint_protocol = crate::provider::model::EndpointProtocol::Systemone;
         row.model_slots.sonnet = "should-not-be-used".into();
         row.model_discovery.example_models = vec!["clef-flash".into()];
-        assert_eq!(pick_test_model(&row), Some(("clef-flash".to_string(), None)));
+        assert_eq!(pick_test_model(&row, &Default::default()), Some(("clef-flash".to_string(), None)));
         row.model_slots.jev = "clef-pro".into();
-        assert_eq!(pick_test_model(&row), Some(("clef-pro".to_string(), None)));
+        assert_eq!(pick_test_model(&row, &Default::default()), Some(("clef-pro".to_string(), None)));
     }
 }
