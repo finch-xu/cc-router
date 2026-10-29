@@ -1,0 +1,75 @@
+# Cheaper Inference provider
+#
+# 官方文档（核对 2026-10）:
+#   - Anthropic Messages API: https://cheaperinference.com/docs
+#       接口: https://api.cheaperinference.com/v1/messages
+#       请求体格式与 Anthropic 官方一致。同一个 Key 也可用于 /v1/chat/completions 与 /v1/responses。
+#   - 鉴权: Authorization: Bearer <CHEAPER_INFERENCE_API_KEY>
+#       Key 申请: https://cheaperinference.com
+#   - /v1/models 接口: https://api.cheaperinference.com/v1/models
+#       与 messages 同域同前缀, 需 API Key 鉴权（无 key 返回 401）, 本 provider 用它做动态 model_discovery。
+#       公开模型列表（无需 key）: https://api.cheaperinference.com/public/models
+#   - 模型 ID: 不带厂商前缀的短名, 譬如 claude-sonnet-5、gpt-5.4、deepseek-v4-flash
+
+id: cheaperinference
+display_name: "Cheaper Inference"
+icon: ""
+category: aggregator
+description:
+  zh: "Cheaper Inference 模型网关，一个 Key 覆盖 Anthropic / OpenAI / Google / DeepSeek / 智谱等多家模型"
+  zh-Hant: "Cheaper Inference 模型閘道，一個 Key 覆蓋 Anthropic / OpenAI / Google / DeepSeek / 智譜等多家模型"
+  en: "Cheaper Inference model gateway; one key covers models from Anthropic / OpenAI / Google / DeepSeek / Zhipu and more"
+  ja: "Cheaper Inference モデルゲートウェイ。1 つの Key で Anthropic / OpenAI / Google / DeepSeek / Zhipu などのモデルを利用可能"
+homepage: "https://cheaperinference.com"
+docs_url: "https://cheaperinference.com/docs"
+api_key_url: "https://cheaperinference.com"
+
+compatibility: untested
+compatibility_notes:
+
+endpoints:
+  - id: paygo
+    label:
+      zh: "全球 · 按量付费 API"
+      zh-Hant: "全球 · 按量計費 API"
+      en: "Global · Pay-as-you-go API"
+      ja: "グローバル · 従量課金 API"
+    description:
+      zh: "Cheaper Inference 默认端点，按 token 转发到对应底层提供商"
+      zh-Hant: "Cheaper Inference 預設端點，按 token 轉發到對應底層提供商"
+      en: "Cheaper Inference's default endpoint; forwards requests to the underlying providers, billed per token"
+      ja: "Cheaper Inference の既定エンドポイント。トークン従量課金で下層のプロバイダへ転送"
+    base_url: "https://api.cheaperinference.com"
+    messages_path: "/v1/messages"
+    region: global
+    billing: pay_as_you_go
+
+default_endpoint: paygo
+
+auth:
+  type: api_key
+  header_name: "Authorization"
+  header_format: bearer
+
+required_headers:
+  anthropic-version: "2023-06-01"
+
+forward_headers: []
+
+model_discovery:
+  # Cheaper Inference /v1/models 接口, 与 messages 同域同前缀, 需 Key
+  enabled: true
+  path: "/v1/models"
+  cache_ttl_hours: 24
+  # 来源: 公开模型列表 /public/models（2026-10-28 核对，仅作填写示例）
+  # 排序原则: Claude 系列优先（cc-router 主场景）> 其他主流模型
+  example_models:
+    - "claude-opus-5.5"
+    - "claude-sonnet-5.5"
+    - "claude-sonnet-5"
+    - "claude-haiku-4.5"
+    - "gpt-5.4"
+    - "gemini-3.5-flash"
+    - "deepseek-v4-flash"
+    - "glm-5.3"
+    - "kimi-k3"
