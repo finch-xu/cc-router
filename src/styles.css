@@ -463,7 +463,7 @@ input, select, textarea { font: inherit; color: inherit; }
  * 侧栏为原生红绿灯 / 自绘三键让出这段高度; 右侧 macOS 不让 (用户明确要求内容顶到边),
  * Windows / Linux 的卡片页让出, 否则右上角三键会盖住 .page-actions 里的按钮, 误点即关窗。 */
 :root { --titlebar-inset: 32px; }
-html[data-platform="macos"] { --titlebar-inset: 28px; }
+html[data-platform="macos"] { --titlebar-inset: calc(28px / var(--ui-zoom, 1)); }
 html[data-platform="web"] { --titlebar-inset: 0px; }
 .window-chrome {
   position: fixed;
@@ -961,6 +961,15 @@ html:not([data-platform="macos"]) .main.flush { padding-top: 0; }
 .table td.mono { font-size: 12px; }
 .table td.mono.muted { color: var(--ink-3); }
 .table td.mono.strong { color: var(--ink-2); font-weight: 500; }
+
+/* 请求日志有十列: 窄窗口只滚动表格, 避免被 .main 的 overflow-x:clip 截掉右侧。
+ * 列宽合计 1100px; fixed 布局阻止任意长的模型名 / 厂商名撑大整张表。 */
+.request-log-scroll { max-width: 100%; overflow-x: auto; border-radius: inherit; }
+.request-log-scroll:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.request-log-table { min-width: 1100px; table-layout: fixed; }
+.request-log-table th, .request-log-table td { padding-left: 10px; padding-right: 10px; overflow-wrap: anywhere; }
+.request-log-table .tnum { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.request-log-name { display: block; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
 /* === Routing diagram === */
 .diagram {
@@ -1485,6 +1494,8 @@ html:not([data-platform="macos"]) .main.flush { padding-top: 0; }
   align-items: start;
 }
 .setting-row:first-child { padding-top: 0; }
+.ui-zoom-controls { display: flex; align-items: center; gap: 8px; flex-shrink: 0; }
+.ui-zoom-controls > [role="combobox"] { width: 150px; }
 .setting-row:last-child { border-bottom: none; padding-bottom: 0; }
 .setting-row .label-col {
   font-size: 13px;

@@ -7,6 +7,7 @@ import { I18nProvider } from "@/i18n";
 import { WebAuthGate } from "@/components/layout/WebAuthGate";
 import { SketchDefs } from "@/components/sketch/SketchDefs";
 import { ThemeProvider } from "@/hooks/useTheme";
+import { initializeUiZoom, UiZoomProvider } from "@/hooks/useUiZoom";
 import { applyPlatformAttr } from "@/lib/platform";
 import { runtime } from "@/runtime";
 import "./fonts";
@@ -33,20 +34,24 @@ const queryClient = new QueryClient({
   },
 });
 
-ReactDOM.createRoot(document.getElementById("root")!).render(
-  <React.StrictMode>
-    {/* 手绘抖动滤镜: 放在所有页面之外, 登录门禁 / 免责声明页里的 Logo 也能引用 */}
-    <SketchDefs />
-    <QueryClientProvider client={queryClient}>
-      <ThemeProvider>
-        <I18nProvider>
-          <WebAuthGate>
-            <Router>
-              <App />
-            </Router>
-          </WebAuthGate>
-        </I18nProvider>
-      </ThemeProvider>
-    </QueryClientProvider>
-  </React.StrictMode>,
-);
+void initializeUiZoom().then((initialZoom) => {
+  ReactDOM.createRoot(document.getElementById("root")!).render(
+    <React.StrictMode>
+      {/* 手绘抖动滤镜: 放在所有页面之外, 登录门禁 / 免责声明页里的 Logo 也能引用 */}
+      <SketchDefs />
+      <QueryClientProvider client={queryClient}>
+        <UiZoomProvider initial={initialZoom}>
+          <ThemeProvider>
+            <I18nProvider>
+              <WebAuthGate>
+                <Router>
+                  <App />
+                </Router>
+              </WebAuthGate>
+            </I18nProvider>
+          </ThemeProvider>
+        </UiZoomProvider>
+      </QueryClientProvider>
+    </React.StrictMode>,
+  );
+});

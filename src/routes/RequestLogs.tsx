@@ -295,95 +295,105 @@ export function RequestLogsPage() {
 
       {items.length > 0 && (
         <div className="card">
-          <table className="table">
-            <thead>
-              <tr>
-                <th style={{ width: 150 }}>{t("requestLogs.col.time")}</th>
-                <th style={{ width: 110 }}>{t("requestLogs.col.status")}</th>
-                <th style={{ width: 130 }}>{t("requestLogs.col.client")}</th>
-                <th style={{ width: 130 }}>{t("requestLogs.col.virtualModel")}</th>
-                <th style={{ width: 200 }}>{t("requestLogs.col.realModel")}</th>
-                <th>{t("requestLogs.col.responseModel")}</th>
-                <th style={{ width: 140 }}>{t("requestLogs.col.provider")}</th>
-                <th style={{ width: 70, textAlign: "right" }}>{t("requestLogs.col.tokensIn")}</th>
-                <th style={{ width: 70, textAlign: "right" }}>{t("requestLogs.col.tokensOut")}</th>
-                <th style={{ width: 90, textAlign: "right" }}>{t("requestLogs.col.latency")}</th>
-              </tr>
-            </thead>
-            <tbody>
-              {items.map((row) => {
-                const lat = (row.total_latency_ms ?? 0) / 1000;
-                const provider = providerOf(row.provider_id);
-                const status = STATUS_TONE[row.status];
-                const isError = row.status !== "success";
-                return (
-                  <tr
-                    key={row.id}
-                    onClick={() => setActiveRequest(row)}
-                    style={{ cursor: "pointer" }}
-                  >
-                    <td className="mono muted">{fmtTime(row.timestamp)}</td>
-                    <td>
-                      <div style={{ display: "inline-flex", alignItems: "center", gap: 4 }}>
-                        <span className={`pill ${status.tone}`}>
-                          <span className="dot" />
-                          {t(status.labelKey)}
-                        </span>
-                        {isError && row.http_status != null && (
-                          <span className="pill tag mono">{row.http_status}</span>
-                        )}
-                        {row.is_streaming && (
-                          <span className="pill tag mono" title={t("requestLogs.sse")}>
-                            SSE
+          <div className="request-log-scroll" role="region" aria-label={t("logs.tab.requests")} tabIndex={0}>
+            <table className="table request-log-table">
+              <thead>
+                <tr>
+                  <th style={{ width: 110 }}>{t("requestLogs.col.time")}</th>
+                  <th style={{ width: 120 }}>{t("requestLogs.col.status")}</th>
+                  <th style={{ width: 105 }}>{t("requestLogs.col.client")}</th>
+                  <th style={{ width: 95 }}>{t("requestLogs.col.virtualModel")}</th>
+                  <th style={{ width: 170 }}>{t("requestLogs.col.realModel")}</th>
+                  <th style={{ width: 170 }}>{t("requestLogs.col.responseModel")}</th>
+                  <th style={{ width: 110 }}>{t("requestLogs.col.provider")}</th>
+                  <th style={{ width: 70, textAlign: "right" }}>{t("requestLogs.col.tokensIn")}</th>
+                  <th style={{ width: 70, textAlign: "right" }}>{t("requestLogs.col.tokensOut")}</th>
+                  <th style={{ width: 80, textAlign: "right" }}>{t("requestLogs.col.latency")}</th>
+                </tr>
+              </thead>
+              <tbody>
+                {items.map((row) => {
+                  const lat = (row.total_latency_ms ?? 0) / 1000;
+                  const latencyText = row.total_latency_ms != null ? `${lat.toFixed(2)}s` : "-";
+                  const inputTokensText = fmtNum(row.input_tokens);
+                  const outputTokensText = fmtNum(row.output_tokens);
+                  const provider = providerOf(row.provider_id);
+                  const providerLabel = provider?.display_name ?? customProviderLabel(row.provider_id, t) ?? row.provider_id;
+                  const status = STATUS_TONE[row.status];
+                  const isError = row.status !== "success";
+                  return (
+                    <tr
+                      key={row.id}
+                      onClick={() => setActiveRequest(row)}
+                      style={{ cursor: "pointer" }}
+                    >
+                      <td className="mono muted">{fmtTime(row.timestamp)}</td>
+                      <td>
+                        <div style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: 4 }}>
+                          <span className={`pill ${status.tone}`}>
+                            <span className="dot" />
+                            {t(status.labelKey)}
                           </span>
-                        )}
-                        {row.tool_use_count != null && row.tool_use_count > 0 && (
-                          <span
-                            className="pill tag mono"
-                            title={t("requestLogs.col.toolsHint", { count: row.tool_use_count })}
-                          >
-                            🔧 {row.tool_use_count}
-                          </span>
-                        )}
-                      </div>
-                    </td>
-                    <td>
-                      <ClientToolBadge
-                        toolId={row.client_tool}
-                        userAgent={row.client_user_agent}
-                      />
-                    </td>
-                    <td className="mono">{row.virtual_model_name}</td>
-                    <td className="mono strong">{row.real_model_name}</td>
-                    <td className="mono muted">{row.response_model_name ?? "—"}</td>
-                    <td>
-                      <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                        <ProviderLogo
-                          iconId={provider?.icon ?? providerIconId(row.provider_id)}
-                          size={18}
-                          iconSize={12}
+                          {isError && row.http_status != null && (
+                            <span className="pill tag mono">{row.http_status}</span>
+                          )}
+                          {row.is_streaming && (
+                            <span className="pill tag mono" title={t("requestLogs.sse")}>
+                              SSE
+                            </span>
+                          )}
+                          {row.tool_use_count != null && row.tool_use_count > 0 && (
+                            <span
+                              className="pill tag mono"
+                              title={t("requestLogs.col.toolsHint", { count: row.tool_use_count })}
+                            >
+                              🔧 {row.tool_use_count}
+                            </span>
+                          )}
+                        </div>
+                      </td>
+                      <td>
+                        <ClientToolBadge
+                          toolId={row.client_tool}
+                          userAgent={row.client_user_agent}
                         />
-                        <span style={{ fontSize: 12.5 }}>
-                          {provider?.display_name ??
-                            customProviderLabel(row.provider_id, t) ??
-                            row.provider_id}
-                        </span>
-                      </div>
-                    </td>
-                    <td className="mono tnum muted" style={{ textAlign: "right" }}>
-                      {fmtNum(row.input_tokens)}
-                    </td>
-                    <td className="mono tnum strong" style={{ textAlign: "right" }}>
-                      {fmtNum(row.output_tokens)}
-                    </td>
-                    <td className="mono tnum" style={{ textAlign: "right" }}>
-                      {row.total_latency_ms != null ? `${lat.toFixed(2)}s` : "-"}
-                    </td>
-                  </tr>
-                );
-              })}
-            </tbody>
-          </table>
+                      </td>
+                      <td className="mono">
+                        <span className="request-log-name" title={row.virtual_model_name}>{row.virtual_model_name}</span>
+                      </td>
+                      <td className="mono strong">
+                        <span className="request-log-name" title={row.real_model_name}>{row.real_model_name}</span>
+                      </td>
+                      <td className="mono muted">
+                        <span className="request-log-name" title={row.response_model_name}>{row.response_model_name ?? "—"}</span>
+                      </td>
+                      <td>
+                        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                          <ProviderLogo
+                            iconId={provider?.icon ?? providerIconId(row.provider_id)}
+                            size={18}
+                            iconSize={12}
+                          />
+                          <span className="request-log-name" title={providerLabel} style={{ fontSize: 12.5 }}>
+                            {providerLabel}
+                          </span>
+                        </div>
+                      </td>
+                      <td className="mono tnum muted" title={inputTokensText} style={{ textAlign: "right" }}>
+                        {inputTokensText}
+                      </td>
+                      <td className="mono tnum strong" title={outputTokensText} style={{ textAlign: "right" }}>
+                        {outputTokensText}
+                      </td>
+                      <td className="mono tnum" title={latencyText} style={{ textAlign: "right" }}>
+                        {latencyText}
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
         </div>
       )}
 

@@ -16,27 +16,19 @@
 use tauri::{LogicalSize, Manager};
 use tracing::{info, warn};
 
-/// 理想尺寸下限 (CSS px): 笔记本与小屏上的目标尺寸。宽度按请求日志表格 (十列) 在
-/// 侧边栏之外完整放下所需反推 (2026-10 由 1200 提到 1360; 原先 1200 下右侧几列会被裁掉)。
-const PREFERRED_W: f64 = 1360.0;
+/// 默认宽度 (逻辑像素): 90% 缩放时能容纳侧栏与 1100 CSS px 的请求日志表格。
+/// 大屏也以此宽度启动; 用户仍可手动拉宽, 窄屏 / 更大缩放由表格内部横向滚动兜底。
+const PREFERRED_W: f64 = 1280.0;
 const PREFERRED_H: f64 = 800.0;
-/// 理想尺寸上限 (CSS px): 外接大屏放大的封顶, 防止超宽屏出现巨型窗口。
-const MAX_W: f64 = 1600.0;
+/// 高度保留原有的大屏增长策略和封顶 (逻辑像素)。
 const MAX_H: f64 = 1000.0;
-/// 大屏放大时理想尺寸占可用区的比例 (高度比例略高, 维持接近 16:10 的观感)。
-const GROW_W: f64 = 0.62;
 const GROW_H: f64 = 0.70;
-/// 绝对下限 (CSS px): 侧边栏死宽 220px + 多列表格开始挤压的临界点。
+/// 绝对下限 (逻辑像素): 保留既有窗口下限, 内容密度由用户的页面缩放单独控制。
 const FLOOR_W: f64 = 960.0;
 const FLOOR_H: f64 = 560.0;
 /// 可用区占比: 留一圈呼吸空间, 让用户看得见桌面边缘。
 const WORK_AREA_RATIO: f64 = 0.92;
-/// Windows 低缩放下的 webview 放大倍数。
-const WINDOWS_UI_ZOOM: f64 = 1.08;
-/// OS 缩放低于该值才补偿字号, 见 `resolve_ui_zoom_for`。
-const ZOOM_COMPENSATION_BELOW_SCALE: f64 = 1.25;
-
-/// 窗口几何计算结果, 单位均为逻辑像素 (即 CSS px × ui_zoom)。
+/// 窗口几何计算结果, 单位均为系统逻辑像素, 独立于页面缩放。
 #[derive(Debug, Clone, Copy, PartialEq)]
 struct Geometry {
     width: f64,
@@ -45,41 +37,20 @@ struct Geometry {
     min_height: f64,
 }
 
-/// Windows 在 100% 缩放下微软雅黑 12px 以下会触发劣质 hinting, 字形发虚、笔画粘连;
-/// 而 OS 缩放 >=125% 时系统已经把物理像素补上了, 再叠加 zoom 反而过大。
-///
-/// 这个 scale 感知顺带消解了一处约束冲突: 放大 webview 会压缩 CSS 视口、需要抬高
-/// 最小窗口宽度, 而最窄的屏幕恰恰是高缩放屏 (1080p@175% 逻辑宽仅 1097px)。
-/// 按 scale 门控后, 两个约束永不同时触发。
-///
-/// `is_windows` 显式传入而非直接读 `cfg!`, 是为了让阈值逻辑在任何平台都可单测。
-fn resolve_ui_zoom_for(is_windows: bool, scale_factor: f64) -> f64 {
-    if is_windows && scale_factor < ZOOM_COMPENSATION_BELOW_SCALE {
-        WINDOWS_UI_ZOOM
-    } else {
-        1.0
-    }
-}
-
-fn resolve_ui_zoom(scale_factor: f64) -> f64 {
-    resolve_ui_zoom_for(cfg!(target_os = "windows"), scale_factor)
-}
-
 /// 纯计算, 无 Tauri 依赖。
 ///
-/// `avail_*` 是显示器可用区的逻辑像素尺寸; `ui_zoom` 是 webview 页面缩放倍数 ——
-/// 视口被 zoom 压缩, 所以窗口像素要按 zoom 放大才能维持同样的 CSS px 布局宽度。
-fn compute_geometry(avail_w: f64, avail_h: f64, ui_zoom: f64) -> Geometry {
-    // 理想尺寸: 笔记本上恒为 1360x800; 外接大屏按可用区比例增长, 封顶 1600x1000
-    let pref_w = (avail_w * GROW_W).clamp(PREFERRED_W, MAX_W);
+/// `avail_*` 是显示器可用区的逻辑像素尺寸。页面缩放由前端在挂载前恢复,
+/// 不再参与窗口尺寸计算: 缩小界面应增加同一窗口中的可见内容, 而非把窗口一起缩小。
+fn compute_geometry(avail_w: f64, avail_h: f64) -> Geometry {
+    // 默认宽度固定为 1280; 高度在大屏上按可用区增长, 封顶 1000。
     let pref_h = (avail_h * GROW_H).clamp(PREFERRED_H, MAX_H);
 
     // 可用区比下限还小时把下限压到可用区, 保证窗口永远不会大于屏幕
-    let min_width = (FLOOR_W * ui_zoom).min(avail_w);
-    let min_height = (FLOOR_H * ui_zoom).min(avail_h);
+    let min_width = FLOOR_W.min(avail_w);
+    let min_height = FLOOR_H.min(avail_h);
     // .max(min_*) 保证 clamp 的 min <= max, 否则极端尺寸下会 panic
-    let max_w = (pref_w * ui_zoom).max(min_width);
-    let max_h = (pref_h * ui_zoom).max(min_height);
+    let max_w = PREFERRED_W.max(min_width);
+    let max_h = pref_h.max(min_height);
 
     Geometry {
         width: (avail_w * WORK_AREA_RATIO).clamp(min_width, max_w),
@@ -117,8 +88,7 @@ fn resize_to_work_area<R: tauri::Runtime>(win: &tauri::WebviewWindow<R>) {
         return;
     }
 
-    let ui_zoom = resolve_ui_zoom(scale);
-    let geo = compute_geometry(avail_w, avail_h, ui_zoom);
+    let geo = compute_geometry(avail_w, avail_h);
 
     // 顺序很关键: tauri.conf.json 的 minWidth/minHeight 会钳制 set_size,
     // 必须先把下限放开, 否则小屏上根本缩不下去。
@@ -128,19 +98,11 @@ fn resize_to_work_area<R: tauri::Runtime>(win: &tauri::WebviewWindow<R>) {
     if let Err(e) = win.set_size(LogicalSize::new(geo.width, geo.height)) {
         warn!(error = %e, "set_size 失败");
     }
-    if ui_zoom != 1.0 {
-        // 页面级缩放 (WebView2 ZoomFactor), 不是 CSS zoom —— 它会重算 CSS 视口,
-        // 所以 100vh 仍等于窗口高度、position:fixed 仍贴边。
-        if let Err(e) = win.set_zoom(ui_zoom) {
-            warn!(error = %e, "set_zoom 失败");
-        }
-    }
 
     info!(
         avail_w,
         avail_h,
         scale,
-        ui_zoom,
         width = geo.width,
         height = geo.height,
         "窗口几何已按显示器可用区自适应"
@@ -177,8 +139,8 @@ mod tests {
         );
     }
 
-    fn check(label: &str, avail: (f64, f64), zoom: f64, want: (f64, f64)) {
-        let geo = compute_geometry(avail.0, avail.1, zoom);
+    fn check(label: &str, avail: (f64, f64), want: (f64, f64)) {
+        let geo = compute_geometry(avail.0, avail.1);
         assert_close(geo.width, want.0, &format!("{label} width"));
         assert_close(geo.height, want.1, &format!("{label} height"));
         // 窗口永远不得大于可用区, 这是本模块存在的全部理由
@@ -193,68 +155,52 @@ mod tests {
     }
 
     #[test]
+    fn page_zoom_does_not_shrink_or_enlarge_the_window() {
+        let geo = compute_geometry(1920.0, 1040.0);
+        assert_close(geo.width, 1280.0, "window width independent of zoom");
+        assert_close(geo.height, 800.0, "window height independent of zoom");
+    }
+
+    #[test]
     fn shrinks_on_small_screens() {
         // 1080p@175%: 逻辑仅 1097x617, 旧配置的 minHeight=640 在这里根本装不下
-        check("1080p@175%", (1097.0, 590.0), 1.0, (1009.24, 560.0));
+        check("1080p@175%", (1097.0, 590.0), (1009.24, 560.0));
         // 1080p@150%: 纯 WORK_AREA_RATIO 收缩
-        check("1080p@150%", (1280.0, 680.0), 1.0, (1177.6, 625.6));
+        check("1080p@150%", (1280.0, 680.0), (1177.6, 625.6));
         // MacBook Air 13": 逻辑 1280x832 扣掉菜单栏与 Dock, 旧配置的 800 高会溢出
-        check("MBA13", (1280.0, 737.0), 1.0, (1177.6, 678.04));
+        check("MBA13", (1280.0, 737.0), (1177.6, 678.04));
     }
 
     #[test]
     fn caps_at_preferred_on_laptops() {
         // MacBook Pro 14": 可用区够大但未达大屏阈值, 恒定理想尺寸
-        check("MBP14", (1512.0, 887.0), 1.0, (1360.0, 800.0));
+        check("MBP14", (1512.0, 887.0), (1280.0, 800.0));
     }
 
     #[test]
-    fn grows_on_large_monitors() {
-        // 5K 27": GROW 生效但未触 MAX
-        check("5K27", (2560.0, 1345.0), 1.0, (1587.2, 941.5));
-        // 4K 32": 宽高双双触 MAX 封顶
-        check("4K32", (3072.0, 1688.0), 1.0, (1600.0, 1000.0));
+    fn keeps_compact_width_while_height_grows_on_large_monitors() {
+        // 5K 27": 只增长高度, 不自动加宽窗口
+        check("5K27", (2560.0, 1345.0), (1280.0, 941.5));
+        // 4K 32": 高度封顶, 宽度仍为 1280
+        check("4K32", (3072.0, 1688.0), (1280.0, 1000.0));
     }
 
     #[test]
-    fn accounts_for_windows_zoom() {
-        // zoom 把窗口像素放大, 使 CSS 视口回到 1360x800
-        check("1080p@100% Win", (1920.0, 1040.0), 1.08, (1468.8, 864.0));
-        let geo = compute_geometry(1920.0, 1040.0, 1.08);
-        assert_close(geo.width / 1.08, 1360.0, "CSS 视口宽");
-        assert_close(geo.height / 1.08, 800.0, "CSS 视口高");
-
-        // zoom 与可用区收缩并存
-        check("1366x768 Win", (1366.0, 728.0), 1.08, (1256.72, 669.76));
-        // 超宽屏: MAX 与 zoom 复合
-        check("ultrawide Win", (3440.0, 1400.0), 1.08, (1728.0, 1058.4));
-
-        // 下限也要跟着 zoom 抬高, 否则 CSS 视口会跌破 FLOOR_W 的布局底线
-        let geo = compute_geometry(1920.0, 1040.0, 1.08);
-        assert_close(geo.min_width, FLOOR_W * 1.08, "min_width");
-        assert_close(geo.min_height, FLOOR_H * 1.08, "min_height");
+    fn windows_work_areas_keep_the_same_geometry_rules() {
+        check("1080p@100% Win", (1920.0, 1040.0), (1280.0, 800.0));
+        check("1366x768 Win", (1366.0, 728.0), (1256.72, 669.76));
+        check("ultrawide Win", (3440.0, 1400.0), (1280.0, 980.0));
+        let geo = compute_geometry(1920.0, 1040.0);
+        assert_close(geo.min_width, 960.0, "min_width");
+        assert_close(geo.min_height, 560.0, "min_height");
     }
 
     #[test]
     fn never_exceeds_tiny_work_area() {
         // 可用区小于 FLOOR 时下限被压到可用区, clamp 的 min<=max 仍成立, 不 panic
-        check("极端小屏", (800.0, 500.0), 1.0, (800.0, 500.0));
-        let geo = compute_geometry(800.0, 500.0, 1.0);
+        check("极端小屏", (800.0, 500.0), (800.0, 500.0));
+        let geo = compute_geometry(800.0, 500.0);
         assert_close(geo.min_width, 800.0, "min_width 被压到可用区");
         assert_close(geo.min_height, 500.0, "min_height 被压到可用区");
-    }
-
-    #[test]
-    fn zoom_only_on_low_scale_windows() {
-        // Windows 100% / 未知低缩放 → 补偿
-        assert_eq!(resolve_ui_zoom_for(true, 1.0), WINDOWS_UI_ZOOM);
-        assert_eq!(resolve_ui_zoom_for(true, 1.24), WINDOWS_UI_ZOOM);
-        // Windows 125% 起 OS 已补足物理像素 → 不再叠加
-        assert_eq!(resolve_ui_zoom_for(true, 1.25), 1.0);
-        assert_eq!(resolve_ui_zoom_for(true, 1.5), 1.0);
-        assert_eq!(resolve_ui_zoom_for(true, 1.75), 1.0);
-        // 非 Windows 一律不动, 保证 macOS / Linux 像素级不变
-        assert_eq!(resolve_ui_zoom_for(false, 1.0), 1.0);
-        assert_eq!(resolve_ui_zoom_for(false, 2.0), 1.0);
     }
 }

@@ -14,7 +14,8 @@
     "icon:macos": "node scripts/make-macos-icon.mjs",
     "check:i18n": "node scripts/check-i18n.mjs",
     "check:schedule": "node scripts/check-slot-schedule.mjs",
-    "check:onboarding": "node scripts/check-onboarding.mjs"
+    "check:onboarding": "node scripts/check-onboarding.mjs",
+    "check:ui-zoom": "node scripts/check-ui-zoom.mjs"
   },
   "dependencies": {
     "@codemirror/lang-json": "^6.0.2",

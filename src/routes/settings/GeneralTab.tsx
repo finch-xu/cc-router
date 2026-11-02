@@ -8,6 +8,9 @@ import {
 } from "@/components/ui/select";
 import { useT, type LanguagePref } from "@/i18n";
 import { useTheme, type ColorMode } from "@/hooks/useTheme";
+import { useUiZoom } from "@/hooks/useUiZoom";
+import { DEFAULT_UI_ZOOM, UI_ZOOM_OPTIONS, type UiZoomPercent } from "@/lib/uiZoom";
+import { runtime } from "@/runtime";
 import { THEMES } from "@/themes";
 import type { UpdateSource } from "@/types";
 import type { SettingsForm } from "./useSettingsForm";
@@ -20,6 +23,7 @@ const COLOR_MODES: readonly ColorMode[] = ["system", "light", "dark"];
 export function GeneralTab({ form }: { form: SettingsForm }) {
   const { t } = useT();
   const { mode, setMode, themeId, setThemeId } = useTheme();
+  const zoom = useUiZoom();
   const wizard = useWizard();
   const onboarding = useOnboardingState();
 
@@ -59,6 +63,7 @@ export function GeneralTab({ form }: { form: SettingsForm }) {
             <button
               type="button"
               className="btn sm"
+              style={{ justifySelf: "start" }}
               onClick={() => {
                 // 还没走完: 接着上次的进度 (清掉会丢下窗口建的订阅); 已完成: 从头再走一遍
                 if (onboarding.data?.completed) wizard.reset();
@@ -162,6 +167,40 @@ export function GeneralTab({ form }: { form: SettingsForm }) {
               ))}
             </div>
           </div>
+          {runtime.kind === "desktop" && (
+            <div className="setting-row">
+              <div className="label-col">
+                {t("settings.appearance.zoom.label")}
+                <div className="desc" id="ui-zoom-description">{t("settings.appearance.zoom.desc")}</div>
+                {zoom.error && (
+                  <div className="desc" role="alert" style={{ color: "var(--err)" }}>
+                    {t(zoom.error === "apply" ? "settings.appearance.zoom.applyFailed" : "settings.appearance.zoom.saveFailed")}
+                  </div>
+                )}
+              </div>
+              <div className="ui-zoom-controls" aria-busy={zoom.pending}>
+                <Select
+                  value={zoom.percent === null ? "" : String(zoom.percent)}
+                  onValueChange={(value) => void zoom.change(Number(value) as UiZoomPercent)}
+                  disabled={zoom.pending}
+                >
+                  <SelectTrigger aria-label={t("settings.appearance.zoom.label")} aria-describedby="ui-zoom-description">
+                    <SelectValue placeholder={t("settings.appearance.zoom.unapplied")} />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {UI_ZOOM_OPTIONS.map((percent) => (
+                      <SelectItem key={percent} value={String(percent)}>
+                        {percent === DEFAULT_UI_ZOOM ? t("settings.appearance.zoom.default", { percent }) : `${percent}%`}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+                <button type="button" className="btn sm" disabled={zoom.pending} onClick={() => void zoom.reset()}>
+                  {t("settings.appearance.zoom.reset")}
+                </button>
+              </div>
+            </div>
+          )}
         </div>
       </div>
     </>
