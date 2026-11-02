@@ -7,7 +7,7 @@
 <p align="center">
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-blue.svg?style=flat-square" alt="License: MIT"></a>
   <img src="https://img.shields.io/badge/Tauri-2-FFC131?style=flat-square&logo=tauri&logoColor=white" alt="Tauri 2">
-  <img src="https://img.shields.io/badge/Rust-1.90+-DEA584?style=flat-square&logo=rust&logoColor=white" alt="Rust 1.90+">
+  <img src="https://img.shields.io/badge/Rust-1.94+-DEA584?style=flat-square&logo=rust&logoColor=white" alt="Rust 1.94+">
   <img src="https://img.shields.io/badge/React-19-61DAFB?style=flat-square&logo=react&logoColor=white" alt="React 19">
   <img src="https://img.shields.io/badge/TypeScript-5-3178C6?style=flat-square&logo=typescript&logoColor=white" alt="TypeScript 5">
   <img src="https://img.shields.io/badge/Tailwind-4-06B6D4?style=flat-square&logo=tailwindcss&logoColor=white" alt="Tailwind CSS">
@@ -414,7 +414,7 @@ CC からのリクエストはこのマッピングに従って転送される�
 - Tailwind 4
 - React 19
 
-前提条件: Node.js ≥ 20（pnpm 推奨）、Rust ≥ 1.90（rustup の最新 stable 推奨）、Xcode Command Line Tools（macOS）。
+前提条件: Node.js ≥ 22.22（pnpm 推奨）、Rust ≥ 1.94（rustup の最新 stable 推奨）、Xcode Command Line Tools（macOS）。
 
 ```bash
 pnpm install
@@ -446,7 +446,7 @@ Tauri の Windows バンドルは MSVC に依存しており、CI も `x86_64-pc
 
 ```powershell
 rustup show          # active toolchain の末尾が -msvc であること
-rustc --version      # 1.90 以上であること
+rustc --version      # 1.94 以上であること
 ```
 
 **2. Visual Studio Build Tools が必要**

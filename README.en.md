@@ -7,7 +7,7 @@
 <p align="center">
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-blue.svg?style=flat-square" alt="License: MIT"></a>
   <img src="https://img.shields.io/badge/Tauri-2-FFC131?style=flat-square&logo=tauri&logoColor=white" alt="Tauri 2">
-  <img src="https://img.shields.io/badge/Rust-1.90+-DEA584?style=flat-square&logo=rust&logoColor=white" alt="Rust 1.90+">
+  <img src="https://img.shields.io/badge/Rust-1.94+-DEA584?style=flat-square&logo=rust&logoColor=white" alt="Rust 1.94+">
   <img src="https://img.shields.io/badge/React-19-61DAFB?style=flat-square&logo=react&logoColor=white" alt="React 19">
   <img src="https://img.shields.io/badge/TypeScript-5-3178C6?style=flat-square&logo=typescript&logoColor=white" alt="TypeScript 5">
   <img src="https://img.shields.io/badge/Tailwind-4-06B6D4?style=flat-square&logo=tailwindcss&logoColor=white" alt="Tailwind CSS">
@@ -414,7 +414,7 @@ Example: subscription A = GLM-5 / MiniMax-2.7 / DeepSeek-Flash; subscription B =
 - Tailwind 4
 - React 19
 
-Prerequisites: Node.js ≥ 20 (pnpm recommended), Rust ≥ 1.90 (the latest stable via rustup is recommended), Xcode Command Line Tools (macOS).
+Prerequisites: Node.js ≥ 22.22 (pnpm recommended), Rust ≥ 1.94 (the latest stable via rustup is recommended), Xcode Command Line Tools (macOS).
 
 ```bash
 pnpm install
@@ -446,7 +446,7 @@ Tauri's Windows bundling depends on MSVC, and CI builds with `x86_64-pc-windows-
 
 ```powershell
 rustup show          # the active toolchain should end with -msvc
-rustc --version      # should be >= 1.90
+rustc --version      # should be >= 1.94
 ```
 
 **2. Visual Studio Build Tools are required**

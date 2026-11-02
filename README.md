@@ -7,7 +7,7 @@
 <p align="center">
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-blue.svg?style=flat-square" alt="License: MIT"></a>
   <img src="https://img.shields.io/badge/Tauri-2-FFC131?style=flat-square&logo=tauri&logoColor=white" alt="Tauri 2">
-  <img src="https://img.shields.io/badge/Rust-1.90+-DEA584?style=flat-square&logo=rust&logoColor=white" alt="Rust 1.90+">
+  <img src="https://img.shields.io/badge/Rust-1.94+-DEA584?style=flat-square&logo=rust&logoColor=white" alt="Rust 1.94+">
   <img src="https://img.shields.io/badge/React-19-61DAFB?style=flat-square&logo=react&logoColor=white" alt="React 19">
   <img src="https://img.shields.io/badge/TypeScript-5-3178C6?style=flat-square&logo=typescript&logoColor=white" alt="TypeScript 5">
   <img src="https://img.shields.io/badge/Tailwind-4-06B6D4?style=flat-square&logo=tailwindcss&logoColor=white" alt="Tailwind CSS">
@@ -414,7 +414,7 @@ CC 请求来了就按映射转发，不用再频繁改 `~/.claude/settings.json`
 - Tailwind 4
 - React 19
 
-依赖：Node.js ≥ 20（推荐 pnpm），Rust ≥ 1.90（建议直接用 rustup 最新 stable），Xcode CLT（macOS）。
+依赖：Node.js ≥ 22.22（推荐 pnpm），Rust ≥ 1.94（建议直接用 rustup 最新 stable），Xcode CLT（macOS）。
 
 ```bash
 pnpm install
@@ -446,7 +446,7 @@ Tauri 在 Windows 上打包依赖 MSVC，CI 用的也是 `x86_64-pc-windows-msvc
 
 ```powershell
 rustup show          # active toolchain 应带 -msvc 后缀
-rustc --version      # 应 ≥ 1.90
+rustc --version      # 应 ≥ 1.94
 ```
 
 **2. 需要 Visual Studio Build Tools**

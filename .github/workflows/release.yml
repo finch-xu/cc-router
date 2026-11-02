@@ -19,12 +19,13 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7.0.1
 
       - name: Setup Node
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v7.1.0
         with:
-          node-version: 22
+          node-version: "24"
+          check-latest: true
 
       - name: zh.md must be written
         run: node scripts/release-body.mjs --check "${{ github.ref_name }}"
@@ -38,17 +39,18 @@ jobs:
       RELEASE_TAG: ${{ github.ref_name }}
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7.0.1
 
       - name: Setup pnpm
-        uses: pnpm/action-setup@v4
+        uses: pnpm/action-setup@v6.1.0
         with:
           version: 9
 
       - name: Setup Node
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v7.1.0
         with:
-          node-version: 22
+          node-version: "24"
+          check-latest: true
           cache: pnpm
 
       - name: Setup Rust (aarch64-apple-darwin)
@@ -57,7 +59,7 @@ jobs:
           targets: aarch64-apple-darwin
 
       - name: Cache Cargo
-        uses: Swatinem/rust-cache@v2
+        uses: Swatinem/rust-cache@v2.9.3
         with:
           workspaces: src-tauri
           key: macos-aarch64
@@ -92,7 +94,7 @@ jobs:
           echo "All 8 signing & notarization secrets present."
 
       - name: Build, sign & notarize
-        uses: tauri-apps/tauri-action@v0
+        uses: tauri-apps/tauri-action@action-v1.0.0
         env:
           APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
           APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
@@ -137,7 +139,7 @@ jobs:
           done
 
       - name: Upload .sig artifact (for manifest job)
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7.0.2
         with:
           name: sig-macos
           path: src-tauri/target/aarch64-apple-darwin/release/bundle/macos/*.app.tar.gz.sig
@@ -145,7 +147,7 @@ jobs:
           retention-days: 1
 
       - name: Upload to draft release
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@v3.0.3
         with:
           tag_name: ${{ env.RELEASE_TAG }}
           draft: true
@@ -163,17 +165,18 @@ jobs:
       RELEASE_TAG: ${{ github.ref_name }}
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7.0.1
 
       - name: Setup pnpm
-        uses: pnpm/action-setup@v4
+        uses: pnpm/action-setup@v6.1.0
         with:
           version: 9
 
       - name: Setup Node
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v7.1.0
         with:
-          node-version: 22
+          node-version: "24"
+          check-latest: true
           cache: pnpm
 
       - name: Setup Rust (x86_64-apple-darwin)
@@ -182,7 +185,7 @@ jobs:
           targets: x86_64-apple-darwin
 
       - name: Cache Cargo
-        uses: Swatinem/rust-cache@v2
+        uses: Swatinem/rust-cache@v2.9.3
         with:
           workspaces: src-tauri
           key: macos-x64
@@ -217,7 +220,7 @@ jobs:
           echo "All 8 signing & notarization secrets present."
 
       - name: Build, sign & notarize
-        uses: tauri-apps/tauri-action@v0
+        uses: tauri-apps/tauri-action@action-v1.0.0
         env:
           APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
           APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
@@ -262,7 +265,7 @@ jobs:
           done
 
       - name: Upload .sig artifact (for manifest job)
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7.0.2
         with:
           name: sig-macos-x64
           path: src-tauri/target/x86_64-apple-darwin/release/bundle/macos/*.app.tar.gz.sig
@@ -270,7 +273,7 @@ jobs:
           retention-days: 1
 
       - name: Upload to draft release
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@v3.0.3
         with:
           tag_name: ${{ env.RELEASE_TAG }}
           draft: true
@@ -288,17 +291,18 @@ jobs:
       RELEASE_TAG: ${{ github.ref_name }}
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7.0.1
 
       - name: Setup pnpm
-        uses: pnpm/action-setup@v4
+        uses: pnpm/action-setup@v6.1.0
         with:
           version: 9
 
       - name: Setup Node
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v7.1.0
         with:
-          node-version: 22
+          node-version: "24"
+          check-latest: true
           cache: pnpm
 
       - name: Setup Rust (x86_64-pc-windows-msvc)
@@ -307,7 +311,7 @@ jobs:
           targets: x86_64-pc-windows-msvc
 
       - name: Cache Cargo
-        uses: Swatinem/rust-cache@v2
+        uses: Swatinem/rust-cache@v2.9.3
         with:
           workspaces: src-tauri
           key: windows-x64
@@ -332,7 +336,7 @@ jobs:
           Write-Host "TAURI signing secrets present."
 
       - name: Build
-        uses: tauri-apps/tauri-action@v0
+        uses: tauri-apps/tauri-action@action-v1.0.0
         env:
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
@@ -377,7 +381,7 @@ jobs:
           }
 
       - name: Upload .sig artifact (for manifest job)
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7.0.2
         with:
           name: sig-windows
           path: src-tauri/target/x86_64-pc-windows-msvc/release/bundle/nsis/*.exe.sig
@@ -385,7 +389,7 @@ jobs:
           retention-days: 1
 
       - name: Upload to draft release
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@v3.0.3
         with:
           tag_name: ${{ env.RELEASE_TAG }}
           draft: true
@@ -404,17 +408,18 @@ jobs:
       RELEASE_TAG: ${{ github.ref_name }}
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7.0.1
 
       - name: Setup pnpm
-        uses: pnpm/action-setup@v4
+        uses: pnpm/action-setup@v6.1.0
         with:
           version: 9
 
       - name: Setup Node
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v7.1.0
         with:
-          node-version: 22
+          node-version: "24"
+          check-latest: true
           cache: pnpm
 
       - name: Setup Rust (aarch64-pc-windows-msvc)
@@ -423,7 +428,7 @@ jobs:
           targets: aarch64-pc-windows-msvc
 
       - name: Cache Cargo
-        uses: Swatinem/rust-cache@v2
+        uses: Swatinem/rust-cache@v2.9.3
         with:
           workspaces: src-tauri
           key: windows-arm64
@@ -448,7 +453,7 @@ jobs:
           Write-Host "TAURI signing secrets present."
 
       - name: Build
-        uses: tauri-apps/tauri-action@v0
+        uses: tauri-apps/tauri-action@action-v1.0.0
         env:
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
@@ -487,7 +492,7 @@ jobs:
           }
 
       - name: Upload .sig artifact (for manifest job)
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7.0.2
         with:
           name: sig-windows-arm
           path: src-tauri/target/aarch64-pc-windows-msvc/release/bundle/nsis/*.exe.sig
@@ -495,7 +500,7 @@ jobs:
           retention-days: 1
 
       - name: Upload to draft release
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@v3.0.3
         with:
           tag_name: ${{ env.RELEASE_TAG }}
           draft: true
@@ -512,17 +517,18 @@ jobs:
       RELEASE_TAG: ${{ github.ref_name }}
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7.0.1
 
       - name: Setup pnpm
-        uses: pnpm/action-setup@v4
+        uses: pnpm/action-setup@v6.1.0
         with:
           version: 9
 
       - name: Setup Node
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v7.1.0
         with:
-          node-version: 22
+          node-version: "24"
+          check-latest: true
           cache: pnpm
 
       - name: Setup Rust (x86_64-unknown-linux-gnu)
@@ -531,7 +537,7 @@ jobs:
           targets: x86_64-unknown-linux-gnu
 
       - name: Cache Cargo
-        uses: Swatinem/rust-cache@v2
+        uses: Swatinem/rust-cache@v2.9.3
         with:
           workspaces: src-tauri
           key: linux-x64
@@ -583,7 +589,7 @@ jobs:
           ls -l "$cache/AppRun-x86_64"
 
       - name: Build
-        uses: tauri-apps/tauri-action@v0
+        uses: tauri-apps/tauri-action@action-v1.0.0
         env:
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
@@ -632,7 +638,7 @@ jobs:
           done
 
       - name: Upload .sig artifact (for manifest job)
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7.0.2
         with:
           name: sig-linux
           path: src-tauri/target/x86_64-unknown-linux-gnu/release/bundle/appimage/*.AppImage.sig
@@ -640,7 +646,7 @@ jobs:
           retention-days: 1
 
       - name: Upload to draft release
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@v3.0.3
         with:
           tag_name: ${{ env.RELEASE_TAG }}
           draft: true
@@ -662,17 +668,18 @@ jobs:
       RELEASE_TAG: ${{ github.ref_name }}
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7.0.1
 
       - name: Setup pnpm
-        uses: pnpm/action-setup@v4
+        uses: pnpm/action-setup@v6.1.0
         with:
           version: 9
 
       - name: Setup Node
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v7.1.0
         with:
-          node-version: 22
+          node-version: "24"
+          check-latest: true
           cache: pnpm
 
       - name: Setup Rust (aarch64-unknown-linux-gnu)
@@ -681,7 +688,7 @@ jobs:
           targets: aarch64-unknown-linux-gnu
 
       - name: Cache Cargo
-        uses: Swatinem/rust-cache@v2
+        uses: Swatinem/rust-cache@v2.9.3
         with:
           workspaces: src-tauri
           key: linux-arm64
@@ -733,7 +740,7 @@ jobs:
           ls -l "$cache/AppRun-aarch64"
 
       - name: Build
-        uses: tauri-apps/tauri-action@v0
+        uses: tauri-apps/tauri-action@action-v1.0.0
         env:
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
@@ -784,7 +791,7 @@ jobs:
           done
 
       - name: Upload .sig artifact (for manifest job)
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7.0.2
         with:
           name: sig-linux-arm
           path: src-tauri/target/aarch64-unknown-linux-gnu/release/bundle/appimage/*.AppImage.sig
@@ -792,7 +799,7 @@ jobs:
           retention-days: 1
 
       - name: Upload to draft release
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@v3.0.3
         with:
           tag_name: ${{ env.RELEASE_TAG }}
           draft: true
@@ -809,15 +816,16 @@ jobs:
       RELEASE_TAG: ${{ github.ref_name }}
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7.0.1
 
       - name: Setup Node
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v7.1.0
         with:
-          node-version: 22
+          node-version: "24"
+          check-latest: true
 
       - name: Download .sig artifacts from build jobs
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8.0.2
         with:
           path: sigs
           pattern: sig-*
@@ -846,7 +854,7 @@ jobs:
         run: node scripts/generate-latest-json.mjs "$RELEASE_TAG" sigs latest.json
 
       - name: Upload latest.json to draft release
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@v3.0.3
         with:
           tag_name: ${{ env.RELEASE_TAG }}
           draft: true
@@ -858,7 +866,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Flip draft to published
-        uses: actions/github-script@v7
+        uses: actions/github-script@v9.0.0
         env:
           RELEASE_TAG: ${{ github.ref_name }}
         with:

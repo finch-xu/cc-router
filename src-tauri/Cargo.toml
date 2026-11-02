@@ -11,17 +11,17 @@ license = "MIT"
 # 不发布到 crates.io; 同时让 cargo-deny 的 [licenses.private] 认出这是自家 crate
 publish = false
 edition = "2021"
-# 依赖树的实际下限: tauri 2.12 及其官方插件声明 MSRV 1.90, 低于此版本 cargo 直接拒绝构建.
-rust-version = "1.90.0"
+# 依赖树的实际下限: sqlx 0.9 声明 MSRV 1.94 (Tauri 2.12 为 1.90).
+rust-version = "1.94.0"
 
 [lib]
 name = "cc_router_lib"
 crate-type = ["staticlib", "cdylib", "rlib"]
 
 [build-dependencies]
-tauri-build = { version = "2", features = [] }
+tauri-build = { version = "2.7.4", features = [] }
 # build.rs 用 #[path] 引入 release_notes/markdown.rs 校验发版说明, 该文件 derive 了 Serialize
-serde = { version = "1", features = ["derive"] }
+serde = { version = "1.0.229", features = ["derive"] }
 
 [dependencies]
 # 下限钉在 2.13.2: bitflags 2.10 / 2.11 的 named-flags 宏按 flag 递归展开, 会撞穿 dispatch2 0.3.1 的
@@ -29,73 +29,73 @@ serde = { version = "1", features = ["derive"] }
 # 2.13.2 已实测可编译 dispatch2 0.3.1 (cargo clean -p dispatch2 && cargo check)。升级 bitflags 后若 macOS 构建
 # 报 "recursion limit reached while expanding __bitflags_flag_name!", 回到这里。
 bitflags = "2.13.2"
-regex = "1"
-tauri = { version = "2", features = ["tray-icon"] }
-tauri-plugin-clipboard-manager = "2"
-tauri-plugin-dialog = "2"
-tauri-plugin-shell = "2"
-tauri-plugin-updater = "2"
-tauri-plugin-autostart = "2"
+regex = "1.13.1"
+tauri = { version = "2.12.5", features = ["tray-icon"] }
+tauri-plugin-clipboard-manager = "2.5.0"
+tauri-plugin-dialog = "2.8.4"
+tauri-plugin-shell = "2.6.0"
+tauri-plugin-updater = "2.14.1"
+tauri-plugin-autostart = "2.7.0"
 # Rust 侧用 tauri_plugin_os::locale() 做托盘菜单的系统语言探测 (tray::TrayLocale::from_pref);
 # 该函数是 sys_locale 的纯封装, 不依赖 plugin 注册, 但 plugin 保留着以便前端随时取 OS 信息.
 # 注: 该 plugin 的 MSRV 曾是本 crate rust-version 的来源 (1.77.2), 2.4 起随 tauri 一起升到 1.90.
-tauri-plugin-os = "2"
-tauri-plugin-single-instance = "2"
+tauri-plugin-os = "2.4.0"
+tauri-plugin-single-instance = "2.5.5"
 
 # 发版说明的版本比较; 已是 tauri 的传递依赖, 提升为直接依赖不引入新包
-semver = "1"
-serde = { version = "1", features = ["derive"] }
-serde_json = "1"
-serde_yaml = "0.9"
+semver = "1.0.28"
+serde = { version = "1.0.229", features = ["derive"] }
+serde_json = "1.0.154"
+serde_yaml = "0.9.34"
 
-tokio = { version = "1", features = ["full"] }
-axum = { version = "0.8", features = ["http2", "macros"] }
-tower = "0.5"
-hyper = { version = "1", features = ["full"] }
-bytes = "1"
-futures = "0.3"
+tokio = { version = "1.54.1", features = ["full"] }
+axum = { version = "0.8.9", features = ["http2", "macros"] }
+tower = "0.5.3"
+hyper = { version = "1.12.0", features = ["full"] }
+bytes = "1.12.1"
+futures = "0.3.34"
 
 # TLS 信任: reqwest 0.13 起 rustls 后端默认走 rustls-platform-verifier (操作系统证书库 + 平台校验逻辑),
 # 企业内网私有 CA (系统已信任) 直接可用 (issue #34); 0.12 时代的 rustls-tls-native-roots /
 # webpki 内置根 feature 已被上游移除, 无需再并集. crypto provider 默认 aws-lc-rs.
-reqwest = { version = "0.13", default-features = false, features = ["stream", "json", "form", "rustls"] }
+reqwest = { version = "0.13.5", default-features = false, features = ["stream", "json", "form", "rustls"] }
 
-# 本地 TLS 监听 (HTTPS 模式). rustls 与 reqwest/tokio-rustls 间接引入版本对齐, cargo tree 实测 rustls 0.23.39 + tokio-rustls 0.26.4.
-axum-server = { version = "0.8", features = ["tls-rustls"] }
-rustls = { version = "0.23", default-features = false, features = ["ring", "std"] }
+# 本地 TLS 监听 (HTTPS 模式). rustls 与 reqwest/tokio-rustls 共用 0.23 系列, 最低 0.23.46 包含安全修复.
+axum-server = { version = "0.8.0", features = ["tls-rustls"] }
+rustls = { version = "0.23.46", default-features = false, features = ["ring", "std"] }
 # PEM 解析走 pki-types 自带的 pem 模块 (rustls-pemfile 已被上游 deprecated).
-rustls-pki-types = "1"
-rcgen = { version = "0.14", features = ["x509-parser"] }
-time = { version = "0.3", features = ["macros"] }
-sha2 = "0.11"
+rustls-pki-types = "1.15.1"
+rcgen = { version = "0.14.10", features = ["x509-parser"] }
+time = { version = "0.3.55", features = ["macros"] }
+sha2 = "0.11.1"
 
-sqlx = { version = "0.9", default-features = false, features = ["runtime-tokio", "sqlite", "macros", "chrono"] }
+sqlx = { version = "0.9.0", default-features = false, features = ["runtime-tokio", "sqlite", "macros", "chrono"] }
 
-jsonschema = { version = "0.53", default-features = false }
+jsonschema = { version = "0.60.2", default-features = false }
 
-tracing = "0.1"
-tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt", "json"] }
-tracing-appender = "0.2"
+tracing = "0.1.44"
+tracing-subscriber = { version = "0.3.23", features = ["env-filter", "fmt", "json"] }
+tracing-appender = "0.2.5"
 
-thiserror = "2"
-anyhow = "1"
-uuid = { version = "1", features = ["v4", "serde"] }
-chrono = { version = "0.4", features = ["serde"] }
-once_cell = "1"
-base64 = "0.23"
-crc32fast = "1.4"
+thiserror = "2.0.21"
+anyhow = "1.0.104"
+uuid = { version = "1.29.0", features = ["v4", "serde"] }
+chrono = { version = "0.4.45", features = ["serde"] }
+once_cell = "1.21.4"
+base64 = "0.23.1"
+crc32fast = "1.5.4"
 # 网页界面设置页列出局域网 IP (list_lan_addresses)
-if-addrs = "0.13"
+if-addrs = "0.15.0"
 
 # 配置导出的密钥段加密: 口令经 Argon2id 拉伸, XChaCha20-Poly1305 加密 (backup/crypto.rs)
-argon2 = "0.6"
-chacha20poly1305 = "0.11"
-zeroize = "1"
-getrandom = "0.3"
+argon2 = "0.6.0"
+chacha20poly1305 = "0.11.0"
+zeroize = "1.9.1"
+getrandom = "0.4.3"
 
 [dev-dependencies]
-wiremock = "0.6"
-tempfile = "3"
+wiremock = "0.6.5"
+tempfile = "3.27.0"
 # 契约测试用: 把真实 DTO 反序列化进 TUI 的视图结构体。依赖方向只能是这一个。
 cc-router-tui = { path = "crates/cc-router-tui" }
 
