@@ -340,6 +340,22 @@ Settings → Web UI → once enabled, open `http://127.0.0.1:23456/ui/` in a bro
   </tr>
 </table>
 
+### Time-based virtual models
+
+Keep the same virtual model in your client while cc-router switches each subscription slot's real model by day of the week and time of day. In the desktop app's subscription editor, you can configure schedules independently for `fable`, `opus`, `sonnet`, and `haiku`.
+
+- **Schedule your models** — Choose the days, start and end times, and real model for each rule. The calendar previews the weekly schedule, and rules can be copied to other slots.
+- **Use a default model** — When no time rule matches, the slot uses its default model. If no default is configured, that subscription is excluded from the slot's routing during uncovered times.
+- **Preview routing** — On the virtual models page, choose a day and drag the timeline to inspect model mappings and routing at that time. Click “Now” to return to the current time. Schedules use the clock of the computer running cc-router.
+
+**Model slots: time rules and weekly calendar preview**
+
+![cc-router model slot time rules and weekly calendar preview](assets/screenshots/en/slot-schedules.png)
+
+**Virtual models: subscriptions, model mappings, and active hours**
+
+![cc-router time-based virtual model routing and active hours preview](assets/screenshots/en/virtual-model-schedules.png)
+
 ## FAQ & Use Cases
 
 <details>
