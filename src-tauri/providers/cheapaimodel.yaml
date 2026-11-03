@@ -1,0 +1,101 @@
+# cheapaimodel provider
+#
+# 官方文档（核对 2026-11）:
+#   - OpenAI Chat Completions API: https://cheapaimodel.ai/docs
+#       接口: https://api.cheapaimodel.ai/v1/chat/completions, stream: true 受支持。
+#       cc-router 把 Claude Code 的请求翻译成 Chat Completions 调用。
+#   - 鉴权: Authorization: Bearer <key>
+#       Key 申请: https://console.cheapaimodel.ai/keys (按 token 预付美元, 无免费额度)
+#   - /v1/models 接口: https://api.cheapaimodel.ai/v1/models
+#       与 chat/completions 同域同前缀, 需 API Key 鉴权（无 key 返回 401）, 本 provider 用它做动态 model_discovery。
+#       公开模型目录（无需 key）: https://cheapaimodel.ai/models
+#   - 模型 ID: 不带厂商前缀的短名, 譬如 deepseek-v4-1-flash、glm-5.3、kimi-k3
+#
+# 实测 (2026-11-03, 经 cc-router 的 Chat Completions 翻译层, 五个模型):
+#   - 非流式 / 流式 / tool_use / tool_result 回灌均 200
+#   - 思考过程以 reasoning_content 返回, expose_reasoning 打开后显示为 thinking 块, 多轮回灌 200
+#   - glm-5.3 / glm-5.3-flash: reasoning_effort 为 minimal / medium / xhigh 时间歇 400
+#       ("cannot be disabled; please use low, high, or max"), low / high / max 与不传正常;
+#       Claude Code 的 thinking.budget_tokens 会被映射成 minimal (< 4096) 或 medium (16384–65535)
+
+id: cheapaimodel
+display_name: "cheapaimodel"
+icon: ""
+category: aggregator
+description:
+  zh: "cheapaimodel 模型网关，一个 Key 调用 DeepSeek / Z.ai GLM / Moonshot Kimi / xAI Grok 模型"
+  zh-Hant: "cheapaimodel 模型閘道，一個 Key 呼叫 DeepSeek / Z.ai GLM / Moonshot Kimi / xAI Grok 模型"
+  en: "cheapaimodel model gateway; one key covers DeepSeek / Z.ai GLM / Moonshot Kimi / xAI Grok models"
+  ja: "cheapaimodel モデルゲートウェイ。1 つの Key で DeepSeek / Z.ai GLM / Moonshot Kimi / xAI Grok のモデルを利用可能"
+homepage: "https://cheapaimodel.ai"
+docs_url: "https://cheapaimodel.ai/docs"
+api_key_url: "https://console.cheapaimodel.ai/keys"
+
+compatibility: partial
+compatibility_notes:
+  zh: |
+    1. 经 OpenAI Chat Completions 协议翻译, thinking 签名、cache_control 等 Anthropic 专有内容会丢失; 模型的思考过程显示为 thinking 块.
+    2. glm-5.3 / glm-5.3-flash 在思考强度为 minimal、medium 或 xhigh 时可能返回 400 ("please use low, high, or max"), Claude Code 的思考预算也会被换算成 minimal 或 medium; 请在该槽位把思考强度固定为 low / high / max.
+    3. kimi-k3 只接受 temperature 1 或 0.6、top_p 0.95, 其他取值返回 400.
+  zh-Hant: |
+    1. 經 OpenAI Chat Completions 協議翻譯, thinking 簽名、cache_control 等 Anthropic 專有內容會丟失; 模型的思考過程顯示為 thinking 塊.
+    2. glm-5.3 / glm-5.3-flash 在思考強度為 minimal、medium 或 xhigh 時可能回傳 400 ("please use low, high, or max"), Claude Code 的思考預算也會被換算成 minimal 或 medium; 請在該槽位把思考強度固定為 low / high / max.
+    3. kimi-k3 只接受 temperature 1 或 0.6、top_p 0.95, 其他取值回傳 400.
+  en: |
+    1. Translated through the OpenAI Chat Completions protocol; Anthropic-only content such as thinking signatures
+       and cache_control is dropped. The models' reasoning is shown as thinking blocks.
+    2. glm-5.3 / glm-5.3-flash may return 400 ("please use low, high, or max") when the reasoning effort is minimal,
+       medium or xhigh, and Claude Code's thinking budget is converted to minimal or medium; fix the slot's
+       reasoning effort to low / high / max.
+    3. kimi-k3 only accepts temperature 1 or 0.6 and top_p 0.95; other values return 400.
+  ja: |
+    1. OpenAI Chat Completions プロトコル経由で変換するため、thinking の署名や cache_control など Anthropic 固有の
+       内容は失われます。モデルの推論過程は thinking ブロックとして表示されます。
+    2. glm-5.3 / glm-5.3-flash は思考強度が minimal、medium、xhigh のとき 400（"please use low, high, or max"）を
+       返すことがあり、Claude Code の思考予算も minimal または medium に換算されます。該当スロットの思考強度を
+       low / high / max に固定してください。
+    3. kimi-k3 は temperature 1 または 0.6、top_p 0.95 のみ受け付け、それ以外の値は 400 を返します。
+
+endpoints:
+  - id: paygo
+    label:
+      zh: "全球 · 按量付费 API"
+      zh-Hant: "全球 · 按量計費 API"
+      en: "Global · Pay-as-you-go API"
+      ja: "グローバル · 従量課金 API"
+    description:
+      zh: "cheapaimodel 默认端点，按 token 从预付的美元余额扣费"
+      zh-Hant: "cheapaimodel 預設端點，按 token 從預付的美元餘額扣費"
+      en: "cheapaimodel's default endpoint; billed per token from a prepaid USD balance"
+      ja: "cheapaimodel の既定エンドポイント。トークン単位で前払いの米ドル残高から課金"
+    base_url: "https://api.cheapaimodel.ai"
+    messages_path: "/v1/chat/completions"
+    region: global
+    billing: pay_as_you_go
+
+default_endpoint: paygo
+
+auth:
+  type: openai_chat_completions_api_key
+  header_name: "Authorization"
+  header_format: bearer
+
+required_headers: {}
+
+forward_headers: []
+
+model_discovery:
+  # cheapaimodel /v1/models 接口, 与 chat/completions 同域同前缀, 需 Key
+  enabled: true
+  path: "/v1/models"
+  cache_ttl_hours: 24
+  # 来源: 公开模型目录 https://cheapaimodel.ai/api/models（2026-11-03 核对，仅作填写示例）
+  example_models:
+    - "deepseek-v4-1-flash"
+    - "glm-5.3"
+    - "glm-5.3-flash"
+    - "grok-4.7"
+    - "kimi-k3"
+
+# 上游以 reasoning_content 返回思考过程, 打开后在 Claude Code 里显示为 thinking 块
+expose_reasoning: true
