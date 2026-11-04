@@ -1,5 +1,6 @@
 pub mod client_fingerprint;
 pub mod controller;
+pub mod count_tokens;
 pub mod effort_log;
 pub mod extractors;
 pub mod forward;

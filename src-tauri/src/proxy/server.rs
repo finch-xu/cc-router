@@ -48,6 +48,9 @@ impl ProxyHooks for AppHooks {
 fn build_router(state: AppState, body_limit: usize) -> Router {
     Router::new()
         .route("/v1/messages", post(handler::messages))
+        .route("/v1/messages/count_tokens", post(handler::count_tokens))
+        // Claude Code's best-effort connection warm-up probe.
+        .route("/api/hello", axum::routing::head(|| async { axum::http::StatusCode::OK }))
         .route("/v1/responses", post(handler::responses))
         .route("/v1/chat/completions", post(handler::chat_completions))
         .route("/v1/systemone", post(handler::systemone))

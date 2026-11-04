@@ -94,6 +94,15 @@ pub async fn messages(
     }
 }
 
+/// POST /v1/messages/count_tokens — see `proxy/count_tokens.rs`.
+pub async fn count_tokens(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    body: Bytes,
+) -> Response {
+    crate::proxy::count_tokens::handle(&state, headers, body).await
+}
+
 pub fn error_body(kind: &str, message: &str) -> serde_json::Value {
     json!({
         "type": "error",
