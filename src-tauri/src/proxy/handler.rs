@@ -66,6 +66,8 @@ pub async fn messages(
 
     // 识别一次客户端 (UA + stainless headers) + 记录 TCP 对端 IP + 入口端点 + 下游 HTTP 版本,
     // 沿 dispatch 链透传给所有 RequestLogEntry.
+    // 「记录请求头」开关每请求读一次, 入站头在这里脱敏序列化 (proxy/header_log.rs)。
+    let log_headers = state.settings.read().await.log_request_headers;
     let ctx = ClientContext {
         info: client_fingerprint::identify(&headers),
         ip: Some(peer.ip().to_string()),
@@ -73,6 +75,8 @@ pub async fn messages(
         http_version: Some(format_http_version(version)),
         session_key: session_key::extract(&headers, &parsed, RequestEntryKind::Messages),
         tools: tool_log::request_tool_shape(&parsed),
+        request_headers_log: crate::proxy::header_log::serialize(&headers, log_headers),
+        log_headers,
     };
 
     info!(
@@ -185,6 +189,8 @@ pub async fn responses(
         }
     };
 
+    // 「记录请求头」开关每请求读一次, 入站头在这里脱敏序列化 (proxy/header_log.rs)。
+    let log_headers = state.settings.read().await.log_request_headers;
     let ctx = ClientContext {
         info: client_fingerprint::identify(&headers),
         ip: Some(peer.ip().to_string()),
@@ -193,6 +199,8 @@ pub async fn responses(
         // 用翻译前的原始 parsed: request_to_anthropic 会丢 prompt_cache_key.
         session_key: session_key::extract(&headers, &parsed, RequestEntryKind::Responses),
         tools: tool_log::request_tool_shape(&anthropic_body),
+        request_headers_log: crate::proxy::header_log::serialize(&headers, log_headers),
+        log_headers,
     };
 
     info!(
@@ -531,6 +539,8 @@ pub async fn chat_completions(
         }
     };
 
+    // 「记录请求头」开关每请求读一次, 入站头在这里脱敏序列化 (proxy/header_log.rs)。
+    let log_headers = state.settings.read().await.log_request_headers;
     let ctx = ClientContext {
         info: client_fingerprint::identify(&headers),
         ip: Some(peer.ip().to_string()),
@@ -539,6 +549,8 @@ pub async fn chat_completions(
         // 用翻译前的原始 parsed: 会话键分支读原始 `user` 字段.
         session_key: session_key::extract(&headers, &parsed, RequestEntryKind::ChatCompletions),
         tools: tool_log::request_tool_shape(&anthropic_body),
+        request_headers_log: crate::proxy::header_log::serialize(&headers, log_headers),
+        log_headers,
     };
 
     info!(
@@ -796,6 +808,8 @@ pub async fn systemone(
     let Some(model) = parsed.get("model").and_then(|v| v.as_str()).map(str::to_string) else {
         return systemone::error_response(StatusCode::BAD_REQUEST, "invalid_request_error", "缺少 model 字段");
     };
+    // 「记录请求头」开关每请求读一次, 入站头在这里脱敏序列化 (proxy/header_log.rs)。
+    let log_headers = state.settings.read().await.log_request_headers;
     let ctx = ClientContext {
         info: client_fingerprint::identify(&headers),
         ip: Some(peer.ip().to_string()),
@@ -803,6 +817,8 @@ pub async fn systemone(
         http_version: Some(format_http_version(version)),
         session_key: session_key::extract(&headers, &parsed, RequestEntryKind::SystemOne),
         tools: Default::default(),
+        request_headers_log: crate::proxy::header_log::serialize(&headers, log_headers),
+        log_headers,
     };
     info!(%model, client_tool = ?ctx.info.tool, client_ip = ?ctx.ip, "proxy received /v1/systemone request");
     systemone::dispatch(&state, body, model, &ctx).await

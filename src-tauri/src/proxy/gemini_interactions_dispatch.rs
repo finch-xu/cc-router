@@ -441,6 +441,11 @@ fn finalize_streaming(
             effort_source: effort_log.source,
             upstream_effort: None,
             tool_calls: tool_tally.fields(&ctx.tools),
+            headers: crate::proxy::header_log::HeaderLogFields {
+                client_request: ctx.request_headers_log.clone(),
+                upstream_request: None,
+                upstream_response: None,
+            },
         };
         let _ = log_tx.try_send(entry);
     });
@@ -586,6 +591,11 @@ async fn collect_to_json_response(
         effort_source: effort_log.source,
         upstream_effort: None,
         tool_calls,
+        headers: crate::proxy::header_log::HeaderLogFields {
+            client_request: ctx.request_headers_log.clone(),
+            upstream_request: None,
+            upstream_response: None,
+        },
     };
     let _ = log_tx.try_send(entry);
 

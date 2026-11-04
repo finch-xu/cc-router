@@ -526,6 +526,11 @@ pub async fn dispatch(
                         effort_source: effort_log.source,
                         upstream_effort: None,
                         tool_calls: ToolLogFields::request_only(&ctx.tools),
+                        headers: crate::proxy::header_log::HeaderLogFields {
+                            client_request: ctx.request_headers_log.clone(),
+                            upstream_request: None,
+                            upstream_response: None,
+                        },
                     };
                     let _ = state.request_log_tx.try_send(entry);
 
@@ -645,6 +650,11 @@ pub async fn dispatch(
                         effort_source: effort_log.source,
                         upstream_effort: None,
                         tool_calls: ToolLogFields::request_only(&ctx.tools),
+                        headers: crate::proxy::header_log::HeaderLogFields {
+                            client_request: ctx.request_headers_log.clone(),
+                            upstream_request: None,
+                            upstream_response: None,
+                        },
                     };
                     let _ = state.request_log_tx.try_send(entry);
 
@@ -774,6 +784,11 @@ pub async fn dispatch(
                         effort_source: effort_log.source,
                         upstream_effort: None,
                         tool_calls: ToolLogFields::request_only(&ctx.tools),
+                        headers: crate::proxy::header_log::HeaderLogFields {
+                            client_request: ctx.request_headers_log.clone(),
+                            upstream_request: None,
+                            upstream_response: None,
+                        },
                     };
                     let _ = state.request_log_tx.try_send(entry);
 
@@ -914,6 +929,11 @@ pub async fn dispatch(
                         effort_source: effort_log.source,
                         upstream_effort: None,
                         tool_calls: ToolLogFields::request_only(&ctx.tools),
+                        headers: crate::proxy::header_log::HeaderLogFields {
+                            client_request: ctx.request_headers_log.clone(),
+                            upstream_request: None,
+                            upstream_response: None,
+                        },
                     };
                     let _ = state.request_log_tx.try_send(entry);
 
@@ -1053,6 +1073,11 @@ pub async fn dispatch(
                         effort_source: effort_log.source,
                         upstream_effort: None,
                         tool_calls: ToolLogFields::request_only(&ctx.tools),
+                        headers: crate::proxy::header_log::HeaderLogFields {
+                            client_request: ctx.request_headers_log.clone(),
+                            upstream_request: None,
+                            upstream_response: None,
+                        },
                     };
                     let _ = state.request_log_tx.try_send(entry);
 
@@ -1193,6 +1218,11 @@ pub async fn dispatch(
                         effort_source: effort_log.source,
                         upstream_effort: None,
                         tool_calls: ToolLogFields::request_only(&ctx.tools),
+                        headers: crate::proxy::header_log::HeaderLogFields {
+                            client_request: ctx.request_headers_log.clone(),
+                            upstream_request: None,
+                            upstream_response: None,
+                        },
                     };
                     let _ = state.request_log_tx.try_send(entry);
 
@@ -1429,6 +1459,11 @@ pub async fn dispatch(
                     effort_source: effort_log.source,
                     upstream_effort: None,
                     tool_calls,
+                    headers: crate::proxy::header_log::HeaderLogFields {
+                        client_request: ctx.request_headers_log.clone(),
+                        upstream_request: None,
+                        upstream_response: None,
+                    },
                 };
                 let _ = state.request_log_tx.try_send(entry);
 
@@ -1562,6 +1597,11 @@ pub async fn dispatch(
                             effort_source: effort_log.source,
                             upstream_effort: None,
                             tool_calls: ToolLogFields::request_only(&ctx.tools),
+                            headers: crate::proxy::header_log::HeaderLogFields {
+                                client_request: ctx.request_headers_log.clone(),
+                                upstream_request: None,
+                                upstream_response: None,
+                            },
                         };
                         let _ = state.request_log_tx.try_send(entry);
 
@@ -1612,6 +1652,11 @@ pub async fn dispatch(
                             effort_source: effort_log.source,
                             upstream_effort: None,
                             tool_calls: ToolLogFields::request_only(&ctx.tools),
+                            headers: crate::proxy::header_log::HeaderLogFields {
+                                client_request: ctx.request_headers_log.clone(),
+                                upstream_request: None,
+                                upstream_response: None,
+                            },
                         };
                         let _ = state.request_log_tx.try_send(entry);
                         retry_count += 1;
@@ -1745,6 +1790,11 @@ pub async fn dispatch(
                     effort_source: effort_log.source,
                     upstream_effort: None,
                     tool_calls: ToolLogFields::request_only(&ctx.tools),
+                    headers: crate::proxy::header_log::HeaderLogFields {
+                        client_request: ctx.request_headers_log.clone(),
+                        upstream_request: None,
+                        upstream_response: None,
+                    },
                 };
                 let _ = state.request_log_tx.try_send(entry);
 

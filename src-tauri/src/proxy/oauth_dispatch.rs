@@ -501,6 +501,11 @@ fn finalize_streaming(
             effort_source: effort_log.source,
             upstream_effort: upstream_effort_echo,
             tool_calls: tool_tally.fields(&ctx.tools),
+            headers: crate::proxy::header_log::HeaderLogFields {
+                client_request: ctx.request_headers_log.clone(),
+                upstream_request: None,
+                upstream_response: None,
+            },
         };
         let _ = log_tx.try_send(entry);
     });
@@ -616,6 +621,11 @@ async fn collect_to_json_response(
             effort_source: effort_log.source,
             upstream_effort: upstream_effort_echo.clone(),
             tool_calls: ToolLogFields::request_only(&ctx.tools),
+            headers: crate::proxy::header_log::HeaderLogFields {
+                client_request: ctx.request_headers_log.clone(),
+                upstream_request: None,
+                upstream_response: None,
+            },
         };
         let _ = log_tx.try_send(entry);
         return (
@@ -699,6 +709,11 @@ async fn collect_to_json_response(
         effort_source: effort_log.source,
         upstream_effort: upstream_effort_echo.clone(),
         tool_calls,
+        headers: crate::proxy::header_log::HeaderLogFields {
+            client_request: ctx.request_headers_log.clone(),
+            upstream_request: None,
+            upstream_response: None,
+        },
     };
     let _ = log_tx.try_send(entry);
 
@@ -1053,6 +1068,11 @@ fn finalize_kiro_streaming(
             effort_source: effort_log.source,
             upstream_effort: None,
             tool_calls: tool_tally.fields(&ctx.tools),
+            headers: crate::proxy::header_log::HeaderLogFields {
+                client_request: ctx.request_headers_log.clone(),
+                upstream_request: None,
+                upstream_response: None,
+            },
         };
         let _ = log_tx.try_send(entry);
     });
@@ -1174,6 +1194,11 @@ async fn collect_kiro_to_json_response(
         effort_source: effort_log.source,
         upstream_effort: None,
         tool_calls,
+        headers: crate::proxy::header_log::HeaderLogFields {
+            client_request: ctx.request_headers_log.clone(),
+            upstream_request: None,
+            upstream_response: None,
+        },
     };
     let _ = log_tx.try_send(entry);
 

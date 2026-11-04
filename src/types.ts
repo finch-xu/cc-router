@@ -607,6 +607,8 @@ export interface Settings {
    * 默认关闭。
    */
   debug_mode: boolean;
+  /** 请求日志是否记录三组请求头 (凭据脱敏), 默认开 */
+  log_request_headers: boolean;
   /** 入站请求体上限 (MiB), 默认 32。修改需重启 app 才生效 (router 构建时读取)。 */
   max_request_body_mb: number;
   /** 是否在代理端口上提供网页管理界面 (/ui)。默认 false，改动即时生效 */
@@ -641,6 +643,8 @@ export interface SettingsPatch {
   preferred_language?: "system" | "zh" | "zh-Hant" | "en" | "ja";
   update_source?: UpdateSource;
   debug_mode?: boolean;
+  /** 请求日志是否记录三组请求头 (凭据脱敏), 默认开 */
+  log_request_headers?: boolean;
   max_request_body_mb?: number;
   web_ui_enabled?: boolean;
   web_ui_auth_enabled?: boolean;

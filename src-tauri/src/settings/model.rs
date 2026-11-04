@@ -87,6 +87,9 @@ pub struct Settings {
     /// 用于排查协议适配类问题. 默认关闭(file IO 与磁盘占用代价).
     #[serde(default)]
     pub debug_mode: bool,
+    /// 请求日志是否记录三组请求头 (凭据脱敏)。默认开, 每请求读, 不需要重启。
+    #[serde(default = "default_log_request_headers")]
+    pub log_request_headers: bool,
     /// 入站请求体上限 (MiB)。axum 默认 2 MiB 会让 Codex 多图 base64 请求 413
     /// (issue #41), 默认 32 对齐 Anthropic /v1/messages 官方请求上限。
     /// 改动后点「重启代理服务」生效 (router 构建时读取)。
@@ -148,6 +151,9 @@ fn default_preferred_language() -> String {
 fn default_https_enable_h2() -> bool {
     true
 }
+fn default_log_request_headers() -> bool {
+    true
+}
 fn default_max_request_body_mb() -> u32 {
     128
 }
@@ -180,6 +186,7 @@ impl Default for Settings {
             preferred_language: default_preferred_language(),
             update_source: None,
             debug_mode: false,
+            log_request_headers: default_log_request_headers(),
             max_request_body_mb: default_max_request_body_mb(),
             web_ui_enabled: false,
             web_ui_auth_enabled: default_web_ui_auth_enabled(),
@@ -208,6 +215,7 @@ pub struct SettingsPatch {
     pub preferred_language: Option<String>,
     pub update_source: Option<String>,
     pub debug_mode: Option<bool>,
+    pub log_request_headers: Option<bool>,
     pub max_request_body_mb: Option<u32>,
     pub web_ui_enabled: Option<bool>,
     pub web_ui_auth_enabled: Option<bool>,
@@ -262,6 +270,9 @@ impl Settings {
         }
         if let Some(p) = patch.debug_mode {
             self.debug_mode = p;
+        }
+        if let Some(p) = patch.log_request_headers {
+            self.log_request_headers = p;
         }
         if let Some(p) = patch.max_request_body_mb {
             self.max_request_body_mb = p;
@@ -356,6 +367,20 @@ mod tests {
         let raw = r#"{ "proxy_port": 23456 }"#;
         let s: Settings = serde_json::from_str(raw).unwrap();
         assert_eq!(s.max_request_body_mb, 128);
+    }
+
+    #[test]
+    fn log_request_headers_defaults_true() {
+        assert!(Settings::default().log_request_headers);
+        let s: Settings = serde_json::from_str(r#"{ "proxy_port": 23456 }"#).unwrap();
+        assert!(s.log_request_headers);
+    }
+
+    #[test]
+    fn apply_patch_sets_log_request_headers() {
+        let mut s = Settings::default();
+        s.apply_patch(SettingsPatch { log_request_headers: Some(false), ..Default::default() });
+        assert!(!s.log_request_headers);
     }
 
     #[test]

@@ -348,6 +348,11 @@ pub fn log_entry(
         effort_source: None,
         upstream_effort: None,
         tool_calls: ToolLogFields::empty(),
+        headers: crate::proxy::header_log::HeaderLogFields {
+            client_request: ctx.request_headers_log.clone(),
+            upstream_request: None,
+            upstream_response: None,
+        },
     }
 }
 

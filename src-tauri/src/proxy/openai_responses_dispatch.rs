@@ -479,6 +479,11 @@ fn finalize_streaming(
             effort_source: effort_log.source,
             upstream_effort: upstream_effort_echo,
             tool_calls: tool_tally.fields(&ctx.tools),
+            headers: crate::proxy::header_log::HeaderLogFields {
+                client_request: ctx.request_headers_log.clone(),
+                upstream_request: None,
+                upstream_response: None,
+            },
         };
         let _ = log_tx.try_send(entry);
     });
@@ -623,6 +628,11 @@ fn finalize_non_streaming(
             effort_source: effort_log.source,
             upstream_effort: upstream_effort_echo.clone(),
             tool_calls,
+            headers: crate::proxy::header_log::HeaderLogFields {
+                client_request: ctx.request_headers_log.clone(),
+                upstream_request: None,
+                upstream_response: None,
+            },
         };
         let _ = log_tx.try_send(entry);
     });

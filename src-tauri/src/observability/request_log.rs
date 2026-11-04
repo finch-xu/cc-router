@@ -15,6 +15,7 @@ use tracing::{debug, warn};
 use uuid::Uuid;
 
 use crate::observability::events::{EventEntry, EventKind, Severity};
+use crate::proxy::header_log::HeaderLogFields;
 use crate::proxy::tool_log::{ToolLogFields, TRUNCATED_MARKER};
 use crate::subscription::model::SubscriptionRuntime;
 use crate::subscription::quota::QuotaPeriod;
@@ -165,6 +166,8 @@ pub struct RequestLogEntry {
     /// 工具调用观测五格 (stop_reason / 声明数 / 回传数 / 调用数 / 调用名), 见 [`crate::proxy::tool_log`]。
     /// 刻意用无 `Default` 的子结构: 任何构造点漏写都编译失败。
     pub tool_calls: ToolLogFields,
+    /// 三组请求头 (proxy/header_log.rs), 纯观测, 拿不到就是 None。
+    pub headers: HeaderLogFields,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -429,9 +432,10 @@ pub(crate) async fn flush_batch(
                 client_tool, client_user_agent, client_version, client_ip,
                 entry_kind, downstream_http_version,
                 client_effort, effective_effort, effort_source, upstream_effort,
-                stop_reason, tools_offered_count, tool_result_count, tool_use_count, tool_use_names)
+                stop_reason, tools_offered_count, tool_result_count, tool_use_count, tool_use_names,
+                client_request_headers, upstream_request_headers, upstream_response_headers)
              VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
-                     ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                     ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
         )
         .bind(entry.id.to_string())
         .bind(entry.timestamp_ms)
@@ -468,6 +472,9 @@ pub(crate) async fn flush_batch(
         .bind(entry.tool_calls.tool_result_count.map(|v| v as i64))
         .bind(entry.tool_calls.tool_use_count.map(|v| v as i64))
         .bind(entry.tool_calls.tool_use_names)
+        .bind(entry.headers.client_request)
+        .bind(entry.headers.upstream_request)
+        .bind(entry.headers.upstream_response)
         .execute(&mut *tx)
         .await;
         if let Err(e) = result {
@@ -654,6 +661,7 @@ mod tests {
             effort_source: None,
             upstream_effort: None,
             tool_calls: crate::proxy::tool_log::ToolLogFields::empty(),
+            headers: crate::proxy::header_log::HeaderLogFields::none(),
         }
     }
 
@@ -704,6 +712,34 @@ mod tests {
         assert_eq!(r.try_get::<Option<i64>, _>("tools_offered_count").unwrap(), Some(12));
         assert_eq!(r.try_get::<Option<i64>, _>("tool_use_count").unwrap(), None);
         assert_eq!(r.try_get::<Option<String>, _>("tool_use_names").unwrap(), None);
+    }
+
+    /// 请求头三列: 有值能读回, HeaderLogFields::none() 落 NULL。
+    #[tokio::test]
+    async fn header_columns_roundtrip() {
+        let pool = fresh_pool().await;
+        let sub = Uuid::new_v4();
+        let day_start = 1_704_067_200_000;
+        let mut with = make_entry(day_start, VirtualModelName::Sonnet, sub, "anthropic", RequestStatus::Success, Some(1), Some(1), Some(1));
+        with.headers = HeaderLogFields {
+            client_request: Some(r#"[["x-app","cli"]]"#.into()),
+            upstream_request: Some(r#"[["anthropic-beta","a"]]"#.into()),
+            upstream_response: Some(r#"[["request-id","r1"]]"#.into()),
+        };
+        let with_id = with.id.to_string();
+        let bare = make_entry(day_start + 1, VirtualModelName::Sonnet, sub, "anthropic", RequestStatus::Success, Some(1), Some(1), Some(1));
+        let bare_id = bare.id.to_string();
+        flush_batch(&pool, vec![with, bare], vec![]).await.expect("flush ok");
+
+        let q = "SELECT client_request_headers, upstream_request_headers, upstream_response_headers FROM requests WHERE id = ?";
+        let r = sqlx::query(q).bind(&with_id).fetch_one(&pool).await.unwrap();
+        assert_eq!(r.try_get::<String, _>("client_request_headers").unwrap(), r#"[["x-app","cli"]]"#);
+        assert_eq!(r.try_get::<String, _>("upstream_request_headers").unwrap(), r#"[["anthropic-beta","a"]]"#);
+        assert_eq!(r.try_get::<String, _>("upstream_response_headers").unwrap(), r#"[["request-id","r1"]]"#);
+        let r = sqlx::query(q).bind(&bare_id).fetch_one(&pool).await.unwrap();
+        for c in ["client_request_headers", "upstream_request_headers", "upstream_response_headers"] {
+            assert_eq!(r.try_get::<Option<String>, _>(c).unwrap(), None, "{c}");
+        }
     }
 
     /// 思考强度四列: 有值能读回, 老式全 None 的 entry 也照常落库 (NULL)。

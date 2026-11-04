@@ -95,6 +95,10 @@ pub struct ClientContext {
     pub session_key: Option<String>,
     /// 请求侧工具形状 (声明工具数 / 回传 tool_result 数), 对 Anthropic 形态 body 算一次。
     pub tools: crate::proxy::tool_log::RequestToolShape,
+    /// 入站请求头, 已脱敏序列化 (proxy/header_log.rs); 关闭「记录请求头」时为 None。
+    pub request_headers_log: Option<String>,
+    /// 本请求是否记录请求头 (settings.log_request_headers 在入口处读一次)。
+    pub log_headers: bool,
 }
 
 /// 入口: 按规则识别 headers, 返回 ClientInfo.
