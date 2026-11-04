@@ -420,6 +420,16 @@ fn upstream_error_parts(parsed: &Value) -> (String, String) {
 }
 
 /// 把 pipeline 返回的 Anthropic JSON body 翻译成 OpenAI Responses JSON.
+/// 非 JSON 上游错误体的展示文本: 截断到 2 KB (按字符边界); 空 body 用状态码兜底。
+fn non_json_error_text(bytes: &[u8], status: StatusCode) -> String {
+    let text = String::from_utf8_lossy(bytes);
+    let text = text.trim();
+    if text.is_empty() {
+        return format!("upstream returned {}", status.as_u16());
+    }
+    crate::proxy::pipeline::truncate_body(text, 2048)
+}
+
 async fn translate_json_to_responses(status: StatusCode, body: Body) -> Response {
     let bytes = match axum::body::to_bytes(body, 16 * 1024 * 1024).await {
         Ok(b) => b,
@@ -434,6 +444,11 @@ async fn translate_json_to_responses(status: StatusCode, body: Body) -> Response
     };
     let parsed: Value = match serde_json::from_slice(&bytes) {
         Ok(v) => v,
+        // 上游错误体不是 JSON (网关 HTML 页 / 空 body): pipeline 原样回传了字节,
+        // 这里保留原状态码, 把上游文本当消息, 不能变成 500。
+        Err(_) if !status.is_success() => {
+            return responses_error_response(status, "api_error", &non_json_error_text(&bytes, status));
+        }
         Err(e) => {
             error!(?e, "上游 JSON 解析失败 (responses)");
             return responses_error_response(
@@ -574,6 +589,9 @@ async fn translate_json_to_chat(status: StatusCode, body: Body, requested_model:
     };
     let parsed: Value = match serde_json::from_slice(&bytes) {
         Ok(v) => v,
+        Err(_) if !status.is_success() => {
+            return chat_error_response(status, "api_error", &non_json_error_text(&bytes, status));
+        }
         Err(e) => {
             error!(?e, "上游 JSON 解析失败 (chat_completions)");
             return chat_error_response(StatusCode::INTERNAL_SERVER_ERROR, "api_error", "上游响应解析失败");
@@ -625,6 +643,21 @@ fn stream_from_receiver(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// 上游 4xx 的 body 不是 JSON (HTML / 空) 时, 两个入站翻译入口要保留原状态码,
+    /// 不能因解析失败变成 500 (pipeline 现在原样回传上游错误字节)。
+    #[tokio::test]
+    async fn non_json_upstream_error_keeps_status_on_inbound_entries() {
+        for (status, raw) in [(StatusCode::FORBIDDEN, "<html>blocked</html>"), (StatusCode::NOT_FOUND, "")] {
+            let r = translate_json_to_responses(status, Body::from(raw.to_string())).await;
+            assert_eq!(r.status(), status, "responses: {raw:?}");
+            let c = translate_json_to_chat(status, Body::from(raw.to_string()), "m").await;
+            assert_eq!(c.status(), status, "chat: {raw:?}");
+        }
+        let c = translate_json_to_chat(StatusCode::FORBIDDEN, Body::from("<html>blocked</html>"), "m").await;
+        let b = axum::body::to_bytes(c.into_body(), usize::MAX).await.unwrap();
+        assert!(String::from_utf8_lossy(&b).contains("blocked"), "upstream text kept in message");
+    }
 
     #[test]
     fn find_double_newline_lf() {

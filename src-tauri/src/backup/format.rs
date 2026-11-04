@@ -74,6 +74,10 @@ pub struct ExportSubscription {
     /// (no secret slot for them), see `subscription_to_export`.
     #[serde(default)]
     pub extra_headers: BTreeMap<String, String>,
+    /// Names of sensitive extra headers left out of the file; the import preview
+    /// lists them so the user knows to fill them in again.
+    #[serde(default)]
+    pub redacted_extra_headers: Vec<String>,
     /// 端点协议快照; 旧导出文件没有该字段, 按对话协议 (messages) 处理。
     #[serde(default)]
     pub endpoint_protocol: EndpointProtocol,
@@ -285,6 +289,11 @@ pub fn subscription_to_export(row: &SubscriptionRow) -> (ExportSubscription, Ext
             .iter()
             .filter(|(k, _)| !is_sensitive_header(k))
             .map(|(k, v)| (k.clone(), v.clone()))
+            .collect(),
+        redacted_extra_headers: extra_headers
+            .keys()
+            .filter(|k| is_sensitive_header(k))
+            .cloned()
             .collect(),
         endpoint_protocol: *endpoint_protocol,
         url_params: url_params.clone(),
@@ -598,6 +607,11 @@ mod tests {
         assert!(
             !back.extra_headers.contains_key("X-Session-Token"),
             "sensitive extra header must not travel in plaintext"
+        );
+        assert_eq!(
+            exp.redacted_extra_headers,
+            vec!["X-Session-Token".to_string()],
+            "dropped names are recorded so the import preview can ask for them"
         );
         assert_eq!(back.created_at.timestamp_millis(), row.created_at.timestamp_millis());
         assert_eq!(back.updated_at, now);

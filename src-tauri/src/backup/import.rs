@@ -166,10 +166,15 @@ pub fn preview(file: &ExportFile, local: &LocalState) -> ImportPreview {
                     status,
                     has_api_key: s.has_api_key,
                     // Re-snapshotted subscriptions get every header back from the registry.
-                    redacted_headers: if rebuilt_connection(s, &local.providers).is_some() {
-                        Vec::new()
-                    } else {
-                        s.redacted_headers.clone()
+                    // Sensitive extra headers are never in the file, whatever the connection path.
+                    redacted_headers: {
+                        let mut names = if rebuilt_connection(s, &local.providers).is_some() {
+                            Vec::new()
+                        } else {
+                            s.redacted_headers.clone()
+                        };
+                        names.extend(s.redacted_extra_headers.iter().cloned());
+                        names
                     },
                     invalid_reason,
                 }
@@ -443,6 +448,17 @@ mod tests {
         assert_eq!(status(f.rows[2].id), PreviewStatus::SkipOauth);
         assert!(!p.has_secrets);
         assert_eq!(p.local_subscription_count, 1);
+    }
+
+    #[test]
+    fn preview_lists_dropped_extra_headers_for_refill() {
+        let mut f = fixture(false);
+        let id = f.rows[0].id;
+        let s = f.file.subscriptions.iter_mut().find(|s| s.id == id).unwrap();
+        s.redacted_extra_headers = vec!["X-Relay-Key".into()];
+        let p = preview(&f.file, &empty_local());
+        let item = p.subscriptions.iter().find(|s| s.id == id.to_string()).unwrap();
+        assert!(item.redacted_headers.contains(&"X-Relay-Key".to_string()), "{:?}", item.redacted_headers);
     }
 
     #[test]

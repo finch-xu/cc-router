@@ -50,9 +50,13 @@ pub struct UpstreamError {
 
 impl UpstreamError {
     /// Only client errors are worth replaying; 5xx / network failures are
-    /// cc-router's to summarize.
+    /// cc-router's to summarize. 401/403 are excluded too: they mean the
+    /// *subscription's* upstream key is bad, and replaying them would make
+    /// Claude Code report its own (cc-router) token as invalid.
     pub fn is_replayable(status: StatusCode) -> bool {
         status.is_client_error()
+            && status != StatusCode::UNAUTHORIZED
+            && status != StatusCode::FORBIDDEN
     }
 
     /// Response with the upstream status, original body bytes, and whitelisted
@@ -167,7 +171,9 @@ mod tests {
     fn replayable_is_client_errors_only() {
         assert!(UpstreamError::is_replayable(StatusCode::BAD_REQUEST));
         assert!(UpstreamError::is_replayable(StatusCode::TOO_MANY_REQUESTS));
-        assert!(UpstreamError::is_replayable(StatusCode::UNAUTHORIZED));
+        // 上游订阅凭据失效不能冒充客户端 (本机 token) 失效: 留给 503 摘要说明是哪家订阅
+        assert!(!UpstreamError::is_replayable(StatusCode::UNAUTHORIZED));
+        assert!(!UpstreamError::is_replayable(StatusCode::FORBIDDEN));
         assert!(!UpstreamError::is_replayable(StatusCode::SERVICE_UNAVAILABLE));
         assert!(!UpstreamError::is_replayable(StatusCode::OK));
     }
