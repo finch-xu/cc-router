@@ -336,11 +336,19 @@ impl SubscriptionRow {
     }
 
     /// Headers as sent upstream: `{api_key}` in values is filled at send time, never stored.
+    /// Outbound configured headers: yaml/custom `required_headers` overlaid with the user's
+    /// `extra_headers` (same name, case-insensitive → extra wins), `{api_key}` filled. Every
+    /// send site (dispatches, ping, model discovery) goes through here, so extra headers reach
+    /// them all.
     pub fn resolved_required_headers(&self) -> BTreeMap<String, String> {
-        self.required_headers
-            .iter()
-            .map(|(k, v)| (k.clone(), crate::provider::url_template::fill_api_key(v, &self.api_key)))
-            .collect()
+        let fill = |v: &String| crate::provider::url_template::fill_api_key(v, &self.api_key);
+        let mut out: BTreeMap<String, String> =
+            self.required_headers.iter().map(|(k, v)| (k.clone(), fill(v))).collect();
+        for (k, v) in &self.extra_headers {
+            out.retain(|existing, _| !existing.eq_ignore_ascii_case(k));
+            out.insert(k.clone(), fill(v));
+        }
+        out
     }
 }
 
@@ -959,6 +967,22 @@ mod tests {
         assert_eq!(h["cf-aig-gateway-id"], "gw1");
         // the row itself still holds the template
         assert_eq!(row.required_headers["cf-aig-authorization"], "Bearer {api_key}");
+    }
+
+    #[test]
+    fn extra_headers_override_required_case_insensitive() {
+        let mut row = SubscriptionRow::test_fixture("p", "e");
+        row.api_key = "k".into();
+        row.required_headers.insert("X-Team".into(), "a".into());
+        row.required_headers.insert("cf-aig-authorization".into(), "Bearer {api_key}".into());
+        row.extra_headers.insert("x-team".into(), "b".into());
+        row.extra_headers.insert("x-new".into(), "{api_key}".into());
+        let h = row.resolved_required_headers();
+        let teams: Vec<_> = h.iter().filter(|(k, _)| k.eq_ignore_ascii_case("x-team")).collect();
+        assert_eq!(teams.len(), 1, "{h:?}");
+        assert_eq!(teams[0].1, "b");
+        assert_eq!(h["x-new"], "k");
+        assert_eq!(h["cf-aig-authorization"], "Bearer k");
     }
 
     #[test]

@@ -44,6 +44,8 @@ const DEVICE_REDIRECT_URI: &str = "https://auth.openai.com/deviceauth/callback";
 /// OpenAI 风控会校验这个 header, 缺失或值不匹配时更可能触发手机号验证 / 二次确认.
 /// 我们用真实官方值, 但通过 User-Agent 后缀显式标识 cc-router 身份 (build_codex_ua).
 pub(crate) const CODEX_ORIGINATOR: &str = "codex_cli_rs";
+/// Header name carrying [`CODEX_ORIGINATOR`].
+pub(crate) const CODEX_ORIGINATOR_HEADER: &str = "originator";
 
 /// 仿官方 codex_cli_rs UA 但**显式标识 cc-router**, 既降低 OpenAI 风控误判
 /// 又对外明示我们不是真 codex CLI。形如 `codex_cli_rs/1.7.0 (macos; aarch64) cc-router/1.7.0`.
