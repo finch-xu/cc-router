@@ -36,7 +36,8 @@ import { SubscriptionBalancePanel } from "@/components/SubscriptionBalanceCard";
 import { SubscriptionQuotaCard } from "@/components/SubscriptionQuotaCard";
 import { api } from "@/api/tauri";
 import { KeyValueEditor, type KeyValueRow } from "@/components/KeyValueEditor";
-import { validateConnection, validateRequiredHeaders } from "@/lib/connectionValidation";
+import { validateConnection, validateHeaderPolicyNames, validateRequiredHeaders } from "@/lib/connectionValidation";
+import { HeaderPolicyEditor } from "@/components/HeaderPolicyEditor";
 import { useProviders } from "@/hooks/useProviders";
 import {
   useDeleteSubscription,
@@ -53,7 +54,7 @@ import type {
   SlotEfforts,
   SlotSchedules,
   SubscriptionPatch,
-  TestConnectionResult,
+  TestConnectionResult, HeaderPolicy,
 } from "@/types";
 import { MODEL_SLOT_KEYS, parseSlotParam, uniformSlots } from "@/lib/modelSlots";
 import { normalizeSchedules, schedulesEqual, validateRules } from "@/lib/slotSchedule";
@@ -106,7 +107,9 @@ export function SubscriptionEditPage() {
   const [authHeaderFormat, setAuthHeaderFormat] = useState<AuthHeaderFormat>("bearer");
   const [providerDisplayName, setProviderDisplayName] = useState<string>("");
   const [requiredHeaders, setRequiredHeaders] = useState<KeyValueRow[]>([]);
-  const [forwardClientHeaders, setForwardClientHeaders] = useState(false);
+  const [headerPolicy, setHeaderPolicy] = useState<HeaderPolicy>({ mode: "none", names: [] });
+  /** 内置订阅的自定义请求头 (extra_headers); 自定义订阅继续编辑 required_headers */
+  const [extraHeaders, setExtraHeaders] = useState<KeyValueRow[]>([]);
 
   const [models, setModels] = useState<ModelInfo[] | null>(null);
   const [fetchingModels, setFetchingModels] = useState(false);
@@ -136,7 +139,10 @@ export function SubscriptionEditPage() {
       setAuthHeaderName(subQuery.data.auth_header_name);
       setAuthHeaderFormat(subQuery.data.auth_header_format);
       setProviderDisplayName(subQuery.data.provider_display_name);
-      setForwardClientHeaders((subQuery.data.header_policy?.mode ?? "none") !== "none");
+      setHeaderPolicy(subQuery.data.header_policy ?? { mode: "none", names: [] });
+      setExtraHeaders(
+        Object.entries(subQuery.data.extra_headers ?? {}).map(([key, value]) => ({ key, value })),
+      );
       setRequiredHeaders(
         Object.entries(subQuery.data.required_headers ?? {}).map(([key, value]) => ({
           key,
@@ -189,9 +195,19 @@ export function SubscriptionEditPage() {
       model_slots: slots,
       slot_efforts: slotEfforts,
     };
-    // 仅透传订阅有此开关 (翻译类订阅不渲染也不提交, 保持后端字段不变)
+    // 仅透传订阅有透传策略 (翻译类订阅不渲染也不提交, 保持后端字段不变)
     if (sub.auth_type === "api_key" && !isSystemOne) {
-      patch.header_policy = { mode: forwardClientHeaders ? "claude_code" : "none", names: [] };
+      const nameErr = validateHeaderPolicyNames(headerPolicy.names);
+      if (nameErr) return setSaveError(t(nameErr));
+      patch.header_policy = headerPolicy;
+    }
+    if (!sub.is_user_defined) {
+      const extraRows = extraHeaders
+        .map((r) => ({ key: r.key.trim(), value: r.value.trim() }))
+        .filter((r) => r.key !== "" || r.value !== "");
+      const extraErr = validateRequiredHeaders(extraRows);
+      if (extraErr) return setSaveError(t(extraErr));
+      patch.extra_headers = Object.fromEntries(extraRows.map((r) => [r.key, r.value]));
     }
     if (sub.is_user_defined) {
       const connErrKey = validateConnection({ base_url: baseUrl, messages_path: messagesPath });
@@ -468,19 +484,29 @@ export function SubscriptionEditPage() {
                       </div>
                     </div>
 
-                    {/* 仅 Anthropic 透传订阅: 透传客户端请求头开关 (翻译类协议不消费此字段) */}
+                    {/* 内置订阅的自定义请求头 (自定义订阅在上方连接区编辑 required_headers) */}
+                    {!isCustom && (
+                      <div className="grid grid-cols-[120px_1fr] gap-3 items-start">
+                        <Label className="mt-2">{t("subscriptionEdit.extraHeaders")}</Label>
+                        <div className="space-y-1">
+                          <KeyValueEditor
+                            value={extraHeaders}
+                            onChange={setExtraHeaders}
+                            keyPlaceholder={t("subscriptionEdit.requiredHeaderKeyPh")}
+                            valuePlaceholder={t("subscriptionEdit.requiredHeaderValuePh")}
+                            addLabel={t("subscriptionEdit.requiredHeadersAdd")}
+                            removeAriaLabel={t("subscriptionEdit.requiredHeadersRemove")}
+                          />
+                          <p className="text-xs text-muted-foreground">{t("subscriptionEdit.extraHeadersHint")}</p>
+                        </div>
+                      </div>
+                    )}
+
+                    {/* 仅 Anthropic 透传订阅: 客户端请求头透传策略 (翻译类协议不消费此字段) */}
                     {sub.auth_type === "api_key" && !isSystemOne && (
                       <div className="grid grid-cols-[120px_1fr] gap-3 items-start">
-                        <Label className="mt-0.5">{t("subscriptionEdit.forwardClientHeaders")}</Label>
-                        <div className="space-y-1">
-                          <Switch
-                            checked={forwardClientHeaders}
-                            onCheckedChange={setForwardClientHeaders}
-                          />
-                          <p className="text-xs text-muted-foreground">
-                            {t("subscriptionEdit.forwardClientHeadersHint")}
-                          </p>
-                        </div>
+                        <Label className="mt-2">{t("subscriptionEdit.headerPolicy.label")}</Label>
+                        <HeaderPolicyEditor value={headerPolicy} onChange={setHeaderPolicy} />
                       </div>
                     )}
                   </div>

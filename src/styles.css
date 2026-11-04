@@ -4121,3 +4121,19 @@ html:not([data-platform="macos"]) .main.flush { padding-top: 0; }
 .ob-next-title { font-size: 12.5px; font-weight: 600; line-height: 1.35; }
 .ob-next-where { font-size: 11px; color: var(--ink-3); }
 .star-prompt.ob-star { margin-top: 2px; }
+
+/* 订阅编辑页: 请求头透传策略 (HeaderPolicyEditor) */
+.hp-options { display: flex; flex-direction: column; gap: 6px; }
+.hp-option { display: flex; gap: 10px; align-items: flex-start; border: 1px solid var(--line); border-radius: var(--radius-md); padding: 8px 12px; cursor: pointer; background: var(--surface); }
+.hp-option:hover { border-color: var(--line-2); }
+.hp-option.on { border-color: var(--accent); background: var(--accent-bg); }
+.hp-option input { margin-top: 3px; accent-color: var(--accent); }
+.hp-option-title { display: block; font-size: 12.5px; font-weight: 600; color: var(--ink); }
+.hp-option-desc { display: block; font-size: 11.5px; color: var(--ink-3); }
+.hp-names { display: flex; flex-wrap: wrap; gap: 6px; padding-left: 4px; }
+.hp-chip { display: inline-flex; align-items: center; gap: 5px; border: 1px solid var(--line-2); border-radius: var(--radius-sm); padding: 2px 8px; font-size: 11.5px; background: var(--surface); }
+.hp-chip input { accent-color: var(--accent); margin: 0; }
+.hp-chip-x { color: var(--ink-4); display: inline-flex; }
+.hp-chip-x:hover { color: var(--err); }
+.hp-auto-mode { font-size: 11.5px; }
+.hp-auto-mode code { font-size: 11.5px; }

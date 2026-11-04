@@ -36,3 +36,22 @@ export function validateRequiredHeaders(
   }
   return null;
 }
+
+export type HeaderPolicyNameErrorKey =
+  | "validation.headerPolicyNameEmpty"
+  | "validation.headerPolicyNameStar"
+  | "validation.headerPolicyNameInvalid";
+
+/** HTTP token 字符 (RFC 9110), 与后端 reqwest HeaderName 解析口径一致。 */
+const HEADER_TOKEN = /^[!#$%&'*+\-.^_`|~0-9A-Za-z]+$/;
+
+/** 透传策略名单校验, 规则同后端 `HeaderPolicy::validate`: `*` 只能在末尾表示前缀。 */
+export function validateHeaderPolicyNames(names: string[]): HeaderPolicyNameErrorKey | null {
+  for (const raw of names) {
+    const stem = raw.endsWith("*") ? raw.slice(0, -1) : raw;
+    if (stem === "") return "validation.headerPolicyNameEmpty";
+    if (stem.includes("*")) return "validation.headerPolicyNameStar";
+    if (!HEADER_TOKEN.test(stem)) return "validation.headerPolicyNameInvalid";
+  }
+  return null;
+}
