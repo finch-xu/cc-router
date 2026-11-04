@@ -41,22 +41,20 @@ export function HttpsCertSection() {
 
   async function onExportCa() {
     try {
+      // zip 里同一份 PEM 落 .pem + .crt 两个后缀: Windows 双击 .crt 即装, 其余平台用 .pem。
+      const name = caZipName(new Date());
       if (runtime.kind === "web") {
-        const pem = await api.tlsGetCaPemText();
-        runtime.downloadText("cc-router-ca.pem", pem, "application/x-pem-file");
+        const bytes = await api.tlsGetCaZipBytes();
+        runtime.downloadBytes(name, new Uint8Array(bytes), "application/zip");
         alert(t("settings.https.cert.exportOk"));
         return;
       }
       const dest = await runtime.pickSavePath({
-        defaultName: "cc-router-ca.crt",
-        filters: [{ name: "Certificate", extensions: ["crt", "pem"] }],
+        defaultName: name,
+        filters: [{ name: "Zip", extensions: ["zip"] }],
       });
       if (!dest) return;
-      // Windows 把 .crt 关联到证书安装向导, .pem 默认无关联. 三平台都接受 PEM 文本内容,
-      // 同一份字节流落两份后缀, 用户拿到的哪份都能用.
-      const stem = dest.replace(/\.(pem|crt)$/i, "");
-      await api.tlsExportCaPem(`${stem}.pem`);
-      await api.tlsExportCaPem(`${stem}.crt`);
+      await api.tlsExportCaZip(/\.zip$/i.test(dest) ? dest : `${dest}.zip`);
       alert(t("settings.https.cert.exportOk"));
     } catch (e) {
       alert(`${t("settings.https.cert.exportFailed")}: ${errorText(e)}`);
@@ -161,4 +159,12 @@ export function HttpsCertSection() {
       </div>
     </div>
   );
+}
+
+/** `cc-router-ca-YYYYMMDD-HHMMSS.zip`, 本地时间 (本地 getter, 不用 toISOString)。 */
+export function caZipName(d: Date): string {
+  const p = (n: number) => String(n).padStart(2, "0");
+  const day = `${d.getFullYear()}${p(d.getMonth() + 1)}${p(d.getDate())}`;
+  const time = `${p(d.getHours())}${p(d.getMinutes())}${p(d.getSeconds())}`;
+  return `cc-router-ca-${day}-${time}.zip`;
 }

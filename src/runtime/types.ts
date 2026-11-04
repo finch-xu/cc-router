@@ -8,6 +8,8 @@ export interface Runtime {
   pickSavePath(opts: { defaultName: string; filters: { name: string; extensions: string[] }[] }): Promise<string | null>;
   /** web: 触发浏览器下载; 桌面: 抛错 (调用方应先判 kind) */
   downloadText(filename: string, text: string, mime: string): void;
+  /** web: 触发浏览器下载二进制内容; 桌面: 抛错 (调用方应先判 kind) */
+  downloadBytes(filename: string, bytes: Uint8Array<ArrayBuffer>, mime: string): void;
   /** 桌面: 打开系统下载目录; web: no-op */
   openDownloadsDir(): Promise<void>;
   /** 桌面: 窗口三键; web: no-op */

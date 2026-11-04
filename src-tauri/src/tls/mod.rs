@@ -60,13 +60,21 @@ pub fn ca_pem_path(app_data_dir: &Path) -> PathBuf {
     tls_dir(app_data_dir).join("ca.pem")
 }
 
-/// 拷贝 CA 公钥 PEM 到用户选择的目标路径.
-pub async fn export_ca_pem(app_data_dir: &Path, dest: &Path) -> AppResult<()> {
-    let src = ca_pem_path(app_data_dir);
-    tokio::fs::copy(&src, dest)
-        .await
-        .map(|_| ())
-        .map_err(AppError::Io)
+/// CA 证书导出包: 同一份 PEM 字节落两个后缀 (Windows 双击 .crt 即装, 其余平台用 .pem)。
+pub fn ca_zip_bytes(pem: &[u8]) -> AppResult<Vec<u8>> {
+    use std::io::Write;
+    use zip::write::SimpleFileOptions;
+
+    let mut w = zip::ZipWriter::new(std::io::Cursor::new(Vec::new()));
+    let opts = SimpleFileOptions::default()
+        .compression_method(zip::CompressionMethod::Deflated)
+        .unix_permissions(0o644);
+    for name in ["cc-router-ca.pem", "cc-router-ca.crt"] {
+        w.start_file(name, opts).map_err(|e| AppError::internal(e.to_string()))?;
+        w.write_all(pem).map_err(AppError::Io)?;
+    }
+    let cursor = w.finish().map_err(|e| AppError::internal(e.to_string()))?;
+    Ok(cursor.into_inner())
 }
 
 /// 重新生成 leaf 证书 (CA 不动). 用 `extra_sans` 注入用户配置的额外 SAN.
@@ -84,4 +92,26 @@ pub async fn read_status(app_data_dir: &Path) -> AppResult<TlsStatus> {
 
 fn tls_dir(app_data_dir: &Path) -> PathBuf {
     app_data_dir.join("tls")
+}
+
+#[cfg(test)]
+mod zip_tests {
+    use super::*;
+
+    #[test]
+    fn ca_zip_contains_pem_and_crt() {
+        let pem = b"-----BEGIN CERTIFICATE-----\nMIIB\n-----END CERTIFICATE-----\n";
+        let bytes = ca_zip_bytes(pem).unwrap();
+        let mut ar = zip::ZipArchive::new(std::io::Cursor::new(bytes)).unwrap();
+        assert_eq!(ar.len(), 2);
+        let mut names: Vec<String> = (0..ar.len()).map(|i| ar.by_index(i).unwrap().name().unwrap().to_string()).collect();
+        names.sort();
+        assert_eq!(names, vec!["cc-router-ca.crt", "cc-router-ca.pem"]);
+        for n in ["cc-router-ca.crt", "cc-router-ca.pem"] {
+            let mut f = ar.by_name(n).unwrap();
+            let mut buf = Vec::new();
+            std::io::Read::read_to_end(&mut f, &mut buf).unwrap();
+            assert_eq!(buf, pem);
+        }
+    }
 }

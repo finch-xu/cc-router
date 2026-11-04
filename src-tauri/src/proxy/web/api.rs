@@ -194,8 +194,8 @@ web_commands! {
     // TLS
     tls_get_status() => commands::tls::tls_get_status(st).await,
     tls_get_ca_pem_path() => commands::tls::tls_get_ca_pem_path(st).await,
-    tls_export_ca_pem(dest: String) => commands::tls::tls_export_ca_pem(st, args.dest).await,
-    tls_get_ca_pem_text() => commands::tls::tls_get_ca_pem_text(st).await,
+    tls_export_ca_zip() => Err::<(), AppError>(AppError::BadRequest(DESKTOP_ONLY.into())),
+    tls_get_ca_zip_bytes() => commands::tls::tls_get_ca_zip_bytes(st).await,
     tls_regenerate_leaf() => commands::tls::tls_regenerate_leaf(st).await,
     // 配置导入导出。带密钥导出会把全部 API Key 写进文件, 网页界面从设计上读不到任何 Key, 所以只留桌面端。
     export_config() => Err::<(), AppError>(AppError::BadRequest(DESKTOP_ONLY.into())),
@@ -271,7 +271,8 @@ mod tests {
     #[test]
     fn host_mutating_tui_commands_are_refusal_stubs_here() {
         let src = include_str!("api.rs");
-        for name in ["install_tui_command", "uninstall_tui_command"] {
+        // tls_export_ca_zip 同理: 写宿主机任意路径。
+        for name in ["install_tui_command", "uninstall_tui_command", "tls_export_ca_zip"] {
             assert!(REGISTERED.contains(&name), "{name} 必须登记 (两边集合要一致)");
             let line = src
                 .lines()
@@ -342,7 +343,7 @@ mod tests {
             "relaunch_app",
             "download_install_update",
             "export_requests_csv_text",
-            "tls_get_ca_pem_text",
+            "tls_get_ca_zip_bytes",
             "list_lan_addresses",
         ] {
             assert!(names.contains(&must), "{must} 未登记");

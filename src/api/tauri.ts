@@ -211,9 +211,9 @@ export const api = {
   // TLS / HTTPS 证书 (proxy_mode 包含 https 时使用)
   tlsGetStatus: () => invoke<TlsStatus>("tls_get_status"),
   tlsGetCaPemPath: () => invoke<string>("tls_get_ca_pem_path"),
-  tlsExportCaPem: (dest: string) => invoke<void>("tls_export_ca_pem", { dest }),
+  tlsExportCaZip: (dest: string) => invoke<void>("tls_export_ca_zip", { dest }),
   /** 网页端导出: 返回 CA PEM 文本 */
-  tlsGetCaPemText: () => invoke<string>("tls_get_ca_pem_text"),
+  tlsGetCaZipBytes: () => invoke<number[]>("tls_get_ca_zip_bytes"),
   tlsRegenerateLeaf: () => invoke<TlsStatus>("tls_regenerate_leaf"),
 
   // Claude Code 集成 (~/.claude/settings.json)

@@ -30,6 +30,9 @@ export const tauriRuntime: Runtime = {
   downloadText: () => {
     throw new Error("downloadText is web-only");
   },
+  downloadBytes: () => {
+    throw new Error("downloadBytes is web-only");
+  },
   openDownloadsDir: async () => {
     const dir = await downloadDir();
     await openShell(dir);

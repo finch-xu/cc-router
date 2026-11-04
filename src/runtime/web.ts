@@ -112,17 +112,8 @@ export const webRuntime: Runtime = {
   pickSavePath: () => {
     throw new Error("pickSavePath is desktop-only");
   },
-  downloadText: (filename, text, mime) => {
-    const blob = new Blob([text], { type: mime });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement("a");
-    a.href = url;
-    a.download = filename;
-    document.body.appendChild(a);
-    a.click();
-    a.remove();
-    setTimeout(() => URL.revokeObjectURL(url), 1000);
-  },
+  downloadText: (filename, text, mime) => downloadBlob(filename, new Blob([text], { type: mime })),
+  downloadBytes: (filename, bytes, mime) => downloadBlob(filename, new Blob([bytes], { type: mime })),
   openDownloadsDir: async () => {},
   windowAction: () => {},
   platformName: () => "web",
@@ -154,4 +145,16 @@ export async function webSession(): Promise<{ authenticated: boolean; auth_enabl
   const res = await fetch(`${API_PREFIX}/session`, { credentials: "same-origin" });
   if (!res.ok) return { authenticated: false, auth_enabled: true };
   return (await res.json()) as { authenticated: boolean; auth_enabled: boolean };
+}
+
+/** 触发浏览器下载; 稍后释放 object URL (立即释放会让部分浏览器下载失败)。 */
+function downloadBlob(filename: string, blob: Blob) {
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
 }
