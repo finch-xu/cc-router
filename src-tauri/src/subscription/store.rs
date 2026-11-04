@@ -124,7 +124,8 @@ fn row_to_row(row: &sqlx::sqlite::SqliteRow) -> AppResult<SubscriptionRow> {
     let extra_headers_json: String = row.try_get("extra_headers")?;
     let extra_headers: BTreeMap<String, String> =
         serde_json::from_str(&extra_headers_json).unwrap_or_else(|e| {
-            warn!(error = %e, raw = %extra_headers_json, "extra_headers JSON 解析失败, 该订阅视为无自定义头");
+            // 不记原值: 自定义头里可能有 token。
+            warn!(error = %e, len = extra_headers_json.len(), "extra_headers JSON 解析失败, 该订阅视为无自定义头");
             BTreeMap::new()
         });
     let url_params_json: String = row.try_get("url_params")?;

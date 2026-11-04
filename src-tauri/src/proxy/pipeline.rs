@@ -1282,10 +1282,10 @@ pub async fn dispatch(
         }
 
         // 出站头组装 (forward → required → auth → content-type, 后插覆盖):
-        // forward_client_headers 开关打开时按内置白名单转发客户端头 (proxy/forward.rs)。
+        // 按订阅的 header_policy 转发客户端头, 硬禁止集与优先级见 proxy/forward.rs。
         let upstream_headers = forward::build_anthropic_passthrough_headers(
             &client_headers,
-            header_policy.mode != crate::subscription::header_policy::HeaderPolicyMode::None,
+            &header_policy,
             &forward_headers,
             &required_headers,
             &auth_header_name,
