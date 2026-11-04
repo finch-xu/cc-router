@@ -9,6 +9,7 @@ use crate::provider::model::{
     ModelDiscovery, SystemoneWire,
 };
 use crate::provider::Provider;
+use crate::subscription::header_policy::HeaderPolicy;
 use crate::subscription::quota::{QuotaPeriod, QuotaUsage, TokenQuotas};
 use crate::subscription::schedule::{effective_model, SlotSchedules, WallClock};
 use crate::virtual_model::model::SubscriptionSlot;
@@ -270,10 +271,12 @@ pub struct SubscriptionRow {
     pub auth_header_format: AuthHeaderFormat,
     pub required_headers: BTreeMap<String, String>,
     pub forward_headers: Vec<String>,
-    /// 「透传客户端请求头」开关 (migration 020, 默认 false = 历史行为)。
-    /// 打开后 Anthropic 透传路径按 proxy/forward.rs 的内置白名单转发客户端头;
-    /// 翻译类 auth_type 不消费此字段。
-    pub forward_client_headers: bool,
+    /// 客户端请求头透传策略 (migration 026, 取代 forward_client_headers)。
+    /// 只有 Anthropic 透传路径消费 (proxy/forward.rs); 翻译类 auth_type 不读。
+    pub header_policy: HeaderPolicy,
+    /// 用户自定义出站头 (migration 026)。所有订阅可编辑, yaml 重拍不覆盖;
+    /// 发送时经 `resolved_required_headers()` 合并, 同名覆盖 required_headers。
+    pub extra_headers: BTreeMap<String, String>,
     /// 创建时快照的端点协议, 之后不可变 (migration 023)。决定订阅只能绑哪类虚拟模型。
     pub endpoint_protocol: EndpointProtocol,
     /// User-supplied provider params as entered (migration 024). The resolved strings are
@@ -568,9 +571,12 @@ pub struct SubscriptionDto {
     pub auth_header_format: AuthHeaderFormat,
     pub required_headers: BTreeMap<String, String>,
     pub forward_headers: Vec<String>,
-    /// 「透传客户端请求头」开关. 默认 false 兼容老 DTO 消费者.
+    /// 客户端请求头透传策略.
     #[serde(default)]
-    pub forward_client_headers: bool,
+    pub header_policy: HeaderPolicy,
+    /// 用户自定义出站头.
+    #[serde(default)]
+    pub extra_headers: BTreeMap<String, String>,
     /// 端点协议 (`messages` / `systemone`)。客户端据此决定显示四槽还是 Jev 槽、能绑哪些虚拟模型。
     #[serde(default)]
     pub endpoint_protocol: EndpointProtocol,
@@ -668,7 +674,8 @@ impl SubscriptionRow {
             auth_header_format: AuthHeaderFormat::Bearer,
             required_headers: BTreeMap::new(),
             forward_headers: Vec::new(),
-            forward_client_headers: false,
+            header_policy: HeaderPolicy::none(),
+            extra_headers: BTreeMap::new(),
             endpoint_protocol: EndpointProtocol::Messages,
             url_params: BTreeMap::new(),
             systemone_wire: SystemoneWire::Standard,
@@ -742,7 +749,8 @@ impl SubscriptionDto {
             auth_header_format: rt.row.auth_header_format.clone(),
             required_headers: rt.row.required_headers.clone(),
             forward_headers: rt.row.forward_headers.clone(),
-            forward_client_headers: rt.row.forward_client_headers,
+            header_policy: rt.row.header_policy.clone(),
+            extra_headers: rt.row.extra_headers.clone(),
             endpoint_protocol: rt.row.endpoint_protocol,
             url_params: rt.row.url_params.clone(),
             model_discovery: rt.row.model_discovery.clone(),

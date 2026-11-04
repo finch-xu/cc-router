@@ -11,6 +11,7 @@ use crate::provider::model::{
     SystemoneWire,
 };
 use crate::subscription::model::{ModelSlots, OAuthMetadata, SlotEfforts, SubscriptionRow};
+use crate::subscription::header_policy::{HeaderPolicy, HeaderPolicyMode};
 use crate::subscription::quota::TokenQuotas;
 use crate::subscription::schedule::SlotSchedules;
 use crate::virtual_model::model::{RoutingMode, VirtualModelName};
@@ -62,8 +63,17 @@ pub struct ExportSubscription {
     pub required_headers: BTreeMap<String, String>,
     #[serde(default)]
     pub forward_headers: Vec<String>,
+    /// Pre-026 switch. Still written (`mode != none`) so older app versions importing a
+    /// new file keep roughly the same behavior; only read when `header_policy` is absent.
     #[serde(default)]
     pub forward_client_headers: bool,
+    /// Client-header forwarding policy; absent in files from before migration 026.
+    #[serde(default)]
+    pub header_policy: Option<HeaderPolicy>,
+    /// User-defined outbound headers. Names that look sensitive are never exported
+    /// (no secret slot for them), see `subscription_to_export`.
+    #[serde(default)]
+    pub extra_headers: BTreeMap<String, String>,
     /// 端点协议快照; 旧导出文件没有该字段, 按对话协议 (messages) 处理。
     #[serde(default)]
     pub endpoint_protocol: EndpointProtocol,
@@ -228,7 +238,8 @@ pub fn subscription_to_export(row: &SubscriptionRow) -> (ExportSubscription, Ext
         auth_header_format,
         required_headers,
         forward_headers,
-        forward_client_headers,
+        header_policy,
+        extra_headers,
         endpoint_protocol,
         url_params,
         systemone_wire,
@@ -268,7 +279,13 @@ pub fn subscription_to_export(row: &SubscriptionRow) -> (ExportSubscription, Ext
         auth_header_format: auth_header_format.clone(),
         required_headers: plain_headers,
         forward_headers: forward_headers.clone(),
-        forward_client_headers: *forward_client_headers,
+        forward_client_headers: header_policy.mode != HeaderPolicyMode::None,
+        header_policy: Some(header_policy.clone()),
+        extra_headers: extra_headers
+            .iter()
+            .filter(|(k, _)| !is_sensitive_header(k))
+            .map(|(k, v)| (k.clone(), v.clone()))
+            .collect(),
         endpoint_protocol: *endpoint_protocol,
         url_params: url_params.clone(),
         systemone_wire: *systemone_wire,
@@ -319,7 +336,11 @@ pub fn export_to_row(
         auth_header_format: sub.auth_header_format.clone(),
         required_headers,
         forward_headers: sub.forward_headers.clone(),
-        forward_client_headers: sub.forward_client_headers,
+        header_policy: sub
+            .header_policy
+            .clone()
+            .unwrap_or_else(|| HeaderPolicy::from_legacy_flag(sub.forward_client_headers)),
+        extra_headers: sub.extra_headers.clone(),
         endpoint_protocol: sub.endpoint_protocol,
         url_params: sub.url_params.clone(),
         systemone_wire: sub.systemone_wire,
@@ -535,12 +556,32 @@ mod tests {
     }
 
     #[test]
+    fn legacy_backup_maps_forward_flag_to_policy() {
+        let row = SubscriptionRow::test_fixture("deepseek", "default");
+        let (exp, _) = subscription_to_export(&row);
+        let mut v = serde_json::to_value(&exp).unwrap();
+        let obj = v.as_object_mut().unwrap();
+        obj.remove("header_policy");
+        obj.remove("extra_headers");
+        obj.insert("forward_client_headers".into(), serde_json::Value::Bool(true));
+        let legacy: ExportSubscription = serde_json::from_value(v).unwrap();
+        let back = export_to_row(&legacy, String::new(), BTreeMap::new(), true, Utc::now());
+        assert_eq!(back.header_policy.mode, HeaderPolicyMode::ClaudeCode);
+        assert!(back.extra_headers.is_empty());
+    }
+
+    #[test]
     fn row_roundtrips_through_export_entry() {
         let mut row = SubscriptionRow::test_fixture("deepseek", "default");
         row.base_url = "https://api.deepseek.com/anthropic".into();
         row.display_name = "主号".into();
         row.enabled = false;
-        row.forward_client_headers = true;
+        row.header_policy = HeaderPolicy {
+            mode: HeaderPolicyMode::Allowlist,
+            names: vec!["x-team".into(), "x-trace-*".into()],
+        };
+        row.extra_headers.insert("X-Team".into(), "platform".into());
+        row.extra_headers.insert("X-Session-Token".into(), "secret-must-not-export".into());
         row.is_auth_failed = true;
         row.last_error_message = Some("boom".into());
         let (exp, secrets) = subscription_to_export(&row);
@@ -552,7 +593,12 @@ mod tests {
         assert_eq!(back.api_key, row.api_key);
         assert_eq!(back.base_url, row.base_url);
         assert_eq!(back.enabled, row.enabled);
-        assert_eq!(back.forward_client_headers, row.forward_client_headers);
+        assert_eq!(back.header_policy, row.header_policy);
+        assert_eq!(back.extra_headers.get("X-Team").map(String::as_str), Some("platform"));
+        assert!(
+            !back.extra_headers.contains_key("X-Session-Token"),
+            "sensitive extra header must not travel in plaintext"
+        );
         assert_eq!(back.created_at.timestamp_millis(), row.created_at.timestamp_millis());
         assert_eq!(back.updated_at, now);
         assert!(!back.is_auth_failed, "运行状态不随文件迁移");

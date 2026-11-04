@@ -380,8 +380,10 @@ export interface SubscriptionDto {
   auth_header_format: AuthHeaderFormat;
   required_headers: Record<string, string>;
   forward_headers: string[];
-  /** 「透传客户端请求头」开关 (仅 auth_type=api_key 的透传路径消费, 默认 false) */
-  forward_client_headers: boolean;
+  /** 客户端请求头透传策略 (仅 auth_type=api_key 的透传路径消费) */
+  header_policy: HeaderPolicy;
+  /** 用户自定义出站头 (所有订阅可编辑, yaml 重拍不覆盖) */
+  extra_headers: Record<string, string>;
   /** 创建时快照的端点协议, 之后不可变。systemone 订阅只能绑 model-jev, 反之亦然。 */
   endpoint_protocol: EndpointProtocol;
   /** Provider params as entered (e.g. account_id); resolved strings are already in base_url etc. */
@@ -493,13 +495,23 @@ export interface ConnectionPatch {
   required_headers?: Record<string, string>;
 }
 
+export type HeaderPolicyMode = "none" | "claude_code" | "allowlist" | "denylist" | "all";
+
+/** 客户端请求头透传策略。names 只在 allowlist / denylist 下有意义, 末尾 `*` 表示前缀匹配。 */
+export interface HeaderPolicy {
+  mode: HeaderPolicyMode;
+  names: string[];
+}
+
 export interface SubscriptionPatch {
   display_name?: string;
   model_slots?: ModelSlots;
   /** 每槽位 effort 覆盖, 整块替换 (与 model_slots 一致, 无 per-slot patch) */
   slot_efforts?: SlotEfforts;
-  /** 「透传客户端请求头」开关 (仅透传订阅显示, 内置/自定义均可改) */
-  forward_client_headers?: boolean;
+  /** 客户端请求头透传策略 (仅透传订阅显示, 内置/自定义均可改) */
+  header_policy?: HeaderPolicy;
+  /** 用户自定义出站头, 整块替换 */
+  extra_headers?: Record<string, string>;
   /** 内置订阅: 切换 endpoint, 后端 re-snapshot */
   endpoint_id?: string;
   /** 内置订阅: 改 url_params (可与 endpoint_id 同发), 后端与现有值合并后整体重新快照; 自定义订阅会被拒绝 */

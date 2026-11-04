@@ -109,6 +109,10 @@ const MIGRATIONS: &[(u32, &str)] = &[
         25,
         include_str!("../../migrations/025_add_slot_schedules.sql"),
     ),
+    (
+        26,
+        include_str!("../../migrations/026_add_header_policy_and_extra_headers.sql"),
+    ),
 ];
 
 pub async fn init_pool(db_path: &Path) -> AppResult<SqlitePool> {
@@ -400,7 +404,7 @@ mod tests {
         run_migrations(&pool).await.expect("migrate fresh");
 
         let versions = applied_versions(&pool).await;
-        assert_eq!(versions, vec![1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25]);
+        assert_eq!(versions, vec![1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26]);
         assert!(!has_column(&pool, "subscriptions", "supports_thinking_blocks").await);
         assert!(!has_column(&pool, "subscriptions", "thinking_block_field_name").await);
         assert!(has_column(&pool, "requests", "upstream_response_body").await);
@@ -458,7 +462,7 @@ mod tests {
         run_migrations(&pool).await.expect("migrate legacy");
 
         let versions = applied_versions(&pool).await;
-        assert_eq!(versions, vec![1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25]); // baseline v=1, 然后跑增量
+        assert_eq!(versions, vec![1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26]); // baseline v=1, 然后跑增量
         assert!(!has_column(&pool, "subscriptions", "supports_thinking_blocks").await);
         assert!(!has_column(&pool, "subscriptions", "thinking_block_field_name").await);
         assert!(has_column(&pool, "requests", "upstream_response_body").await);
@@ -474,7 +478,7 @@ mod tests {
         run_migrations(&pool).await.expect("third run");
 
         let versions = applied_versions(&pool).await;
-        assert_eq!(versions, vec![1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25]); // 没有重复写
+        assert_eq!(versions, vec![1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26]); // 没有重复写
     }
 
     /// 在 v4 schema 状态下插一条订阅 (含已 v7 移除的 supports_thinking_blocks 列)。
@@ -540,7 +544,7 @@ mod tests {
         assert!(!has_table(&pool, "subscriptions_new").await);
         assert_eq!(
             applied_versions(&pool).await,
-            vec![1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25]
+            vec![1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26]
         );
 
         let count: (i64,) =
@@ -873,6 +877,37 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(again.0 as usize, expected.len() + 1);
+    }
+
+    /// v26: forward_client_headers 换算成 header_policy; extra_headers 默认空对象。
+    #[tokio::test]
+    async fn migration_026_maps_forward_flag() {
+        let pool = in_memory_pool().await;
+        let v26 = MIGRATIONS.iter().position(|(v, _)| *v == 26).unwrap();
+        sqlx::query("CREATE TABLE IF NOT EXISTS _schema_version (version INTEGER PRIMARY KEY, applied_at INTEGER NOT NULL)")
+            .execute(&pool)
+            .await
+            .unwrap();
+        apply_migrations(&pool, 0..v26).await;
+        insert_v13_subscription(&pool, "anthropic", "default").await;
+        insert_v13_subscription(&pool, "deepseek", "default").await;
+        sqlx::query("UPDATE subscriptions SET forward_client_headers = 1 WHERE provider_id = 'anthropic'")
+            .execute(&pool)
+            .await
+            .unwrap();
+        apply_migrations(&pool, v26..v26 + 1).await;
+
+        let rows: Vec<(String, String, String)> = sqlx::query_as(
+            "SELECT provider_id, header_policy, extra_headers FROM subscriptions ORDER BY provider_id",
+        )
+        .fetch_all(&pool)
+        .await
+        .unwrap();
+        assert_eq!(rows[0].0, "anthropic");
+        assert_eq!(rows[0].1, r#"{"mode":"claude_code","names":[]}"#);
+        assert_eq!(rows[1].1, r#"{"mode":"none","names":[]}"#);
+        assert_eq!(rows[0].2, "{}");
+        assert_eq!(rows[1].2, "{}");
     }
 
     #[tokio::test]

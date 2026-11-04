@@ -18,6 +18,7 @@ use crate::subscription::model::{
     SubscriptionRow, SubscriptionRuntime,
 };
 use crate::subscription::quota::{QuotaBucket, QuotaPeriod, QuotaUsage, TokenQuotas, ALL_PERIODS};
+use crate::subscription::header_policy::HeaderPolicy;
 use crate::subscription::schedule::SlotSchedules;
 
 /// 启动时从 DB 加载全部订阅，并初始化运行时状态。
@@ -35,7 +36,7 @@ pub async fn load_runtime(
                 enabled, is_auth_failed, last_error_message,
                 created_at, updated_at,
                 base_url, messages_path, auth_header_name, auth_header_format,
-                required_headers, forward_headers, forward_client_headers,
+                required_headers, forward_headers, header_policy, extra_headers,
                 model_discovery, balance_discovery,
                 provider_display_name, provider_icon, is_user_defined,
                 auth_type, oauth_metadata, slot_efforts, token_quotas, endpoint_protocol,
@@ -113,6 +114,19 @@ fn row_to_row(row: &sqlx::sqlite::SqliteRow) -> AppResult<SubscriptionRow> {
         EndpointProtocol::from_str(&protocol_str).map_err(AppError::internal)?;
     // url_params / systemone_wire 在 migration 024 加. 与 slot_efforts 同样宽容降级:
     // 坏 JSON 只丢失编辑回显, 不该让整条订阅加载失败。
+    // header_policy / extra_headers 列在 migration 026 加. 同 token_quotas 走宽容降级:
+    // 解析失败回退到「不透传 / 无自定义头」, 不让整条订阅加载失败。
+    let header_policy_json: String = row.try_get("header_policy")?;
+    let header_policy: HeaderPolicy = serde_json::from_str(&header_policy_json).unwrap_or_else(|e| {
+        warn!(error = %e, raw = %header_policy_json, "header_policy JSON 解析失败, 该订阅视为不透传");
+        HeaderPolicy::none()
+    });
+    let extra_headers_json: String = row.try_get("extra_headers")?;
+    let extra_headers: BTreeMap<String, String> =
+        serde_json::from_str(&extra_headers_json).unwrap_or_else(|e| {
+            warn!(error = %e, raw = %extra_headers_json, "extra_headers JSON 解析失败, 该订阅视为无自定义头");
+            BTreeMap::new()
+        });
     let url_params_json: String = row.try_get("url_params")?;
     let url_params: BTreeMap<String, String> =
         serde_json::from_str(&url_params_json).unwrap_or_else(|e| {
@@ -198,10 +212,8 @@ fn row_to_row(row: &sqlx::sqlite::SqliteRow) -> AppResult<SubscriptionRow> {
             .map_err(AppError::internal)?,
         required_headers,
         forward_headers,
-        forward_client_headers: {
-            let v: i64 = row.try_get("forward_client_headers")?;
-            v != 0
-        },
+        header_policy,
+        extra_headers,
         endpoint_protocol,
         url_params,
         systemone_wire,
@@ -233,6 +245,8 @@ pub async fn insert(pool: &SqlitePool, sub: &SubscriptionRow) -> AppResult<()> {
 /// transaction (config import writes every row + binding atomically).
 pub async fn insert_on(conn: &mut SqliteConnection, sub: &SubscriptionRow) -> AppResult<()> {
     let required_json = serde_json::to_string(&sub.required_headers)?;
+    let header_policy_json = serde_json::to_string(&sub.header_policy)?;
+    let extra_headers_json = serde_json::to_string(&sub.extra_headers)?;
     let forward_json = serde_json::to_string(&sub.forward_headers)?;
     let discovery_json = serde_json::to_string(&sub.model_discovery)?;
     let balance_discovery_json = opt_to_json(sub.balance_discovery.as_ref())?;
@@ -247,14 +261,14 @@ pub async fn insert_on(conn: &mut SqliteConnection, sub: &SubscriptionRow) -> Ap
             model_slot_fallback, model_slot_jev,
             enabled, is_auth_failed, last_error_message, created_at, updated_at,
             base_url, messages_path, auth_header_name, auth_header_format,
-            required_headers, forward_headers, forward_client_headers,
+            required_headers, forward_headers, header_policy, extra_headers,
             model_discovery, balance_discovery,
             provider_display_name, provider_icon, is_user_defined,
             auth_type, oauth_metadata, slot_efforts, token_quotas, endpoint_protocol,
             url_params, systemone_wire, slot_schedules)
          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
                  ?, ?, ?, ?,
-                 ?, ?, ?, ?, ?,
+                 ?, ?, ?, ?, ?, ?,
                  ?, ?, ?,
                  ?, ?, ?, ?, ?,
                  ?, ?, ?)",
@@ -281,7 +295,8 @@ pub async fn insert_on(conn: &mut SqliteConnection, sub: &SubscriptionRow) -> Ap
     .bind(sub.auth_header_format.as_str())
     .bind(required_json)
     .bind(forward_json)
-    .bind(sub.forward_client_headers as i64)
+    .bind(header_policy_json.clone())
+    .bind(extra_headers_json.clone())
     .bind(discovery_json)
     .bind(balance_discovery_json)
     .bind(&sub.provider_display_name)
@@ -333,6 +348,8 @@ pub async fn update_api_key(pool: &SqlitePool, id: &Uuid, new_key: &str) -> AppR
 
 pub async fn update_row(pool: &SqlitePool, sub: &SubscriptionRow) -> AppResult<()> {
     let required_json = serde_json::to_string(&sub.required_headers)?;
+    let header_policy_json = serde_json::to_string(&sub.header_policy)?;
+    let extra_headers_json = serde_json::to_string(&sub.extra_headers)?;
     let forward_json = serde_json::to_string(&sub.forward_headers)?;
     let discovery_json = serde_json::to_string(&sub.model_discovery)?;
     let balance_discovery_json = opt_to_json(sub.balance_discovery.as_ref())?;
@@ -349,7 +366,7 @@ pub async fn update_row(pool: &SqlitePool, sub: &SubscriptionRow) -> AppResult<(
             token_quotas = ?,
             enabled = ?, is_auth_failed = ?, last_error_message = ?, updated_at = ?,
             base_url = ?, messages_path = ?, auth_header_name = ?, auth_header_format = ?,
-            required_headers = ?, forward_headers = ?, forward_client_headers = ?,
+            required_headers = ?, forward_headers = ?, header_policy = ?, extra_headers = ?,
             model_discovery = ?, balance_discovery = ?,
             provider_display_name = ?, provider_icon = ?, is_user_defined = ?,
             url_params = ?, systemone_wire = ?,
@@ -376,7 +393,8 @@ pub async fn update_row(pool: &SqlitePool, sub: &SubscriptionRow) -> AppResult<(
     .bind(sub.auth_header_format.as_str())
     .bind(required_json)
     .bind(forward_json)
-    .bind(sub.forward_client_headers as i64)
+    .bind(header_policy_json.clone())
+    .bind(extra_headers_json.clone())
     .bind(discovery_json)
     .bind(balance_discovery_json)
     .bind(&sub.provider_display_name)

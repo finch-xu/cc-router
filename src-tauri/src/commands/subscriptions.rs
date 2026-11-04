@@ -9,6 +9,7 @@ use tracing::warn;
 use uuid::Uuid;
 
 use crate::error::{AppError, AppResult};
+use crate::subscription::header_policy::HeaderPolicy;
 use crate::provider::model::{
     AuthHeaderFormat, AuthType, EndpointProtocol, ModelDiscovery, SystemoneWire,
 };
@@ -243,9 +244,11 @@ pub struct SubscriptionPatch {
     /// 每槽位 reasoning effort 覆盖. 整块替换 (与 model_slots 一致, 无 per-slot patch)。
     /// 字段缺失 = auto, 即透传客户端请求携带的 effort。
     pub slot_efforts: Option<SlotEfforts>,
-    /// 「透传客户端请求头」开关。仅 Anthropic 透传路径 (auth_type=api_key) 消费;
+    /// 客户端请求头透传策略。仅 Anthropic 透传路径 (auth_type=api_key) 消费;
     /// 内置/自定义订阅均可改 (不属于 connection 信息)。
-    pub forward_client_headers: Option<bool>,
+    pub header_policy: Option<HeaderPolicy>,
+    /// 用户自定义出站头, 整块替换。内置/自定义订阅均可改, yaml 重拍不覆盖。
+    pub extra_headers: Option<BTreeMap<String, String>>,
     /// 内置订阅: 切到同 provider 的另一个 endpoint, 后端 re-snapshot base_url/messages_path。
     /// 自定义订阅传该字段会被拒绝。
     pub endpoint_id: Option<String>,
@@ -386,7 +389,8 @@ pub async fn create_subscription(
                 auth_header_format: provider.auth.header_format.clone(),
                 required_headers: snap.required_headers,
                 forward_headers: provider.forward_headers.clone(),
-                forward_client_headers: false,
+                header_policy: HeaderPolicy::default_for_provider(&provider_id),
+                extra_headers: BTreeMap::new(),
                 endpoint_protocol: snap.endpoint_protocol,
                 url_params: snap.url_params,
                 systemone_wire: snap.systemone_wire,
@@ -449,7 +453,8 @@ pub async fn create_subscription(
                 auth_header_format,
                 required_headers: BTreeMap::new(),
                 forward_headers: Vec::new(),
-                forward_client_headers: false,
+                header_policy: HeaderPolicy::none(),
+                extra_headers: BTreeMap::new(),
                 endpoint_protocol: profile.endpoint_protocol,
                 url_params: BTreeMap::new(),
                 systemone_wire: SystemoneWire::Standard,
@@ -489,6 +494,9 @@ pub async fn update_subscription(
     };
 
     // 先做所有校验/反查 (不持锁), 失败时不会留下半应用的内存修改。
+    if let Some(p) = patch.header_policy.as_ref() {
+        p.validate().map_err(AppError::BadRequest)?;
+    }
     if (patch.endpoint_id.is_some() || patch.url_params.is_some()) && patch.connection.is_some() {
         return Err(AppError::BadRequest(
             "endpoint_id / url_params 与 connection patch 不能同时存在".into(),
@@ -579,8 +587,11 @@ pub async fn update_subscription(
         if let Some(efforts) = patch.slot_efforts {
             guard.row.slot_efforts = efforts;
         }
-        if let Some(v) = patch.forward_client_headers {
-            guard.row.forward_client_headers = v;
+        if let Some(v) = patch.header_policy {
+            guard.row.header_policy = v;
+        }
+        if let Some(v) = patch.extra_headers {
+            guard.row.extra_headers = v;
         }
         if let Some((eid, snap)) = resnapshot {
             guard.row.endpoint_id = eid;

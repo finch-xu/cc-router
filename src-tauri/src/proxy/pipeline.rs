@@ -324,7 +324,7 @@ pub async fn dispatch(
             api_key_raw,
             required_headers,
             forward_headers,
-            forward_client_headers,
+            header_policy,
             auth_type,
             oauth_metadata,
             forced_effort,
@@ -359,7 +359,7 @@ pub async fn dispatch(
                 guard.row.api_key.clone(),
                 guard.row.resolved_required_headers(),
                 guard.row.forward_headers.clone(),
-                guard.row.forward_client_headers,
+                guard.row.header_policy.clone(),
                 guard.row.auth_type,
                 guard.row.oauth_metadata.clone(),
                 forced_effort,
@@ -1285,7 +1285,7 @@ pub async fn dispatch(
         // forward_client_headers 开关打开时按内置白名单转发客户端头 (proxy/forward.rs)。
         let upstream_headers = forward::build_anthropic_passthrough_headers(
             &client_headers,
-            forward_client_headers,
+            header_policy.mode != crate::subscription::header_policy::HeaderPolicyMode::None,
             &forward_headers,
             &required_headers,
             &auth_header_name,

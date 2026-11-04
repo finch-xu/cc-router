@@ -136,7 +136,7 @@ export function SubscriptionEditPage() {
       setAuthHeaderName(subQuery.data.auth_header_name);
       setAuthHeaderFormat(subQuery.data.auth_header_format);
       setProviderDisplayName(subQuery.data.provider_display_name);
-      setForwardClientHeaders(subQuery.data.forward_client_headers ?? false);
+      setForwardClientHeaders((subQuery.data.header_policy?.mode ?? "none") !== "none");
       setRequiredHeaders(
         Object.entries(subQuery.data.required_headers ?? {}).map(([key, value]) => ({
           key,
@@ -191,7 +191,7 @@ export function SubscriptionEditPage() {
     };
     // 仅透传订阅有此开关 (翻译类订阅不渲染也不提交, 保持后端字段不变)
     if (sub.auth_type === "api_key" && !isSystemOne) {
-      patch.forward_client_headers = forwardClientHeaders;
+      patch.header_policy = { mode: forwardClientHeaders ? "claude_code" : "none", names: [] };
     }
     if (sub.is_user_defined) {
       const connErrKey = validateConnection({ base_url: baseUrl, messages_path: messagesPath });
