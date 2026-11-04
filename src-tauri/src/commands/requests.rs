@@ -222,6 +222,45 @@ fn csv_field(s: &str) -> String {
     }
 }
 
+/// 请求详情弹窗的三组请求头 (requests 表 migration 027 的三列)。不在列表接口里:
+/// 每行可达 16 KB × 3, 只在打开详情时按 id 取。列为 NULL (老日志 / 关了记录) 或无法解析 → None。
+#[derive(Debug, Serialize, PartialEq, Eq)]
+pub struct RequestHeadersDto {
+    pub client_request: Option<Vec<[String; 2]>>,
+    pub upstream_request: Option<Vec<[String; 2]>>,
+    pub upstream_response: Option<Vec<[String; 2]>>,
+}
+
+pub(crate) async fn load_request_headers(
+    pool: &sqlx::SqlitePool,
+    id: &str,
+) -> AppResult<RequestHeadersDto> {
+    let row = sqlx::query(
+        "SELECT client_request_headers, upstream_request_headers, upstream_response_headers
+         FROM requests WHERE id = ?",
+    )
+    .bind(id)
+    .fetch_optional(pool)
+    .await?
+    .ok_or_else(|| crate::error::AppError::BadRequest("请求记录不存在".into()))?;
+    let col = |name: &str| {
+        row.try_get::<Option<String>, _>(name)
+            .ok()
+            .flatten()
+            .and_then(|s| crate::proxy::header_log::parse(&s))
+    };
+    Ok(RequestHeadersDto {
+        client_request: col("client_request_headers"),
+        upstream_request: col("upstream_request_headers"),
+        upstream_response: col("upstream_response_headers"),
+    })
+}
+
+#[tauri::command]
+pub async fn get_request_headers(state: State<'_, AppState>, id: String) -> AppResult<RequestHeadersDto> {
+    load_request_headers(&state.db, &id).await
+}
+
 /// CSV 列 (与 RequestLogDto 对齐, 刻意不含 upstream_response_body —— 大且多行,
 /// 排障专用不适合表格; 另在 timestamp 旁加人类可读的 timestamp_iso)。
 const CSV_HEADER: &str = "id,timestamp,timestamp_iso,virtual_model_name,subscription_id,\
@@ -426,6 +465,50 @@ mod tests {
         .execute(pool)
         .await
         .unwrap();
+    }
+
+    async fn header_pool() -> sqlx::SqlitePool {
+        let pool = sqlx::sqlite::SqlitePoolOptions::new()
+            .max_connections(1)
+            .connect("sqlite::memory:")
+            .await
+            .unwrap();
+        crate::db::run_migrations(&pool).await.unwrap();
+        pool
+    }
+
+    #[tokio::test]
+    async fn detail_returns_parsed_headers() {
+        let pool = header_pool().await;
+        insert_request(&pool, "h1", 1000, Some("claude-code"), None).await;
+        sqlx::query(
+            "UPDATE requests SET client_request_headers = ?, upstream_request_headers = ?,
+             upstream_response_headers = ? WHERE id = 'h1'",
+        )
+        .bind(r#"[["x-app","cli"],["anthropic-beta","a"]]"#)
+        .bind(r#"[["x-api-key","sk-a…cdef"]]"#)
+        .bind(r#"[["request-id","r1"]]"#)
+        .execute(&pool)
+        .await
+        .unwrap();
+        let d = super::load_request_headers(&pool, "h1").await.unwrap();
+        let pair = |a: &str, b: &str| [a.to_string(), b.to_string()];
+        assert_eq!(d.client_request, Some(vec![pair("x-app", "cli"), pair("anthropic-beta", "a")]));
+        assert_eq!(d.upstream_request, Some(vec![pair("x-api-key", "sk-a…cdef")]));
+        assert_eq!(d.upstream_response, Some(vec![pair("request-id", "r1")]));
+    }
+
+    #[tokio::test]
+    async fn detail_returns_none_for_unrecorded_rows() {
+        let pool = header_pool().await;
+        insert_request(&pool, "h2", 1000, None, None).await;
+        sqlx::query("UPDATE requests SET upstream_request_headers = 'garbage' WHERE id = 'h2'")
+            .execute(&pool)
+            .await
+            .unwrap();
+        let d = super::load_request_headers(&pool, "h2").await.unwrap();
+        assert_eq!(d, super::RequestHeadersDto { client_request: None, upstream_request: None, upstream_response: None });
+        assert!(super::load_request_headers(&pool, "missing").await.is_err());
     }
 
     /// 聚合按 client_tool 分组: 未识别 (NULL) 是独立一桶, 整体按 last_seen 倒序。

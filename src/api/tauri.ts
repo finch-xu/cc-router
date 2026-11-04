@@ -2,6 +2,7 @@ import { runtime } from "@/runtime";
 
 const invoke = runtime.invoke;
 import type {
+  RequestHeaders,
   BreakdownBy,
   BreakdownDto,
   ChatGptAccount,
@@ -121,6 +122,7 @@ export const api = {
     invoke<void>("update_virtual_model", { name, input }),
 
   // request logs
+  getRequestHeaders: (id: string) => invoke<RequestHeaders>("get_request_headers", { id }),
   listRequests: (
     page: number,
     pageSize: number,

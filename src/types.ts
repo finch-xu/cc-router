@@ -754,6 +754,16 @@ export const CLIENT_TOOL_UNKNOWN_SENTINEL = "__unknown__";
  */
 export const TOOL_NAME_TRUNCATED_MARKER = "…";
 
+/** 一组请求头: `[name, value]` 有序对, 名字小写, 凭据已脱敏。null = 没有记录 (老日志或关了「记录请求头」)。 */
+export type HeaderPairs = [string, string][] | null;
+
+/** 请求详情弹窗的三组请求头 (get_request_headers)。 */
+export interface RequestHeaders {
+  client_request: HeaderPairs;
+  upstream_request: HeaderPairs;
+  upstream_response: HeaderPairs;
+}
+
 export interface RequestLogDto {
   id: string;
   timestamp: number;

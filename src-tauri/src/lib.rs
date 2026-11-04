@@ -143,6 +143,7 @@ pub fn run() {
             commands::virtual_models::list_virtual_models,
             commands::virtual_models::update_virtual_model,
             commands::requests::list_requests,
+            commands::requests::get_request_headers,
             commands::requests::export_requests_csv,
             commands::requests::export_requests_csv_text,
             commands::requests::list_supported_client_tools,
