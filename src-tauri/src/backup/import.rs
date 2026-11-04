@@ -10,7 +10,7 @@ use uuid::Uuid;
 use super::format::{export_to_row, header_field, ExportFile, ExportSubscription, SecretsPlain, FIELD_API_KEY};
 use crate::commands::subscriptions::{
     check_schedules_for, validate_base_url, validate_gemini_messages_path, validate_messages_path,
-    validate_required_headers, validate_slot_efforts, validate_token_quotas,
+    validate_extra_headers, validate_required_headers, validate_slot_efforts, validate_token_quotas,
 };
 use crate::error::{AppError, AppResult};
 use crate::provider::model::{AuthType, EndpointProtocol, Provider};
@@ -81,6 +81,8 @@ fn validate_entry(sub: &ExportSubscription) -> Result<(), String> {
             headers.entry(name.clone()).or_insert_with(|| "redacted".into());
         }
         validate_required_headers(&headers, &sub.auth_header_name)?;
+        // 导入文件不可信: 自定义头与编辑页走同一套校验 (不许盖鉴权头 / 合规头)。
+        validate_extra_headers(&sub.extra_headers, &sub.auth_header_name, sub.auth_type)?;
         validate_slot_efforts(&sub.slot_efforts)?;
         validate_token_quotas(&sub.token_quotas)?;
         // 与 provider 加载期的约束一致: System One 只走透传, 其它鉴权类型没有对应 dispatch。
@@ -596,6 +598,22 @@ mod tests {
         assert!(plan.inserts.is_empty());
         assert!(plan.bindings.is_empty());
         assert!(plan.modes.is_empty());
+    }
+
+    #[test]
+    fn invalid_extra_headers_reject_the_entry() {
+        let f = fixture(true);
+        let base = f.file.subscriptions.iter().find(|s| s.display_name == "A").unwrap().clone();
+        let mut bad = base.clone();
+        bad.extra_headers.insert(bad.auth_header_name.clone(), "smuggled".into());
+        assert!(validate_entry(&bad).is_err(), "extra header overriding auth must be rejected");
+        let mut codex = base.clone();
+        codex.auth_type = AuthType::ChatgptOauth;
+        codex.extra_headers.insert("originator".into(), "x".into());
+        assert!(validate_entry(&codex).is_err(), "codex compliance header must be rejected");
+        let mut ok = base;
+        ok.extra_headers.insert("X-Team".into(), "a".into());
+        assert!(validate_entry(&ok).is_ok());
     }
 
     #[test]
