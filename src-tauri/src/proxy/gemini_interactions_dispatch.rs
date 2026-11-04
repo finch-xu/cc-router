@@ -66,6 +66,9 @@ pub async fn dispatch_gemini_interactions_attempt(
     extras: InteractionsExtras,
     attempt_id: Uuid,
     body_dump_tx: Option<mpsc::Sender<BodyDumpEntry>>,
+    // 请求日志用: 发出前写出站头, 收到后写响应头 (proxy/header_log.rs); 发送前失败则保持 None。
+    capture: &mut crate::proxy::header_log::UpstreamHeaderCapture,
+    log_headers: bool,
 ) -> Result<OAuthDispatchOk, OAuthDispatchError> {
     // Interactions 的 model 在 body, URL 固定 — 只需拼 ?alt=sse 强制流式。
     let url = if url.contains('?') {
@@ -148,9 +151,13 @@ pub async fn dispatch_gemini_interactions_attempt(
         ));
     }
 
+    capture.request = crate::proxy::header_log::serialize(&headers, log_headers);
     let send_result = upstream::send(http_client, &url, body_bytes, headers, true).await;
     let upstream_response = match send_result {
-        Ok(r) => r,
+        Ok(r) => {
+            capture.response = crate::proxy::header_log::serialize(r.headers(), log_headers);
+            r
+        }
         Err(upstream::UpstreamError::Reqwest(e)) => {
             return Err(OAuthDispatchError::Upstream {
                 status: None,
@@ -441,11 +448,7 @@ fn finalize_streaming(
             effort_source: effort_log.source,
             upstream_effort: None,
             tool_calls: tool_tally.fields(&ctx.tools),
-            headers: crate::proxy::header_log::HeaderLogFields {
-                client_request: ctx.request_headers_log.clone(),
-                upstream_request: None,
-                upstream_response: None,
-            },
+            headers: ctx.header_log(),
         };
         let _ = log_tx.try_send(entry);
     });
@@ -591,11 +594,7 @@ async fn collect_to_json_response(
         effort_source: effort_log.source,
         upstream_effort: None,
         tool_calls,
-        headers: crate::proxy::header_log::HeaderLogFields {
-            client_request: ctx.request_headers_log.clone(),
-            upstream_request: None,
-            upstream_response: None,
-        },
+        headers: ctx.header_log(),
     };
     let _ = log_tx.try_send(entry);
 

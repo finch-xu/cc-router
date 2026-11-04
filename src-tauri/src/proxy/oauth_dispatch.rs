@@ -92,6 +92,9 @@ pub async fn dispatch_oauth_attempt(
     client_headers: HeaderMap,
     required_headers: std::collections::BTreeMap<String, String>,
     extras: CodexExtras,
+    // 请求日志用: 发出前写出站头, 收到后写响应头 (proxy/header_log.rs); 发送前失败则保持 None。
+    capture: &mut crate::proxy::header_log::UpstreamHeaderCapture,
+    log_headers: bool,
 ) -> Result<OAuthDispatchOk, OAuthDispatchError> {
     // 1. 拿 access_token
     let access_token = match oauth_manager.get_valid_access_token(sub_id, &refresh_token).await {
@@ -167,10 +170,14 @@ pub async fn dispatch_oauth_attempt(
     );
 
     // 4. 发送 (强制 streaming 上游, 因为 ChatGPT 后端拒绝非流式)
+    capture.request = crate::proxy::header_log::serialize(&headers, log_headers);
     let send_result = upstream::send(http_client, &url, body_bytes, headers, true).await;
 
     let upstream_response = match send_result {
-        Ok(r) => r,
+        Ok(r) => {
+            capture.response = crate::proxy::header_log::serialize(r.headers(), log_headers);
+            r
+        }
         Err(upstream::UpstreamError::Reqwest(e)) => {
             return Err(OAuthDispatchError::Upstream {
                 status: None,
@@ -501,11 +508,7 @@ fn finalize_streaming(
             effort_source: effort_log.source,
             upstream_effort: upstream_effort_echo,
             tool_calls: tool_tally.fields(&ctx.tools),
-            headers: crate::proxy::header_log::HeaderLogFields {
-                client_request: ctx.request_headers_log.clone(),
-                upstream_request: None,
-                upstream_response: None,
-            },
+            headers: ctx.header_log(),
         };
         let _ = log_tx.try_send(entry);
     });
@@ -621,11 +624,7 @@ async fn collect_to_json_response(
             effort_source: effort_log.source,
             upstream_effort: upstream_effort_echo.clone(),
             tool_calls: ToolLogFields::request_only(&ctx.tools),
-            headers: crate::proxy::header_log::HeaderLogFields {
-                client_request: ctx.request_headers_log.clone(),
-                upstream_request: None,
-                upstream_response: None,
-            },
+            headers: ctx.header_log(),
         };
         let _ = log_tx.try_send(entry);
         return (
@@ -709,11 +708,7 @@ async fn collect_to_json_response(
         effort_source: effort_log.source,
         upstream_effort: upstream_effort_echo.clone(),
         tool_calls,
-        headers: crate::proxy::header_log::HeaderLogFields {
-            client_request: ctx.request_headers_log.clone(),
-            upstream_request: None,
-            upstream_response: None,
-        },
+        headers: ctx.header_log(),
     };
     let _ = log_tx.try_send(entry);
 
@@ -744,6 +739,9 @@ pub async fn dispatch_kiro_attempt(
     forward_headers: Vec<String>,
     client_headers: HeaderMap,
     required_headers: std::collections::BTreeMap<String, String>,
+    // 请求日志用: 发出前写出站头, 收到后写响应头 (proxy/header_log.rs); 发送前失败则保持 None。
+    capture: &mut crate::proxy::header_log::UpstreamHeaderCapture,
+    log_headers: bool,
 ) -> Result<OAuthDispatchOk, OAuthDispatchError> {
     let kiro_extras = metadata
         .kiro
@@ -845,9 +843,13 @@ pub async fn dispatch_kiro_attempt(
     );
 
     // 4. 发送 (Kiro 后端响应总是 Event Stream)
+    capture.request = crate::proxy::header_log::serialize(&headers, log_headers);
     let send_result = upstream::send(http_client, &url, body_bytes, headers, true).await;
     let upstream_response = match send_result {
-        Ok(r) => r,
+        Ok(r) => {
+            capture.response = crate::proxy::header_log::serialize(r.headers(), log_headers);
+            r
+        }
         Err(upstream::UpstreamError::Reqwest(e)) => {
             return Err(OAuthDispatchError::Upstream {
                 status: None,
@@ -1068,11 +1070,7 @@ fn finalize_kiro_streaming(
             effort_source: effort_log.source,
             upstream_effort: None,
             tool_calls: tool_tally.fields(&ctx.tools),
-            headers: crate::proxy::header_log::HeaderLogFields {
-                client_request: ctx.request_headers_log.clone(),
-                upstream_request: None,
-                upstream_response: None,
-            },
+            headers: ctx.header_log(),
         };
         let _ = log_tx.try_send(entry);
     });
@@ -1194,11 +1192,7 @@ async fn collect_kiro_to_json_response(
         effort_source: effort_log.source,
         upstream_effort: None,
         tool_calls,
-        headers: crate::proxy::header_log::HeaderLogFields {
-            client_request: ctx.request_headers_log.clone(),
-            upstream_request: None,
-            upstream_response: None,
-        },
+        headers: ctx.header_log(),
     };
     let _ = log_tx.try_send(entry);
 

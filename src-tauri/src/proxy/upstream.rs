@@ -27,6 +27,15 @@ pub enum UpstreamResponse {
     },
 }
 
+impl UpstreamResponse {
+    /// Response headers of either variant (request-log capture).
+    pub fn headers(&self) -> &ReqHeaderMap {
+        match self {
+            Self::NonStreaming { headers, .. } | Self::Streaming { headers, .. } => headers,
+        }
+    }
+}
+
 /// Idle limit of the production upstream client (see [`build_client`]).
 pub const UPSTREAM_IDLE_TIMEOUT: Duration = Duration::from_secs(600);
 

@@ -77,6 +77,8 @@ pub async fn messages(
         tools: tool_log::request_tool_shape(&parsed),
         request_headers_log: crate::proxy::header_log::serialize(&headers, log_headers),
         log_headers,
+        upstream_request_headers_log: None,
+        upstream_response_headers_log: None,
     };
 
     info!(
@@ -201,6 +203,8 @@ pub async fn responses(
         tools: tool_log::request_tool_shape(&anthropic_body),
         request_headers_log: crate::proxy::header_log::serialize(&headers, log_headers),
         log_headers,
+        upstream_request_headers_log: None,
+        upstream_response_headers_log: None,
     };
 
     info!(
@@ -551,6 +555,8 @@ pub async fn chat_completions(
         tools: tool_log::request_tool_shape(&anthropic_body),
         request_headers_log: crate::proxy::header_log::serialize(&headers, log_headers),
         log_headers,
+        upstream_request_headers_log: None,
+        upstream_response_headers_log: None,
     };
 
     info!(
@@ -819,6 +825,8 @@ pub async fn systemone(
         tools: Default::default(),
         request_headers_log: crate::proxy::header_log::serialize(&headers, log_headers),
         log_headers,
+        upstream_request_headers_log: None,
+        upstream_response_headers_log: None,
     };
     info!(%model, client_tool = ?ctx.info.tool, client_ip = ?ctx.ip, "proxy received /v1/systemone request");
     systemone::dispatch(&state, body, model, &ctx).await

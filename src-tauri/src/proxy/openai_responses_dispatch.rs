@@ -107,6 +107,9 @@ pub async fn dispatch_openai_responses_attempt(
     client_headers: HeaderMap,
     required_headers: std::collections::BTreeMap<String, String>,
     extras: OpenAiResponsesExtras,
+    // 请求日志用: 发出前写出站头, 收到后写响应头 (proxy/header_log.rs); 发送前失败则保持 None。
+    capture: &mut crate::proxy::header_log::UpstreamHeaderCapture,
+    log_headers: bool,
 ) -> Result<OpenaiResponsesDispatchOk, OAuthDispatchError> {
     // 1. 翻译 body (跟随客户端 stream + 注入 reasoning_effort)
     let mut translated_body = anthropic_to_openai_responses(request_body, &extras).map_err(|e| {
@@ -185,10 +188,14 @@ pub async fn dispatch_openai_responses_attempt(
     let transform_config = extras.transform_config();
 
     // 4. 发送请求
+    capture.request = crate::proxy::header_log::serialize(&headers, log_headers);
     let send_result =
         upstream::send(http_client, &url, body_bytes, headers, client_wants_streaming).await;
     let upstream_response = match send_result {
-        Ok(r) => r,
+        Ok(r) => {
+            capture.response = crate::proxy::header_log::serialize(r.headers(), log_headers);
+            r
+        }
         Err(upstream::UpstreamError::Reqwest(e)) => {
             return Err(OAuthDispatchError::Upstream {
                 status: None,
@@ -479,11 +486,7 @@ fn finalize_streaming(
             effort_source: effort_log.source,
             upstream_effort: upstream_effort_echo,
             tool_calls: tool_tally.fields(&ctx.tools),
-            headers: crate::proxy::header_log::HeaderLogFields {
-                client_request: ctx.request_headers_log.clone(),
-                upstream_request: None,
-                upstream_response: None,
-            },
+            headers: ctx.header_log(),
         };
         let _ = log_tx.try_send(entry);
     });
@@ -628,11 +631,7 @@ fn finalize_non_streaming(
             effort_source: effort_log.source,
             upstream_effort: upstream_effort_echo.clone(),
             tool_calls,
-            headers: crate::proxy::header_log::HeaderLogFields {
-                client_request: ctx.request_headers_log.clone(),
-                upstream_request: None,
-                upstream_response: None,
-            },
+            headers: ctx.header_log(),
         };
         let _ = log_tx.try_send(entry);
     });
@@ -652,6 +651,7 @@ fn finalize_non_streaming(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::proxy::header_log::UpstreamHeaderCapture;
     use serde_json::json;
     use wiremock::matchers::{header, method, path};
     use wiremock::{Mock, MockServer, ResponseTemplate};
@@ -697,11 +697,94 @@ mod tests {
                 expose_reasoning: true,
                 dialect: Default::default(),
             },
+            &mut crate::proxy::header_log::UpstreamHeaderCapture::default(), // 本测试不关心采集
+            false,
         )
         .await;
 
         let ok = result.expect("上游 mock 仅在收到 X-DST: eastus2 时匹配, 失败即 header 未送达");
         assert!(matches!(ok.payload, OpenaiResponsesPayload::NonStreaming(_)));
+    }
+
+    fn responses_extras() -> OpenAiResponsesExtras {
+        OpenAiResponsesExtras { reasoning_effort: None, expose_reasoning: true, dialect: Default::default() }
+    }
+
+    fn hi_body() -> serde_json::Value {
+        json!({"model": "gpt-5", "messages": [{"role": "user", "content": "hi"}], "max_tokens": 32})
+    }
+
+    /// 请求日志的上游两列: 出站头 (鉴权已脱敏 + 用户配置头) 与上游响应头都被采集。
+    #[tokio::test]
+    async fn capture_records_outbound_and_response_headers() {
+        let server = MockServer::start().await;
+        Mock::given(method("POST"))
+            .and(path("/v1/responses"))
+            .respond_with(
+                ResponseTemplate::new(200)
+                    .set_body_json(json!({"id": "resp_1", "output": []}))
+                    .insert_header("x-request-id", "r1"),
+            )
+            .mount(&server)
+            .await;
+        let mut required = std::collections::BTreeMap::new();
+        required.insert("X-Team".to_string(), "platform".to_string());
+        let mut cap = UpstreamHeaderCapture::default();
+        dispatch_openai_responses_attempt(
+            &reqwest::Client::new(),
+            "sk-test-0123456789abcdef".into(),
+            "Authorization".into(),
+            AuthHeaderFormat::Bearer,
+            format!("{}/v1/responses", server.uri()),
+            &hi_body(),
+            false,
+            Vec::new(),
+            HeaderMap::new(),
+            required,
+            responses_extras(),
+            &mut cap,
+            true,
+        )
+        .await
+        .expect("ok");
+        let req = crate::proxy::header_log::parse(cap.request.as_deref().expect("request captured")).unwrap();
+        let auth = req.iter().find(|p| p[0] == "authorization").expect("auth header logged");
+        assert!(!auth[1].contains("0123456789"), "auth value must be masked: {}", auth[1]);
+        assert!(req.iter().any(|p| p[0] == "x-team" && p[1] == "platform"));
+        let resp = crate::proxy::header_log::parse(cap.response.as_deref().expect("response captured")).unwrap();
+        assert!(resp.iter().any(|p| p[0] == "x-request-id" && p[1] == "r1"));
+    }
+
+    #[tokio::test]
+    async fn capture_stays_empty_when_disabled() {
+        let server = MockServer::start().await;
+        Mock::given(method("POST"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({"id": "resp_1", "output": []})))
+            .mount(&server)
+            .await;
+        let mut cap = UpstreamHeaderCapture::default();
+        dispatch_openai_responses_attempt(
+            &reqwest::Client::new(), "sk-test".into(), "Authorization".into(), AuthHeaderFormat::Bearer,
+            format!("{}/v1/responses", server.uri()), &hi_body(), false, Vec::new(), HeaderMap::new(),
+            Default::default(), responses_extras(), &mut cap, false,
+        )
+        .await
+        .expect("ok");
+        assert!(cap.request.is_none() && cap.response.is_none());
+    }
+
+    /// 发请求前就失败 (鉴权头名非法) → 上游两列保持 None, attempt 返回 Err。
+    #[tokio::test]
+    async fn capture_stays_empty_when_attempt_fails_before_send() {
+        let mut cap = UpstreamHeaderCapture::default();
+        let r = dispatch_openai_responses_attempt(
+            &reqwest::Client::new(), "sk-test".into(), "bad name".into(), AuthHeaderFormat::Bearer,
+            "http://127.0.0.1:9/v1/responses".into(), &hi_body(), false, Vec::new(), HeaderMap::new(),
+            Default::default(), responses_extras(), &mut cap, true,
+        )
+        .await;
+        assert!(r.is_err());
+        assert!(cap.request.is_none() && cap.response.is_none());
     }
 
     /// issue #38: 上游 HTTP 200 但流首帧就是 response.failed → attempt 返回 Err,
@@ -739,6 +822,8 @@ mod tests {
                 expose_reasoning: true,
                 dialect: Default::default(),
             },
+            &mut crate::proxy::header_log::UpstreamHeaderCapture::default(), // 本测试不关心采集
+            false,
         )
         .await;
 
@@ -794,6 +879,8 @@ mod tests {
                 expose_reasoning: true,
                 dialect: Default::default(),
             },
+            &mut crate::proxy::header_log::UpstreamHeaderCapture::default(), // 本测试不关心采集
+            false,
         )
         .await;
 

@@ -284,6 +284,8 @@ pub async fn probe_subscription(
                 HeaderMap::new(),
                 row.resolved_required_headers(),
                 extras,
+                &mut crate::proxy::header_log::UpstreamHeaderCapture::default(), // 探测不写请求日志
+                false,
             )
             .await;
             dispatch_result_to_probe(res)
@@ -302,6 +304,8 @@ pub async fn probe_subscription(
                 Vec::new(),
                 HeaderMap::new(),
                 row.resolved_required_headers(),
+                &mut crate::proxy::header_log::UpstreamHeaderCapture::default(), // 探测不写请求日志
+                false,
             )
             .await;
             dispatch_result_to_probe(res)
@@ -326,6 +330,8 @@ pub async fn probe_subscription(
                 HeaderMap::new(),
                 row.resolved_required_headers(),
                 extras,
+                &mut crate::proxy::header_log::UpstreamHeaderCapture::default(), // 探测不写请求日志
+                false,
             )
             .await;
             dispatch_result_to_probe(res)
@@ -352,6 +358,8 @@ pub async fn probe_subscription(
                 extras,
                 Uuid::new_v4(),
                 None,
+                &mut crate::proxy::header_log::UpstreamHeaderCapture::default(), // 探测不写请求日志
+                false,
             )
             .await;
             dispatch_result_to_probe(res)
@@ -378,6 +386,8 @@ pub async fn probe_subscription(
                 HeaderMap::new(),
                 row.resolved_required_headers(),
                 extras,
+                &mut crate::proxy::header_log::UpstreamHeaderCapture::default(), // 探测不写请求日志
+                false,
             )
             .await;
             dispatch_result_to_probe(res)
@@ -402,6 +412,8 @@ pub async fn probe_subscription(
                 HeaderMap::new(),
                 row.resolved_required_headers(),
                 extras,
+                &mut crate::proxy::header_log::UpstreamHeaderCapture::default(), // 探测不写请求日志
+                false,
             )
             .await;
             dispatch_result_to_probe(res)

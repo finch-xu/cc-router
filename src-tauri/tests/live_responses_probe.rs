@@ -41,6 +41,8 @@ async fn dispatch(body: Value, streaming: bool) -> Result<OpenaiResponsesPayload
             expose_reasoning: true,
             dialect: Default::default(),
         },
+        &mut cc_router_lib::proxy::header_log::UpstreamHeaderCapture::default(),
+        false,
     )
     .await;
     match result {

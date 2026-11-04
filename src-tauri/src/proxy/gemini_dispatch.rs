@@ -68,6 +68,9 @@ pub async fn dispatch_gemini_attempt(
     client_headers: HeaderMap,
     required_headers: std::collections::BTreeMap<String, String>,
     extras: GeminiExtras,
+    // 请求日志用: 发出前写出站头, 收到后写响应头 (proxy/header_log.rs); 发送前失败则保持 None。
+    capture: &mut crate::proxy::header_log::UpstreamHeaderCapture,
+    log_headers: bool,
 ) -> Result<OAuthDispatchOk, OAuthDispatchError> {
     if !url_template.contains("{model}") {
         return Err(OAuthDispatchError::Upstream {
@@ -142,9 +145,13 @@ pub async fn dispatch_gemini_attempt(
     );
 
     // 强制 streaming 上游, 因为 URL 已是 :streamGenerateContent?alt=sse.
+    capture.request = crate::proxy::header_log::serialize(&headers, log_headers);
     let send_result = upstream::send(http_client, &url, body_bytes, headers, true).await;
     let upstream_response = match send_result {
-        Ok(r) => r,
+        Ok(r) => {
+            capture.response = crate::proxy::header_log::serialize(r.headers(), log_headers);
+            r
+        }
         Err(upstream::UpstreamError::Reqwest(e)) => {
             return Err(OAuthDispatchError::Upstream {
                 status: None,
@@ -409,11 +416,7 @@ fn finalize_gemini_streaming(
             effort_source: effort_log.source,
             upstream_effort: None,
             tool_calls: tool_tally.fields(&ctx.tools),
-            headers: crate::proxy::header_log::HeaderLogFields {
-                client_request: ctx.request_headers_log.clone(),
-                upstream_request: None,
-                upstream_response: None,
-            },
+            headers: ctx.header_log(),
         };
         let _ = log_tx.try_send(entry);
     });
@@ -543,11 +546,7 @@ async fn collect_gemini_to_json_response(
         effort_source: effort_log.source,
         upstream_effort: None,
         tool_calls,
-        headers: crate::proxy::header_log::HeaderLogFields {
-            client_request: ctx.request_headers_log.clone(),
-            upstream_request: None,
-            upstream_response: None,
-        },
+        headers: ctx.header_log(),
     };
     let _ = log_tx.try_send(entry);
 

@@ -144,6 +144,9 @@ pub async fn dispatch_openai_chat_completions_attempt(
     client_headers: HeaderMap,
     required_headers: std::collections::BTreeMap<String, String>,
     extras: ChatCompletionsExtras,
+    // 请求日志用: 发出前写出站头, 收到后写响应头 (proxy/header_log.rs); 发送前失败则保持 None。
+    capture: &mut crate::proxy::header_log::UpstreamHeaderCapture,
+    log_headers: bool,
 ) -> Result<ChatCompletionsDispatchOk, OAuthDispatchError> {
     let transform_config = ChatCompletionsTransformConfig::permissive();
     // 应用 yaml 兜底 (Phase 1 仅 expose_reasoning); 其他 quirks 留给 Phase 2 暴露到 yaml/订阅级
@@ -232,10 +235,14 @@ pub async fn dispatch_openai_chat_completions_attempt(
     }
 
     // 3. 发送请求
+    capture.request = crate::proxy::header_log::serialize(&headers, log_headers);
     let send_result =
         upstream::send(http_client, &url, body_bytes, headers, client_wants_streaming).await;
     let upstream_response = match send_result {
-        Ok(r) => r,
+        Ok(r) => {
+            capture.response = crate::proxy::header_log::serialize(r.headers(), log_headers);
+            r
+        }
         Err(upstream::UpstreamError::Reqwest(e)) => {
             return Err(OAuthDispatchError::Upstream {
                 status: None,
@@ -568,11 +575,7 @@ fn finalize_streaming(
             effort_source: effort_log.source,
             upstream_effort: None,
             tool_calls: converter.tool_tally().fields(&ctx.tools),
-            headers: crate::proxy::header_log::HeaderLogFields {
-                client_request: ctx.request_headers_log.clone(),
-                upstream_request: None,
-                upstream_response: None,
-            },
+            headers: ctx.header_log(),
         };
         let _ = log_tx.try_send(entry);
     });
@@ -702,11 +705,7 @@ fn finalize_non_streaming(
             effort_source: effort_log.source,
             upstream_effort: None,
             tool_calls,
-            headers: crate::proxy::header_log::HeaderLogFields {
-                client_request: ctx.request_headers_log.clone(),
-                upstream_request: None,
-                upstream_response: None,
-            },
+            headers: ctx.header_log(),
         };
         let _ = log_tx.try_send(entry);
     });
@@ -733,6 +732,7 @@ fn finalize_non_streaming(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::proxy::header_log::UpstreamHeaderCapture;
     use serde_json::json;
     use wiremock::matchers::{header, method, path};
     use wiremock::{Mock, MockServer, ResponseTemplate};
@@ -784,6 +784,35 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn capture_records_outbound_and_response_headers() {
+        let server = MockServer::start().await;
+        Mock::given(method("POST"))
+            .and(path("/v1/chat/completions"))
+            .respond_with(
+                ResponseTemplate::new(200)
+                    .set_body_json(json!({
+                        "id": "c1", "model": "m",
+                        "choices": [{"index": 0, "message": {"role": "assistant", "content": "x"}, "finish_reason": "stop"}],
+                    }))
+                    .insert_header("x-request-id", "r2"),
+            )
+            .mount(&server)
+            .await;
+        let mut cap = UpstreamHeaderCapture::default();
+        dispatch_openai_chat_completions_attempt(
+            &reqwest::Client::new(), "sk-test-0123456789abcdef".into(), "Authorization".into(),
+            AuthHeaderFormat::Bearer, format!("{}/v1/chat/completions", server.uri()), &mk_request_body(),
+            false, Vec::new(), HeaderMap::new(), std::collections::BTreeMap::new(), mk_extras(), &mut cap, true,
+        )
+        .await
+        .expect("ok");
+        let req = crate::proxy::header_log::parse(cap.request.as_deref().expect("request captured")).unwrap();
+        assert!(req.iter().any(|p| p[0] == "authorization" && !p[1].contains("0123456789")));
+        let resp = crate::proxy::header_log::parse(cap.response.as_deref().expect("response captured")).unwrap();
+        assert!(resp.iter().any(|p| p[0] == "x-request-id" && p[1] == "r2"));
+    }
+
+    #[tokio::test]
     async fn dispatch_non_streaming_success_returns_translated_payload() {
         let server = MockServer::start().await;
         let upstream_resp = json!({
@@ -824,6 +853,8 @@ mod tests {
             HeaderMap::new(),
             std::collections::BTreeMap::new(),
             mk_extras(),
+            &mut crate::proxy::header_log::UpstreamHeaderCapture::default(), // 本测试不关心采集
+            false,
         )
         .await;
 
@@ -870,6 +901,8 @@ mod tests {
             HeaderMap::new(),
             std::collections::BTreeMap::new(),
             mk_extras(),
+            &mut crate::proxy::header_log::UpstreamHeaderCapture::default(), // 本测试不关心采集
+            false,
         )
         .await;
 
@@ -905,6 +938,8 @@ mod tests {
             HeaderMap::new(),
             std::collections::BTreeMap::new(),
             mk_extras(),
+            &mut crate::proxy::header_log::UpstreamHeaderCapture::default(), // 本测试不关心采集
+            false,
         )
         .await;
 
@@ -943,6 +978,8 @@ mod tests {
             HeaderMap::new(),
             std::collections::BTreeMap::new(),
             mk_extras(),
+            &mut crate::proxy::header_log::UpstreamHeaderCapture::default(), // 本测试不关心采集
+            false,
         )
         .await;
 
@@ -992,6 +1029,8 @@ mod tests {
             HeaderMap::new(),
             std::collections::BTreeMap::new(),
             mk_extras(),
+            &mut crate::proxy::header_log::UpstreamHeaderCapture::default(), // 本测试不关心采集
+            false,
         )
         .await;
 

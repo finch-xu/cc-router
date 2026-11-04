@@ -429,6 +429,7 @@ pub async fn dispatch(
             };
 
             emit_attempt_started(state, sub_id, vm_name);
+            let mut upstream_capture = crate::proxy::header_log::UpstreamHeaderCapture::default();
             let dispatch_res = oauth_dispatch::dispatch_oauth_attempt(
                 &state.http_client,
                 state.chatgpt_oauth.clone(),
@@ -442,8 +443,13 @@ pub async fn dispatch(
                 client_headers.clone(),
                 required_headers.clone(),
                 codex_extras,
+                &mut upstream_capture,
+                ctx.log_headers,
             )
             .await;
+            // 本 attempt 的 ctx 带上采集到的上游两组头, 之后所有日志行都从它取。
+            let attempt_ctx = ctx.with_upstream_headers(upstream_capture);
+            let ctx = &attempt_ctx;
 
             match dispatch_res {
                 Ok(ok) => {
@@ -526,11 +532,7 @@ pub async fn dispatch(
                         effort_source: effort_log.source,
                         upstream_effort: None,
                         tool_calls: ToolLogFields::request_only(&ctx.tools),
-                        headers: crate::proxy::header_log::HeaderLogFields {
-                            client_request: ctx.request_headers_log.clone(),
-                            upstream_request: None,
-                            upstream_response: None,
-                        },
+                        headers: ctx.header_log(),
                     };
                     let _ = state.request_log_tx.try_send(entry);
 
@@ -555,6 +557,7 @@ pub async fn dispatch(
             let mut kiro_body = request_body.clone();
             kiro_body["model"] = Value::String(real_model.clone());
             emit_attempt_started(state, sub_id, vm_name);
+            let mut upstream_capture = crate::proxy::header_log::UpstreamHeaderCapture::default();
             let dispatch_res = oauth_dispatch::dispatch_kiro_attempt(
                 &state.http_client,
                 state.kiro_oauth.clone(),
@@ -566,8 +569,13 @@ pub async fn dispatch(
                 forward_headers.clone(),
                 client_headers.clone(),
                 required_headers.clone(),
+                &mut upstream_capture,
+                ctx.log_headers,
             )
             .await;
+            // 本 attempt 的 ctx 带上采集到的上游两组头, 之后所有日志行都从它取。
+            let attempt_ctx = ctx.with_upstream_headers(upstream_capture);
+            let ctx = &attempt_ctx;
 
             match dispatch_res {
                 Ok(ok) => {
@@ -650,11 +658,7 @@ pub async fn dispatch(
                         effort_source: effort_log.source,
                         upstream_effort: None,
                         tool_calls: ToolLogFields::request_only(&ctx.tools),
-                        headers: crate::proxy::header_log::HeaderLogFields {
-                            client_request: ctx.request_headers_log.clone(),
-                            upstream_request: None,
-                            upstream_response: None,
-                        },
+                        headers: ctx.header_log(),
                     };
                     let _ = state.request_log_tx.try_send(entry);
 
@@ -688,6 +692,7 @@ pub async fn dispatch(
             };
 
             emit_attempt_started(state, sub_id, vm_name);
+            let mut upstream_capture = crate::proxy::header_log::UpstreamHeaderCapture::default();
             let dispatch_res = gemini_dispatch::dispatch_gemini_attempt(
                 &state.http_client,
                 auth_header_value.clone(),
@@ -700,8 +705,13 @@ pub async fn dispatch(
                 client_headers.clone(),
                 required_headers.clone(),
                 gemini_extras,
+                &mut upstream_capture,
+                ctx.log_headers,
             )
             .await;
+            // 本 attempt 的 ctx 带上采集到的上游两组头, 之后所有日志行都从它取。
+            let attempt_ctx = ctx.with_upstream_headers(upstream_capture);
+            let ctx = &attempt_ctx;
 
             match dispatch_res {
                 Ok(ok) => {
@@ -784,11 +794,7 @@ pub async fn dispatch(
                         effort_source: effort_log.source,
                         upstream_effort: None,
                         tool_calls: ToolLogFields::request_only(&ctx.tools),
-                        headers: crate::proxy::header_log::HeaderLogFields {
-                            client_request: ctx.request_headers_log.clone(),
-                            upstream_request: None,
-                            upstream_response: None,
-                        },
+                        headers: ctx.header_log(),
                     };
                     let _ = state.request_log_tx.try_send(entry);
 
@@ -830,6 +836,7 @@ pub async fn dispatch(
             };
 
             emit_attempt_started(state, sub_id, vm_name);
+            let mut upstream_capture = crate::proxy::header_log::UpstreamHeaderCapture::default();
             let dispatch_res = gemini_interactions_dispatch::dispatch_gemini_interactions_attempt(
                 &state.http_client,
                 auth_header_value.clone(),
@@ -844,8 +851,13 @@ pub async fn dispatch(
                 interactions_extras,
                 attempt_id,
                 dump_tx.clone(),
+                &mut upstream_capture,
+                ctx.log_headers,
             )
             .await;
+            // 本 attempt 的 ctx 带上采集到的上游两组头, 之后所有日志行都从它取。
+            let attempt_ctx = ctx.with_upstream_headers(upstream_capture);
+            let ctx = &attempt_ctx;
 
             match dispatch_res {
                 Ok(ok) => {
@@ -929,11 +941,7 @@ pub async fn dispatch(
                         effort_source: effort_log.source,
                         upstream_effort: None,
                         tool_calls: ToolLogFields::request_only(&ctx.tools),
-                        headers: crate::proxy::header_log::HeaderLogFields {
-                            client_request: ctx.request_headers_log.clone(),
-                            upstream_request: None,
-                            upstream_response: None,
-                        },
+                        headers: ctx.header_log(),
                     };
                     let _ = state.request_log_tx.try_send(entry);
 
@@ -977,6 +985,7 @@ pub async fn dispatch(
             };
 
             emit_attempt_started(state, sub_id, vm_name);
+            let mut upstream_capture = crate::proxy::header_log::UpstreamHeaderCapture::default();
             let dispatch_res = openai_responses_dispatch::dispatch_openai_responses_attempt(
                 &state.http_client,
                 api_key_raw.clone(),
@@ -989,8 +998,13 @@ pub async fn dispatch(
                 client_headers.clone(),
                 required_headers.clone(),
                 extras,
+                &mut upstream_capture,
+                ctx.log_headers,
             )
             .await;
+            // 本 attempt 的 ctx 带上采集到的上游两组头, 之后所有日志行都从它取。
+            let attempt_ctx = ctx.with_upstream_headers(upstream_capture);
+            let ctx = &attempt_ctx;
 
             match dispatch_res {
                 Ok(ok) => {
@@ -1073,11 +1087,7 @@ pub async fn dispatch(
                         effort_source: effort_log.source,
                         upstream_effort: None,
                         tool_calls: ToolLogFields::request_only(&ctx.tools),
-                        headers: crate::proxy::header_log::HeaderLogFields {
-                            client_request: ctx.request_headers_log.clone(),
-                            upstream_request: None,
-                            upstream_response: None,
-                        },
+                        headers: ctx.header_log(),
                     };
                     let _ = state.request_log_tx.try_send(entry);
 
@@ -1117,6 +1127,7 @@ pub async fn dispatch(
             };
 
             emit_attempt_started(state, sub_id, vm_name);
+            let mut upstream_capture = crate::proxy::header_log::UpstreamHeaderCapture::default();
             let dispatch_res =
                 openai_chat_completions_dispatch::dispatch_openai_chat_completions_attempt(
                     &state.http_client,
@@ -1130,8 +1141,13 @@ pub async fn dispatch(
                     client_headers.clone(),
                     required_headers.clone(),
                     extras,
-                )
+                &mut upstream_capture,
+                ctx.log_headers,
+            )
                 .await;
+            // 本 attempt 的 ctx 带上采集到的上游两组头, 之后所有日志行都从它取。
+            let attempt_ctx = ctx.with_upstream_headers(upstream_capture);
+            let ctx = &attempt_ctx;
 
             match dispatch_res {
                 Ok(ok) => {
@@ -1218,11 +1234,7 @@ pub async fn dispatch(
                         effort_source: effort_log.source,
                         upstream_effort: None,
                         tool_calls: ToolLogFields::request_only(&ctx.tools),
-                        headers: crate::proxy::header_log::HeaderLogFields {
-                            client_request: ctx.request_headers_log.clone(),
-                            upstream_request: None,
-                            upstream_response: None,
-                        },
+                        headers: ctx.header_log(),
                     };
                     let _ = state.request_log_tx.try_send(entry);
 
@@ -1341,6 +1353,10 @@ pub async fn dispatch(
 
         emit_attempt_started(state, sub_id, vm_name);
 
+        let mut upstream_capture = crate::proxy::header_log::UpstreamHeaderCapture {
+            request: crate::proxy::header_log::serialize(&upstream_headers, ctx.log_headers),
+            response: None,
+        };
         let upstream_result = upstream::send(
             &state.http_client,
             &url,
@@ -1349,6 +1365,12 @@ pub async fn dispatch(
             is_streaming,
         )
         .await;
+        if let Ok(r) = &upstream_result {
+            upstream_capture.response = crate::proxy::header_log::serialize(r.headers(), ctx.log_headers);
+        }
+        // 本 attempt 的 ctx 带上采集到的上游两组头, 之后所有日志行 (含流式 sse) 都从它取。
+        let attempt_ctx = ctx.with_upstream_headers(upstream_capture);
+        let ctx = &attempt_ctx;
 
         match upstream_result {
             Ok(upstream::UpstreamResponse::NonStreaming {
@@ -1459,11 +1481,7 @@ pub async fn dispatch(
                     effort_source: effort_log.source,
                     upstream_effort: None,
                     tool_calls,
-                    headers: crate::proxy::header_log::HeaderLogFields {
-                        client_request: ctx.request_headers_log.clone(),
-                        upstream_request: None,
-                        upstream_response: None,
-                    },
+                    headers: ctx.header_log(),
                 };
                 let _ = state.request_log_tx.try_send(entry);
 
@@ -1597,11 +1615,7 @@ pub async fn dispatch(
                             effort_source: effort_log.source,
                             upstream_effort: None,
                             tool_calls: ToolLogFields::request_only(&ctx.tools),
-                            headers: crate::proxy::header_log::HeaderLogFields {
-                                client_request: ctx.request_headers_log.clone(),
-                                upstream_request: None,
-                                upstream_response: None,
-                            },
+                            headers: ctx.header_log(),
                         };
                         let _ = state.request_log_tx.try_send(entry);
 
@@ -1652,11 +1666,7 @@ pub async fn dispatch(
                             effort_source: effort_log.source,
                             upstream_effort: None,
                             tool_calls: ToolLogFields::request_only(&ctx.tools),
-                            headers: crate::proxy::header_log::HeaderLogFields {
-                                client_request: ctx.request_headers_log.clone(),
-                                upstream_request: None,
-                                upstream_response: None,
-                            },
+                            headers: ctx.header_log(),
                         };
                         let _ = state.request_log_tx.try_send(entry);
                         retry_count += 1;
@@ -1790,11 +1800,7 @@ pub async fn dispatch(
                     effort_source: effort_log.source,
                     upstream_effort: None,
                     tool_calls: ToolLogFields::request_only(&ctx.tools),
-                    headers: crate::proxy::header_log::HeaderLogFields {
-                        client_request: ctx.request_headers_log.clone(),
-                        upstream_request: None,
-                        upstream_response: None,
-                    },
+                    headers: ctx.header_log(),
                 };
                 let _ = state.request_log_tx.try_send(entry);
 
