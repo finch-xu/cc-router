@@ -66,7 +66,7 @@
   "settings.proxy.restart.webLockout": "重启后代理将只监听本机, 当前设备将无法再访问网页界面。确定继续?",
   "settings.proxy.bodyLimit.label": "请求体上限",
   "settings.proxy.bodyLimit.desc": "单个入站请求的最大体积。带多张 base64 图片的会话(如 Codex 附图)容易超过小上限而被 413 拒绝。修改后点「重启代理服务」生效。",
-  "settings.proxy.bodyLimit.default32": "32 MB (默认)",
+  "settings.proxy.bodyLimit.default128": "128 MB (默认)",
   "settings.proxy.mode.label": "监听协议",
   "settings.proxy.mode.desc": "「仅 HTTP」最简单;「仅 HTTPS」需要导入下方 CA 证书到系统信任库;「两者同时」给出 HTTP + HTTPS 双端口, 不同客户端各取所需。",
   "settings.proxy.mode.http": "仅 HTTP",

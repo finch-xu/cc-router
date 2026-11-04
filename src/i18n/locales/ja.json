@@ -66,7 +66,7 @@
   "settings.proxy.restart.webLockout": "再起動後、プロキシはこのマシンのみをリッスンするため、このデバイスから Web UI にアクセスできなくなります。続行しますか?",
   "settings.proxy.bodyLimit.label": "リクエストボディ上限",
   "settings.proxy.bodyLimit.desc": "受信リクエスト 1 件あたりの最大サイズ。base64 画像を複数含むセッション（Codex の画像添付など）は小さい上限を超えやすく、413 で拒否されます。変更後は「プロキシサービスを再起動」をクリックすると反映されます。",
-  "settings.proxy.bodyLimit.default32": "32 MB (デフォルト)",
+  "settings.proxy.bodyLimit.default128": "128 MB (デフォルト)",
   "settings.proxy.mode.label": "リッスンプロトコル",
   "settings.proxy.mode.desc": "「HTTP のみ」が最もシンプル。「HTTPS のみ」は下記の CA 証明書をシステム信頼ストアにインポートする必要があります。「両方」を選ぶと HTTP と HTTPS を別ポートで同時公開し、クライアントごとに使い分けられます。",
   "settings.proxy.mode.http": "HTTP のみ",

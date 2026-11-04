@@ -149,7 +149,7 @@ fn default_https_enable_h2() -> bool {
     true
 }
 fn default_max_request_body_mb() -> u32 {
-    32
+    128
 }
 fn default_web_ui_auth_enabled() -> bool {
     true
@@ -344,18 +344,18 @@ mod tests {
     }
 
     #[test]
-    fn default_max_request_body_mb_is_32() {
-        // 对齐 Anthropic /v1/messages 官方 32MB 请求上限; axum 默认 2MiB 会让
-        // Codex 多图 base64 请求 413 (issue #41)
-        assert_eq!(Settings::default().max_request_body_mb, 32);
+    fn default_max_request_body_mb_is_128() {
+        // axum 默认 2MiB 会让 Codex 多图 base64 请求 413 (issue #41); 长会话 + 多图 + 大工具
+        // 结果在 32MB 也会撞上限, 2026-11 起默认放宽到 128MB (下拉框的最大档)
+        assert_eq!(Settings::default().max_request_body_mb, 128);
     }
 
     #[test]
     fn legacy_settings_json_without_max_request_body_mb_gets_default() {
-        // 老版本 settings.json 没有该字段, #[serde(default)] 必须填 32
+        // 老版本 settings.json 没有该字段, #[serde(default)] 填当前默认值
         let raw = r#"{ "proxy_port": 23456 }"#;
         let s: Settings = serde_json::from_str(raw).unwrap();
-        assert_eq!(s.max_request_body_mb, 32);
+        assert_eq!(s.max_request_body_mb, 128);
     }
 
     #[test]

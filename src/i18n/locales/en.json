@@ -66,7 +66,7 @@
   "settings.proxy.restart.webLockout": "After the restart the proxy will listen on this machine only, and this device will no longer be able to reach the web UI. Continue?",
   "settings.proxy.bodyLimit.label": "Request body limit",
   "settings.proxy.bodyLimit.desc": "Maximum size of a single inbound request. Sessions with multiple base64 images (e.g. Codex with attachments) easily exceed a small limit and get rejected with 413. Click \"Restart proxy service\" to apply.",
-  "settings.proxy.bodyLimit.default32": "32 MB (default)",
+  "settings.proxy.bodyLimit.default128": "128 MB (default)",
   "settings.proxy.mode.label": "Listen protocol",
   "settings.proxy.mode.desc": "\"HTTP only\" is the simplest; \"HTTPS only\" requires importing the CA below into the system trust store; \"both\" exposes HTTP and HTTPS on separate ports so different clients can pick their own.",
   "settings.proxy.mode.http": "HTTP only",

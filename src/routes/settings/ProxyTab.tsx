@@ -181,9 +181,9 @@ export function ProxyTab({ form }: { form: SettingsForm }) {
               <SelectContent>
                 <SelectItem value="8">8 MB</SelectItem>
                 <SelectItem value="16">16 MB</SelectItem>
-                <SelectItem value="32">{t("settings.proxy.bodyLimit.default32")}</SelectItem>
+                <SelectItem value="32">32 MB</SelectItem>
                 <SelectItem value="64">64 MB</SelectItem>
-                <SelectItem value="128">128 MB</SelectItem>
+                <SelectItem value="128">{t("settings.proxy.bodyLimit.default128")}</SelectItem>
               </SelectContent>
             </Select>
           </div>

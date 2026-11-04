@@ -66,7 +66,7 @@
   "settings.proxy.restart.webLockout": "重新啟動後代理將只監聽本機, 目前裝置將無法再存取網頁介面。確定繼續?",
   "settings.proxy.bodyLimit.label": "請求體上限",
   "settings.proxy.bodyLimit.desc": "單個入站請求的最大體積。帶多張 base64 圖片的工作階段(如 Codex 附圖)容易超過小上限而被 413 拒絕。修改後點「重新啟動代理服務」生效。",
-  "settings.proxy.bodyLimit.default32": "32 MB (預設)",
+  "settings.proxy.bodyLimit.default128": "128 MB (預設)",
   "settings.proxy.mode.label": "監聽協議",
   "settings.proxy.mode.desc": "「僅 HTTP」最簡單;「僅 HTTPS」需要匯入下方 CA 憑證到系統信任庫;「兩者同時」給出 HTTP + HTTPS 雙連接埠, 不同客戶端各取所需。",
   "settings.proxy.mode.http": "僅 HTTP",

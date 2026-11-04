@@ -31,7 +31,7 @@ export function useSettingsForm() {
   const [proxyMode, setProxyMode] = useState<ProxyMode>("http");
   const [httpsPort, setHttpsPort] = useState<number>(23457);
   const [listenAll, setListenAll] = useState(false);
-  const [maxBodyMb, setMaxBodyMb] = useState(32);
+  const [maxBodyMb, setMaxBodyMb] = useState(128);
   const [autostart, setAutostart] = useState(false);
   const [retentionDays, setRetentionDays] = useState(30);
   const [dbLimitMb, setDbLimitMb] = useState(500);
@@ -54,7 +54,7 @@ export function useSettingsForm() {
     setProxyMode(settings.data.proxy_mode ?? "http");
     setHttpsPort(settings.data.https_port ?? 23457);
     setListenAll(settings.data.listen_all);
-    setMaxBodyMb(settings.data.max_request_body_mb ?? 32);
+    setMaxBodyMb(settings.data.max_request_body_mb ?? 128);
     setAutostart(settings.data.autostart);
     setRetentionDays(settings.data.log_retention_days);
     setDbLimitMb(settings.data.db_size_limit_mb);
