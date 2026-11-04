@@ -10,7 +10,7 @@ use std::sync::Arc;
 use std::time::Instant;
 
 use axum::body::Body;
-use axum::http::{HeaderMap, HeaderName, HeaderValue, StatusCode};
+use axum::http::{HeaderMap, HeaderValue, StatusCode};
 use axum::response::Response;
 use bytes::{Bytes, BytesMut};
 use futures::stream::BoxStream;
@@ -596,22 +596,10 @@ pub fn classify_zhipu_sse_error(code: Option<&str>, msg: Option<&str>) -> bool {
     false
 }
 
+/// Streaming success path: same whitelist as every other passthrough response
+/// (rate-limit / request-id headers included), see `proxy/response_headers.rs`.
 fn copy_safe_headers(from: &ReqHeaderMap, to: &mut HeaderMap) {
-    const FORWARD: &[&str] = &[
-        "content-type",
-        "cache-control",
-        "transfer-encoding",
-    ];
-    for name in FORWARD {
-        if let Some(v) = from.get(*name) {
-            if let (Ok(n), Ok(val)) = (
-                HeaderName::try_from(*name),
-                HeaderValue::from_bytes(v.as_bytes()),
-            ) {
-                to.insert(n, val);
-            }
-        }
-    }
+    crate::proxy::response_headers::copy_passthrough_response_headers(from, to);
 }
 
 fn stream_from_receiver(
@@ -642,6 +630,23 @@ mod tests {
         assert_eq!(sse_event_name("event:   message_delta\ndata:{}\n"), Some("message_delta"));
         assert_eq!(sse_event_name("event: message_start\r\ndata: {}\r\n"), Some("message_start"));
         assert_eq!(sse_event_name("data: {}\n"), None);
+    }
+
+    /// 改写 model 时必须保留其余所有键 (含 Claude Code 依赖的未知键如 safeguard_results),
+    /// 且键顺序不变 (serde_json preserve_order)。
+    #[test]
+    fn sse_rewrite_keeps_unknown_keys() {
+        let raw = b"event: message_start\ndata: {\"type\":\"message_start\",\"message\":{\"id\":\"m1\",\"type\":\"message\",\"role\":\"assistant\",\"model\":\"claude-opus-5-5\",\"content\":[],\"usage\":{\"input_tokens\":7,\"output_tokens\":0},\"safeguard_results\":{\"zeta\":1,\"alpha\":2}}}\n\n";
+        let (bytes, _meta) = process_event(raw, Some("model-opus"));
+        let text = std::str::from_utf8(&bytes).unwrap();
+        assert!(text.contains("\"model\":\"model-opus\""), "{text}");
+        assert!(
+            text.contains("\"safeguard_results\":{\"zeta\":1,\"alpha\":2}"),
+            "unknown keys and their order must survive: {text}"
+        );
+        let id = text.find("\"id\"").unwrap();
+        let usage = text.find("\"usage\"").unwrap();
+        assert!(id < usage, "key order preserved: {text}");
     }
 
     /// 百炼风格：event 行冒号后无空格，message_delta.usage 携带全套 token。

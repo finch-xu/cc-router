@@ -13,6 +13,7 @@ pub mod openai_chat_completions_dispatch;
 pub mod openai_responses_dispatch;
 pub mod overloaded;
 pub mod pipeline;
+pub mod response_headers;
 pub mod retry;
 pub mod sanitize;
 pub mod server;

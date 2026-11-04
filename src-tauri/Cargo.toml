@@ -45,7 +45,7 @@ tauri-plugin-single-instance = "2.5.5"
 # 发版说明的版本比较; 已是 tauri 的传递依赖, 提升为直接依赖不引入新包
 semver = "1.0.28"
 serde = { version = "1.0.229", features = ["derive"] }
-serde_json = "1.0.154"
+serde_json = { version = "1.0.154", features = ["preserve_order"] }
 serde_yaml = "0.9.34"
 
 tokio = { version = "1.54.1", features = ["full"] }

@@ -2,9 +2,10 @@
 
 use std::time::Instant;
 
-use axum::http::{HeaderMap, HeaderName, HeaderValue, StatusCode};
+use axum::http::{HeaderMap, HeaderValue, StatusCode};
 use axum::response::{IntoResponse, Response};
 use axum::Json;
+use bytes::Bytes;
 use chrono::{DateTime, Utc};
 use serde_json::Value;
 use tauri::Emitter;
@@ -37,6 +38,7 @@ use crate::proxy::oauth_dispatch::{
     self, OAuthDispatchError,
 };
 use crate::proxy::overloaded;
+use crate::proxy::response_headers;
 use crate::proxy::retry::{classify_response, ShouldRetry};
 use crate::proxy::effort_log::{
     client_effort_of, gemini_effort_log, gemini_interactions_effort_log, kiro_effort_log,
@@ -279,6 +281,10 @@ pub async fn dispatch(
     let mut skipped_wrong_protocol: Vec<String> = Vec::new();
     // 四槽此刻没有模型 (调度后订阅被编辑) 时跳过, 同样记入 503 summary。
     let mut skipped_no_slot_model: Vec<String> = Vec::new();
+    // 透传路径上最近一次真实 attempt 的上游 4xx: 全部候选失败时原样回给客户端
+    // (Claude Code 的能力拒绝重试要匹配上游原文), 而不是换成 503 摘要。
+    // 每次真正发请求前清空, 所以只代表「最后一次尝试」。
+    let mut last_upstream_error: Option<response_headers::UpstreamError> = None;
 
     for sub_id in order.candidate_ids {
         let attempt_id = Uuid::new_v4();
@@ -397,6 +403,7 @@ pub async fn dispatch(
                 t.pin(vm_name, key, sub_id, Instant::now());
             }
         }
+        last_upstream_error = None;
 
         // ChatGPT OAuth 分支: 走独立的 dispatch + 翻译层 (proxy::oauth_dispatch).
         if matches!(auth_type, AuthType::ChatgptOauth) {
@@ -1426,10 +1433,27 @@ pub async fn dispatch(
                 let _ = state.request_log_tx.try_send(entry);
 
                 if let ShouldRetry::Yes(_) = should_retry {
+                    if response_headers::UpstreamError::is_replayable(status) {
+                        last_upstream_error = Some(response_headers::UpstreamError {
+                            status,
+                            headers: resp_headers.clone(),
+                            body: Bytes::from(body_text.clone().unwrap_or_default()),
+                        });
+                    }
                     retry_count += 1;
                     continue;
                 }
 
+                if !is_success {
+                    // 错误体原样字节回传, 不走 JSON 重序列化 (非 JSON 错误体会被
+                    // upstream::send 包成 {"raw": ..}, 原文会丢)。
+                    return Ok(response_headers::UpstreamError {
+                        status,
+                        headers: resp_headers,
+                        body: Bytes::from(body_text.unwrap_or_default()),
+                    }
+                    .into_response());
+                }
                 return Ok(build_non_streaming_response(status, resp_headers, final_body));
             }
             Ok(upstream::UpstreamResponse::Streaming {
@@ -1456,7 +1480,14 @@ pub async fn dispatch(
                         retry_count += 1;
                         continue;
                     } else {
-                        return Ok(build_error_status(status));
+                        // upstream::send 只把 2xx 包成 Streaming, 这里理论上走不到;
+                        // 兜底仍按透传语义回上游状态码与响应头。
+                        return Ok(response_headers::UpstreamError {
+                            status,
+                            headers: resp_headers,
+                            body: Bytes::new(),
+                        }
+                        .into_response());
                     }
                 }
 
@@ -1723,13 +1754,20 @@ pub async fn dispatch(
         }
     }
 
-    // 所有候选都失败
+    // 所有候选都失败: 最后一次尝试是透传路径上游 4xx → 原样回给客户端。
+    if let Some(e) = last_upstream_error {
+        return Ok(e.into_response());
+    }
     let subs_map = state.subscriptions.read().await;
     let mut summary = Vec::new();
+    let mut cooldowns_ms: Vec<i64> = Vec::new();
     let now = Utc::now();
     for sub_id in &vm_config.subscription_ids {
         if let Some(rt) = subs_map.get(sub_id) {
             let g = rt.read().await;
+            if let Some(until) = g.cooldown_until {
+                cooldowns_ms.push((until - now).num_milliseconds());
+            }
             // fallback 下因未配置兜底槽被跳过的翻译类订阅: 状态显示 Available 却没被使用,
             // 不注明的话用户无从排查「明明可用为什么 503」。
             if skipped_wrong_protocol.contains(&g.row.display_name) {
@@ -1760,7 +1798,9 @@ pub async fn dispatch(
         })),
     );
 
-    Ok(overloaded::response_with_summary(vm_name, &summary))
+    let mut resp = overloaded::response_with_summary(vm_name, &summary);
+    response_headers::set_retry_after(resp.headers_mut(), response_headers::retry_after_secs(cooldowns_ms));
+    Ok(resp)
 }
 
 fn rewrite_response_model(mut body: Value, virtual_name: &str) -> Value {
@@ -1795,32 +1835,15 @@ fn build_non_streaming_response(
     let mut response = Response::new(axum::body::Body::from(body_bytes));
     *response.status_mut() = status;
     let hdrs = response.headers_mut();
-    if let Some(ct) = upstream_headers.get(reqwest::header::CONTENT_TYPE) {
-        if let Ok(name) = HeaderName::try_from("content-type") {
-            if let Ok(value) = HeaderValue::from_bytes(ct.as_bytes()) {
-                hdrs.insert(name, value);
-            }
-        }
-    } else {
-        hdrs.insert(
-            axum::http::header::CONTENT_TYPE,
-            HeaderValue::from_static("application/json"),
-        );
-    }
+    response_headers::copy_passthrough_response_headers(&upstream_headers, hdrs);
+    // body 已重新序列化成 JSON, content-type 固定为 JSON (上游可能没带或带了别的)。
+    hdrs.insert(
+        axum::http::header::CONTENT_TYPE,
+        HeaderValue::from_static("application/json"),
+    );
     response
 }
 
-fn build_error_status(status: reqwest::StatusCode) -> Response {
-    let axum_status = StatusCode::from_u16(status.as_u16()).unwrap_or(StatusCode::BAD_GATEWAY);
-    (
-        axum_status,
-        Json(error_body(
-            "upstream_error",
-            &format!("upstream returned {}", status.as_u16()),
-        )),
-    )
-        .into_response()
-}
 
 
 #[cfg(test)]
