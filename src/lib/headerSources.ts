@@ -4,20 +4,35 @@
 
 export type OutboundSource = "forwarded" | "auth" | "configured" | "ccRouter";
 
+/** 客户端请求头: 小写名 → 该名下全部值 (重复头按出现顺序)。 */
+export type ClientHeaderValues = Map<string, string[]>;
+
+export function clientHeaderValues(pairs: [string, string][] | null | undefined): ClientHeaderValues {
+  const m: ClientHeaderValues = new Map();
+  for (const [k, v] of pairs ?? []) {
+    const n = k.toLowerCase();
+    m.set(n, [...(m.get(n) ?? []), v]);
+  }
+  return m;
+}
+
 /**
- * 发往上游的一条头是怎么来的。content-type 由 cc-router 固定写入; 与订阅鉴权头同名的是鉴权;
- * 客户端发过同名头的算透传 (同名被订阅配置覆盖时仍显示透传, 值以表里为准); 其余是订阅配置的头。
+ * 发往上游的一条头是怎么来的。content-type / accept / 默认 user-agent 由 cc-router 写入;
+ * 与订阅鉴权头同名的是鉴权; **客户端发过同名且同值**才算透传 (同名不同值 = 被订阅配置或
+ * 接入方式改写过, 如 Codex 的 UA、yaml 固定的 anthropic-version); 其余是订阅配置的头。
  */
 export function outboundSource(
   name: string,
-  clientNames: Set<string>,
+  value: string,
+  client: ClientHeaderValues,
   authHeaderName: string | undefined,
 ): OutboundSource {
   const n = name.toLowerCase();
   if (n === "content-type" || n === "accept") return "ccRouter";
+  if (n === "user-agent" && value.startsWith("cc-router/")) return "ccRouter";
   const auth = (authHeaderName || "authorization").toLowerCase();
   if (n === auth) return "auth";
-  if (clientNames.has(n)) return "forwarded";
+  if (client.get(n)?.includes(value)) return "forwarded";
   return "configured";
 }
 

@@ -332,6 +332,7 @@ pub async fn probe_subscription(
                 extras,
                 &mut crate::proxy::header_log::UpstreamHeaderCapture::default(), // 探测不写请求日志
                 false,
+                "",
             )
             .await;
             dispatch_result_to_probe(res)
@@ -360,6 +361,7 @@ pub async fn probe_subscription(
                 None,
                 &mut crate::proxy::header_log::UpstreamHeaderCapture::default(), // 探测不写请求日志
                 false,
+                "",
             )
             .await;
             dispatch_result_to_probe(res)

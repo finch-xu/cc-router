@@ -12,8 +12,6 @@
 
 use axum::http::HeaderMap;
 
-use crate::proxy::forward::looks_like_credential;
-
 /// Upper bound for one serialized column.
 pub const HEADER_LOG_LIMIT: usize = 16 * 1024;
 
@@ -30,10 +28,37 @@ const ALWAYS_MASKED: &[&str] = &[
 /// Masks credential values: longer than 12 chars keeps the first and last 4,
 /// anything shorter becomes `•••`. Other headers are returned unchanged.
 pub fn redact_value(lower_name: &str, value: &str) -> String {
-    if !(ALWAYS_MASKED.contains(&lower_name) || looks_like_credential(lower_name)) {
-        return value.to_string();
+    if ALWAYS_MASKED.contains(&lower_name) || log_name_is_secret(lower_name) || value_is_secret(value) {
+        mask(value)
+    } else {
+        value.to_string()
     }
-    mask(value)
+}
+
+/// Header families that never carry secrets and are what people read logs for
+/// (rate-limit budgets count "tokens", Claude Code ids contain "session").
+const LOG_EXEMPT_PREFIXES: &[&str] = &["x-claude-code-", "anthropic-", "x-ratelimit-", "ratelimit-"];
+
+/// Name substrings that mark a credential in the log.
+const LOG_SECRET_MARKERS: &[&str] = &["key", "secret", "pass", "credential", "signature", "cookie", "auth"];
+
+/// Log-side name heuristic. Deliberately separate from the forwarding one
+/// (`proxy::forward::looks_like_credential`), which errs toward dropping a
+/// header; here a false positive hides exactly the debugging info the user
+/// opened the dialog for.
+fn log_name_is_secret(lower_name: &str) -> bool {
+    if LOG_EXEMPT_PREFIXES.iter().any(|p| lower_name.starts_with(p)) {
+        return false;
+    }
+    LOG_SECRET_MARKERS.iter().any(|m| lower_name.contains(m))
+        // "token" only as the name's last word: x-access-token, x-session-token
+        || lower_name.ends_with("token")
+}
+
+/// Values that are credentials whatever the header is called.
+fn value_is_secret(value: &str) -> bool {
+    let v = value.trim_start().to_ascii_lowercase();
+    v.starts_with("bearer ") || v.starts_with("basic ")
 }
 
 /// `•••` for short values, otherwise first 4 + `…` + last 4.
@@ -57,7 +82,19 @@ pub fn serialize(map: &HeaderMap, enabled: bool) -> Option<String> {
 /// custom auth header names and `{api_key}` template headers would slip past
 /// the name heuristic. Secrets shorter than 8 chars are ignored.
 pub fn serialize_outbound(map: &HeaderMap, enabled: bool, secrets: &[&str]) -> Option<String> {
-    serialize_with(map, enabled, secrets)
+    if !enabled {
+        return None;
+    }
+    // reqwest fills in its client-level UA at send time; show what actually goes on the wire.
+    if map.contains_key(axum::http::header::USER_AGENT) {
+        return serialize_with(map, true, secrets);
+    }
+    let mut with_ua = map.clone();
+    with_ua.insert(
+        axum::http::header::USER_AGENT,
+        axum::http::HeaderValue::from_static(crate::proxy::upstream::DEFAULT_USER_AGENT),
+    );
+    serialize_with(&with_ua, true, secrets)
 }
 
 fn serialize_with(map: &HeaderMap, enabled: bool, secrets: &[&str]) -> Option<String> {
@@ -222,6 +259,43 @@ mod tests {
         // empty / short secrets are ignored (would mask everything)
         let got = pairs(&serialize_outbound(&map(&[("x-team", "platform")]), true, &["", "ab"]).unwrap());
         assert_eq!(got[0][1], "platform");
+    }
+
+    /// 日志打码规则独立于出站转发的启发式: 限流类头要原样可见, 第三方凭据头 / Bearer 值要打码。
+    #[test]
+    fn log_redaction_keeps_ratelimit_and_masks_third_party_credentials() {
+        for (n, v) in [
+            ("x-ratelimit-remaining-tokens", "39000"),
+            ("x-ratelimit-limit-tokens", "40000"),
+            ("x-ratelimit-reset-tokens", "6m0s"),
+            ("anthropic-ratelimit-unified-status", "allowed"),
+            ("x-session-affinity", "on"),
+        ] {
+            assert_eq!(redact_value(n, v), v, "{n} must stay visible");
+        }
+        for (n, v) in [
+            ("x-gateway-pass", "hunter2-hunter2-hunter2"),
+            ("x-password", "hunter2-hunter2-hunter2"),
+            ("x-client-credential", "abcdefghijklmnopqrst"),
+            ("x-signature", "abcdefghijklmnopqrst"),
+            ("x-access-token", "abcdefghijklmnopqrst"),
+            ("x-custom-relay", "Bearer abcdefghijklmnopqrst"),
+            ("x-custom-relay2", "Basic dXNlcjpwYXNzd29yZA=="),
+        ] {
+            assert_ne!(redact_value(n, v), v, "{n} must be masked");
+        }
+    }
+
+    /// reqwest 在发送时补上客户端默认 UA; 出站表要如实显示它 (网关 / WAF 排障最想看的就是 UA)。
+    #[test]
+    fn outbound_shows_default_user_agent_when_not_set() {
+        let got = pairs(&serialize_outbound(&map(&[("x-app", "cli")]), true, &[]).unwrap());
+        let ua = got.iter().find(|p| p[0] == "user-agent").expect("default UA row");
+        assert_eq!(ua[1], crate::proxy::upstream::DEFAULT_USER_AGENT);
+        // explicit UA (Codex / Kiro) is kept as-is, not duplicated
+        let got = pairs(&serialize_outbound(&map(&[("user-agent", "codex_cli_rs/1.0")]), true, &[]).unwrap());
+        assert_eq!(got.iter().filter(|p| p[0] == "user-agent").count(), 1);
+        assert_eq!(got[0][1], "codex_cli_rs/1.0");
     }
 
     #[test]

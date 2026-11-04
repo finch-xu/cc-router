@@ -11,7 +11,7 @@ import {
 import { ClientToolBadge } from "@/components/ClientToolBadge";
 import { HeaderTable, type HeaderTag } from "@/components/request-detail/HeaderTable";
 import { api } from "@/api/tauri";
-import { isReturnedToClient, outboundSource } from "@/lib/headerSources";
+import { clientHeaderValues, isReturnedToClient, outboundSource } from "@/lib/headerSources";
 import { ProviderLogo } from "@/components/ProviderLogo";
 import { useSubscriptions } from "@/hooks/useSubscriptions";
 import { useT } from "@/i18n";
@@ -166,9 +166,9 @@ export function RequestDetailDialog({ request, onClose }: Props) {
   const monoOr = (v?: string | null) => (v ? <span className="mono">{v}</span> : dash);
 
   // 发往上游 / 上游响应两张表的标签 (规则见 lib/headerSources.ts)
-  const clientNames = new Set((headers?.client_request ?? []).map(([k]) => k.toLowerCase()));
-  const outboundTag = (name: string): HeaderTag => {
-    const src = outboundSource(name, clientNames, sub?.auth_header_name);
+  const clientValues = clientHeaderValues(headers?.client_request);
+  const outboundTag = (name: string, value: string): HeaderTag => {
+    const src = outboundSource(name, value, clientValues, sub?.auth_header_name);
     const tone = src === "forwarded" ? "ok" : src === "ccRouter" ? "muted" : "accent";
     return { label: t(`requestLogs.detail.headers.source.${src}`), tone };
   };
@@ -182,6 +182,16 @@ export function RequestDetailDialog({ request, onClose }: Props) {
       : null;
   const count = (pairs: HeaderPairs | undefined) =>
     headersQuery.isLoading ? "…" : pairs ? String(pairs.length) : "—";
+  // 某组为 null 的原因: 加载失败 > 整行都没记 (没开记录 / 老日志) > 记了入站但这次尝试没发出或没收到响应
+  const recorded = headers?.client_request != null;
+  const emptyText = (kind: "client" | "request" | "response") =>
+    headersQuery.isError
+      ? t("requestLogs.detail.headers.loadFailed")
+      : !recorded || kind === "client"
+        ? t("requestLogs.detail.headers.notRecorded")
+        : kind === "request" || headers?.upstream_request == null
+          ? t("requestLogs.detail.headers.notSent")
+          : t("requestLogs.detail.headers.noResponse");
   const toolsVisible = request ? hasToolInfo(request) : false;
 
   return (
@@ -237,7 +247,7 @@ export function RequestDetailDialog({ request, onClose }: Props) {
                     {t("requestLogs.detail.tools.title")}
                   </TabsPrimitive.Trigger>
                 )}
-                <div className="rd-nav-group">{t("requestLogs.detail.nav.headersGroup")}</div>
+                <div className="rd-nav-group" role="presentation" aria-hidden="true">{t("requestLogs.detail.nav.headersGroup")}</div>
                 <TabsPrimitive.Trigger value="clientHeaders" className="rd-nav-item">
                   <span>{t("requestLogs.detail.nav.clientHeaders")}</span>
                   <span className="rd-nav-n">{count(headers?.client_request)}</span>
@@ -250,7 +260,7 @@ export function RequestDetailDialog({ request, onClose }: Props) {
                   <span>{t("requestLogs.detail.nav.responseHeaders")}</span>
                   <span className="rd-nav-n">{count(headers?.upstream_response)}</span>
                 </TabsPrimitive.Trigger>
-                <div className="rd-nav-group">{t("requestLogs.detail.nav.responseGroup")}</div>
+                <div className="rd-nav-group" role="presentation" aria-hidden="true">{t("requestLogs.detail.nav.responseGroup")}</div>
                 <TabsPrimitive.Trigger value="body" className="rd-nav-item">
                   {t("requestLogs.detail.nav.body")}
                 </TabsPrimitive.Trigger>
@@ -380,6 +390,7 @@ export function RequestDetailDialog({ request, onClose }: Props) {
                     subtitle={t("requestLogs.detail.headers.clientSub")}
                     pairs={headers?.client_request}
                     loading={headersQuery.isLoading}
+                    emptyText={emptyText("client")}
                   />
                 </TabsPrimitive.Content>
                 <TabsPrimitive.Content value="upstreamHeaders" className="rd-body">
@@ -388,6 +399,7 @@ export function RequestDetailDialog({ request, onClose }: Props) {
                     subtitle={t("requestLogs.detail.headers.upstreamSub")}
                     pairs={headers?.upstream_request}
                     loading={headersQuery.isLoading}
+                    emptyText={emptyText("request")}
                     tagFor={outboundTag}
                   />
                   <p className="field-hint">{t("requestLogs.detail.headers.sourceHint")}</p>
@@ -398,6 +410,7 @@ export function RequestDetailDialog({ request, onClose }: Props) {
                     subtitle={t("requestLogs.detail.headers.responseSub")}
                     pairs={headers?.upstream_response}
                     loading={headersQuery.isLoading}
+                    emptyText={emptyText("response")}
                     tagFor={responseTag}
                   />
                 </TabsPrimitive.Content>

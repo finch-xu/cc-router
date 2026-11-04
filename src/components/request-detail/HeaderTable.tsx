@@ -18,12 +18,15 @@ export function HeaderTable({
   pairs,
   loading,
   tagFor,
+  emptyText,
 }: {
   title: string;
   subtitle?: string;
   pairs: HeaderPairs | undefined;
   loading: boolean;
-  tagFor?: (name: string) => HeaderTag | null;
+  tagFor?: (name: string, value: string) => HeaderTag | null;
+  /** pairs 为 null 时显示的说明 (未记录 / 没发出 / 没收到响应 / 加载失败), 由调用方按整行情况决定 */
+  emptyText: string;
 }) {
   const { t } = useT();
   const [copied, setCopied] = useState(false);
@@ -54,7 +57,7 @@ export function HeaderTable({
       {loading ? (
         <div className="field-hint">{t("common.loading")}</div>
       ) : !pairs ? (
-        <div className="field-hint">{t("requestLogs.detail.headers.notRecorded")}</div>
+        <div className="field-hint">{emptyText}</div>
       ) : pairs.length === 0 ? (
         <div className="field-hint">{t("requestLogs.detail.headers.empty")}</div>
       ) : (
@@ -67,7 +70,7 @@ export function HeaderTable({
           </thead>
           <tbody>
             {pairs.map(([k, v], i) => {
-              const tag = tagFor?.(k) ?? null;
+              const tag = tagFor?.(k, v) ?? null;
               return (
                 <tr key={`${k}-${i}`}>
                   <td className="rd-table-k">

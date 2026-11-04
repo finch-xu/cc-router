@@ -707,6 +707,7 @@ pub async fn dispatch(
                 gemini_extras,
                 &mut upstream_capture,
                 ctx.log_headers,
+                &api_key_raw,
             )
             .await;
             // 本 attempt 的 ctx 带上采集到的上游两组头, 之后所有日志行都从它取。
@@ -853,6 +854,7 @@ pub async fn dispatch(
                 dump_tx.clone(),
                 &mut upstream_capture,
                 ctx.log_headers,
+                &api_key_raw,
             )
             .await;
             // 本 attempt 的 ctx 带上采集到的上游两组头, 之后所有日志行都从它取。

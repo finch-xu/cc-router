@@ -36,6 +36,10 @@ impl UpstreamResponse {
     }
 }
 
+/// User-Agent reqwest adds to every upstream request that does not set one
+/// (Codex / Kiro set their own). Shown in the request log's outbound table.
+pub const DEFAULT_USER_AGENT: &str = concat!("cc-router/", env!("CARGO_PKG_VERSION"));
+
 /// Idle limit of the production upstream client (see [`build_client`]).
 pub const UPSTREAM_IDLE_TIMEOUT: Duration = Duration::from_secs(600);
 
@@ -50,7 +54,7 @@ pub fn build_client(idle: Duration) -> reqwest::Result<reqwest::Client> {
     reqwest::Client::builder()
         .connect_timeout(Duration::from_secs(10))
         .read_timeout(idle)
-        .user_agent(concat!("cc-router/", env!("CARGO_PKG_VERSION")))
+        .user_agent(DEFAULT_USER_AGENT)
         .build()
 }
 

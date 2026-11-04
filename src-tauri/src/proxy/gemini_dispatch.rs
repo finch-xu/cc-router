@@ -71,6 +71,8 @@ pub async fn dispatch_gemini_attempt(
     // 请求日志用: 发出前写出站头, 收到后写响应头 (proxy/header_log.rs); 发送前失败则保持 None。
     capture: &mut crate::proxy::header_log::UpstreamHeaderCapture,
     log_headers: bool,
+    // 订阅的原始 Key; api_key 参数是已按 header_format 格式化的鉴权值, 两者都要拿来打码。
+    secret_raw: &str,
 ) -> Result<OAuthDispatchOk, OAuthDispatchError> {
     if !url_template.contains("{model}") {
         return Err(OAuthDispatchError::Upstream {
@@ -145,7 +147,7 @@ pub async fn dispatch_gemini_attempt(
     );
 
     // 强制 streaming 上游, 因为 URL 已是 :streamGenerateContent?alt=sse.
-    capture.request = crate::proxy::header_log::serialize_outbound(&headers, log_headers, &[api_key.as_str()]);
+    capture.request = crate::proxy::header_log::serialize_outbound(&headers, log_headers, &[api_key.as_str(), secret_raw]);
     let send_result = upstream::send(http_client, &url, body_bytes, headers, true).await;
     let upstream_response = match send_result {
         Ok(r) => {

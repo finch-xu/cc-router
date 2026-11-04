@@ -1404,5 +1404,8 @@
   "requestLogs.detail.headers.returned": "已回传",
   "requestLogs.detail.headers.notReturned": "未回传",
   "settings.log.headers.label": "记录请求头",
-  "settings.log.headers.desc": "在请求详情里展示收到的、发往上游的、上游返回的请求头。凭据会脱敏。每条日志约多 1–3 KB。关闭后新日志不再记录, 已有记录不受影响。"
+  "settings.log.headers.desc": "在请求详情里展示收到的、发往上游的、上游返回的请求头。凭据会脱敏。每条日志约多 2–6 KB。关闭后新日志不再记录, 已有记录不受影响。",
+  "requestLogs.detail.headers.notSent": "这次尝试没有发出请求 (在发送前就失败了, 原因见响应体或错误信息)。",
+  "requestLogs.detail.headers.noResponse": "这次尝试没有收到上游响应 (网络错误或超时)。",
+  "requestLogs.detail.headers.loadFailed": "请求头加载失败, 关闭后重新打开详情再试一次。"
 }
