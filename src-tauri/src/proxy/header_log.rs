@@ -39,20 +39,21 @@ pub fn redact_value(lower_name: &str, value: &str) -> String {
 /// (rate-limit budgets count "tokens", Claude Code ids contain "session").
 const LOG_EXEMPT_PREFIXES: &[&str] = &["x-claude-code-", "anthropic-", "x-ratelimit-", "ratelimit-"];
 
-/// Name substrings that mark a credential in the log.
-const LOG_SECRET_MARKERS: &[&str] = &["key", "secret", "pass", "credential", "signature", "cookie", "auth"];
+/// Name substrings that mark a credential in the log. Deny-by-default: any
+/// header containing one is masked unless its family is in
+/// [`LOG_EXEMPT_PREFIXES`] — that narrow allowlist is what keeps rate-limit
+/// budgets ("…-tokens") and Claude Code ids ("…-session-id") readable.
+const LOG_SECRET_MARKERS: &[&str] = &[
+    "key", "token", "secret", "pass", "credential", "signature", "cookie", "auth", "session",
+];
 
-/// Log-side name heuristic. Deliberately separate from the forwarding one
-/// (`proxy::forward::looks_like_credential`), which errs toward dropping a
-/// header; here a false positive hides exactly the debugging info the user
-/// opened the dialog for.
+/// Log-side name heuristic: the forwarding markers plus pass / credential /
+/// signature, with known-safe families exempted first.
 fn log_name_is_secret(lower_name: &str) -> bool {
     if LOG_EXEMPT_PREFIXES.iter().any(|p| lower_name.starts_with(p)) {
         return false;
     }
     LOG_SECRET_MARKERS.iter().any(|m| lower_name.contains(m))
-        // "token" only as the name's last word: x-access-token, x-session-token
-        || lower_name.ends_with("token")
 }
 
 /// Values that are credentials whatever the header is called.
@@ -269,7 +270,7 @@ mod tests {
             ("x-ratelimit-limit-tokens", "40000"),
             ("x-ratelimit-reset-tokens", "6m0s"),
             ("anthropic-ratelimit-unified-status", "allowed"),
-            ("x-session-affinity", "on"),
+            ("x-claude-code-session-id", "4b1e0c9a-2d7f-4c88"),
         ] {
             assert_eq!(redact_value(n, v), v, "{n} must stay visible");
         }
@@ -279,6 +280,10 @@ mod tests {
             ("x-client-credential", "abcdefghijklmnopqrst"),
             ("x-signature", "abcdefghijklmnopqrst"),
             ("x-access-token", "abcdefghijklmnopqrst"),
+            // deny-by-default: session ids and tokens anywhere in the name
+            ("x-session-id", "abcdefghijklmnopqrst"),
+            ("x-token-v2", "abcdefghijklmnopqrst"),
+            ("x-auth-token-ref", "abcdefghijklmnopqrst"),
             ("x-custom-relay", "Bearer abcdefghijklmnopqrst"),
             ("x-custom-relay2", "Basic dXNlcjpwYXNzd29yZA=="),
         ] {
