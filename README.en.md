@@ -177,7 +177,8 @@ The three chat entry points share the same subscriptions, virtual models, quotas
 - This is the primary inbound: requests are passed through verbatim with no protocol translation, so thinking, `output_config.effort`, `cache_control`, images and tool calls all keep their native Anthropic semantics.
 - The full Claude Code env example is in "Using with Claude Code" above; Claude Desktop needs local HTTPS, see the [setup guide](https://ccrouter.app/docs/claude-desktop-integration/).
 - Session affinity keys on the `x-claude-code-session-id` header first, then `metadata.user_id`.
-- With "Forward client headers" enabled on a subscription's edit page, whitelisted headers such as `anthropic-beta` / `anthropic-version` are forwarded to that upstream as-is; set per subscription, off by default.
+- Each subscription has a "Header forwarding" setting on its edit page: don't forward / Claude Code preset / allowlist / denylist / forward all. Official Anthropic subscriptions default to the Claude Code preset (`anthropic-*`, `x-claude-code-*`, …); everything else defaults to not forwarding. Credential headers are never forwarded in any mode. Subscriptions can also add custom headers.
+- Auto mode's server-side classifier is only provided by the official Anthropic upstream. If any slot Claude Code uses routes to a third-party provider, Claude Code shows "this session isn't eligible"; set `CLAUDE_CODE_AUTO_MODE_SERVER=0` to silence it (billing is unchanged).
 
 </details>
 

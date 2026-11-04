@@ -177,7 +177,8 @@ cc-router はツールと LLM プロバイダの間に入ります。ツール�
 - これがメインの入口です。リクエストはプロトコル変換なしでそのまま透過され、thinking、`output_config.effort`、`cache_control`、画像、ツール呼び出しはすべて Anthropic ネイティブの意味論で動作します。
 - Claude Code の完全な env 例は上記「Claude Code での利用」を参照。Claude Desktop はローカル HTTPS が必要です。[設定ガイド](https://ccrouter.app/docs/claude-desktop-integration/)を参照してください。
 - セッション親和は `x-claude-code-session-id` ヘッダーを優先し、次に `metadata.user_id` でセッションを識別します。
-- サブスクリプション編集画面で「クライアントヘッダーの転送」を有効にすると、`anthropic-beta` / `anthropic-version` などのホワイトリストヘッダーがその上流へそのまま転送されます。サブスクリプションごとの設定で、既定では無効です。
+- サブスクリプション編集画面の「ヘッダー転送」で、転送しない / Claude Code プリセット / 許可リスト / 拒否リスト / すべて転送 を選べます。Anthropic 公式サブスクリプションの既定は Claude Code プリセット（`anthropic-*`、`x-claude-code-*` など）、それ以外は転送しないが既定です。認証情報系のヘッダーはどのモードでも転送しません。カスタムヘッダーも追加できます。
+- auto mode のサーバー側分類器は Anthropic 公式の上流だけが提供します。Claude Code が使うスロットにサードパーティプロバイダーが含まれると「this session isn't eligible」と表示されます。`CLAUDE_CODE_AUTO_MODE_SERVER=0` を設定すると表示を止められます（課金は変わりません）。
 
 </details>
 

@@ -177,7 +177,8 @@ cc-router 夹在你的工具和大模型厂商中间：工具从**入口**连进
 - 这是主入口，请求原样透传不做协议翻译，thinking、`output_config.effort`、`cache_control`、图片、工具调用全部按 Anthropic 原生语义工作。
 - Claude Code 的完整 env 示例见上方「在 Claude Code 中使用」；Claude Desktop 需要本地 HTTPS，见[配置教程](https://ccrouter.app/docs/claude-desktop-integration/)。
 - 会话亲和优先按 `x-claude-code-session-id` 请求头、其次 `metadata.user_id` 识别会话。
-- 在订阅编辑页为某条订阅开启「透传客户端请求头」后，`anthropic-beta` / `anthropic-version` 等白名单头会原样转发给该上游，按订阅单独设置，默认关闭。
+- 每条订阅可在编辑页设置「请求头透传」：不透传 / Claude Code 预设 / 白名单 / 黑名单 / 透传全部。Anthropic 官方订阅默认 Claude Code 预设（`anthropic-*`、`x-claude-code-*` 等），其余默认不透传；凭据类请求头任何模式都不会转发。订阅还可以加自定义请求头。
+- auto mode 的服务端分类器只有 Anthropic 官方上游提供；Claude Code 用到的槽位里有第三方厂商时会提示「this session isn't eligible」，可设 `CLAUDE_CODE_AUTO_MODE_SERVER=0` 关掉提示（计费不变）。
 
 </details>
 
