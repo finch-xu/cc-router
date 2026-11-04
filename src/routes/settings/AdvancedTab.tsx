@@ -128,6 +128,17 @@ export function AdvancedTab({ form }: { form: SettingsForm }) {
         <div className="card-body">
           <div className="setting-row">
             <div className="label-col">
+              {t("settings.log.headers.label")}
+              <div className="desc">{t("settings.log.headers.desc")}</div>
+            </div>
+            <Toggle
+              checked={form.logRequestHeaders}
+              onChange={(v) => void form.changeLogRequestHeaders(v)}
+              aria-label={t("settings.log.headers.label")}
+            />
+          </div>
+          <div className="setting-row">
+            <div className="label-col">
               {t("settings.debug.mode.label")}
               <div className="desc">{t("settings.debug.mode.desc")}</div>
             </div>

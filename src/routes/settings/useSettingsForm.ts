@@ -40,6 +40,7 @@ export function useSettingsForm() {
   const [corsAllowOrigin, setCorsAllowOrigin] = useState("*");
   const [preferredLanguage, setPreferredLanguage] = useState<LanguagePref>("system");
   const [debugMode, setDebugMode] = useState(false);
+  const [logRequestHeaders, setLogRequestHeaders] = useState(true);
   const [webUiEnabled, setWebUiEnabled] = useState(false);
   const [webUiAuthEnabled, setWebUiAuthEnabled] = useState(true);
   const [tuiEnabled, setTuiEnabled] = useState(false);
@@ -63,6 +64,7 @@ export function useSettingsForm() {
     setCorsAllowOrigin(settings.data.cors_allow_origin);
     setPreferredLanguage(settings.data.preferred_language ?? "system");
     setDebugMode(settings.data.debug_mode ?? false);
+    setLogRequestHeaders(settings.data.log_request_headers ?? true);
     setWebUiEnabled(settings.data.web_ui_enabled);
     setWebUiAuthEnabled(settings.data.web_ui_auth_enabled);
     setTuiEnabled(settings.data.tui_enabled);
@@ -105,6 +107,10 @@ export function useSettingsForm() {
   async function changeDebugMode(next: boolean) {
     setDebugMode(next);
     await patch({ debug_mode: next });
+  }
+  async function changeLogRequestHeaders(next: boolean) {
+    setLogRequestHeaders(next);
+    await patch({ log_request_headers: next });
   }
   async function changeListenAll(next: boolean) {
     setListenAll(next);
@@ -218,6 +224,7 @@ export function useSettingsForm() {
     setCorsAllowOrigin,
     preferredLanguage,
     debugMode,
+    logRequestHeaders,
     webUiEnabled,
     webUiAuthEnabled,
     tuiEnabled,
@@ -225,6 +232,7 @@ export function useSettingsForm() {
     changeUpdateSource,
     changeAutoCheckUpdates,
     changeDebugMode,
+    changeLogRequestHeaders,
     changeListenAll,
     changeMaxBodyMb,
     changeProxyPort,
