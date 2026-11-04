@@ -235,7 +235,7 @@ pub async fn dispatch_openai_chat_completions_attempt(
     }
 
     // 3. 发送请求
-    capture.request = crate::proxy::header_log::serialize(&headers, log_headers);
+    capture.request = crate::proxy::header_log::serialize_outbound(&headers, log_headers, &[api_key.as_str()]);
     let send_result =
         upstream::send(http_client, &url, body_bytes, headers, client_wants_streaming).await;
     let upstream_response = match send_result {

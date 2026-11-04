@@ -170,7 +170,7 @@ pub async fn dispatch_oauth_attempt(
     );
 
     // 4. 发送 (强制 streaming 上游, 因为 ChatGPT 后端拒绝非流式)
-    capture.request = crate::proxy::header_log::serialize(&headers, log_headers);
+    capture.request = crate::proxy::header_log::serialize_outbound(&headers, log_headers, &[access_token.as_str()]);
     let send_result = upstream::send(http_client, &url, body_bytes, headers, true).await;
 
     let upstream_response = match send_result {
@@ -843,7 +843,7 @@ pub async fn dispatch_kiro_attempt(
     );
 
     // 4. 发送 (Kiro 后端响应总是 Event Stream)
-    capture.request = crate::proxy::header_log::serialize(&headers, log_headers);
+    capture.request = crate::proxy::header_log::serialize_outbound(&headers, log_headers, &[access_token.as_str()]);
     let send_result = upstream::send(http_client, &url, body_bytes, headers, true).await;
     let upstream_response = match send_result {
         Ok(r) => {

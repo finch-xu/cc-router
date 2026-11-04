@@ -1354,7 +1354,11 @@ pub async fn dispatch(
         emit_attempt_started(state, sub_id, vm_name);
 
         let mut upstream_capture = crate::proxy::header_log::UpstreamHeaderCapture {
-            request: crate::proxy::header_log::serialize(&upstream_headers, ctx.log_headers),
+            request: crate::proxy::header_log::serialize_outbound(
+                &upstream_headers,
+                ctx.log_headers,
+                &[api_key_raw.as_str()],
+            ),
             response: None,
         };
         let upstream_result = upstream::send(

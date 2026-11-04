@@ -151,7 +151,7 @@ pub async fn dispatch_gemini_interactions_attempt(
         ));
     }
 
-    capture.request = crate::proxy::header_log::serialize(&headers, log_headers);
+    capture.request = crate::proxy::header_log::serialize_outbound(&headers, log_headers, &[api_key.as_str()]);
     let send_result = upstream::send(http_client, &url, body_bytes, headers, true).await;
     let upstream_response = match send_result {
         Ok(r) => {

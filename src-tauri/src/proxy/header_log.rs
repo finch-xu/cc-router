@@ -33,6 +33,11 @@ pub fn redact_value(lower_name: &str, value: &str) -> String {
     if !(ALWAYS_MASKED.contains(&lower_name) || looks_like_credential(lower_name)) {
         return value.to_string();
     }
+    mask(value)
+}
+
+/// `•••` for short values, otherwise first 4 + `…` + last 4.
+fn mask(value: &str) -> String {
     let chars: Vec<char> = value.chars().collect();
     if chars.len() <= 12 {
         return "•••".to_string();
@@ -44,15 +49,32 @@ pub fn redact_value(lower_name: &str, value: &str) -> String {
 
 /// Serializes a header map for the log. `None` when `enabled` is false.
 pub fn serialize(map: &HeaderMap, enabled: bool) -> Option<String> {
+    serialize_with(map, enabled, &[])
+}
+
+/// Outbound variant: additionally masks any header whose value contains one of
+/// `secrets` (the subscription's API key / OAuth token), whatever its name —
+/// custom auth header names and `{api_key}` template headers would slip past
+/// the name heuristic. Secrets shorter than 8 chars are ignored.
+pub fn serialize_outbound(map: &HeaderMap, enabled: bool, secrets: &[&str]) -> Option<String> {
+    serialize_with(map, enabled, secrets)
+}
+
+fn serialize_with(map: &HeaderMap, enabled: bool, secrets: &[&str]) -> Option<String> {
     if !enabled {
         return None;
     }
+    let secrets: Vec<&str> = secrets.iter().copied().filter(|s| s.len() >= 8).collect();
     let mut pairs: Vec<[String; 2]> = map
         .iter()
         .map(|(name, value)| {
             let n = name.as_str().to_ascii_lowercase();
-            let v = String::from_utf8_lossy(value.as_bytes());
-            let v = redact_value(&n, &v);
+            let raw = String::from_utf8_lossy(value.as_bytes());
+            let v = if secrets.iter().any(|sec| raw.contains(sec)) {
+                mask(&raw)
+            } else {
+                redact_value(&n, &raw)
+            };
             [n, v]
         })
         .collect();
@@ -180,6 +202,26 @@ mod tests {
         m.insert(HeaderName::from_static("x-weird"), HeaderValue::from_bytes(&[0x66, 0xff, 0x6f]).unwrap());
         let got = pairs(&serialize(&m, true).unwrap());
         assert!(got[0][1].starts_with('f') && got[0][1].ends_with('o'), "{:?}", got[0][1]);
+    }
+
+    /// 出站头: 订阅自己的 Key 不论落在哪个头名下 (自定义鉴权头名 / {api_key} 模板头) 都被打码。
+    #[test]
+    fn outbound_masks_secret_wherever_it_appears() {
+        let key = "sk-live-0123456789abcdef";
+        let m = map(&[
+            ("x-gateway", key),
+            ("cf-aig-routing", "Bearer sk-live-0123456789abcdef"),
+            ("x-team", "platform"),
+        ]);
+        let got = pairs(&serialize_outbound(&m, true, &[key]).unwrap());
+        for p in &got {
+            assert!(!p[1].contains("0123456789"), "{p:?} leaked the key");
+        }
+        assert_eq!(got.iter().find(|p| p[0] == "x-team").unwrap()[1], "platform");
+        assert_eq!(serialize_outbound(&m, false, &[key]), None);
+        // empty / short secrets are ignored (would mask everything)
+        let got = pairs(&serialize_outbound(&map(&[("x-team", "platform")]), true, &["", "ab"]).unwrap());
+        assert_eq!(got[0][1], "platform");
     }
 
     #[test]

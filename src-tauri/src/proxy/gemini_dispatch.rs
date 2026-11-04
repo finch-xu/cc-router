@@ -145,7 +145,7 @@ pub async fn dispatch_gemini_attempt(
     );
 
     // 强制 streaming 上游, 因为 URL 已是 :streamGenerateContent?alt=sse.
-    capture.request = crate::proxy::header_log::serialize(&headers, log_headers);
+    capture.request = crate::proxy::header_log::serialize_outbound(&headers, log_headers, &[api_key.as_str()]);
     let send_result = upstream::send(http_client, &url, body_bytes, headers, true).await;
     let upstream_response = match send_result {
         Ok(r) => {

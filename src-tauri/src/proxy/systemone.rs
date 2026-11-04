@@ -373,8 +373,13 @@ impl AttemptSink for LiveSink<'_> {
             }
             info!(sub_id = %c.sub_id, display_name = %c.display_name, real_model = %c.outbound.real_model, url = %c.outbound.url, "forwarding systemone request");
             emit_attempt_started(self.state, c.sub_id, VirtualModelName::Jev);
+            let api_key = c.rt.read().await.row.api_key.clone();
             self.capture = crate::proxy::header_log::UpstreamHeaderCapture {
-                request: crate::proxy::header_log::serialize(&c.outbound.headers, self.ctx.log_headers),
+                request: crate::proxy::header_log::serialize_outbound(
+                    &c.outbound.headers,
+                    self.ctx.log_headers,
+                    &[api_key.as_str()],
+                ),
                 response: None,
             };
             let result = upstream::send(
