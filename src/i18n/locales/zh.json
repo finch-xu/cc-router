@@ -1400,7 +1400,7 @@
   "requestLogs.detail.headers.source.auth": "订阅鉴权",
   "requestLogs.detail.headers.source.configured": "订阅配置",
   "requestLogs.detail.headers.source.ccRouter": "cc-router",
-  "requestLogs.detail.headers.sourceHint": "来源标签: 透传 = 按订阅的请求头透传策略从客户端转发 (同名时可能已被订阅配置覆盖, 以表中的值为准); 订阅配置 = 厂商或自定义请求头; 订阅鉴权 = 订阅自己的 Key。凭据已脱敏, 只保留前后几个字符。",
+  "requestLogs.detail.headers.sourceHint": "来源标签: 透传 = 客户端发来的同名同值请求头, 按订阅的请求头透传策略转发; 订阅配置 = 厂商配置或自定义的请求头 (包括改写过客户端同名头的); 订阅鉴权 = 订阅自己的 Key; cc-router = cc-router 自己加的。凭据已脱敏, 只保留前后几个字符。",
   "requestLogs.detail.headers.returned": "已回传",
   "requestLogs.detail.headers.notReturned": "未回传",
   "settings.log.headers.label": "记录请求头",
