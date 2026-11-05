@@ -63,6 +63,13 @@ import { providerName } from "@/lib/providerText";
 import { UrlParamFields, urlParamErrors } from "@/components/UrlParamFields";
 import { errorText } from "@/lib/errorText";
 
+/** 请求头编辑器的行 → 预览用的名值表 (与保存时同样 trim、丢弃空名)。 */
+function draftHeaderMap(rows: KeyValueRow[]): Record<string, string> {
+  return Object.fromEntries(
+    rows.map((r) => [r.key.trim(), r.value.trim()] as const).filter(([k]) => k !== ""),
+  );
+}
+
 export function SubscriptionEditPage() {
   const { t, locale } = useT();
   const { id } = useParams<{ id: string }>();
@@ -506,7 +513,12 @@ export function SubscriptionEditPage() {
                     {sub.auth_type === "api_key" && !isSystemOne && (
                       <div className="grid grid-cols-[120px_1fr] gap-3 items-start">
                         <Label className="mt-2">{t("subscriptionEdit.headerPolicy.label")}</Label>
-                        <HeaderPolicyEditor value={headerPolicy} onChange={setHeaderPolicy} />
+                        <HeaderPolicyEditor
+                          value={headerPolicy}
+                          onChange={setHeaderPolicy}
+                          subscriptionId={sub.id}
+                          draftHeaders={draftHeaderMap(isCustom ? requiredHeaders : extraHeaders)}
+                        />
                       </div>
                     )}
                   </div>

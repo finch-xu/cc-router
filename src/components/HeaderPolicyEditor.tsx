@@ -1,6 +1,7 @@
 import { useState } from "react";
-import { Check, Copy, Lock, Plus, X } from "lucide-react";
+import { Check, Copy, Eye, Lock, Plus, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { HeaderPreviewDialog } from "@/components/HeaderPreviewDialog";
 import { Input } from "@/components/ui/input";
 import { useT } from "@/i18n";
 import { validateHeaderPolicyNames } from "@/lib/connectionValidation";
@@ -9,7 +10,7 @@ import type { HeaderPolicy, HeaderPolicyMode } from "@/types";
 
 const MODES: HeaderPolicyMode[] = ["none", "claude_code", "allowlist", "denylist", "all"];
 
-/** 白名单模式下可一键勾选的预设项 (与后端 claude_code 预设一致, 另加 user-agent)。 */
+/** 白名单模式下可一键勾选的预设项 (与后端 claude_code 预设一致)。 */
 const PRESET_NAMES = ["anthropic-*", "x-claude-code-*", "x-stainless-*", "x-app", "user-agent"];
 
 const AUTO_MODE_ENV = "CLAUDE_CODE_AUTO_MODE_SERVER=0";
@@ -21,14 +22,20 @@ const AUTO_MODE_ENV = "CLAUDE_CODE_AUTO_MODE_SERVER=0";
 export function HeaderPolicyEditor({
   value,
   onChange,
+  subscriptionId,
+  draftHeaders,
 }: {
   value: HeaderPolicy;
   onChange: (p: HeaderPolicy) => void;
+  subscriptionId: string;
+  /** 用户可编辑的那张请求头表的草稿, 预览按它计算 */
+  draftHeaders: Record<string, string>;
 }) {
   const { t } = useT();
   const [draft, setDraft] = useState("");
   const [draftError, setDraftError] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
+  const [previewOpen, setPreviewOpen] = useState(false);
 
   const names = value.names ?? [];
   const hasName = (n: string) => names.some((x) => x.toLowerCase() === n.toLowerCase());
@@ -128,6 +135,17 @@ export function HeaderPolicyEditor({
         {t("subscriptionEdit.headerPolicy.hardDeny")}
       </p>
       <p className="text-xs text-muted-foreground">{t("subscriptionEdit.headerPolicy.mergeHint")}</p>
+      <Button type="button" variant="outline" size="sm" className="hpv-open" onClick={() => setPreviewOpen(true)}>
+        <Eye size={14} />
+        {t("subscriptionEdit.headerPreview.open")}
+      </Button>
+      <HeaderPreviewDialog
+        open={previewOpen}
+        onClose={() => setPreviewOpen(false)}
+        subscriptionId={subscriptionId}
+        policy={value}
+        headers={draftHeaders}
+      />
 
       <div className="alert warn hp-auto-mode">
         <div className="space-y-1.5">

@@ -3717,6 +3717,11 @@ html:not([data-platform="macos"]) .main.flush { padding-top: 0; }
 .rd-empty { padding: 14px 16px; font-size: 13px; color: var(--ink-3); background: var(--surface-2); border: 1.5px dashed var(--line-2); border-radius: var(--r-card); }
 .rd-empty::before { content: "✎ "; font-family: var(--font-hand); font-size: 16px; color: var(--accent-ink); }
 .rd-note { margin: 10px 2px 0; font-size: 11.5px; color: var(--ink-4); }
+/* 请求头发送效果预览 (订阅编辑页): 复用请求详情的表格 / 纸签 / 空状态, 只定尺寸与间距 */
+.hpv { width: 92vw; max-width: 760px; max-height: 85vh; overflow-y: auto; }
+.hpv-note { margin: 0 2px 4px; }
+.hpv-body { display: flex; flex-direction: column; gap: 20px; }
+.hpv-open { align-self: flex-start; }
 @media (max-width: 640px) {
   .rd-split-body { flex-direction: column; }
   .rd-nav { width: auto; flex-direction: row; overflow-x: auto; border-right: 0; border-bottom: 1.5px dashed var(--line-2); }
