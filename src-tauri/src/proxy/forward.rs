@@ -13,13 +13,14 @@
 //! forwarded client headers < `required_headers` (yaml + user `extra_headers`)
 //! < auth header < hard-coded `content-type`.
 
-use std::collections::{BTreeMap, HashSet};
+use std::collections::HashSet;
 
 use axum::http::HeaderMap;
 use reqwest::header::{
     HeaderMap as ReqHeaderMap, HeaderName as ReqHeaderName, HeaderValue as ReqHeaderValue,
 };
 
+use crate::proxy::header_source::HeaderSource;
 use crate::subscription::header_policy::{HeaderPolicy, HeaderPolicyMode};
 
 /// Exact names never forwarded. Lowercase only: axum normalizes inbound names.
@@ -56,7 +57,7 @@ const CREDENTIAL_EXEMPT_PREFIXES: &[&str] = &["x-claude-code-", "anthropic-"];
 
 /// Built-in Claude Code preset (`HeaderPolicyMode::ClaudeCode`).
 const CLAUDE_CODE_PREFIXES: &[&str] = &["anthropic-", "x-claude-code-", "x-stainless-"];
-const CLAUDE_CODE_EXACT: &[&str] = &["x-app"];
+const CLAUDE_CODE_EXACT: &[&str] = &["x-app", "user-agent"];
 
 /// Name heuristic shared with request-log redaction: true when a header name
 /// (lowercase) contains a credential marker and is not explicitly exempted.
@@ -98,67 +99,118 @@ pub fn policy_allows(policy: &HeaderPolicy, lower_name: &str) -> bool {
     }
 }
 
-/// Build the complete outbound header map for the Anthropic passthrough path.
+/// Why a client header did not reach the upstream (header preview only).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum DropReason {
+    /// In the hard-deny set: no policy can forward it.
+    HardDenied,
+    /// The policy (and yaml `forward_headers`) did not select it.
+    NotSelected,
+    /// Selected, but a configured / auth / content-type header of the same
+    /// name replaced it.
+    Overridden,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DroppedHeader {
+    pub name: String,
+    pub value: String,
+    pub reason: DropReason,
+}
+
+/// Outbound headers of the passthrough path with where each one came from.
+#[derive(Debug, Clone, Default)]
+pub struct OutboundHeaders {
+    /// What goes on the wire, lowercase names, order and duplicates kept.
+    pub sent: Vec<(String, String, HeaderSource)>,
+    /// Client headers that were not sent, with the reason.
+    pub dropped: Vec<DroppedHeader>,
+}
+
+impl OutboundHeaders {
+    /// Writes a header, replacing every earlier entry of the same name;
+    /// replaced forwarded entries are moved to `dropped` as `Overridden`.
+    fn replace(&mut self, name: &str, value: &str, source: HeaderSource) {
+        let lower = name.to_ascii_lowercase();
+        let mut kept = Vec::with_capacity(self.sent.len());
+        for (n, v, s) in self.sent.drain(..) {
+            if n != lower {
+                kept.push((n, v, s));
+            } else if s == HeaderSource::Forwarded {
+                self.dropped.push(DroppedHeader { name: n, value: v, reason: DropReason::Overridden });
+            }
+        }
+        self.sent = kept;
+        self.sent.push((lower, value.to_string(), source));
+    }
+
+    /// The reqwest map actually sent. Invalid names / values are skipped,
+    /// matching the if-let-Ok style at every dispatch site.
+    pub fn to_reqwest(&self) -> ReqHeaderMap {
+        let mut out = ReqHeaderMap::new();
+        for (n, v, _) in &self.sent {
+            if let (Ok(rn), Ok(rv)) = (ReqHeaderName::try_from(n.as_str()), ReqHeaderValue::from_str(v)) {
+                out.append(rn, rv);
+            }
+        }
+        out
+    }
+}
+
+/// Build the outbound headers for the Anthropic passthrough path.
 ///
-/// `required_headers` must already include the user's `extra_headers` (see
-/// `SubscriptionRow::resolved_required_headers`). Invalid header names/values
-/// are silently skipped, matching the if-let-Ok style at every dispatch site.
+/// `required` must already include the user's `extra_headers` (see
+/// `SubscriptionRow::resolved_required_headers_tagged`). A selected client
+/// header whose value is not valid UTF-8 is not forwarded (reported as
+/// `NotSelected`): `sent` is text so the log and the wire cannot disagree.
 pub fn build_anthropic_passthrough_headers(
     client_headers: &HeaderMap,
     policy: &HeaderPolicy,
     yaml_forward: &[String],
-    required_headers: &BTreeMap<String, String>,
+    required: &[(String, String, HeaderSource)],
     auth_header_name: &str,
     auth_header_value: &str,
-) -> ReqHeaderMap {
-    let mut out = ReqHeaderMap::new();
+) -> OutboundHeaders {
+    let mut out = OutboundHeaders::default();
 
     // Forwarded client headers go in first so every cc-router-controlled
-    // header inserted below overrides them on name collision. Iterate the
-    // client map: http's iter yields one pair per value, so multi-value
-    // headers (repeated anthropic-beta) survive via append.
+    // header written below replaces them on name collision. http's iter
+    // yields one pair per value, so repeated anthropic-beta survives.
     let yaml_set: HashSet<String> = yaml_forward
         .iter()
         .map(|s| s.to_ascii_lowercase())
         .collect();
     for (name, value) in client_headers.iter() {
         let n = name.as_str();
-        if is_hard_denied(n) {
-            continue;
-        }
-        if policy_allows(policy, n) || yaml_set.contains(n) {
-            if let (Ok(rn), Ok(rv)) = (
-                ReqHeaderName::try_from(n),
-                ReqHeaderValue::from_bytes(value.as_bytes()),
-            ) {
-                out.append(rn, rv);
+        let v = String::from_utf8_lossy(value.as_bytes()).into_owned();
+        let reason = if is_hard_denied(n) {
+            Some(DropReason::HardDenied)
+        } else if policy_allows(policy, n) || yaml_set.contains(n) {
+            match value.to_str() {
+                Ok(_) => None,
+                Err(_) => Some(DropReason::NotSelected),
             }
+        } else {
+            Some(DropReason::NotSelected)
+        };
+        match reason {
+            None => out.sent.push((n.to_string(), v, HeaderSource::Forwarded)),
+            Some(reason) => out.dropped.push(DroppedHeader { name: n.to_string(), value: v, reason }),
         }
     }
 
-    // insert (unlike append) drops every previously forwarded value under the
-    // same name — configured headers replace, they do not merge.
-    for (k, v) in required_headers.iter() {
-        if let (Ok(rn), Ok(rv)) = (
-            ReqHeaderName::try_from(k.as_str()),
-            ReqHeaderValue::from_str(v),
-        ) {
-            out.insert(rn, rv);
+    for (k, v, source) in required {
+        if ReqHeaderName::try_from(k.as_str()).is_ok() && ReqHeaderValue::from_str(v).is_ok() {
+            out.replace(k, v, *source);
         }
     }
-
-    if let (Ok(rn), Ok(rv)) = (
-        ReqHeaderName::try_from(auth_header_name),
-        ReqHeaderValue::from_str(auth_header_value),
-    ) {
-        out.insert(rn, rv);
+    if ReqHeaderName::try_from(auth_header_name).is_ok()
+        && ReqHeaderValue::from_str(auth_header_value).is_ok()
+    {
+        out.replace(auth_header_name, auth_header_value, HeaderSource::Auth);
     }
-
-    out.insert(
-        reqwest::header::CONTENT_TYPE,
-        ReqHeaderValue::from_static("application/json"),
-    );
-
+    out.replace("content-type", "application/json", HeaderSource::CcRouter);
     out
 }
 
@@ -166,6 +218,7 @@ pub fn build_anthropic_passthrough_headers(
 mod tests {
     use super::*;
     use crate::subscription::header_policy::{HeaderPolicy, HeaderPolicyMode};
+    use crate::proxy::header_source::HeaderSource;
     use axum::http::{HeaderName, HeaderValue};
 
     fn client_headers(pairs: &[(&str, &str)]) -> HeaderMap {
@@ -183,16 +236,16 @@ mod tests {
         HeaderPolicy { mode, names: names.iter().map(|s| s.to_string()).collect() }
     }
 
-    fn build(
+    fn build_full(
         client: &HeaderMap,
         policy: &HeaderPolicy,
         yaml: &[&str],
-        required: &[(&str, &str)],
-    ) -> ReqHeaderMap {
+        required: &[(&str, &str, HeaderSource)],
+    ) -> OutboundHeaders {
         let yaml: Vec<String> = yaml.iter().map(|s| s.to_string()).collect();
-        let required: BTreeMap<String, String> = required
+        let required: Vec<(String, String, HeaderSource)> = required
             .iter()
-            .map(|(k, v)| (k.to_string(), v.to_string()))
+            .map(|(k, v, s)| (k.to_string(), v.to_string(), *s))
             .collect();
         build_anthropic_passthrough_headers(
             client,
@@ -202,6 +255,85 @@ mod tests {
             "x-api-key",
             "sk-real-upstream-key",
         )
+    }
+
+    fn build(
+        client: &HeaderMap,
+        policy: &HeaderPolicy,
+        yaml: &[&str],
+        required: &[(&str, &str)],
+    ) -> ReqHeaderMap {
+        let tagged: Vec<(&str, &str, HeaderSource)> =
+            required.iter().map(|(k, v)| (*k, *v, HeaderSource::Provider)).collect();
+        build_full(client, policy, yaml, &tagged).to_reqwest()
+    }
+
+    fn sent_of<'a>(out: &'a OutboundHeaders, name: &str) -> Vec<(&'a str, HeaderSource)> {
+        out.sent.iter().filter(|(n, _, _)| n == name).map(|(_, v, s)| (v.as_str(), *s)).collect()
+    }
+
+    fn dropped_of<'a>(out: &'a OutboundHeaders, name: &str) -> Vec<(&'a str, DropReason)> {
+        out.dropped.iter().filter(|d| d.name == name).map(|d| (d.value.as_str(), d.reason)).collect()
+    }
+
+    #[test]
+    fn none_policy_yaml_version_is_provider() {
+        let client = client_headers(&[("anthropic-version", "2023-06-01")]);
+        let out = build_full(
+            &client,
+            &HeaderPolicy::none(),
+            &[],
+            &[("anthropic-version", "2023-06-01", HeaderSource::Provider)],
+        );
+        assert_eq!(sent_of(&out, "anthropic-version"), vec![("2023-06-01", HeaderSource::Provider)]);
+        assert_eq!(dropped_of(&out, "anthropic-version"), vec![("2023-06-01", DropReason::NotSelected)]);
+    }
+
+    #[test]
+    fn claude_code_preset_forwards_user_agent() {
+        let client = client_headers(&[("user-agent", "claude-cli/2.1")]);
+        let out = build_full(&client, &HeaderPolicy::claude_code(), &[], &[]);
+        assert_eq!(sent_of(&out, "user-agent"), vec![("claude-cli/2.1", HeaderSource::Forwarded)]);
+    }
+
+    #[test]
+    fn custom_user_agent_beats_forwarded() {
+        let client = client_headers(&[("user-agent", "claude-cli/2.1")]);
+        let out = build_full(
+            &client,
+            &HeaderPolicy::claude_code(),
+            &[],
+            &[("User-Agent", "my-ua/1", HeaderSource::Custom)],
+        );
+        assert_eq!(sent_of(&out, "user-agent"), vec![("my-ua/1", HeaderSource::Custom)]);
+        assert_eq!(dropped_of(&out, "user-agent"), vec![("claude-cli/2.1", DropReason::Overridden)]);
+        assert_eq!(out.to_reqwest().get("user-agent").unwrap(), "my-ua/1");
+    }
+
+    #[test]
+    fn hard_denied_goes_to_dropped() {
+        let client = client_headers(&[("authorization", "Bearer x")]);
+        let out = build_full(&client, &policy(HeaderPolicyMode::All, &[]), &[], &[]);
+        assert_eq!(dropped_of(&out, "authorization"), vec![("Bearer x", DropReason::HardDenied)]);
+        assert!(sent_of(&out, "authorization").is_empty());
+        assert_eq!(sent_of(&out, "x-api-key"), vec![("sk-real-upstream-key", HeaderSource::Auth)]);
+        assert_eq!(sent_of(&out, "content-type"), vec![("application/json", HeaderSource::CcRouter)]);
+    }
+
+    #[test]
+    fn duplicate_beta_overridden_both_dropped() {
+        let client = client_headers(&[("anthropic-beta", "a"), ("anthropic-beta", "b")]);
+        let out = build_full(
+            &client,
+            &HeaderPolicy::claude_code(),
+            &[],
+            &[("anthropic-beta", "only", HeaderSource::Provider)],
+        );
+        assert_eq!(sent_of(&out, "anthropic-beta"), vec![("only", HeaderSource::Provider)]);
+        assert_eq!(
+            dropped_of(&out, "anthropic-beta"),
+            vec![("a", DropReason::Overridden), ("b", DropReason::Overridden)]
+        );
     }
 
     fn cc_client() -> HeaderMap {
@@ -248,7 +380,7 @@ mod tests {
         ] {
             assert!(out.get(n).is_some(), "{n} should be forwarded");
         }
-        assert!(out.get("user-agent").is_none());
+        assert_eq!(out.get("user-agent").unwrap(), "claude-cli/2.1");
         assert!(out.get("x-foo").is_none());
     }
 

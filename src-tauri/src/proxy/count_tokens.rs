@@ -114,10 +114,11 @@ pub async fn handle(state: &AppState, client_headers: HeaderMap, body: Bytes) ->
             &client_headers,
             &row.header_policy,
             &row.forward_headers,
-            &row.resolved_required_headers(),
+            &row.resolved_required_headers_tagged(),
             &row.auth_header_name,
             &row.auth_header_value(),
-        );
+        )
+        .to_reqwest();
         let resp = match state.http_client.post(&target.url).headers(headers).body(bytes).send().await {
             Ok(r) => r,
             Err(_) => return not_available(),

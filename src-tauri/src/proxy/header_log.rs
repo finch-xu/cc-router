@@ -12,6 +12,8 @@
 
 use axum::http::HeaderMap;
 
+use crate::proxy::header_source::HeaderSource;
+
 /// Upper bound for one serialized column.
 pub const HEADER_LOG_LIMIT: usize = 16 * 1024;
 
@@ -102,31 +104,71 @@ fn serialize_with(map: &HeaderMap, enabled: bool, secrets: &[&str]) -> Option<St
     if !enabled {
         return None;
     }
-    let secrets: Vec<&str> = secrets.iter().copied().filter(|s| s.len() >= 8).collect();
-    let mut pairs: Vec<[String; 2]> = map
+    let pairs: Vec<[String; 2]> = map
         .iter()
         .map(|(name, value)| {
             let n = name.as_str().to_ascii_lowercase();
             let raw = String::from_utf8_lossy(value.as_bytes());
-            let v = if secrets.iter().any(|sec| raw.contains(sec)) {
-                mask(&raw)
-            } else {
-                redact_value(&n, &raw)
-            };
+            let v = redact_with(&n, &raw, secrets);
             [n, v]
         })
         .collect();
-    let mut out = serde_json::to_string(&pairs).ok()?;
+    let marker = ["…".to_string(), "truncated".to_string()];
+    to_capped_json(pairs, marker)
+}
+
+/// Masked value: the subscription's own secrets (≥ 8 chars) wherever they
+/// appear, otherwise the name / value heuristics of [`redact_value`].
+pub fn redact_with(lower_name: &str, raw: &str, secrets: &[&str]) -> String {
+    if secrets.iter().any(|sec| sec.len() >= 8 && raw.contains(sec)) {
+        mask(raw)
+    } else {
+        redact_value(lower_name, raw)
+    }
+}
+
+/// Outbound headers with their source as `[[name, value, source]]`. Adds
+/// reqwest's default UA (`cc_router`) when none is set, like
+/// [`serialize_outbound`]. Same masking and size cap.
+pub fn serialize_tagged(
+    sent: &[(String, String, HeaderSource)],
+    enabled: bool,
+    secrets: &[&str],
+) -> Option<String> {
+    if !enabled {
+        return None;
+    }
+    let mut rows: Vec<[String; 3]> = sent
+        .iter()
+        .map(|(n, v, src)| {
+            let n = n.to_ascii_lowercase();
+            let v = redact_with(&n, v, secrets);
+            [n, v, src.as_str().to_string()]
+        })
+        .collect();
+    if !rows.iter().any(|r| r[0] == "user-agent") {
+        rows.push([
+            "user-agent".to_string(),
+            crate::proxy::upstream::DEFAULT_USER_AGENT.to_string(),
+            HeaderSource::CcRouter.as_str().to_string(),
+        ]);
+    }
+    let marker = ["…".to_string(), "truncated".to_string(), HeaderSource::CcRouter.as_str().to_string()];
+    to_capped_json(rows, marker)
+}
+
+/// JSON of `rows`, capped at [`HEADER_LOG_LIMIT`] by dropping entries from
+/// the tail and appending `marker`.
+fn to_capped_json<T: serde::Serialize + Clone>(mut rows: Vec<T>, marker: T) -> Option<String> {
+    let mut out = serde_json::to_string(&rows).ok()?;
     if out.len() <= HEADER_LOG_LIMIT {
         return Some(out);
     }
-    // Drop entries from the tail until the list plus the marker fits.
-    let marker = ["…".to_string(), "truncated".to_string()];
-    while !pairs.is_empty() {
-        pairs.pop();
-        pairs.push(marker.clone());
-        out = serde_json::to_string(&pairs).ok()?;
-        pairs.pop();
+    while !rows.is_empty() {
+        rows.pop();
+        rows.push(marker.clone());
+        out = serde_json::to_string(&rows).ok()?;
+        rows.pop();
         if out.len() <= HEADER_LOG_LIMIT {
             return Some(out);
         }
@@ -301,6 +343,28 @@ mod tests {
         let got = pairs(&serialize_outbound(&map(&[("user-agent", "codex_cli_rs/1.0")]), true, &[]).unwrap());
         assert_eq!(got.iter().filter(|p| p[0] == "user-agent").count(), 1);
         assert_eq!(got[0][1], "codex_cli_rs/1.0");
+    }
+
+    #[test]
+    fn serialize_tagged_adds_default_ua_and_masks() {
+        use crate::proxy::header_source::HeaderSource;
+        let sent = vec![(
+            "x-api-key".to_string(),
+            "sk-ant-abcdefghijklmnop".to_string(),
+            HeaderSource::Auth,
+        )];
+        let got: Vec<[String; 3]> =
+            serde_json::from_str(&serialize_tagged(&sent, true, &[]).unwrap()).unwrap();
+        assert_eq!(got[0], ["x-api-key".to_string(), "sk-a…mnop".to_string(), "auth".to_string()]);
+        assert_eq!(
+            got[1],
+            [
+                "user-agent".to_string(),
+                crate::proxy::upstream::DEFAULT_USER_AGENT.to_string(),
+                "cc_router".to_string()
+            ]
+        );
+        assert_eq!(serialize_tagged(&sent, false, &[]), None);
     }
 
     #[test]

@@ -329,6 +329,7 @@ pub async fn dispatch(
             auth_header_value,
             api_key_raw,
             required_headers,
+            required_tagged,
             forward_headers,
             header_policy,
             auth_type,
@@ -364,6 +365,7 @@ pub async fn dispatch(
                 guard.row.auth_header_value(),
                 guard.row.api_key.clone(),
                 guard.row.resolved_required_headers(),
+                guard.row.resolved_required_headers_tagged(),
                 guard.row.forward_headers.clone(),
                 guard.row.header_policy.clone(),
                 guard.row.auth_type,
@@ -1334,14 +1336,15 @@ pub async fn dispatch(
 
         // 出站头组装 (forward → required → auth → content-type, 后插覆盖):
         // 按订阅的 header_policy 转发客户端头, 硬禁止集与优先级见 proxy/forward.rs。
-        let upstream_headers = forward::build_anthropic_passthrough_headers(
+        let outbound = forward::build_anthropic_passthrough_headers(
             &client_headers,
             &header_policy,
             &forward_headers,
-            &required_headers,
+            &required_tagged,
             &auth_header_name,
             &auth_header_value,
         );
+        let upstream_headers = outbound.to_reqwest();
 
         info!(
             %dispatch_id,
@@ -1356,8 +1359,8 @@ pub async fn dispatch(
         emit_attempt_started(state, sub_id, vm_name);
 
         let mut upstream_capture = crate::proxy::header_log::UpstreamHeaderCapture {
-            request: crate::proxy::header_log::serialize_outbound(
-                &upstream_headers,
+            request: crate::proxy::header_log::serialize_tagged(
+                &outbound.sent,
                 ctx.log_headers,
                 &[api_key_raw.as_str()],
             ),
