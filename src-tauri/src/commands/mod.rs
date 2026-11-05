@@ -2,6 +2,7 @@ pub mod app;
 pub mod backup;
 pub mod debug;
 pub mod events;
+pub mod header_preview;
 pub mod integrations;
 pub mod oauth;
 pub mod onboarding;

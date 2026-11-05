@@ -3,6 +3,8 @@ import { runtime } from "@/runtime";
 const invoke = runtime.invoke;
 import type {
   RequestHeaders,
+  HeaderPreview,
+  HeaderPolicy,
   BreakdownBy,
   BreakdownDto,
   ChatGptAccount,
@@ -123,6 +125,9 @@ export const api = {
 
   // request logs
   getRequestHeaders: (id: string) => invoke<RequestHeaders>("get_request_headers", { id }),
+  /** 按编辑页草稿 (未保存也算) 预览发给上游的请求头; headers 是用户可编辑的那张表。 */
+  previewOutboundHeaders: (subscriptionId: string, headerPolicy: HeaderPolicy, headers: Record<string, string>) =>
+    invoke<HeaderPreview>("preview_outbound_headers", { subscriptionId, headerPolicy, headers }),
   listRequests: (
     page: number,
     pageSize: number,

@@ -99,6 +99,23 @@ pub fn policy_allows(policy: &HeaderPolicy, lower_name: &str) -> bool {
     }
 }
 
+/// A typical Claude Code request's headers, fed to the header preview. Covers
+/// every outcome: forwarded by the preset, hard-denied, not selected, and
+/// replaced by provider-fixed headers.
+pub const SAMPLE_CLAUDE_CODE_HEADERS: &[(&str, &str)] = &[
+    ("user-agent", "claude-cli/2.1.0 (external, cli)"),
+    ("anthropic-version", "2023-06-01"),
+    ("anthropic-beta", "claude-code-20250219,interleaved-thinking-2025-05-14"),
+    ("x-app", "cli"),
+    ("x-stainless-lang", "js"),
+    ("x-stainless-package-version", "0.60.0"),
+    ("x-claude-code-session-id", "00000000-0000-4000-8000-000000000000"),
+    ("authorization", "Bearer sk-ant-sample-0000000000"),
+    ("accept", "application/json"),
+    ("accept-encoding", "gzip, br"),
+    ("content-type", "application/json"),
+];
+
 /// Why a client header did not reach the upstream (header preview only).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize)]
 #[serde(rename_all = "snake_case")]

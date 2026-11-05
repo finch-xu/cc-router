@@ -763,6 +763,15 @@ export type OutboundSource = "forwarded" | "provider" | "custom" | "auth" | "cc_
 /** 发往上游的请求头: `[name, value, source]`。 */
 export type OutboundHeaderRows = [string, string, OutboundSource][] | null;
 
+/** 客户端请求头没发出去的原因 (Rust `proxy/forward.rs::DropReason`)。 */
+export type DropReason = "hard_denied" | "not_selected" | "overridden";
+
+/** 发送效果预览 (preview_outbound_headers): 示例客户端请求按当前草稿组装后的结果, 值已脱敏。 */
+export interface HeaderPreview {
+  sent: { name: string; value: string; source: OutboundSource }[];
+  dropped: { name: string; value: string; reason: DropReason }[];
+}
+
 /** 请求详情弹窗的三组请求头 (get_request_headers)。 */
 export interface RequestHeaders {
   client_request: HeaderPairs;
