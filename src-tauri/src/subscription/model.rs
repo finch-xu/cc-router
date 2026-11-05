@@ -341,14 +341,30 @@ impl SubscriptionRow {
     /// send site (dispatches, ping, model discovery) goes through here, so extra headers reach
     /// them all.
     pub fn resolved_required_headers(&self) -> BTreeMap<String, String> {
+        self.resolved_required_headers_tagged()
+            .into_iter()
+            .map(|(k, v, _)| (k, v))
+            .collect()
+    }
+
+    /// Same headers as [`Self::resolved_required_headers`], each tagged with
+    /// who configured it: yaml `required_headers` are `Provider` (`Custom` on a
+    /// user-defined subscription, whose required headers the user wrote);
+    /// `extra_headers` are `Custom` and replace same-named entries
+    /// case-insensitively. Sorted by name like the BTreeMap projection.
+    pub fn resolved_required_headers_tagged(
+        &self,
+    ) -> Vec<(String, String, crate::proxy::header_source::HeaderSource)> {
+        use crate::proxy::header_source::HeaderSource;
         let fill = |v: &String| crate::provider::url_template::fill_api_key(v, &self.api_key);
-        let mut out: BTreeMap<String, String> =
-            self.required_headers.iter().map(|(k, v)| (k.clone(), fill(v))).collect();
+        let base = if self.is_user_defined { HeaderSource::Custom } else { HeaderSource::Provider };
+        let mut out: BTreeMap<String, (String, HeaderSource)> =
+            self.required_headers.iter().map(|(k, v)| (k.clone(), (fill(v), base))).collect();
         for (k, v) in &self.extra_headers {
             out.retain(|existing, _| !existing.eq_ignore_ascii_case(k));
-            out.insert(k.clone(), fill(v));
+            out.insert(k.clone(), (fill(v), HeaderSource::Custom));
         }
-        out
+        out.into_iter().map(|(k, (v, s))| (k, v, s)).collect()
     }
 }
 
@@ -967,6 +983,37 @@ mod tests {
         assert_eq!(h["cf-aig-gateway-id"], "gw1");
         // the row itself still holds the template
         assert_eq!(row.required_headers["cf-aig-authorization"], "Bearer {api_key}");
+    }
+
+    #[test]
+    fn tagged_required_headers_marks_provider_and_custom() {
+        use crate::proxy::header_source::HeaderSource::{Custom, Provider};
+        let mut row = SubscriptionRow::test_fixture("p", "e");
+        row.required_headers.insert("anthropic-version".into(), "2023-06-01".into());
+        row.required_headers.insert("x-a".into(), "1".into());
+        row.extra_headers.insert("X-A".into(), "2".into());
+        row.extra_headers.insert("x-b".into(), "3".into());
+        let got = row.resolved_required_headers_tagged();
+        assert_eq!(
+            got,
+            vec![
+                ("X-A".to_string(), "2".to_string(), Custom),
+                ("anthropic-version".to_string(), "2023-06-01".to_string(), Provider),
+                ("x-b".to_string(), "3".to_string(), Custom),
+            ]
+        );
+    }
+
+    #[test]
+    fn tagged_required_headers_user_defined_is_custom() {
+        use crate::proxy::header_source::HeaderSource::Custom;
+        let mut row = SubscriptionRow::test_fixture("p", "e");
+        row.is_user_defined = true;
+        row.required_headers.insert("x-team".into(), "p".into());
+        assert_eq!(
+            row.resolved_required_headers_tagged(),
+            vec![("x-team".to_string(), "p".to_string(), Custom)]
+        );
     }
 
     #[test]
