@@ -40,6 +40,13 @@ impl UpstreamResponse {
 /// (Codex / Kiro set their own). Shown in the request log's outbound table.
 pub const DEFAULT_USER_AGENT: &str = concat!("cc-router/", env!("CARGO_PKG_VERSION"));
 
+/// Observability only: reqwest/tower-http inserts this at send time when no
+/// Accept-Encoding is set (including requests with Range in reqwest 0.13.5).
+/// Do not set it on requests ourselves: let reqwest negotiate supported codecs.
+/// The compression socket tests compare logs/preview with the actual wire header
+/// so a dependency upgrade cannot silently make this value stale.
+pub const DEFAULT_ACCEPT_ENCODING: &str = "zstd,gzip,deflate,br";
+
 /// Idle limit of the production upstream client (see [`build_client`]).
 pub const UPSTREAM_IDLE_TIMEOUT: Duration = Duration::from_secs(600);
 

@@ -82,7 +82,7 @@ pub fn serialize(map: &HeaderMap, enabled: bool) -> Option<String> {
 
 /// Outbound headers of a dispatch that assembles its own reqwest map (the
 /// translation paths and System One): masked pairs, reqwest's default UA
-/// added when none is set. Sources are filled in later by [`tag_capture`],
+/// added when none is set. Sources and automatic Accept-Encoding are filled in by [`tag_capture`],
 /// once the pipeline has the subscription's [`SourceHints`] at hand.
 ///
 /// Masking additionally covers any header whose value contains one of
@@ -170,16 +170,29 @@ pub fn tag_capture(cap: OutboundCapture, hints: &SourceHints, client: &HeaderMap
     match cap {
         OutboundCapture::Tagged(json) => Some(json),
         OutboundCapture::Untagged(pairs) => {
-            let rows: Vec<[String; 3]> = pairs
+            let mut rows: Vec<[String; 3]> = pairs
                 .into_iter()
                 .map(|[n, v]| {
                     let src = classify(&n, &v, hints, client).as_str().to_string();
                     [n, v, src]
                 })
                 .collect();
+            append_auto_encoding(&mut rows);
             let marker = ["…".to_string(), "truncated".to_string(), HeaderSource::CcRouter.as_str().to_string()];
             to_capped_json(rows, marker)
         }
+    }
+}
+
+/// Add only after classifying explicit headers: a configured encoding remains
+/// custom/provider/forwarded even if its value happens to equal the default.
+fn append_auto_encoding(rows: &mut Vec<[String; 3]>) {
+    if !rows.iter().any(|r| r[0] == "accept-encoding") {
+        rows.push([
+            "accept-encoding".to_string(),
+            crate::proxy::upstream::DEFAULT_ACCEPT_ENCODING.to_string(),
+            HeaderSource::CcRouter.as_str().to_string(),
+        ]);
     }
 }
 
@@ -211,8 +224,8 @@ pub fn redact_with(lower_name: &str, raw: &str, secrets: &[&str]) -> String {
 }
 
 /// Outbound headers with their source as `[[name, value, source]]`. Adds
-/// reqwest's default UA (`cc_router`) when none is set, like
-/// [`capture_untagged`]. Same masking and size cap.
+/// reqwest's default UA and Accept-Encoding when none is set, like
+/// [`capture_untagged`] + [`tag_capture`]. Same masking and size cap.
 pub fn serialize_tagged(
     sent: &[(String, String, HeaderSource)],
     enabled: bool,
@@ -236,6 +249,7 @@ pub fn serialize_tagged(
             HeaderSource::CcRouter.as_str().to_string(),
         ]);
     }
+    append_auto_encoding(&mut rows);
     let marker = ["…".to_string(), "truncated".to_string(), HeaderSource::CcRouter.as_str().to_string()];
     to_capped_json(rows, marker)
 }
@@ -521,6 +535,7 @@ mod tests {
             vec![
                 ["authorization".to_string(), "Bear…mnop".to_string(), "auth".to_string()],
                 ["x-team".to_string(), "p".to_string(), "custom".to_string()],
+                ["accept-encoding".to_string(), crate::proxy::upstream::DEFAULT_ACCEPT_ENCODING.to_string(), "cc_router".to_string()],
             ]
         );
         let tagged = OutboundCapture::Tagged("[]".to_string());

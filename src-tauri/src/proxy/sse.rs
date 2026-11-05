@@ -22,6 +22,11 @@ use tokio::sync::{mpsc, RwLock};
 use tracing::warn;
 use uuid::Uuid;
 
+// Exercises the real HTTP decoder before this module's SSE parsing/rewriting.
+#[cfg(test)]
+#[path = "compression_tests.rs"]
+mod compression_tests;
+
 /// 单个 SSE 事件最多读 16KB; 防止恶意/异常上游让 peek_first_event 一直累积.
 const PEEK_LIMIT_BYTES: usize = 16 * 1024;
 

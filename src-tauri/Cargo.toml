@@ -60,7 +60,8 @@ futures = "0.3.34"
 # TLS 信任: reqwest 0.13 起 rustls 后端默认走 rustls-platform-verifier (操作系统证书库 + 平台校验逻辑),
 # 企业内网私有 CA (系统已信任) 直接可用 (issue #34); 0.12 时代的 rustls-tls-native-roots /
 # webpki 内置根 feature 已被上游移除, 无需再并集. crypto provider 默认 aws-lc-rs.
-reqwest = { version = "0.13.5", default-features = false, features = ["stream", "json", "form", "rustls"] }
+# Response compression: reqwest negotiates and decodes before JSON/SSE consumers read the body.
+reqwest = { version = "0.13.5", default-features = false, features = ["stream", "json", "form", "rustls", "gzip", "deflate", "brotli", "zstd"] }
 
 # 本地 TLS 监听 (HTTPS 模式). rustls 与 reqwest/tokio-rustls 共用 0.23 系列, 最低 0.23.46 包含安全修复.
 axum-server = { version = "0.8.0", features = ["tls-rustls"] }
@@ -96,6 +97,7 @@ zeroize = "1.9.1"
 getrandom = "0.4.3"
 
 [dev-dependencies]
+async-compression = { version = "0.4.51", features = ["tokio", "gzip", "zlib", "brotli", "zstd"] }
 wiremock = "0.6.5"
 tempfile = "3.27.0"
 # 契约测试用: 把真实 DTO 反序列化进 TUI 的视图结构体。依赖方向只能是这一个。

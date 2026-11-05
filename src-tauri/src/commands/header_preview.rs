@@ -38,7 +38,7 @@ pub struct HeaderPreviewDto {
 
 /// Preview for `row` under `policy`, using [`SAMPLE_CLAUDE_CODE_HEADERS`] as
 /// the client request. Values are masked like the request log; the default
-/// UA reqwest adds at send time is listed when nothing else sets one.
+/// UA and Accept-Encoding reqwest adds at send time are listed when not set explicitly.
 ///
 /// [`SAMPLE_CLAUDE_CODE_HEADERS`]: crate::proxy::forward::SAMPLE_CLAUDE_CODE_HEADERS
 pub fn preview(row: &SubscriptionRow, policy: &HeaderPolicy) -> HeaderPreviewDto {
@@ -73,6 +73,13 @@ pub fn preview(row: &SubscriptionRow, policy: &HeaderPolicy) -> HeaderPreviewDto
         sent.push(PreviewHeader {
             name: "user-agent".into(),
             value: crate::proxy::upstream::DEFAULT_USER_AGENT.into(),
+            source: HeaderSource::CcRouter,
+        });
+    }
+    if !sent.iter().any(|h| h.name == "accept-encoding") {
+        sent.push(PreviewHeader {
+            name: "accept-encoding".into(),
+            value: crate::proxy::upstream::DEFAULT_ACCEPT_ENCODING.into(),
             source: HeaderSource::CcRouter,
         });
     }
@@ -162,6 +169,17 @@ mod tests {
 
     fn reason(d: &HeaderPreviewDto, name: &str) -> Option<DropReason> {
         d.dropped.iter().find(|h| h.name == name).map(|h| h.reason)
+    }
+
+    #[test]
+    fn compression_preview_shows_automatic_encoding_and_custom_override() {
+        let mut row = row();
+        let d = preview(&row, &HeaderPolicy::none());
+        assert_eq!(sent(&d, "accept-encoding"), vec![("zstd,gzip,deflate,br", HeaderSource::CcRouter)]);
+        assert_eq!(reason(&d, "accept-encoding"), Some(DropReason::HardDenied));
+        row.extra_headers.insert("Accept-Encoding".into(), "identity".into());
+        let d = preview(&row, &HeaderPolicy::none());
+        assert_eq!(sent(&d, "accept-encoding"), vec![("identity", HeaderSource::Custom)]);
     }
 
     #[test]

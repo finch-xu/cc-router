@@ -16,7 +16,7 @@ pub enum HeaderSource {
     Custom,
     /// The subscription's auth header.
     Auth,
-    /// Added by cc-router itself: content-type, accept, the default UA.
+    /// Added by cc-router itself: content-type, accept, default UA/Accept-Encoding.
     CcRouter,
 }
 
