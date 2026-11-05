@@ -3,7 +3,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/u
 import { HeaderTable, type HeaderTag } from "@/components/request-detail/HeaderTable";
 import { api } from "@/api/tauri";
 import { useT } from "@/i18n";
-import type { DropReason, HeaderPolicy, OutboundSource } from "@/types";
+import type { AuthHeaderFormat, DropReason, HeaderPolicy, OutboundSource } from "@/types";
 
 /**
  * 订阅请求头设置的「发送效果预览」: 后端用与真实请求同一个组装函数,
@@ -15,6 +15,7 @@ export function HeaderPreviewDialog({
   subscriptionId,
   policy,
   headers,
+  auth,
 }: {
   open: boolean;
   onClose: () => void;
@@ -22,11 +23,13 @@ export function HeaderPreviewDialog({
   policy: HeaderPolicy;
   /** 用户可编辑的那张表的草稿: 内置订阅是自定义请求头, 自定义订阅是连接区的请求头 */
   headers: Record<string, string>;
+  /** 自定义订阅的鉴权头草稿 (内置订阅不传) */
+  auth?: { name: string; format: AuthHeaderFormat };
 }) {
   const { t } = useT();
   const query = useQuery({
-    queryKey: ["header-preview", subscriptionId, policy, headers],
-    queryFn: () => api.previewOutboundHeaders(subscriptionId, policy, headers),
+    queryKey: ["header-preview", subscriptionId, policy, headers, auth],
+    queryFn: () => api.previewOutboundHeaders(subscriptionId, policy, headers, auth),
     enabled: open,
     staleTime: 0,
   });

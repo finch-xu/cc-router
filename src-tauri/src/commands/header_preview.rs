@@ -88,17 +88,42 @@ pub fn preview(row: &SubscriptionRow, policy: &HeaderPolicy) -> HeaderPreviewDto
     HeaderPreviewDto { sent, dropped }
 }
 
-/// Header preview with the edit page's unsaved draft. `headers` is the table
-/// the user edits: `extra_headers` on a built-in subscription,
-/// `required_headers` on a user-defined one. Validated like a save would be.
+/// Applies the edit page's draft to a row copy, validated like a save would
+/// be. `headers` is the table the user edits: `extra_headers` on a built-in
+/// subscription, `required_headers` on a user-defined one. `auth` (header
+/// name + format) is only user-editable — and therefore only applied — on
+/// user-defined subscriptions; it is applied before validation because the
+/// required-header rules depend on the auth header name.
+fn apply_draft(
+    row: &mut SubscriptionRow,
+    headers: BTreeMap<String, String>,
+    auth: Option<(String, crate::provider::model::AuthHeaderFormat)>,
+) -> AppResult<()> {
+    use crate::commands::subscriptions::{validate_extra_headers, validate_required_headers};
+    if row.is_user_defined {
+        if let Some((name, format)) = auth {
+            row.auth_header_name = name.trim().to_string();
+            row.auth_header_format = format;
+        }
+        validate_required_headers(&headers, &row.auth_header_name)?;
+        row.required_headers = headers;
+    } else {
+        validate_extra_headers(&headers, &row.auth_header_name, row.auth_type)?;
+        row.extra_headers = headers;
+    }
+    Ok(())
+}
+
+/// Header preview with the edit page's unsaved draft (see [`apply_draft`]).
 #[tauri::command]
 pub async fn preview_outbound_headers(
     state: State<'_, AppState>,
     subscription_id: String,
     header_policy: HeaderPolicy,
     headers: BTreeMap<String, String>,
+    auth_header_name: Option<String>,
+    auth_header_format: Option<crate::provider::model::AuthHeaderFormat>,
 ) -> AppResult<HeaderPreviewDto> {
-    use crate::commands::subscriptions::{validate_extra_headers, validate_required_headers};
     use crate::provider::model::{AuthType, EndpointProtocol};
 
     let id = Uuid::parse_str(&subscription_id).map_err(|_| AppError::BadRequest("无效 id".into()))?;
@@ -109,16 +134,12 @@ pub async fn preview_outbound_headers(
         let row = rt.read().await.row.clone();
         row
     };
+    // The edit page only offers the header policy on passthrough subscriptions.
     if row.auth_type != AuthType::ApiKey || row.endpoint_protocol == EndpointProtocol::Systemone {
         return Err(AppError::BadRequest("该订阅不消费请求头透传策略".into()));
     }
-    if row.is_user_defined {
-        validate_required_headers(&headers, &row.auth_header_name)?;
-        row.required_headers = headers;
-    } else {
-        validate_extra_headers(&headers, &row.auth_header_name, row.auth_type)?;
-        row.extra_headers = headers;
-    }
+    let auth = auth_header_name.zip(auth_header_format);
+    apply_draft(&mut row, headers, auth)?;
     Ok(preview(&row, &header_policy))
 }
 
@@ -141,6 +162,25 @@ mod tests {
 
     fn reason(d: &HeaderPreviewDto, name: &str) -> Option<DropReason> {
         d.dropped.iter().find(|h| h.name == name).map(|h| h.reason)
+    }
+
+    #[test]
+    fn draft_auth_applies_only_to_user_defined() {
+        use crate::provider::model::AuthHeaderFormat;
+        let auth = Some(("Authorization".to_string(), AuthHeaderFormat::Bearer));
+        let mut custom = row();
+        custom.is_user_defined = true;
+        let mut headers = BTreeMap::new();
+        headers.insert("x-api-key".to_string(), "v".to_string());
+        // the draft renames auth away from x-api-key, so a required x-api-key header is legal
+        apply_draft(&mut custom, headers.clone(), auth.clone()).expect("valid against draft auth name");
+        assert_eq!(custom.auth_header_name, "Authorization");
+        assert_eq!(custom.auth_header_format, AuthHeaderFormat::Bearer);
+        assert_eq!(custom.required_headers, headers);
+
+        let mut builtin = row();
+        apply_draft(&mut builtin, BTreeMap::new(), auth).unwrap();
+        assert_eq!(builtin.auth_header_name, "x-api-key", "built-in auth is not user-editable");
     }
 
     #[test]

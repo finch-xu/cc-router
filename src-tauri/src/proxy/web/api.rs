@@ -123,7 +123,7 @@ web_commands! {
     list_subscriptions() => commands::subscriptions::list_subscriptions(st).await,
     get_subscription(id: String) => commands::subscriptions::get_subscription(st, args.id).await,
     create_subscription(input: CreateSubscriptionInput) => commands::subscriptions::create_subscription(st, args.input).await,
-    preview_outbound_headers(subscription_id: String, header_policy: crate::subscription::header_policy::HeaderPolicy, headers: std::collections::BTreeMap<String, String>) => commands::header_preview::preview_outbound_headers(st, args.subscription_id, args.header_policy, args.headers).await,
+    preview_outbound_headers(subscription_id: String, header_policy: crate::subscription::header_policy::HeaderPolicy, headers: std::collections::BTreeMap<String, String>, auth_header_name: Option<String>, auth_header_format: Option<crate::provider::model::AuthHeaderFormat>) => commands::header_preview::preview_outbound_headers(st, args.subscription_id, args.header_policy, args.headers, args.auth_header_name, args.auth_header_format).await,
     update_subscription(id: String, patch: SubscriptionPatch) => commands::subscriptions::update_subscription(st, args.id, args.patch).await,
     update_subscription_key(id: String, new_key: String) => commands::subscriptions::update_subscription_key(st, args.id, args.new_key).await,
     delete_subscription(id: String) => commands::subscriptions::delete_subscription(st, args.id).await,

@@ -5,6 +5,7 @@ import type {
   RequestHeaders,
   HeaderPreview,
   HeaderPolicy,
+  AuthHeaderFormat,
   BreakdownBy,
   BreakdownDto,
   ChatGptAccount,
@@ -125,9 +126,23 @@ export const api = {
 
   // request logs
   getRequestHeaders: (id: string) => invoke<RequestHeaders>("get_request_headers", { id }),
-  /** 按编辑页草稿 (未保存也算) 预览发给上游的请求头; headers 是用户可编辑的那张表。 */
-  previewOutboundHeaders: (subscriptionId: string, headerPolicy: HeaderPolicy, headers: Record<string, string>) =>
-    invoke<HeaderPreview>("preview_outbound_headers", { subscriptionId, headerPolicy, headers }),
+  /**
+   * 按编辑页草稿 (未保存也算) 预览发给上游的请求头; headers 是用户可编辑的那张表。
+   * auth 只对自定义订阅生效 (内置订阅的鉴权头不可编辑, 传了也被忽略)。
+   */
+  previewOutboundHeaders: (
+    subscriptionId: string,
+    headerPolicy: HeaderPolicy,
+    headers: Record<string, string>,
+    auth?: { name: string; format: AuthHeaderFormat },
+  ) =>
+    invoke<HeaderPreview>("preview_outbound_headers", {
+      subscriptionId,
+      headerPolicy,
+      headers,
+      authHeaderName: auth?.name ?? null,
+      authHeaderFormat: auth?.format ?? null,
+    }),
   listRequests: (
     page: number,
     pageSize: number,

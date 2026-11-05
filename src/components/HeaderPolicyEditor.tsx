@@ -6,7 +6,7 @@ import { Input } from "@/components/ui/input";
 import { useT } from "@/i18n";
 import { validateHeaderPolicyNames } from "@/lib/connectionValidation";
 import { runtime } from "@/runtime";
-import type { HeaderPolicy, HeaderPolicyMode } from "@/types";
+import type { AuthHeaderFormat, HeaderPolicy, HeaderPolicyMode } from "@/types";
 
 const MODES: HeaderPolicyMode[] = ["none", "claude_code", "allowlist", "denylist", "all"];
 
@@ -24,12 +24,15 @@ export function HeaderPolicyEditor({
   onChange,
   subscriptionId,
   draftHeaders,
+  draftAuth,
 }: {
   value: HeaderPolicy;
   onChange: (p: HeaderPolicy) => void;
   subscriptionId: string;
   /** 用户可编辑的那张请求头表的草稿, 预览按它计算 */
   draftHeaders: Record<string, string>;
+  /** 自定义订阅的鉴权头草稿, 预览同样按它计算 */
+  draftAuth?: { name: string; format: AuthHeaderFormat };
 }) {
   const { t } = useT();
   const [draft, setDraft] = useState("");
@@ -145,6 +148,7 @@ export function HeaderPolicyEditor({
         subscriptionId={subscriptionId}
         policy={value}
         headers={draftHeaders}
+        auth={draftAuth}
       />
 
       <div className="alert warn hp-auto-mode">

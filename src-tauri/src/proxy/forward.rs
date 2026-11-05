@@ -167,7 +167,9 @@ impl OutboundHeaders {
     pub fn to_reqwest(&self) -> ReqHeaderMap {
         let mut out = ReqHeaderMap::new();
         for (n, v, _) in &self.sent {
-            if let (Ok(rn), Ok(rv)) = (ReqHeaderName::try_from(n.as_str()), ReqHeaderValue::from_str(v)) {
+            // from_bytes: forwarded values may be non-ASCII UTF-8; configured
+            // ones were already checked with from_str before entering `sent`.
+            if let (Ok(rn), Ok(rv)) = (ReqHeaderName::try_from(n.as_str()), ReqHeaderValue::from_bytes(v.as_bytes())) {
                 out.append(rn, rv);
             }
         }
@@ -204,7 +206,9 @@ pub fn build_anthropic_passthrough_headers(
         let reason = if is_hard_denied(n) {
             Some(DropReason::HardDenied)
         } else if policy_allows(policy, n) || yaml_set.contains(n) {
-            match value.to_str() {
+            // UTF-8 rather than `to_str` (visible ASCII only): the old
+            // byte-wise forwarding passed values like `Zoë` through.
+            match std::str::from_utf8(value.as_bytes()) {
                 Ok(_) => None,
                 Err(_) => Some(DropReason::NotSelected),
             }
@@ -335,6 +339,18 @@ mod tests {
         assert!(sent_of(&out, "authorization").is_empty());
         assert_eq!(sent_of(&out, "x-api-key"), vec![("sk-real-upstream-key", HeaderSource::Auth)]);
         assert_eq!(sent_of(&out, "content-type"), vec![("application/json", HeaderSource::CcRouter)]);
+    }
+
+    #[test]
+    fn non_ascii_utf8_value_still_forwarded() {
+        let mut client = HeaderMap::new();
+        client.append(
+            HeaderName::from_static("x-user-name"),
+            HeaderValue::from_bytes("Zoë".as_bytes()).unwrap(),
+        );
+        let out = build_full(&client, &policy(HeaderPolicyMode::All, &[]), &[], &[]);
+        assert_eq!(sent_of(&out, "x-user-name"), vec![("Zoë", HeaderSource::Forwarded)]);
+        assert_eq!(out.to_reqwest().get("x-user-name").unwrap().as_bytes(), "Zoë".as_bytes());
     }
 
     #[test]

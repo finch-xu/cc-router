@@ -518,6 +518,7 @@ export function SubscriptionEditPage() {
                           onChange={setHeaderPolicy}
                           subscriptionId={sub.id}
                           draftHeaders={draftHeaderMap(isCustom ? requiredHeaders : extraHeaders)}
+                          draftAuth={isCustom ? { name: authHeaderName, format: authHeaderFormat } : undefined}
                         />
                       </div>
                     )}
