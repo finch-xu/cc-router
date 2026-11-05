@@ -73,3 +73,6 @@ CLAUDE.md
 # superpowers 的 spec/plan 工作文档与头脑风暴 mockup 只留本地, 不进仓库
 docs/superpowers/
 .superpowers/
+
+.agents/
+AGENTS.md
