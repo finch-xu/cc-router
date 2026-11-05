@@ -11,14 +11,14 @@ import {
 import { ClientToolBadge } from "@/components/ClientToolBadge";
 import { HeaderTable, type HeaderTag } from "@/components/request-detail/HeaderTable";
 import { api } from "@/api/tauri";
-import { clientHeaderValues, isReturnedToClient, outboundSource } from "@/lib/headerSources";
+import { isReturnedToClient } from "@/lib/headerSources";
 import { ProviderLogo } from "@/components/ProviderLogo";
 import { useSubscriptions } from "@/hooks/useSubscriptions";
 import { useT } from "@/i18n";
 import { fmtNum, fmtTime } from "@/lib/format";
 import { customProviderLabel, providerIconId } from "@/lib/providerLabels";
 import { providerName as localProviderName } from "@/lib/providerText";
-import type { HeaderPairs, RequestLogDto } from "@/types";
+import type { HeaderPairs, OutboundHeaderRows, OutboundSource, RequestLogDto } from "@/types";
 import { TOOL_NAME_TRUNCATED_MARKER } from "@/types";
 
 interface Props {
@@ -146,9 +146,9 @@ export function RequestDetailDialog({ request, onClose }: Props) {
       "upstream_response_body:",
       prettyBody ?? "",
     ];
-    const section = (name: string, pairs: HeaderPairs | undefined) => {
+    const section = (name: string, pairs: HeaderPairs | OutboundHeaderRows | undefined) => {
       if (!pairs) return;
-      lines.push("", `${name}:`, ...pairs.map(([k, v]) => `${k}: ${v}`));
+      lines.push("", `${name}:`, ...pairs.map(([k, v, src]) => (src ? `${k}: ${v}  [${src}]` : `${k}: ${v}`)));
     };
     section("client_request_headers", headers?.client_request);
     section("upstream_request_headers", headers?.upstream_request);
@@ -165,22 +165,20 @@ export function RequestDetailDialog({ request, onClose }: Props) {
   const dash = <span className="muted">—</span>;
   const monoOr = (v?: string | null) => (v ? <span className="mono">{v}</span> : dash);
 
-  // 发往上游 / 上游响应两张表的标签 (规则见 lib/headerSources.ts)
-  const clientValues = clientHeaderValues(headers?.client_request);
-  const outboundTag = (name: string, value: string): HeaderTag => {
-    const src = outboundSource(name, value, clientValues, sub?.auth_header_name);
-    const tone = src === "forwarded" ? "ok" : src === "ccRouter" ? "muted" : "accent";
+  // 发往上游一张表的来源标签: 后端组装时记录, 这里只映射文案与色调
+  const outboundTag = ([, , src]: [string, string, OutboundSource]): HeaderTag => {
+    const tone = src === "forwarded" ? "ok" : src === "cc_router" ? "muted" : "accent";
     return { label: t(`requestLogs.detail.headers.source.${src}`), tone };
   };
   // 回传白名单只作用于 Anthropic 透传路径; 翻译类订阅不显示该标签
   const showReturned = sub?.auth_type === "api_key";
-  const responseTag = (name: string): HeaderTag | null =>
+  const responseTag = ([name]: [string, string]): HeaderTag | null =>
     showReturned
       ? isReturnedToClient(name)
         ? { label: t("requestLogs.detail.headers.returned"), tone: "ok" }
         : { label: t("requestLogs.detail.headers.notReturned"), tone: "muted" }
       : null;
-  const count = (pairs: HeaderPairs | undefined) =>
+  const count = (pairs: HeaderPairs | OutboundHeaderRows | undefined) =>
     headersQuery.isLoading ? "…" : pairs ? String(pairs.length) : "—";
   // 某组为 null 的原因: 加载失败 > 整行都没记 (没开记录 / 老日志) > 记了入站但这次尝试没发出或没收到响应
   const recorded = headers?.client_request != null;

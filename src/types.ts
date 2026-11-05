@@ -757,10 +757,16 @@ export const TOOL_NAME_TRUNCATED_MARKER = "…";
 /** 一组请求头: `[name, value]` 有序对, 名字小写, 凭据已脱敏。null = 没有记录 (老日志或关了「记录请求头」)。 */
 export type HeaderPairs = [string, string][] | null;
 
+/** 出站请求头的来源, 由后端组装时记录 (Rust `proxy/header_source.rs::HeaderSource`)。 */
+export type OutboundSource = "forwarded" | "provider" | "custom" | "auth" | "cc_router";
+
+/** 发往上游的请求头: `[name, value, source]`。 */
+export type OutboundHeaderRows = [string, string, OutboundSource][] | null;
+
 /** 请求详情弹窗的三组请求头 (get_request_headers)。 */
 export interface RequestHeaders {
   client_request: HeaderPairs;
-  upstream_request: HeaderPairs;
+  upstream_request: OutboundHeaderRows;
   upstream_response: HeaderPairs;
 }
 

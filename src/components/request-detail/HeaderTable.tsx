@@ -1,7 +1,9 @@
 import { useState } from "react";
 import { Check, Copy } from "lucide-react";
 import { useT } from "@/i18n";
-import type { HeaderPairs } from "@/types";
+
+/** 一行请求头: 名称、值, 之后可带调用方用的附加列 (如出站来源)。 */
+export type HeaderRow = readonly [string, string, ...string[]];
 
 export interface HeaderTag {
   label: string;
@@ -12,7 +14,7 @@ export interface HeaderTag {
  * 一组请求头的两列表格 (名称 / 值)。表头 sticky, 值可折行; 右上角复制为 `name: value` 多行。
  * `pairs === null` 表示这条日志没有记录请求头 (老日志或当时关了记录)。
  */
-export function HeaderTable({
+export function HeaderTable<R extends HeaderRow>({
   title,
   subtitle,
   pairs,
@@ -22,9 +24,9 @@ export function HeaderTable({
 }: {
   title: string;
   subtitle?: string;
-  pairs: HeaderPairs | undefined;
+  pairs: R[] | null | undefined;
   loading: boolean;
-  tagFor?: (name: string, value: string) => HeaderTag | null;
+  tagFor?: (row: R) => HeaderTag | null;
   /** pairs 为 null 时显示的说明 (未记录 / 没发出 / 没收到响应 / 加载失败), 由调用方按整行情况决定 */
   emptyText: string;
 }) {
@@ -69,8 +71,9 @@ export function HeaderTable({
             </tr>
           </thead>
           <tbody>
-            {pairs.map(([k, v], i) => {
-              const tag = tagFor?.(k, v) ?? null;
+            {pairs.map((row, i) => {
+              const [k, v] = row;
+              const tag = tagFor?.(row) ?? null;
               return (
                 <tr key={`${k}-${i}`}>
                   <td className="rd-table-k">
