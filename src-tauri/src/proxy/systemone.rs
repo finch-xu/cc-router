@@ -375,7 +375,7 @@ impl AttemptSink for LiveSink<'_> {
             emit_attempt_started(self.state, c.sub_id, VirtualModelName::Jev);
             let api_key = c.rt.read().await.row.api_key.clone();
             self.capture = crate::proxy::header_log::UpstreamHeaderCapture {
-                request: crate::proxy::header_log::serialize_outbound(
+                request: crate::proxy::header_log::capture_untagged(
                     &c.outbound.headers,
                     self.ctx.log_headers,
                     &[api_key.as_str()],
@@ -421,7 +421,14 @@ impl AttemptSink for LiveSink<'_> {
             )
             .await;
             let latency = self.start.elapsed().as_millis() as u64;
-            let attempt_ctx = self.ctx.with_upstream_headers(std::mem::take(&mut self.capture));
+            // System One never forwards client headers: an empty client map
+            // keeps the classifier from ever reporting `forwarded`.
+            let hints = c.rt.read().await.row.source_hints();
+            let attempt_ctx = self.ctx.with_upstream_headers(
+                std::mem::take(&mut self.capture),
+                &hints,
+                &axum::http::HeaderMap::new(),
+            );
             let _ = self.state.request_log_tx.try_send(log_entry(c, r, retry_count, &attempt_ctx, latency));
         })
     }

@@ -227,7 +227,8 @@ fn csv_field(s: &str) -> String {
 #[derive(Debug, Serialize, PartialEq, Eq)]
 pub struct RequestHeadersDto {
     pub client_request: Option<Vec<[String; 2]>>,
-    pub upstream_request: Option<Vec<[String; 2]>>,
+    /// `[name, value, source]`, source as in `proxy::header_source::HeaderSource`.
+    pub upstream_request: Option<Vec<[String; 3]>>,
     pub upstream_response: Option<Vec<[String; 2]>>,
 }
 
@@ -243,15 +244,11 @@ pub(crate) async fn load_request_headers(
     .fetch_optional(pool)
     .await?
     .ok_or_else(|| crate::error::AppError::BadRequest("请求记录不存在".into()))?;
-    let col = |name: &str| {
-        row.try_get::<Option<String>, _>(name)
-            .ok()
-            .flatten()
-            .and_then(|s| crate::proxy::header_log::parse(&s))
-    };
+    let raw = |name: &str| row.try_get::<Option<String>, _>(name).ok().flatten();
+    let col = |name: &str| raw(name).and_then(|s| crate::proxy::header_log::parse(&s));
     Ok(RequestHeadersDto {
         client_request: col("client_request_headers"),
-        upstream_request: col("upstream_request_headers"),
+        upstream_request: raw("upstream_request_headers").and_then(|s| serde_json::from_str(&s).ok()),
         upstream_response: col("upstream_response_headers"),
     })
 }
@@ -486,7 +483,7 @@ mod tests {
              upstream_response_headers = ? WHERE id = 'h1'",
         )
         .bind(r#"[["x-app","cli"],["anthropic-beta","a"]]"#)
-        .bind(r#"[["x-api-key","sk-a…cdef"]]"#)
+        .bind(r#"[["x-api-key","sk-a…cdef","auth"]]"#)
         .bind(r#"[["request-id","r1"]]"#)
         .execute(&pool)
         .await
@@ -494,7 +491,10 @@ mod tests {
         let d = super::load_request_headers(&pool, "h1").await.unwrap();
         let pair = |a: &str, b: &str| [a.to_string(), b.to_string()];
         assert_eq!(d.client_request, Some(vec![pair("x-app", "cli"), pair("anthropic-beta", "a")]));
-        assert_eq!(d.upstream_request, Some(vec![pair("x-api-key", "sk-a…cdef")]));
+        assert_eq!(
+            d.upstream_request,
+            Some(vec![["x-api-key".to_string(), "sk-a…cdef".to_string(), "auth".to_string()]])
+        );
         assert_eq!(d.upstream_response, Some(vec![pair("request-id", "r1")]));
     }
 

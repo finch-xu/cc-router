@@ -107,9 +107,16 @@ pub struct ClientContext {
 
 impl ClientContext {
     /// 本 attempt 的 ctx: 带上刚采集到的上游两组头, 其余字段不变。
-    pub fn with_upstream_headers(&self, cap: crate::proxy::header_log::UpstreamHeaderCapture) -> Self {
+    pub fn with_upstream_headers(
+        &self,
+        cap: crate::proxy::header_log::UpstreamHeaderCapture,
+        hints: &crate::proxy::header_log::SourceHints,
+        client_headers: &axum::http::HeaderMap,
+    ) -> Self {
         Self {
-            upstream_request_headers_log: cap.request,
+            upstream_request_headers_log: cap
+                .request
+                .and_then(|c| crate::proxy::header_log::tag_capture(c, hints, client_headers)),
             upstream_response_headers_log: cap.response,
             ..self.clone()
         }

@@ -80,24 +80,107 @@ pub fn serialize(map: &HeaderMap, enabled: bool) -> Option<String> {
     serialize_with(map, enabled, &[])
 }
 
-/// Outbound variant: additionally masks any header whose value contains one of
+/// Outbound headers of a dispatch that assembles its own reqwest map (the
+/// translation paths and System One): masked pairs, reqwest's default UA
+/// added when none is set. Sources are filled in later by [`tag_capture`],
+/// once the pipeline has the subscription's [`SourceHints`] at hand.
+///
+/// Masking additionally covers any header whose value contains one of
 /// `secrets` (the subscription's API key / OAuth token), whatever its name —
 /// custom auth header names and `{api_key}` template headers would slip past
 /// the name heuristic. Secrets shorter than 8 chars are ignored.
-pub fn serialize_outbound(map: &HeaderMap, enabled: bool, secrets: &[&str]) -> Option<String> {
-    if !enabled {
-        return None;
-    }
+pub fn capture_untagged(map: &HeaderMap, enabled: bool, secrets: &[&str]) -> Option<OutboundCapture> {
+    enabled.then(|| OutboundCapture::Untagged(untagged_pairs(map, secrets)))
+}
+
+fn untagged_pairs(map: &HeaderMap, secrets: &[&str]) -> Vec<[String; 2]> {
+    let mut pairs: Vec<[String; 2]> = map
+        .iter()
+        .map(|(name, value)| {
+            let n = name.as_str().to_ascii_lowercase();
+            let raw = String::from_utf8_lossy(value.as_bytes());
+            let v = redact_with(&n, &raw, secrets);
+            [n, v]
+        })
+        .collect();
     // reqwest fills in its client-level UA at send time; show what actually goes on the wire.
-    if map.contains_key(axum::http::header::USER_AGENT) {
-        return serialize_with(map, true, secrets);
+    if !map.contains_key(axum::http::header::USER_AGENT) {
+        pairs.push(["user-agent".to_string(), crate::proxy::upstream::DEFAULT_USER_AGENT.to_string()]);
     }
-    let mut with_ua = map.clone();
-    with_ua.insert(
-        axum::http::header::USER_AGENT,
-        axum::http::HeaderValue::from_static(crate::proxy::upstream::DEFAULT_USER_AGENT),
-    );
-    serialize_with(&with_ua, true, secrets)
+    pairs
+}
+
+/// Outbound request headers captured at send time.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum OutboundCapture {
+    /// Already `[[name, value, source]]` JSON (passthrough path).
+    Tagged(String),
+    /// Masked `[name, value]` pairs awaiting [`tag_capture`].
+    Untagged(Vec<[String; 2]>),
+}
+
+/// What the classifier needs to know about a subscription.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct SourceHints {
+    /// Empty means `authorization`.
+    pub auth_header_name: String,
+    /// Header names the user configured.
+    pub custom_names: Vec<String>,
+    /// yaml `forward_headers`.
+    pub forward_names: Vec<String>,
+}
+
+/// Source of one outbound header on a path that did not record it while
+/// assembling. First match wins, names compared case-insensitively:
+/// content-type / accept → cc-router; auth header → auth; default UA →
+/// cc-router; yaml-forwarded name whose client value is identical →
+/// forwarded (a dispatch that rewrites it afterwards, like the Codex UA,
+/// changes the value and falls through); user-configured name → custom;
+/// anything else → provider. `value` is the masked value; the client side is
+/// masked the same way before comparing.
+pub fn classify(name: &str, value: &str, hints: &SourceHints, client: &HeaderMap) -> HeaderSource {
+    let n = name.to_ascii_lowercase();
+    if n == "content-type" || n == "accept" {
+        return HeaderSource::CcRouter;
+    }
+    let auth = if hints.auth_header_name.is_empty() { "authorization" } else { hints.auth_header_name.as_str() };
+    if n.eq_ignore_ascii_case(auth) {
+        return HeaderSource::Auth;
+    }
+    if n == "user-agent" && value.starts_with("cc-router/") {
+        return HeaderSource::CcRouter;
+    }
+    if hints.forward_names.iter().any(|f| f.eq_ignore_ascii_case(&n))
+        && client
+            .get_all(n.as_str())
+            .iter()
+            .any(|cv| redact_value(&n, &String::from_utf8_lossy(cv.as_bytes())) == value)
+    {
+        return HeaderSource::Forwarded;
+    }
+    if hints.custom_names.iter().any(|c| c.eq_ignore_ascii_case(&n)) {
+        return HeaderSource::Custom;
+    }
+    HeaderSource::Provider
+}
+
+/// Final `upstream_request_headers` column: tagged JSON as-is, untagged pairs
+/// classified with [`classify`] and serialized with the usual size cap.
+pub fn tag_capture(cap: OutboundCapture, hints: &SourceHints, client: &HeaderMap) -> Option<String> {
+    match cap {
+        OutboundCapture::Tagged(json) => Some(json),
+        OutboundCapture::Untagged(pairs) => {
+            let rows: Vec<[String; 3]> = pairs
+                .into_iter()
+                .map(|[n, v]| {
+                    let src = classify(&n, &v, hints, client).as_str().to_string();
+                    [n, v, src]
+                })
+                .collect();
+            let marker = ["…".to_string(), "truncated".to_string(), HeaderSource::CcRouter.as_str().to_string()];
+            to_capped_json(rows, marker)
+        }
+    }
 }
 
 fn serialize_with(map: &HeaderMap, enabled: bool, secrets: &[&str]) -> Option<String> {
@@ -129,7 +212,7 @@ pub fn redact_with(lower_name: &str, raw: &str, secrets: &[&str]) -> String {
 
 /// Outbound headers with their source as `[[name, value, source]]`. Adds
 /// reqwest's default UA (`cc_router`) when none is set, like
-/// [`serialize_outbound`]. Same masking and size cap.
+/// [`capture_untagged`]. Same masking and size cap.
 pub fn serialize_tagged(
     sent: &[(String, String, HeaderSource)],
     enabled: bool,
@@ -155,6 +238,15 @@ pub fn serialize_tagged(
     }
     let marker = ["…".to_string(), "truncated".to_string(), HeaderSource::CcRouter.as_str().to_string()];
     to_capped_json(rows, marker)
+}
+
+/// [`serialize_tagged`] wrapped for [`UpstreamHeaderCapture::request`].
+pub fn capture_tagged(
+    sent: &[(String, String, HeaderSource)],
+    enabled: bool,
+    secrets: &[&str],
+) -> Option<OutboundCapture> {
+    serialize_tagged(sent, enabled, secrets).map(OutboundCapture::Tagged)
 }
 
 /// JSON of `rows`, capped at [`HEADER_LOG_LIMIT`] by dropping entries from
@@ -201,7 +293,7 @@ impl HeaderLogFields {
 /// into the log entry.
 #[derive(Debug, Clone, Default)]
 pub struct UpstreamHeaderCapture {
-    pub request: Option<String>,
+    pub request: Option<OutboundCapture>,
     pub response: Option<String>,
 }
 
@@ -216,6 +308,13 @@ mod tests {
             m.append(HeaderName::try_from(*k).unwrap(), HeaderValue::from_str(v).unwrap());
         }
         m
+    }
+
+    fn untagged(m: &HeaderMap, enabled: bool, secrets: &[&str]) -> Vec<[String; 2]> {
+        match capture_untagged(m, enabled, secrets) {
+            Some(OutboundCapture::Untagged(p)) => p,
+            other => panic!("expected untagged capture, got {other:?}"),
+        }
     }
 
     fn pairs(stored: &str) -> Vec<[String; 2]> {
@@ -293,14 +392,14 @@ mod tests {
             ("cf-aig-routing", "Bearer sk-live-0123456789abcdef"),
             ("x-team", "platform"),
         ]);
-        let got = pairs(&serialize_outbound(&m, true, &[key]).unwrap());
+        let got = untagged(&m, true, &[key]);
         for p in &got {
             assert!(!p[1].contains("0123456789"), "{p:?} leaked the key");
         }
         assert_eq!(got.iter().find(|p| p[0] == "x-team").unwrap()[1], "platform");
-        assert_eq!(serialize_outbound(&m, false, &[key]), None);
+        assert_eq!(capture_untagged(&m, false, &[key]), None);
         // empty / short secrets are ignored (would mask everything)
-        let got = pairs(&serialize_outbound(&map(&[("x-team", "platform")]), true, &["", "ab"]).unwrap());
+        let got = untagged(&map(&[("x-team", "platform")]), true, &["", "ab"]);
         assert_eq!(got[0][1], "platform");
     }
 
@@ -336,11 +435,11 @@ mod tests {
     /// reqwest 在发送时补上客户端默认 UA; 出站表要如实显示它 (网关 / WAF 排障最想看的就是 UA)。
     #[test]
     fn outbound_shows_default_user_agent_when_not_set() {
-        let got = pairs(&serialize_outbound(&map(&[("x-app", "cli")]), true, &[]).unwrap());
+        let got = untagged(&map(&[("x-app", "cli")]), true, &[]);
         let ua = got.iter().find(|p| p[0] == "user-agent").expect("default UA row");
         assert_eq!(ua[1], crate::proxy::upstream::DEFAULT_USER_AGENT);
         // explicit UA (Codex / Kiro) is kept as-is, not duplicated
-        let got = pairs(&serialize_outbound(&map(&[("user-agent", "codex_cli_rs/1.0")]), true, &[]).unwrap());
+        let got = untagged(&map(&[("user-agent", "codex_cli_rs/1.0")]), true, &[]);
         assert_eq!(got.iter().filter(|p| p[0] == "user-agent").count(), 1);
         assert_eq!(got[0][1], "codex_cli_rs/1.0");
     }
@@ -365,6 +464,67 @@ mod tests {
             ]
         );
         assert_eq!(serialize_tagged(&sent, false, &[]), None);
+    }
+
+    fn hints(auth: &str, custom: &[&str], forward: &[&str]) -> SourceHints {
+        SourceHints {
+            auth_header_name: auth.to_string(),
+            custom_names: custom.iter().map(|s| s.to_string()).collect(),
+            forward_names: forward.iter().map(|s| s.to_string()).collect(),
+        }
+    }
+
+    #[test]
+    fn classify_codex_forced_ua_is_provider() {
+        let client = map(&[("user-agent", "claude-cli/2.1")]);
+        let h = hints("authorization", &[], &["user-agent"]);
+        assert_eq!(
+            classify("user-agent", "codex_cli_rs/0.1 (Mac OS; arm64) cc-router/6.4.0", &h, &client),
+            HeaderSource::Provider
+        );
+    }
+
+    #[test]
+    fn classify_forwarded_same_value() {
+        let client = map(&[("x-trace", "t1")]);
+        let h = hints("authorization", &[], &["X-Trace"]);
+        assert_eq!(classify("x-trace", "t1", &h, &client), HeaderSource::Forwarded);
+        assert_eq!(classify("x-trace", "t2", &h, &client), HeaderSource::Provider);
+    }
+
+    #[test]
+    fn classify_custom_and_auth_and_default() {
+        let client = HeaderMap::new();
+        let h = hints("x-goog-api-key", &["X-Team"], &[]);
+        assert_eq!(classify("x-team", "p", &h, &client), HeaderSource::Custom);
+        assert_eq!(classify("x-goog-api-key", "AIza…abcd", &h, &client), HeaderSource::Auth);
+        assert_eq!(classify("anthropic-version", "2023-06-01", &h, &client), HeaderSource::Provider);
+        assert_eq!(classify("user-agent", "cc-router/1", &h, &client), HeaderSource::CcRouter);
+        assert_eq!(classify("content-type", "application/json", &h, &client), HeaderSource::CcRouter);
+        assert_eq!(classify("accept", "text/event-stream", &h, &client), HeaderSource::CcRouter);
+        let empty_auth = hints("", &[], &[]);
+        assert_eq!(classify("authorization", "Bear…mnop", &empty_auth, &client), HeaderSource::Auth);
+    }
+
+    #[test]
+    fn tag_capture_tags_untagged() {
+        let cap = OutboundCapture::Untagged(vec![
+            ["authorization".to_string(), "Bear…mnop".to_string()],
+            ["x-team".to_string(), "p".to_string()],
+        ]);
+        let got: Vec<[String; 3]> = serde_json::from_str(
+            &tag_capture(cap, &hints("", &["x-team"], &[]), &HeaderMap::new()).unwrap(),
+        )
+        .unwrap();
+        assert_eq!(
+            got,
+            vec![
+                ["authorization".to_string(), "Bear…mnop".to_string(), "auth".to_string()],
+                ["x-team".to_string(), "p".to_string(), "custom".to_string()],
+            ]
+        );
+        let tagged = OutboundCapture::Tagged("[]".to_string());
+        assert_eq!(tag_capture(tagged, &hints("", &[], &[]), &HeaderMap::new()).as_deref(), Some("[]"));
     }
 
     #[test]

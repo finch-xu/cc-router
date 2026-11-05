@@ -235,7 +235,7 @@ pub async fn dispatch_openai_chat_completions_attempt(
     }
 
     // 3. 发送请求
-    capture.request = crate::proxy::header_log::serialize_outbound(&headers, log_headers, &[api_key.as_str()]);
+    capture.request = crate::proxy::header_log::capture_untagged(&headers, log_headers, &[api_key.as_str()]);
     let send_result =
         upstream::send(http_client, &url, body_bytes, headers, client_wants_streaming).await;
     let upstream_response = match send_result {
@@ -806,7 +806,9 @@ mod tests {
         )
         .await
         .expect("ok");
-        let req = crate::proxy::header_log::parse(cap.request.as_deref().expect("request captured")).unwrap();
+        let Some(crate::proxy::header_log::OutboundCapture::Untagged(req)) = cap.request else {
+            panic!("request captured untagged")
+        };
         assert!(req.iter().any(|p| p[0] == "authorization" && !p[1].contains("0123456789")));
         let resp = crate::proxy::header_log::parse(cap.response.as_deref().expect("response captured")).unwrap();
         assert!(resp.iter().any(|p| p[0] == "x-request-id" && p[1] == "r2"));

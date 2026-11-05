@@ -188,7 +188,7 @@ pub async fn dispatch_openai_responses_attempt(
     let transform_config = extras.transform_config();
 
     // 4. 发送请求
-    capture.request = crate::proxy::header_log::serialize_outbound(&headers, log_headers, &[api_key.as_str()]);
+    capture.request = crate::proxy::header_log::capture_untagged(&headers, log_headers, &[api_key.as_str()]);
     let send_result =
         upstream::send(http_client, &url, body_bytes, headers, client_wants_streaming).await;
     let upstream_response = match send_result {
@@ -747,7 +747,9 @@ mod tests {
         )
         .await
         .expect("ok");
-        let req = crate::proxy::header_log::parse(cap.request.as_deref().expect("request captured")).unwrap();
+        let Some(crate::proxy::header_log::OutboundCapture::Untagged(req)) = cap.request else {
+            panic!("request captured untagged")
+        };
         let auth = req.iter().find(|p| p[0] == "authorization").expect("auth header logged");
         assert!(!auth[1].contains("0123456789"), "auth value must be masked: {}", auth[1]);
         assert!(req.iter().any(|p| p[0] == "x-team" && p[1] == "platform"));

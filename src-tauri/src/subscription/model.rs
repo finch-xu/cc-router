@@ -347,6 +347,20 @@ impl SubscriptionRow {
             .collect()
     }
 
+    /// What the request-log classifier needs to tag the outbound headers of
+    /// a path that assembles its own map (see `header_log::classify`).
+    pub fn source_hints(&self) -> crate::proxy::header_log::SourceHints {
+        let mut custom_names: Vec<String> = self.extra_headers.keys().cloned().collect();
+        if self.is_user_defined {
+            custom_names.extend(self.required_headers.keys().cloned());
+        }
+        crate::proxy::header_log::SourceHints {
+            auth_header_name: self.auth_header_name.clone(),
+            custom_names,
+            forward_names: self.forward_headers.clone(),
+        }
+    }
+
     /// Same headers as [`Self::resolved_required_headers`], each tagged with
     /// who configured it: yaml `required_headers` are `Provider` (`Custom` on a
     /// user-defined subscription, whose required headers the user wrote);
@@ -1014,6 +1028,23 @@ mod tests {
             row.resolved_required_headers_tagged(),
             vec![("x-team".to_string(), "p".to_string(), Custom)]
         );
+    }
+
+    #[test]
+    fn source_hints_user_defined_includes_required_names() {
+        let mut row = SubscriptionRow::test_fixture("p", "e");
+        row.auth_header_name = "x-api-key".into();
+        row.required_headers.insert("x-a".into(), "1".into());
+        row.extra_headers.insert("x-b".into(), "2".into());
+        row.forward_headers = vec!["x-c".into()];
+        let h = row.source_hints();
+        assert_eq!(h.auth_header_name, "x-api-key");
+        assert_eq!(h.custom_names, vec!["x-b".to_string()]);
+        assert_eq!(h.forward_names, vec!["x-c".to_string()]);
+        row.is_user_defined = true;
+        let mut names = row.source_hints().custom_names;
+        names.sort();
+        assert_eq!(names, vec!["x-a".to_string(), "x-b".to_string()]);
     }
 
     #[test]

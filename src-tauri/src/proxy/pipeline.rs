@@ -330,6 +330,7 @@ pub async fn dispatch(
             api_key_raw,
             required_headers,
             required_tagged,
+            source_hints,
             forward_headers,
             header_policy,
             auth_type,
@@ -366,6 +367,7 @@ pub async fn dispatch(
                 guard.row.api_key.clone(),
                 guard.row.resolved_required_headers(),
                 guard.row.resolved_required_headers_tagged(),
+                guard.row.source_hints(),
                 guard.row.forward_headers.clone(),
                 guard.row.header_policy.clone(),
                 guard.row.auth_type,
@@ -450,7 +452,7 @@ pub async fn dispatch(
             )
             .await;
             // 本 attempt 的 ctx 带上采集到的上游两组头, 之后所有日志行都从它取。
-            let attempt_ctx = ctx.with_upstream_headers(upstream_capture);
+            let attempt_ctx = ctx.with_upstream_headers(upstream_capture, &source_hints, &client_headers);
             let ctx = &attempt_ctx;
 
             match dispatch_res {
@@ -576,7 +578,7 @@ pub async fn dispatch(
             )
             .await;
             // 本 attempt 的 ctx 带上采集到的上游两组头, 之后所有日志行都从它取。
-            let attempt_ctx = ctx.with_upstream_headers(upstream_capture);
+            let attempt_ctx = ctx.with_upstream_headers(upstream_capture, &source_hints, &client_headers);
             let ctx = &attempt_ctx;
 
             match dispatch_res {
@@ -713,7 +715,7 @@ pub async fn dispatch(
             )
             .await;
             // 本 attempt 的 ctx 带上采集到的上游两组头, 之后所有日志行都从它取。
-            let attempt_ctx = ctx.with_upstream_headers(upstream_capture);
+            let attempt_ctx = ctx.with_upstream_headers(upstream_capture, &source_hints, &client_headers);
             let ctx = &attempt_ctx;
 
             match dispatch_res {
@@ -860,7 +862,7 @@ pub async fn dispatch(
             )
             .await;
             // 本 attempt 的 ctx 带上采集到的上游两组头, 之后所有日志行都从它取。
-            let attempt_ctx = ctx.with_upstream_headers(upstream_capture);
+            let attempt_ctx = ctx.with_upstream_headers(upstream_capture, &source_hints, &client_headers);
             let ctx = &attempt_ctx;
 
             match dispatch_res {
@@ -1007,7 +1009,7 @@ pub async fn dispatch(
             )
             .await;
             // 本 attempt 的 ctx 带上采集到的上游两组头, 之后所有日志行都从它取。
-            let attempt_ctx = ctx.with_upstream_headers(upstream_capture);
+            let attempt_ctx = ctx.with_upstream_headers(upstream_capture, &source_hints, &client_headers);
             let ctx = &attempt_ctx;
 
             match dispatch_res {
@@ -1150,7 +1152,7 @@ pub async fn dispatch(
             )
                 .await;
             // 本 attempt 的 ctx 带上采集到的上游两组头, 之后所有日志行都从它取。
-            let attempt_ctx = ctx.with_upstream_headers(upstream_capture);
+            let attempt_ctx = ctx.with_upstream_headers(upstream_capture, &source_hints, &client_headers);
             let ctx = &attempt_ctx;
 
             match dispatch_res {
@@ -1359,7 +1361,7 @@ pub async fn dispatch(
         emit_attempt_started(state, sub_id, vm_name);
 
         let mut upstream_capture = crate::proxy::header_log::UpstreamHeaderCapture {
-            request: crate::proxy::header_log::serialize_tagged(
+            request: crate::proxy::header_log::capture_tagged(
                 &outbound.sent,
                 ctx.log_headers,
                 &[api_key_raw.as_str()],
@@ -1378,7 +1380,7 @@ pub async fn dispatch(
             upstream_capture.response = crate::proxy::header_log::serialize(r.headers(), ctx.log_headers);
         }
         // 本 attempt 的 ctx 带上采集到的上游两组头, 之后所有日志行 (含流式 sse) 都从它取。
-        let attempt_ctx = ctx.with_upstream_headers(upstream_capture);
+        let attempt_ctx = ctx.with_upstream_headers(upstream_capture, &source_hints, &client_headers);
         let ctx = &attempt_ctx;
 
         match upstream_result {
