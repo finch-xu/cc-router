@@ -402,7 +402,9 @@ export function RequestDetailDialog({ request, onClose }: Props) {
                     emptyText={emptyText("request")}
                     tagFor={outboundTag}
                   />
-                  <p className="field-hint">{t("requestLogs.detail.headers.sourceHint")}</p>
+                  {headers?.upstream_request && headers.upstream_request.length > 0 && (
+                    <p className="rd-note">{t("requestLogs.detail.headers.sourceHint")}</p>
+                  )}
                 </TabsPrimitive.Content>
                 <TabsPrimitive.Content value="responseHeaders" className="rd-body">
                   <HeaderTable
@@ -426,7 +428,7 @@ export function RequestDetailDialog({ request, onClose }: Props) {
                   {prettyBody ? (
                     <pre className="mono rd-pre">{prettyBody}</pre>
                   ) : (
-                    <div className="field-hint">{t("requestLogs.detail.noBody")}</div>
+                    <div className="rd-empty">{t("requestLogs.detail.noBody")}</div>
                   )}
                 </TabsPrimitive.Content>
               </div>

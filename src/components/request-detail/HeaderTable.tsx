@@ -55,11 +55,11 @@ export function HeaderTable({
         )}
       </h3>
       {loading ? (
-        <div className="field-hint">{t("common.loading")}</div>
+        <div className="rd-empty">{t("common.loading")}</div>
       ) : !pairs ? (
-        <div className="field-hint">{emptyText}</div>
+        <div className="rd-empty">{emptyText}</div>
       ) : pairs.length === 0 ? (
-        <div className="field-hint">{t("requestLogs.detail.headers.empty")}</div>
+        <div className="rd-empty">{t("requestLogs.detail.headers.empty")}</div>
       ) : (
         <table className="rd-table">
           <thead>

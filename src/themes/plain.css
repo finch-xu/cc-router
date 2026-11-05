@@ -521,6 +521,30 @@
   border-radius: var(--r-sm);
 }
 
+/* 请求详情: 左分类右内容 —— 经典画风回到细线 + 规整圆角, 去掉手写、波浪线与错位投影 */
+:where([data-art~="plain"]) .rd-split-body { border-top: 1px solid var(--line); }
+:where([data-art~="plain"]) .rd-nav { gap: 2px; padding: 10px 8px; border-right: 1px solid var(--line); }
+:where([data-art~="plain"]) .rd-nav-item { font-size: 12.5px; border: 0; border-radius: var(--r-sm); }
+:where([data-art~="plain"]) .rd-nav-item:hover { background: var(--surface-3); }
+:where([data-art~="plain"]) .rd-nav-item[data-state="active"] { background: var(--accent-bg); color: var(--accent-ink); box-shadow: none; }
+:where([data-art~="plain"]) .rd-nav-n { min-width: 0; height: auto; padding: 0; font-family: var(--font-mono); font-size: 11px; font-weight: 400; color: var(--ink-4); border: 0; background: none; transform: none; }
+:where([data-art~="plain"]) .rd-nav-item[data-state="active"] .rd-nav-n { background: none; color: var(--accent-ink); }
+:where([data-art~="plain"]) .rd-nav-group { font-family: var(--font-sans); font-size: 10.5px; padding: 10px 10px 3px; letter-spacing: .02em; }
+:where([data-art~="plain"]) .rd-nav-group::before { display: none; }
+:where([data-art~="plain"]) .rd-pane-title { font-family: var(--font-sans); font-size: 13px; margin-bottom: 10px; }
+:where([data-art~="plain"]) .rd-pane-title > span:first-child { padding-bottom: 0; }
+:where([data-art~="plain"]) .rd-pane-title > span:first-child::after { display: none; }
+:where([data-art~="plain"]) .rd-pane-sub { font-family: var(--font-sans); font-size: 11.5px; color: var(--ink-4); }
+:where([data-art~="plain"]) .rd-table { border: 1px solid var(--line); border-radius: var(--r-md); box-shadow: none; }
+:where([data-art~="plain"]) .rd-table th { background: var(--surface-2); border-bottom: 1px solid var(--line); font-size: 11px; text-transform: none; letter-spacing: 0; padding: 6px 10px; }
+:where([data-art~="plain"]) .rd-table td { padding: 5px 10px; border-bottom: 1px solid var(--line); }
+:where([data-art~="plain"]) .rd-tag { margin-left: 6px; padding: 0 5px; font-size: 10px; border: 0; border-radius: 4px; box-shadow: none; transform: none; }
+:where([data-art~="plain"]) .rd-tag.ok { background: var(--ok-bg); color: var(--ok); }
+:where([data-art~="plain"]) .rd-tag.accent { background: var(--accent-bg); color: var(--accent-ink); }
+:where([data-art~="plain"]) .rd-tag.muted { background: var(--surface-3); color: var(--ink-4); }
+:where([data-art~="plain"]) .rd-empty { padding: 0; font-size: 12.5px; background: none; border: 0; }
+:where([data-art~="plain"]) .rd-empty::before { content: none; }
+
 /* === 引导窗口 === */
 :where([data-art~="plain"]) .ob { border: 1px solid var(--line); border-radius: var(--r-lg); box-shadow: var(--shadow-lg); }
 :where([data-art~="plain"]) .ob-kicker {
