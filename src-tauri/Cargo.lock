@@ -818,7 +818,7 @@ dependencies = [
 
 [[package]]
 name = "cc-router"
-version = "6.6.0"
+version = "6.7.0"
 dependencies = [
  "anyhow",
  "argon2",
@@ -874,7 +874,7 @@ dependencies = [
 
 [[package]]
 name = "cc-router-tui"
-version = "6.6.0"
+version = "6.7.0"
 dependencies = [
  "chrono",
  "crossterm",
