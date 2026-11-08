@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import * as TabsPrimitive from "@radix-ui/react-tabs";
 import { useQuery } from "@tanstack/react-query";
-import { Copy, Check, ArrowRight } from "lucide-react";
+import { Copy, Check } from "lucide-react";
 import {
   Dialog,
   DialogContent,
@@ -15,7 +15,7 @@ import { isReturnedToClient } from "@/lib/headerSources";
 import { ProviderLogo } from "@/components/ProviderLogo";
 import { useSubscriptions } from "@/hooks/useSubscriptions";
 import { useT } from "@/i18n";
-import { fmtNum, fmtTime } from "@/lib/format";
+import { fmtNum, fmtTime, fmtRequestSeconds, fmtTokenSpeed } from "@/lib/format";
 import { customProviderLabel, providerIconId } from "@/lib/providerLabels";
 import { providerName as localProviderName } from "@/lib/providerText";
 import type { HeaderPairs, OutboundHeaderRows, OutboundSource, RequestLogDto } from "@/types";
@@ -137,6 +137,9 @@ export function RequestDetailDialog({ request, onClose }: Props) {
       `real_model: ${request.real_model_name}`,
       `effort: ${effortSummary(request, t) ?? "—"}`,
       `status: ${request.status}`,
+      `total_latency: ${fmtRequestSeconds(request.total_latency_ms)}`,
+      `first_content: ${fmtRequestSeconds(request.first_content_ms)}`,
+      `output_speed: ${fmtTokenSpeed(request.output_tokens_per_second)}`,
       `http_status: ${request.http_status ?? "—"}`,
       `stop_reason: ${request.stop_reason ?? "—"}`,
       `tools_offered: ${request.tools_offered_count ?? "—"} · tool_results: ${request.tool_result_count ?? "—"} · tool_uses: ${request.tool_use_count ?? "—"}`,
@@ -266,71 +269,40 @@ export function RequestDetailDialog({ request, onClose }: Props) {
 
               <div className="rd-pane">
                 <TabsPrimitive.Content value="overview" className="rd-body">
-                  {/* 路由路径: 客户端 → 虚拟模型 → 订阅 → 真实模型 */}
-                  <section className="rd-route" aria-label={t("requestLogs.detail.section.route")}>
-                    <div className="rd-node">
-                      <div className="rd-node-label">{t("requestLogs.detail.clientTool")}</div>
-                      <div className="rd-node-value">
-                        <ClientToolBadge toolId={request.client_tool} userAgent={request.client_user_agent} />
-                      </div>
-                      <div className="rd-node-sub mono">{request.client_version ?? "—"}</div>
-                    </div>
-                    <ArrowRight className="rd-arrow" size={16} aria-hidden />
-                    <div className="rd-node">
-                      <div className="rd-node-label">{t("requestLogs.detail.virtualModel")}</div>
-                      <div className="rd-node-value mono">{request.virtual_model_name}</div>
-                      <div className="rd-node-sub mono">
-                        {request.entry_kind ? `/v1/${request.entry_kind}` : "—"}
-                      </div>
-                    </div>
-                    <ArrowRight className="rd-arrow" size={16} aria-hidden />
-                    <div className="rd-node">
-                      <div className="rd-node-label">{t("requestLogs.detail.subscription")}</div>
-                      <div className="rd-node-value rd-node-sub-row">
-                        <ProviderLogo
-                          iconId={sub?.provider_icon ?? providerIconId(request.provider_id)}
-                          size={20}
-                          iconSize={13}
-                        />
-                        <span className="rd-ellipsis">{sub?.display_name ?? providerName}</span>
-                      </div>
-                      <div className="rd-node-sub">{providerName}</div>
-                    </div>
-                    <ArrowRight className="rd-arrow" size={16} aria-hidden />
-                    <div className="rd-node accent">
-                      <div className="rd-node-label">{t("requestLogs.detail.realModel")}</div>
-                      <div className="rd-node-value mono strong rd-ellipsis" title={request.real_model_name}>
-                        {request.real_model_name}
-                      </div>
-                      <div className="rd-node-sub mono rd-ellipsis" title={request.response_model_name}>
-                        {request.response_model_name && request.response_model_name !== request.real_model_name
-                          ? `${t("requestLogs.detail.responseModel")} ${request.response_model_name}`
-                          : effortSummaryShort(request, t) ?? "—"}
-                      </div>
-                    </div>
-                  </section>
-
-                  <section className="rd-stats" aria-label={t("requestLogs.detail.section.usage")}>
-                    <Stat label={t("requestLogs.detail.latency")}
-                      value={request.total_latency_ms != null ? `${(request.total_latency_ms / 1000).toFixed(2)}s` : "—"} />
-                    <Stat label={t("stats.daily.tokenTooltipInput")} value={fmtNum(request.input_tokens)} />
-                    <Stat label={t("stats.daily.tokenTooltipOutput")} value={fmtNum(request.output_tokens)} strong />
-                    <Stat label={t("stats.daily.tokenTooltipCacheRead")} value={fmtNum(request.cache_read_tokens)} />
-                    <Stat label={t("stats.daily.tokenTooltipCacheCreate")} value={fmtNum(request.cache_creation_tokens)} />
-                  </section>
-
-                  {isError && request.error_message && (
-                    <div className="alert err rd-error">
-                      <div>
-                        <div className="rd-card-title" style={{ marginBottom: 4 }}>
-                          {t("requestLogs.detail.errorMessage")}
-                        </div>
-                        <div className="mono" style={{ fontSize: 12.5, wordBreak: "break-word" }}>
-                          {request.error_message}
-                        </div>
-                      </div>
-                    </div>
-                  )}
+                  <table className="rd-table rd-overview-table">
+                    <thead>
+                      <tr>
+                        <th>{t("requestLogs.detail.headers.item")}</th>
+                        <th>{t("requestLogs.detail.headers.value")}</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      <Row k={t("requestLogs.detail.clientTool")} v={<ClientToolBadge toolId={request.client_tool} userAgent={request.client_user_agent} />} />
+                      <Row k={t("requestLogs.detail.clientVersion")} v={monoOr(request.client_version)} />
+                      <Row k={t("requestLogs.detail.entryKind")} v={monoOr(request.entry_kind ? `/v1/${request.entry_kind}` : null)} />
+                      <Row k={t("requestLogs.detail.virtualModel")} v={monoOr(request.virtual_model_name)} />
+                      <Row k={t("requestLogs.detail.subscription")} v={sub?.display_name ?? providerName} />
+                      <Row k={t("requestLogs.detail.provider")} v={
+                        <span className="rd-provider-value">
+                          <ProviderLogo iconId={sub?.provider_icon ?? providerIconId(request.provider_id)} size={20} iconSize={13} />
+                          <span>{providerName}</span>
+                        </span>
+                      } />
+                      <Row k={t("requestLogs.detail.realModel")} v={monoOr(request.real_model_name)} />
+                      <Row k={t("requestLogs.detail.responseModel")} v={monoOr(request.response_model_name)} />
+                      <Row k={t("requestLogs.detail.effort")} v={effortSummary(request, t) ?? dash} />
+                      <Row k={t("requestLogs.col.speed")} hint={t("requestLogs.speedHint")} v={fmtTokenSpeed(request.output_tokens_per_second)} />
+                      <Row k={t("requestLogs.col.firstContent")} hint={t("requestLogs.firstContentHint")} v={fmtRequestSeconds(request.first_content_ms)} />
+                      <Row k={t("requestLogs.detail.latency")} v={fmtRequestSeconds(request.total_latency_ms)} />
+                      <Row k={t("stats.daily.tokenTooltipInput")} v={fmtNum(request.input_tokens)} />
+                      <Row k={t("stats.daily.tokenTooltipOutput")} v={fmtNum(request.output_tokens)} />
+                      <Row k={t("stats.daily.tokenTooltipCacheRead")} v={fmtNum(request.cache_read_tokens)} />
+                      <Row k={t("stats.daily.tokenTooltipCacheCreate")} v={fmtNum(request.cache_creation_tokens)} />
+                      {isError && request.error_message && (
+                        <Row k={t("requestLogs.detail.errorMessage")} v={<span className="rd-overview-error">{request.error_message}</span>} />
+                      )}
+                    </tbody>
+                  </table>
                 </TabsPrimitive.Content>
 
                 <TabsPrimitive.Content value="request" className="rd-body">
@@ -438,24 +410,10 @@ export function RequestDetailDialog({ request, onClose }: Props) {
   );
 }
 
-/** 路由卡「真实模型」下方的一行小字: 实际发往上游的思考强度 (没有则不显示) */
-function effortSummaryShort(r: RequestLogDto, t: (key: string) => string): string | null {
-  return r.effective_effort ? `${t("requestLogs.detail.effort")} ${r.effective_effort}` : null;
-}
-
-function Stat({ label, value, strong }: { label: string; value: string; strong?: boolean }) {
-  return (
-    <div className={strong ? "rd-stat strong" : "rd-stat"}>
-      <div className="rd-stat-label">{label}</div>
-      <div className="rd-stat-value mono tnum">{value}</div>
-    </div>
-  );
-}
-
-function Row({ k, v }: { k: string; v: React.ReactNode }) {
+function Row({ k, v, hint }: { k: string; v: React.ReactNode; hint?: string }) {
   return (
     <tr>
-      <td className="rd-table-k">{k}</td>
+      <td className="rd-table-k" title={hint}>{k}</td>
       <td className="rd-table-v">{v}</td>
     </tr>
   );

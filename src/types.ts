@@ -793,6 +793,10 @@ export interface RequestLogDto {
   status: RequestStatus;
   http_status?: number;
   total_latency_ms?: number;
+  /** 本次上游尝试到首次有效正文、思考或工具内容；历史 / 非流式为空。 */
+  first_content_ms?: number | null;
+  /** 成功流式的输出 token / 首字后的秒数；不可计算时为空。 */
+  output_tokens_per_second?: number | null;
   input_tokens?: number;
   output_tokens?: number;
   cache_creation_tokens?: number;

@@ -329,6 +329,7 @@ pub fn log_entry(
         status,
         http_status,
         ttft_ms: None,
+        first_content_ms: None,
         total_latency_ms: Some(latency_ms),
         upstream_input_tokens: input,
         upstream_output_tokens: output,

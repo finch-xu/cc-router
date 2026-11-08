@@ -19,7 +19,7 @@ import { useRequests } from "@/hooks/useRequests";
 import { useProviders } from "@/hooks/useProviders";
 import { useSubscriptions } from "@/hooks/useSubscriptions";
 import { useT } from "@/i18n";
-import { fmtNum, fmtTime } from "@/lib/format";
+import { fmtNum, fmtTime, fmtRequestSeconds, fmtTokenSpeed } from "@/lib/format";
 import { VM_META } from "@/lib/virtualModels";
 import { customProviderLabel, providerIconId } from "@/lib/providerLabels";
 import { CLIENT_TOOLS } from "@/lib/clientTools";
@@ -308,13 +308,14 @@ export function RequestLogsPage() {
                   <th style={{ width: 110 }}>{t("requestLogs.col.provider")}</th>
                   <th style={{ width: 70, textAlign: "right" }}>{t("requestLogs.col.tokensIn")}</th>
                   <th style={{ width: 70, textAlign: "right" }}>{t("requestLogs.col.tokensOut")}</th>
+                  <th style={{ width: 110, textAlign: "right" }} title={t("requestLogs.speedHint")}>{t("requestLogs.col.speed")}</th>
+                  <th style={{ width: 95, textAlign: "right" }} title={t("requestLogs.firstContentHint")}>{t("requestLogs.col.firstContent")}</th>
                   <th style={{ width: 80, textAlign: "right" }}>{t("requestLogs.col.latency")}</th>
                 </tr>
               </thead>
               <tbody>
                 {items.map((row) => {
-                  const lat = (row.total_latency_ms ?? 0) / 1000;
-                  const latencyText = row.total_latency_ms != null ? `${lat.toFixed(2)}s` : "-";
+                  const latencyText = fmtRequestSeconds(row.total_latency_ms);
                   const inputTokensText = fmtNum(row.input_tokens);
                   const outputTokensText = fmtNum(row.output_tokens);
                   const provider = providerOf(row.provider_id);
@@ -385,6 +386,8 @@ export function RequestLogsPage() {
                       <td className="mono tnum strong" title={outputTokensText} style={{ textAlign: "right" }}>
                         {outputTokensText}
                       </td>
+                      <td className="mono tnum" style={{ textAlign: "right" }}>{fmtTokenSpeed(row.output_tokens_per_second)}</td>
+                      <td className="mono tnum" style={{ textAlign: "right" }}>{fmtRequestSeconds(row.first_content_ms)}</td>
                       <td className="mono tnum" title={latencyText} style={{ textAlign: "right" }}>
                         {latencyText}
                       </td>

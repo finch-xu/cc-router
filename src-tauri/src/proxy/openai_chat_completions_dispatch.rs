@@ -312,6 +312,7 @@ pub fn finalize_openai_chat_completions(
     real_model: String,
     display_name: String,
     retry_count: u32,
+    start: std::time::Instant,
     log_tx: mpsc::Sender<RequestLogEntry>,
     event_log_tx: mpsc::Sender<EventEntry>,
     pool: SqlitePool,
@@ -339,6 +340,7 @@ pub fn finalize_openai_chat_completions(
             real_model,
             display_name,
             retry_count,
+            start,
             log_tx,
             event_log_tx,
             pool,
@@ -358,6 +360,7 @@ pub fn finalize_openai_chat_completions(
             real_model,
             display_name,
             retry_count,
+            start,
             log_tx,
             event_log_tx,
             pool,
@@ -382,6 +385,7 @@ fn finalize_streaming(
     real_model: String,
     _display_name: String,
     retry_count: u32,
+    start: std::time::Instant,
     log_tx: mpsc::Sender<RequestLogEntry>,
     event_log_tx: mpsc::Sender<EventEntry>,
     pool: SqlitePool,
@@ -394,7 +398,7 @@ fn finalize_streaming(
     let (client_tx, client_rx) = mpsc::channel::<Result<Bytes, std::io::Error>>(64);
 
     tokio::spawn(async move {
-        let start = std::time::Instant::now();
+        let mut timing = crate::proxy::request_timing::StreamTiming::new(start);
         // response_id 占位用 attempt_id (上游 chunk.id 出现时由 converter 自动覆盖)
         let mut converter = ChatCompletionsSseConverter::new(
             transform_config,
@@ -411,6 +415,7 @@ fn finalize_streaming(
                 Err(e) => {
                     // 修 #3: mid-stream 网络错误改走 UpstreamError outcome, 不再误标 RequestSucceeded
                     warn!(?e, "OpenAI Chat upstream stream error");
+                    timing.fail(upstream::describe_error(&e));
                     outcome = StreamOutcome::UpstreamError {
                         message: format!("上游 stream 中断: {}", upstream::describe_error(&e)),
                         http_status: 502,
@@ -447,6 +452,7 @@ fn finalize_streaming(
                     &frame_bytes[..frame_bytes.len() - sep_len],
                 )
                 .unwrap_or("");
+                timing.observe_chat_frame(frame_str);
                 // 修 #9: converter.ingest 是 sync, 用 catch_unwind 兜底 panic.
                 // panic 时走 UpstreamError 让客户端拿到合法 error 帧而非 silent close.
                 let ingest_result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(
@@ -470,11 +476,14 @@ fn finalize_streaming(
                 for s in frames_out {
                     buf.extend_from_slice(s.as_bytes());
                 }
+                timing.observe_sse(&buf, std::time::Instant::now());
                 if client_tx.send(Ok(Bytes::from(buf))).await.is_err() {
                     return;
                 }
             }
         }
+
+        timing.finish_stream();
 
         // 修 #11: 统一收尾 — 不管 success 还是 error 都让客户端拿到合法的 SSE 结尾
         match &outcome {
@@ -486,6 +495,7 @@ fn finalize_streaming(
                     for s in tail {
                         buf.extend_from_slice(s.as_bytes());
                     }
+                    timing.observe_sse(&buf, std::time::Instant::now());
                     let _ = client_tx.send(Ok(Bytes::from(buf))).await;
                 }
             }
@@ -498,11 +508,19 @@ fn finalize_streaming(
                     for s in close_frames {
                         buf.extend_from_slice(s.as_bytes());
                     }
+                    timing.observe_sse(&buf, std::time::Instant::now());
                     let _ = client_tx.send(Ok(Bytes::from(buf))).await;
                 }
                 // 修 #10: error 帧用 Anthropic 规范 {type:error, error:{type, message}} 形态
                 let err_frame = anthropic_error_sse_frame("overloaded_error", message);
                 let _ = client_tx.send(Ok(Bytes::from(err_frame))).await;
+            }
+        }
+
+        // Timing validation affects observability only; preserve the existing wire finalization.
+        if matches!(outcome, StreamOutcome::Success) {
+            if let Some(message) = timing.error_message() {
+                outcome = StreamOutcome::UpstreamError { message: message.to_owned(), http_status: 502 };
             }
         }
 
@@ -541,6 +559,7 @@ fn finalize_streaming(
             ),
         };
 
+        let total_ms = start.elapsed().as_millis() as u64;
         let _ = state_machine::apply(&pool, &app, &event_log_tx, sub_rt.clone(), sm_event).await;
 
         let entry = RequestLogEntry {
@@ -556,9 +575,10 @@ fn finalize_streaming(
             status,
             http_status,
             ttft_ms: None,
-            total_latency_ms: Some(start.elapsed().as_millis() as u64),
+            first_content_ms: timing.first_content_ms(),
+            total_latency_ms: Some(total_ms),
             upstream_input_tokens: input_tokens,
-            upstream_output_tokens: output_tokens,
+            upstream_output_tokens: output_tokens.filter(|_| timing.has_output_usage()),
             upstream_cache_creation: None,
             upstream_cache_read: None,
             retry_count,
@@ -608,6 +628,7 @@ fn finalize_non_streaming(
     real_model: String,
     _display_name: String,
     retry_count: u32,
+    start: std::time::Instant,
     log_tx: mpsc::Sender<RequestLogEntry>,
     event_log_tx: mpsc::Sender<EventEntry>,
     pool: SqlitePool,
@@ -617,7 +638,6 @@ fn finalize_non_streaming(
     // 本次 attempt 的思考强度三格 (客户端 / 实际 / 来源), 只写请求日志; 拿不到就是 None。
     effort_log: EffortLog,
 ) -> Response {
-    let start = std::time::Instant::now();
 
     // 提取 usage (用于日志, 翻译前提). 修 #14: parse_token_count 容错 float/string +
     // saturating cast 防止 u64 截断.
@@ -664,6 +684,7 @@ fn finalize_non_streaming(
     let log_provider_id = provider_id.clone();
     let log_endpoint_id = endpoint_id.clone();
     tokio::spawn(async move {
+        let total_ms = start.elapsed().as_millis() as u64;
         let _ = state_machine::apply(
             &log_pool,
             &log_app,
@@ -686,7 +707,8 @@ fn finalize_non_streaming(
             status: RequestStatus::Success,
             http_status: Some(200),
             ttft_ms: None,
-            total_latency_ms: Some(start.elapsed().as_millis() as u64),
+            first_content_ms: None,
+            total_latency_ms: Some(total_ms),
             upstream_input_tokens: input_tokens,
             upstream_output_tokens: output_tokens,
             upstream_cache_creation: None,

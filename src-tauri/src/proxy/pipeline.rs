@@ -260,7 +260,6 @@ pub async fn dispatch(
     }
 
     let mut retry_count: u32 = 0;
-    let start = Instant::now();
     // 一次 dispatch 可能产生多个 attempt(每次 retry 一行日志)。每个 attempt 用独立 id,
     // 避免 PRIMARY KEY 冲突 + 让用户在 Logs 页能看到每次 retry 的具体错误。
     let dispatch_id = Uuid::new_v4();
@@ -408,6 +407,8 @@ pub async fn dispatch(
             }
         }
         last_upstream_error = None;
+        // Per-attempt timing includes auth/HTTP header wait, not previous retries.
+        let start = Instant::now();
 
         // ChatGPT OAuth 分支: 走独立的 dispatch + 翻译层 (proxy::oauth_dispatch).
         if matches!(auth_type, AuthType::ChatgptOauth) {
@@ -455,6 +456,7 @@ pub async fn dispatch(
             let attempt_ctx = ctx.with_upstream_headers(upstream_capture, &source_hints, &client_headers);
             let ctx = &attempt_ctx;
 
+            let total_ms = start.elapsed().as_millis() as u64;
             match dispatch_res {
                 Ok(ok) => {
                     emit_attempt_finished(state, sub_id, vm_name, true);
@@ -468,6 +470,7 @@ pub async fn dispatch(
                         real_model,
                         display_name,
                         retry_count,
+                        start,
                         state.request_log_tx.clone(),
                         state.event_log_tx.clone(),
                         state.db.clone(),
@@ -517,7 +520,8 @@ pub async fn dispatch(
                             _ => Some(401),
                         },
                         ttft_ms: None,
-                        total_latency_ms: Some(start.elapsed().as_millis() as u64),
+                        first_content_ms: None,
+                        total_latency_ms: Some(total_ms),
                         upstream_input_tokens: None,
                         upstream_output_tokens: None,
                         upstream_cache_creation: None,
@@ -581,6 +585,7 @@ pub async fn dispatch(
             let attempt_ctx = ctx.with_upstream_headers(upstream_capture, &source_hints, &client_headers);
             let ctx = &attempt_ctx;
 
+            let total_ms = start.elapsed().as_millis() as u64;
             match dispatch_res {
                 Ok(ok) => {
                     emit_attempt_finished(state, sub_id, vm_name, true);
@@ -594,6 +599,7 @@ pub async fn dispatch(
                         real_model,
                         display_name,
                         retry_count,
+                        start,
                         state.request_log_tx.clone(),
                         state.event_log_tx.clone(),
                         state.db.clone(),
@@ -643,7 +649,8 @@ pub async fn dispatch(
                             _ => Some(401),
                         },
                         ttft_ms: None,
-                        total_latency_ms: Some(start.elapsed().as_millis() as u64),
+                        first_content_ms: None,
+                        total_latency_ms: Some(total_ms),
                         upstream_input_tokens: None,
                         upstream_output_tokens: None,
                         upstream_cache_creation: None,
@@ -718,6 +725,7 @@ pub async fn dispatch(
             let attempt_ctx = ctx.with_upstream_headers(upstream_capture, &source_hints, &client_headers);
             let ctx = &attempt_ctx;
 
+            let total_ms = start.elapsed().as_millis() as u64;
             match dispatch_res {
                 Ok(ok) => {
                     emit_attempt_finished(state, sub_id, vm_name, true);
@@ -731,6 +739,7 @@ pub async fn dispatch(
                         real_model,
                         display_name,
                         retry_count,
+                        start,
                         state.request_log_tx.clone(),
                         state.event_log_tx.clone(),
                         state.db.clone(),
@@ -780,7 +789,8 @@ pub async fn dispatch(
                             _ => Some(401),
                         },
                         ttft_ms: None,
-                        total_latency_ms: Some(start.elapsed().as_millis() as u64),
+                        first_content_ms: None,
+                        total_latency_ms: Some(total_ms),
                         upstream_input_tokens: None,
                         upstream_output_tokens: None,
                         upstream_cache_creation: None,
@@ -865,6 +875,7 @@ pub async fn dispatch(
             let attempt_ctx = ctx.with_upstream_headers(upstream_capture, &source_hints, &client_headers);
             let ctx = &attempt_ctx;
 
+            let total_ms = start.elapsed().as_millis() as u64;
             match dispatch_res {
                 Ok(ok) => {
                     emit_attempt_finished(state, sub_id, vm_name, true);
@@ -878,6 +889,7 @@ pub async fn dispatch(
                         real_model,
                         display_name,
                         retry_count,
+                        start,
                         state.request_log_tx.clone(),
                         state.event_log_tx.clone(),
                         state.db.clone(),
@@ -928,7 +940,8 @@ pub async fn dispatch(
                             _ => Some(401),
                         },
                         ttft_ms: None,
-                        total_latency_ms: Some(start.elapsed().as_millis() as u64),
+                        first_content_ms: None,
+                        total_latency_ms: Some(total_ms),
                         upstream_input_tokens: None,
                         upstream_output_tokens: None,
                         upstream_cache_creation: None,
@@ -1012,6 +1025,7 @@ pub async fn dispatch(
             let attempt_ctx = ctx.with_upstream_headers(upstream_capture, &source_hints, &client_headers);
             let ctx = &attempt_ctx;
 
+            let total_ms = start.elapsed().as_millis() as u64;
             match dispatch_res {
                 Ok(ok) => {
                     emit_attempt_finished(state, sub_id, vm_name, true);
@@ -1025,6 +1039,7 @@ pub async fn dispatch(
                         real_model,
                         display_name,
                         retry_count,
+                        start,
                         state.request_log_tx.clone(),
                         state.event_log_tx.clone(),
                         state.db.clone(),
@@ -1074,7 +1089,8 @@ pub async fn dispatch(
                             _ => Some(401),
                         },
                         ttft_ms: None,
-                        total_latency_ms: Some(start.elapsed().as_millis() as u64),
+                        first_content_ms: None,
+                        total_latency_ms: Some(total_ms),
                         upstream_input_tokens: None,
                         upstream_output_tokens: None,
                         upstream_cache_creation: None,
@@ -1155,6 +1171,7 @@ pub async fn dispatch(
             let attempt_ctx = ctx.with_upstream_headers(upstream_capture, &source_hints, &client_headers);
             let ctx = &attempt_ctx;
 
+            let total_ms = start.elapsed().as_millis() as u64;
             match dispatch_res {
                 Ok(ok) => {
                     emit_attempt_finished(state, sub_id, vm_name, true);
@@ -1169,6 +1186,7 @@ pub async fn dispatch(
                             real_model,
                             display_name,
                             retry_count,
+                            start,
                             state.request_log_tx.clone(),
                             state.event_log_tx.clone(),
                             state.db.clone(),
@@ -1221,7 +1239,8 @@ pub async fn dispatch(
                             _ => Some(401),
                         },
                         ttft_ms: None,
-                        total_latency_ms: Some(start.elapsed().as_millis() as u64),
+                        first_content_ms: None,
+                        total_latency_ms: Some(total_ms),
                         upstream_input_tokens: None,
                         upstream_output_tokens: None,
                         upstream_cache_creation: None,
@@ -1383,6 +1402,7 @@ pub async fn dispatch(
         let attempt_ctx = ctx.with_upstream_headers(upstream_capture, &source_hints, &client_headers);
         let ctx = &attempt_ctx;
 
+        let total_ms = start.elapsed().as_millis() as u64;
         match upstream_result {
             Ok(upstream::UpstreamResponse::NonStreaming {
                 status,
@@ -1473,7 +1493,8 @@ pub async fn dispatch(
                     status: req_status,
                     http_status: Some(status.as_u16()),
                     ttft_ms: None,
-                    total_latency_ms: Some(start.elapsed().as_millis() as u64),
+                    first_content_ms: None,
+                    total_latency_ms: Some(total_ms),
                     upstream_input_tokens: extract_usage(&final_body, "input_tokens"),
                     upstream_output_tokens: extract_usage(&final_body, "output_tokens"),
                     upstream_cache_creation: extract_usage(&final_body, "cache_creation_input_tokens"),
@@ -1557,6 +1578,7 @@ pub async fn dispatch(
 
                 // 智谱等上游用 200 + `event: error` 表达限流; 不 peek 会被透传成假成功.
                 let peek = sse::peek_first_event(stream).await;
+                let total_ms = start.elapsed().as_millis() as u64;
                 match peek {
                     sse::PeekResult::UpstreamError {
                         code,
@@ -1604,7 +1626,8 @@ pub async fn dispatch(
                             // HTTP 仍然是 200, 但语义层是错误; error_message 区分
                             http_status: Some(200),
                             ttft_ms: None,
-                            total_latency_ms: Some(start.elapsed().as_millis() as u64),
+                            first_content_ms: None,
+                            total_latency_ms: Some(total_ms),
                             upstream_input_tokens: None,
                             upstream_output_tokens: None,
                             upstream_cache_creation: None,
@@ -1658,7 +1681,8 @@ pub async fn dispatch(
                             status: RequestStatus::Error,
                             http_status: Some(200),
                             ttft_ms: None,
-                            total_latency_ms: Some(start.elapsed().as_millis() as u64),
+                            first_content_ms: None,
+                            total_latency_ms: Some(total_ms),
                             upstream_input_tokens: None,
                             upstream_output_tokens: None,
                             upstream_cache_creation: None,
@@ -1792,7 +1816,8 @@ pub async fn dispatch(
                     status: RequestStatus::Error,
                     http_status: None,
                     ttft_ms: None,
-                    total_latency_ms: Some(start.elapsed().as_millis() as u64),
+                    first_content_ms: None,
+                    total_latency_ms: Some(total_ms),
                     upstream_input_tokens: None,
                     upstream_output_tokens: None,
                     upstream_cache_creation: None,

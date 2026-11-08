@@ -262,6 +262,7 @@ pub fn finalize_oauth_response(
     real_model: String,
     display_name: String,
     retry_count: u32,
+    start: std::time::Instant,
     log_tx: mpsc::Sender<RequestLogEntry>,
     event_log_tx: mpsc::Sender<EventEntry>,
     pool: SqlitePool,
@@ -286,6 +287,7 @@ pub fn finalize_oauth_response(
             real_model,
             display_name,
             retry_count,
+            start,
             log_tx,
             event_log_tx,
             pool,
@@ -308,6 +310,7 @@ pub fn finalize_oauth_response(
             real_model,
             display_name,
             retry_count,
+            start,
             log_tx,
             event_log_tx,
             pool,
@@ -352,6 +355,7 @@ fn finalize_streaming(
     real_model: String,
     _display_name: String,
     retry_count: u32,
+    start: std::time::Instant,
     log_tx: mpsc::Sender<RequestLogEntry>,
     event_log_tx: mpsc::Sender<EventEntry>,
     pool: SqlitePool,
@@ -364,7 +368,7 @@ fn finalize_streaming(
     let (client_tx, client_rx) = mpsc::channel::<Result<Bytes, std::io::Error>>(64);
 
     tokio::spawn(async move {
-        let start = std::time::Instant::now();
+        let mut timing = crate::proxy::request_timing::StreamTiming::new(start);
         let mut converter = ResponsesSseConverter::new_with_config(transform_config);
         let mut buffer = BytesMut::with_capacity(8 * 1024);
         let mut input_tokens: Option<u32> = None;
@@ -378,6 +382,7 @@ fn finalize_streaming(
                 Ok(c) => c,
                 Err(e) => {
                     warn!(?e, "OAuth upstream stream error");
+                    timing.fail(upstream::describe_error(&e));
                     // serde 序列化保证 JSON 转义正确 (手拼字符串遇到引号会破帧)
                     let payload =
                         serde_json::to_string(&serde_json::json!({"error": upstream::describe_error(&e)}))
@@ -401,10 +406,12 @@ fn finalize_streaming(
                     continue;
                 };
 
+                timing.observe_responses_frame(&event_name, &data);
                 let anth_events = converter.feed(&event_name, &data);
                 for evt in anth_events {
                     tool_tally.observe_responses_event(&evt);
                     let frame = evt.to_sse_frame();
+                    timing.observe_sse(frame.as_bytes(), std::time::Instant::now());
                     if client_tx.send(Ok(Bytes::from(frame))).await.is_err() {
                         return;
                     }
@@ -420,6 +427,7 @@ fn finalize_streaming(
         }
 
         // 兜底 message_stop
+        timing.finish_stream();
         for evt in converter.finalize_if_needed() {
             tool_tally.observe_responses_event(&evt);
             let _ = client_tx.send(Ok(Bytes::from(evt.to_sse_frame()))).await;
@@ -452,6 +460,9 @@ fn finalize_streaming(
         let upstream_effort_echo = converter.upstream_effort().map(str::to_string);
 
         // 状态机 + 日志 — HTTP 200 但 SSE 内报错时按「上游 SSE 错误」处理 (对齐智谱前例)
+        if upstream_error.is_none() {
+            upstream_error = timing.error_message().map(str::to_owned);
+        }
         let state_event = if upstream_error.is_some() {
             state_machine::Event::UpstreamSseError {
                 is_quota_exhausted: false,
@@ -459,6 +470,7 @@ fn finalize_streaming(
         } else {
             state_machine::Event::RequestSucceeded
         };
+        let total_ms = start.elapsed().as_millis() as u64;
         let _ = state_machine::apply(
             &pool,
             &app,
@@ -489,9 +501,10 @@ fn finalize_streaming(
             // HTTP 层仍是 200, 语义层失败靠 status + error_message 区分 (对齐智谱前例)
             http_status: Some(200),
             ttft_ms: None,
-            total_latency_ms: Some(start.elapsed().as_millis() as u64),
+            first_content_ms: timing.first_content_ms(),
+            total_latency_ms: Some(total_ms),
             upstream_input_tokens: input_tokens,
-            upstream_output_tokens: output_tokens,
+            upstream_output_tokens: output_tokens.filter(|_| timing.has_output_usage()),
             upstream_cache_creation: cache_creation,
             upstream_cache_read: cache_read,
             retry_count,
@@ -544,6 +557,7 @@ async fn collect_to_json_response(
     real_model: String,
     _display_name: String,
     retry_count: u32,
+    start: std::time::Instant,
     log_tx: mpsc::Sender<RequestLogEntry>,
     event_log_tx: mpsc::Sender<EventEntry>,
     pool: SqlitePool,
@@ -553,7 +567,6 @@ async fn collect_to_json_response(
     // 本次 attempt 的思考强度三格 (客户端 / 实际 / 来源), 只写请求日志; 拿不到就是 None。
     effort_log: EffortLog,
 ) -> Response {
-    let start = std::time::Instant::now();
     let mut collector = NonStreamingCollector::new_with_config(transform_config);
     let mut buffer = BytesMut::with_capacity(8 * 1024);
     let mut input_tokens: Option<u32> = None;
@@ -581,6 +594,7 @@ async fn collect_to_json_response(
 
     // 流中 response.failed / error: 非流式还没给客户端发过 header, 可以返回真实错误码 (issue #38)
     if let Some(message) = collector.failure_message().map(str::to_string) {
+        let total_ms = start.elapsed().as_millis() as u64;
         let _ = state_machine::apply(
             &pool,
             &app,
@@ -605,7 +619,8 @@ async fn collect_to_json_response(
             // HTTP 层仍是 200, 语义层失败靠 status + error_message 区分 (对齐智谱前例)
             http_status: Some(200),
             ttft_ms: None,
-            total_latency_ms: Some(start.elapsed().as_millis() as u64),
+            first_content_ms: None,
+            total_latency_ms: Some(total_ms),
             upstream_input_tokens: input_tokens,
             upstream_output_tokens: output_tokens,
             upstream_cache_creation: None,
@@ -658,6 +673,7 @@ async fn collect_to_json_response(
             .map(|v| v as u32);
     }
 
+    let total_ms = start.elapsed().as_millis() as u64;
     let _ = state_machine::apply(
         &pool,
         &app,
@@ -689,7 +705,8 @@ async fn collect_to_json_response(
         status: RequestStatus::Success,
         http_status: Some(200),
         ttft_ms: None,
-        total_latency_ms: Some(start.elapsed().as_millis() as u64),
+        first_content_ms: None,
+        total_latency_ms: Some(total_ms),
         upstream_input_tokens: input_tokens,
         upstream_output_tokens: output_tokens,
         upstream_cache_creation: cache_creation,
@@ -905,6 +922,7 @@ pub fn finalize_kiro_response(
     real_model: String,
     display_name: String,
     retry_count: u32,
+    start: std::time::Instant,
     log_tx: mpsc::Sender<RequestLogEntry>,
     event_log_tx: mpsc::Sender<EventEntry>,
     pool: SqlitePool,
@@ -917,12 +935,12 @@ pub fn finalize_kiro_response(
     if ok.client_wants_streaming {
         finalize_kiro_streaming(
             ok.upstream_stream, vm_name, attempt_id, sub_id, provider_id, endpoint_id,
-            real_model, display_name, retry_count, log_tx, event_log_tx, pool, app, sub_rt, ctx, effort_log,
+            real_model, display_name, retry_count, start, log_tx, event_log_tx, pool, app, sub_rt, ctx, effort_log,
         )
     } else {
         let fut = collect_kiro_to_json_response(
             ok.upstream_stream, vm_name, attempt_id, sub_id, provider_id, endpoint_id,
-            real_model, display_name, retry_count, log_tx, event_log_tx, pool, app, sub_rt, ctx, effort_log,
+            real_model, display_name, retry_count, start, log_tx, event_log_tx, pool, app, sub_rt, ctx, effort_log,
         );
         let stream = futures::stream::once(async move {
             let resp = fut.await;
@@ -955,6 +973,7 @@ fn finalize_kiro_streaming(
     real_model: String,
     _display_name: String,
     retry_count: u32,
+    start: std::time::Instant,
     log_tx: mpsc::Sender<RequestLogEntry>,
     event_log_tx: mpsc::Sender<EventEntry>,
     pool: SqlitePool,
@@ -967,7 +986,8 @@ fn finalize_kiro_streaming(
     let (client_tx, client_rx) = mpsc::channel::<Result<Bytes, std::io::Error>>(64);
 
     tokio::spawn(async move {
-        let start = std::time::Instant::now();
+        let mut timing = crate::proxy::request_timing::StreamTiming::new(start);
+        let mut has_output_usage = false;
         let mut decoder = EventStreamDecoder::new();
         let mut converter = KiroSseConverter::new(&real_model);
         let mut tool_tally = ToolUseTally::default();
@@ -978,6 +998,7 @@ fn finalize_kiro_streaming(
                 Ok(c) => c,
                 Err(e) => {
                     warn!(?e, "Kiro upstream stream error");
+                    timing.fail(upstream::describe_error(&e));
                     let payload =
                         serde_json::to_string(&serde_json::json!({"error": upstream::describe_error(&e)}))
                             .unwrap_or_else(|_| r#"{"error":"unknown"}"#.into());
@@ -991,6 +1012,7 @@ fn finalize_kiro_streaming(
                 Ok(f) => f,
                 Err(e) => {
                     warn!(?e, "Kiro Event Stream 解码错误");
+                    timing.fail(format!("Event stream decode error: {e}"));
                     let _ = client_tx
                         .send(Ok(Bytes::from(format!(
                             "event: error\ndata: {{\"error\":\"event_stream_decode: {}\"}}\n\n",
@@ -1001,6 +1023,10 @@ fn finalize_kiro_streaming(
                 }
             };
             for frame in frames {
+                if frame.event_type() == Some("contextUsageEvent") {
+                    has_output_usage |= serde_json::from_slice::<Value>(&frame.payload).ok()
+                        .and_then(|v| v.get("outputTokenCount").and_then(Value::as_u64)).is_some();
+                }
                 let anth_events = converter.feed(&frame);
                 if anth_events.is_empty() {
                     continue;
@@ -1010,6 +1036,7 @@ fn finalize_kiro_streaming(
                     tool_tally.observe_event_json(&evt.data);
                     buf.extend_from_slice(&evt.to_sse_bytes());
                 }
+                timing.observe_sse(&buf, std::time::Instant::now());
                 if client_tx.send(Ok(Bytes::from(buf))).await.is_err() {
                     return;
                 }
@@ -1022,15 +1049,17 @@ fn finalize_kiro_streaming(
                 tool_tally.observe_event_json(&evt.data);
                 buf.extend_from_slice(&evt.to_sse_bytes());
             }
+            timing.observe_sse(&buf, std::time::Instant::now());
             let _ = client_tx.send(Ok(Bytes::from(buf))).await;
         }
 
+        let total_ms = start.elapsed().as_millis() as u64;
         let _ = state_machine::apply(
             &pool,
             &app,
             &event_log_tx,
             sub_rt.clone(),
-            state_machine::Event::RequestSucceeded,
+            if timing.error_message().is_some() { state_machine::Event::NetworkError } else { state_machine::Event::RequestSucceeded },
         )
         .await;
 
@@ -1048,16 +1077,17 @@ fn finalize_kiro_streaming(
             real_model_name: real_model.clone(),
             response_model_name: None,
             is_streaming: true,
-            status: RequestStatus::Success,
+            status: if timing.error_message().is_some() { RequestStatus::Error } else { RequestStatus::Success },
             http_status: Some(200),
             ttft_ms: None,
-            total_latency_ms: Some(start.elapsed().as_millis() as u64),
+            first_content_ms: timing.first_content_ms(),
+            total_latency_ms: Some(total_ms),
             upstream_input_tokens: input_tokens,
-            upstream_output_tokens: output_tokens,
+            upstream_output_tokens: output_tokens.filter(|_| has_output_usage),
             upstream_cache_creation: None,
             upstream_cache_read: None,
             retry_count,
-            error_message: None,
+            error_message: timing.error_message().map(str::to_owned),
             upstream_response_body: None,
             client_tool: ctx.info.tool,
             client_user_agent: ctx.info.user_agent.clone(),
@@ -1102,6 +1132,7 @@ async fn collect_kiro_to_json_response(
     real_model: String,
     _display_name: String,
     retry_count: u32,
+    start: std::time::Instant,
     log_tx: mpsc::Sender<RequestLogEntry>,
     event_log_tx: mpsc::Sender<EventEntry>,
     pool: SqlitePool,
@@ -1111,7 +1142,6 @@ async fn collect_kiro_to_json_response(
     // 本次 attempt 的思考强度三格 (客户端 / 实际 / 来源), 只写请求日志; 拿不到就是 None。
     effort_log: EffortLog,
 ) -> Response {
-    let start = std::time::Instant::now();
     let mut decoder = EventStreamDecoder::new();
     let mut collector = KiroCollector::new(&real_model);
 
@@ -1137,6 +1167,7 @@ async fn collect_kiro_to_json_response(
         tally.fields(&ctx.tools)
     };
 
+    let total_ms = start.elapsed().as_millis() as u64;
     let _ = state_machine::apply(
         &pool,
         &app,
@@ -1173,7 +1204,8 @@ async fn collect_kiro_to_json_response(
         status: RequestStatus::Success,
         http_status: Some(200),
         ttft_ms: None,
-        total_latency_ms: Some(start.elapsed().as_millis() as u64),
+        first_content_ms: None,
+        total_latency_ms: Some(total_ms),
         upstream_input_tokens: input_tokens,
         upstream_output_tokens: output_tokens,
         upstream_cache_creation: None,

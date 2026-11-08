@@ -133,6 +133,8 @@ pub struct RequestLogEntry {
     pub status: RequestStatus,
     pub http_status: Option<u16>,
     pub ttft_ms: Option<u64>,
+    /// First effective content, distinct from legacy first-byte ttft_ms.
+    pub first_content_ms: Option<u64>,
     pub total_latency_ms: Option<u64>,
     pub upstream_input_tokens: Option<u32>,
     pub upstream_output_tokens: Option<u32>,
@@ -425,7 +427,7 @@ pub(crate) async fn flush_batch(
             "INSERT INTO requests (id, timestamp, virtual_model_name, subscription_id,
                 provider_id, endpoint_id, real_model_name, response_model_name,
                 is_streaming, status,
-                http_status, ttft_ms, total_latency_ms,
+                http_status, ttft_ms, first_content_ms, total_latency_ms,
                 upstream_input_tokens, upstream_output_tokens,
                 upstream_cache_creation, upstream_cache_read,
                 retry_count, error_message, upstream_response_body,
@@ -435,7 +437,7 @@ pub(crate) async fn flush_batch(
                 stop_reason, tools_offered_count, tool_result_count, tool_use_count, tool_use_names,
                 client_request_headers, upstream_request_headers, upstream_response_headers)
              VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
-                     ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                     ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
         )
         .bind(entry.id.to_string())
         .bind(entry.timestamp_ms)
@@ -449,6 +451,7 @@ pub(crate) async fn flush_batch(
         .bind(entry.status.as_str())
         .bind(entry.http_status.map(|v| v as i64))
         .bind(entry.ttft_ms.map(|v| v as i64))
+        .bind(entry.first_content_ms.map(|v| v as i64))
         .bind(entry.total_latency_ms.map(|v| v as i64))
         .bind(entry.upstream_input_tokens.map(|v| v as i64))
         .bind(entry.upstream_output_tokens.map(|v| v as i64))
@@ -642,6 +645,7 @@ mod tests {
             status,
             http_status: Some(200),
             ttft_ms: None,
+            first_content_ms: None,
             total_latency_ms: latency_ms,
             upstream_input_tokens: in_tokens,
             upstream_output_tokens: out_tokens,
@@ -663,6 +667,23 @@ mod tests {
             tool_calls: crate::proxy::tool_log::ToolLogFields::empty(),
             headers: crate::proxy::header_log::HeaderLogFields::none(),
         }
+    }
+
+    /// First-content timing keeps zero distinct from unknown and persists with the log batch.
+    #[tokio::test]
+    async fn flush_persists_first_content_including_zero_and_unknown() {
+        let pool = fresh_pool().await;
+        let sub = Uuid::new_v4();
+        let mut entries = Vec::new();
+        for first in [Some(850), Some(0), None] {
+            let mut entry = make_entry(1000, VirtualModelName::Sonnet, sub, "p", RequestStatus::Success, Some(5000), Some(10), Some(200));
+            entry.first_content_ms = first;
+            entries.push(entry);
+        }
+        flush_batch(&pool, entries, vec![]).await.unwrap();
+        let values: Vec<Option<i64>> = sqlx::query_scalar("SELECT first_content_ms FROM requests ORDER BY first_content_ms")
+            .fetch_all(&pool).await.unwrap();
+        assert_eq!(values, vec![None, Some(0), Some(850)]);
     }
 
     /// 工具调用 5 列: 有值能读回; request_only 的 entry 响应侧三列为 NULL。

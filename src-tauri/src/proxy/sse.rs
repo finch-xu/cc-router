@@ -85,10 +85,12 @@ pub fn stream_response(
         let mut raw_dump_buf: Option<BytesMut> = body_dump_tx
             .as_ref()
             .map(|_| BytesMut::with_capacity(8 * 1024));
+        let mut timing = crate::proxy::request_timing::StreamTiming::new(start);
         let mut wrote_any_event = false;
         let mut first_byte_at: Option<Instant> = peek_first_byte_at;
         let mut input_tokens: Option<u32> = None;
         let mut output_tokens: Option<u32> = None;
+        let mut has_final_output_usage = false;
         let mut cache_creation: Option<u32> = None;
         let mut cache_read: Option<u32> = None;
         let mut response_model: Option<String> = None;
@@ -121,9 +123,9 @@ pub fn stream_response(
             }
             buffer.extend_from_slice(&chunk);
 
-            // 尝试按 "\n\n" 切出完整事件
-            while let Some(pos) = find_sequence(&buffer, b"\n\n") {
-                let event_bytes = buffer.split_to(pos + 2);
+            // LF and CRLF both delimit complete events; partial frames cannot start timing.
+            while let Some((pos, sep_len)) = super::sse_framing::find_sse_frame_boundary(&buffer) {
+                let event_bytes = buffer.split_to(pos + sep_len);
                 let (processed, parsed_meta) =
                     process_event(&event_bytes, virtual_name_override.as_deref());
 
@@ -132,6 +134,7 @@ pub fn stream_response(
                         input_tokens = Some(v);
                     }
                     if let Some(v) = meta.output_tokens {
+                        has_final_output_usage |= std::str::from_utf8(&event_bytes).ok().and_then(sse_event_name) == Some("message_delta");
                         output_tokens = Some(v);
                     }
                     if let Some(v) = meta.cache_creation {
@@ -149,6 +152,7 @@ pub fn stream_response(
                     tool_tally.observe_stop_reason(meta.stop_reason.as_deref());
                 }
 
+                timing.observe_sse(&processed, Instant::now());
                 if let Err(e) = client_tx.send(Ok(processed)).await {
                     warn!(?e, "client 接收方已关闭, 终止流式任务以释放上游连接");
                     return;
@@ -156,6 +160,8 @@ pub fn stream_response(
                 wrote_any_event = true;
             }
         }
+
+        timing.finish_stream();
 
         // 缓冲区残余
         if !buffer.is_empty() {
@@ -171,6 +177,12 @@ pub fn stream_response(
             ));
         }
 
+        if let Some(message) = timing.error_message() {
+            had_error = true;
+            error_text.get_or_insert_with(|| message.to_owned());
+        }
+        let total_ms = start.elapsed().as_millis() as u64;
+
         // 客户端断开走 client_tx send error 提前 return, 不会到此, 避免 ctrl+c 触发 transient
         if had_error {
             let _ = state_machine::apply(
@@ -184,7 +196,6 @@ pub fn stream_response(
         }
 
         // 日志
-        let total_ms = start.elapsed().as_millis() as u64;
         let ttft_ms = first_byte_at.map(|t| t.duration_since(start).as_millis() as u64);
         let error_message = if had_error {
             Some(format!(
@@ -211,9 +222,10 @@ pub fn stream_response(
             },
             http_status: Some(200),
             ttft_ms,
+            first_content_ms: timing.first_content_ms(),
             total_latency_ms: Some(total_ms),
             upstream_input_tokens: input_tokens,
-            upstream_output_tokens: output_tokens,
+            upstream_output_tokens: output_tokens.filter(|_| has_final_output_usage),
             upstream_cache_creation: cache_creation,
             upstream_cache_read: cache_read,
             retry_count,
@@ -449,15 +461,6 @@ fn sse_event_name(text: &str) -> Option<&str> {
     None
 }
 
-fn find_sequence(haystack: &[u8], needle: &[u8]) -> Option<usize> {
-    if needle.is_empty() || needle.len() > haystack.len() {
-        return None;
-    }
-    haystack
-        .windows(needle.len())
-        .position(|w| w == needle)
-}
-
 fn format_error_event(msg: &str) -> String {
     let payload = serde_json::json!({
         "type": "error",
@@ -518,8 +521,8 @@ pub async fn peek_first_event(
     let mut first_byte_at: Option<Instant> = None;
 
     loop {
-        if let Some(pos) = find_sequence(&buffer, b"\n\n") {
-            let event_end = pos + 2;
+        if let Some((pos, sep_len)) = super::sse_framing::find_sse_frame_boundary(&buffer) {
+            let event_end = pos + sep_len;
             let event_bytes = &buffer[..event_end];
             let text = match std::str::from_utf8(event_bytes) {
                 Ok(s) => s,
@@ -557,6 +560,26 @@ pub async fn peek_first_event(
             Some(Err(e)) => return PeekResult::Network(e),
             None => return PeekResult::Malformed(buffer.freeze()),
         }
+    }
+}
+
+#[cfg(test)]
+mod first_content_framing_tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn crlf_peek_preserves_complete_content_for_timing() {
+        let start = Instant::now();
+        let raw = Bytes::from_static(b"event: content_block_delta\r\ndata: {\"type\":\"content_block_delta\",\"delta\":{\"type\":\"text_delta\",\"text\":\"hi\"}}\r\n\r\n");
+        let stream = futures::stream::iter(vec![Ok(raw.clone())]).boxed();
+        let PeekResult::Ok { mut stream, .. } = peek_first_event(stream).await else {
+            panic!("CRLF is a valid complete SSE event");
+        };
+        let emitted = stream.next().await.unwrap().unwrap();
+        assert_eq!(emitted, raw);
+        let mut timing = crate::proxy::request_timing::StreamTiming::new(start);
+        timing.observe_sse(&emitted, start);
+        assert_eq!(timing.first_content_ms(), Some(0));
     }
 }
 

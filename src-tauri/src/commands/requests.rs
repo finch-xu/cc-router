@@ -26,6 +26,8 @@ pub struct RequestLogDto {
     pub status: String,
     pub http_status: Option<i64>,
     pub total_latency_ms: Option<i64>,
+    pub first_content_ms: Option<i64>,
+    pub output_tokens_per_second: Option<f64>,
     pub input_tokens: Option<i64>,
     pub output_tokens: Option<i64>,
     pub cache_creation_tokens: Option<i64>,
@@ -148,7 +150,7 @@ pub async fn list_requests(
     let select_sql = format!(
         "SELECT id, timestamp, virtual_model_name, subscription_id, provider_id, endpoint_id,
                 real_model_name, response_model_name, is_streaming, status,
-                http_status, total_latency_ms,
+                http_status, total_latency_ms, first_content_ms,
                 upstream_input_tokens, upstream_output_tokens,
                 upstream_cache_creation, upstream_cache_read, error_message,
                 upstream_response_body,
@@ -186,6 +188,8 @@ pub async fn list_requests(
             status: r.try_get("status").unwrap_or_default(),
             http_status: r.try_get("http_status").ok(),
             total_latency_ms: r.try_get("total_latency_ms").ok(),
+            first_content_ms: r.try_get("first_content_ms").ok(),
+            output_tokens_per_second: row_output_speed(&r),
             input_tokens: r.try_get("upstream_input_tokens").ok(),
             output_tokens: r.try_get("upstream_output_tokens").ok(),
             cache_creation_tokens: r.try_get("upstream_cache_creation").ok(),
@@ -265,7 +269,7 @@ provider_id,endpoint_id,real_model_name,response_model_name,is_streaming,status,
 total_latency_ms,input_tokens,output_tokens,cache_creation_tokens,cache_read_tokens,\
 error_message,client_tool,client_user_agent,client_version,client_ip,entry_kind,\
 downstream_http_version,client_effort,effective_effort,effort_source,upstream_effort,\
-stop_reason,tools_offered_count,tool_result_count,tool_use_count,tool_use_names";
+stop_reason,tools_offered_count,tool_result_count,tool_use_count,tool_use_names,first_content_ms,output_tokens_per_second";
 
 /// 把当前筛选下的请求逐行写成 CSV (带 UTF-8 BOM + 表头), 返回行数.
 /// 桌面导出写文件, 网页导出写 Vec<u8>, 共享同一份 SQL 与格式化.
@@ -280,7 +284,7 @@ pub async fn write_csv<W: Write>(
     let sql = format!(
         "SELECT id, timestamp, virtual_model_name, subscription_id, provider_id, endpoint_id,
                 real_model_name, response_model_name, is_streaming, status,
-                http_status, total_latency_ms,
+                http_status, total_latency_ms, first_content_ms,
                 upstream_input_tokens, upstream_output_tokens,
                 upstream_cache_creation, upstream_cache_read, error_message,
                 client_tool, client_user_agent, client_version, client_ip,
@@ -345,6 +349,8 @@ pub async fn write_csv<W: Write>(
             opt_num(r.try_get("tool_result_count").ok()),
             opt_num(r.try_get("tool_use_count").ok()),
             opt_str(r.try_get("tool_use_names").ok()),
+            opt_num(r.try_get("first_content_ms").ok()),
+            row_output_speed(&r).map(|v| v.to_string()).unwrap_or_default(),
         ]
         .join(",");
         writeln!(w, "{}", line).map_err(io_err)?;
@@ -436,6 +442,18 @@ pub async fn get_client_activity(state: State<'_, AppState>) -> AppResult<Vec<Cl
     query_client_activity(&state.db).await.map_err(Into::into)
 }
 
+/// One calculation for the table DTO and both CSV exporters.
+fn row_output_speed(row: &sqlx::sqlite::SqliteRow) -> Option<f64> {
+    crate::proxy::request_timing::output_tokens_per_second(
+        row.try_get::<i64, _>("is_streaming").unwrap_or(0) != 0,
+        &row.try_get::<String, _>("status").unwrap_or_default(),
+        row.try_get("upstream_output_tokens").ok(),
+        row.try_get("total_latency_ms").ok(),
+        row.try_get("first_content_ms").ok(),
+    )
+}
+
+
 #[cfg(test)]
 mod tests {
     use super::{csv_field, CSV_HEADER};
@@ -472,6 +490,21 @@ mod tests {
             .unwrap();
         crate::db::run_migrations(&pool).await.unwrap();
         pool
+    }
+
+    #[tokio::test]
+    async fn first_content_migration_preserves_unknown_historical_values() {
+        let pool = header_pool().await;
+        insert_request(&pool, "old", 1000, None, Some((10, 200))).await;
+        let first: Option<i64> = sqlx::query_scalar("SELECT first_content_ms FROM requests WHERE id = 'old'")
+            .fetch_one(&pool).await.unwrap();
+        assert_eq!(first, None);
+        sqlx::query("UPDATE requests SET first_content_ms = 1200 WHERE id = 'old'")
+            .execute(&pool).await.unwrap();
+        crate::db::run_migrations(&pool).await.unwrap();
+        let first: Option<i64> = sqlx::query_scalar("SELECT first_content_ms FROM requests WHERE id = 'old'")
+            .fetch_one(&pool).await.unwrap();
+        assert_eq!(first, Some(1200));
     }
 
     #[tokio::test]
@@ -552,9 +585,9 @@ mod tests {
     #[test]
     fn csv_header_has_expected_columns() {
         let cols: Vec<&str> = CSV_HEADER.split(',').collect();
-        assert_eq!(cols.len(), 33, "改了 CSV 列数? 同步 SELECT 与行写入");
+        assert_eq!(cols.len(), 35, "改了 CSV 列数? 同步 SELECT 与行写入");
         assert_eq!(
-            &cols[cols.len() - 9..],
+            &cols[cols.len() - 11..],
             &[
                 "client_effort",
                 "effective_effort",
@@ -565,6 +598,8 @@ mod tests {
                 "tool_result_count",
                 "tool_use_count",
                 "tool_use_names",
+                "first_content_ms",
+                "output_tokens_per_second",
             ]
         );
         // 刻意排除的大字段, 不能悄悄混进来

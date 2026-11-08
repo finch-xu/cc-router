@@ -267,6 +267,7 @@ pub fn finalize_openai_responses(
     real_model: String,
     display_name: String,
     retry_count: u32,
+    start: std::time::Instant,
     log_tx: mpsc::Sender<RequestLogEntry>,
     event_log_tx: mpsc::Sender<EventEntry>,
     pool: SqlitePool,
@@ -289,6 +290,7 @@ pub fn finalize_openai_responses(
             real_model,
             display_name,
             retry_count,
+            start,
             log_tx,
             event_log_tx,
             pool,
@@ -308,6 +310,7 @@ pub fn finalize_openai_responses(
             real_model,
             display_name,
             retry_count,
+            start,
             log_tx,
             event_log_tx,
             pool,
@@ -331,6 +334,7 @@ fn finalize_streaming(
     real_model: String,
     _display_name: String,
     retry_count: u32,
+    start: std::time::Instant,
     log_tx: mpsc::Sender<RequestLogEntry>,
     event_log_tx: mpsc::Sender<EventEntry>,
     pool: SqlitePool,
@@ -343,7 +347,7 @@ fn finalize_streaming(
     let (client_tx, client_rx) = mpsc::channel::<Result<Bytes, std::io::Error>>(64);
 
     tokio::spawn(async move {
-        let start = std::time::Instant::now();
+        let mut timing = crate::proxy::request_timing::StreamTiming::new(start);
         let mut converter = ResponsesSseConverter::new_with_config(transform_config);
         let mut buffer = BytesMut::with_capacity(8 * 1024);
         let mut input_tokens: Option<u32> = None;
@@ -360,6 +364,7 @@ fn finalize_streaming(
                 Ok(c) => c,
                 Err(e) => {
                     warn!(?e, "OpenAI Responses upstream stream error");
+                    timing.fail(upstream::describe_error(&e));
                     let payload = serde_json::to_string(&serde_json::json!({"error": upstream::describe_error(&e)}))
                         .unwrap_or_else(|_| r#"{"error":"unknown"}"#.into());
                     let _ = client_tx
@@ -380,6 +385,7 @@ fn finalize_streaming(
                 let Some((event_name, data)) = parse_sse_frame(frame_str) else {
                     continue;
                 };
+                timing.observe_responses_frame(&event_name, &data);
                 let anth_events = converter.feed(&event_name, &data);
                 if !anth_events.is_empty() {
                     let mut buf = Vec::with_capacity(256);
@@ -387,6 +393,7 @@ fn finalize_streaming(
                         tool_tally.observe_responses_event(&evt);
                         buf.extend_from_slice(evt.to_sse_frame().as_bytes());
                     }
+                    timing.observe_sse(&buf, std::time::Instant::now());
                     if client_tx.send(Ok(Bytes::from(buf))).await.is_err() {
                         return;
                     }
@@ -402,6 +409,7 @@ fn finalize_streaming(
         }
 
         // 兜底 message_stop (若 response.completed 没收到)
+        timing.finish_stream();
         let tail = converter.finalize_if_needed();
         if !tail.is_empty() {
             let mut buf = Vec::new();
@@ -409,6 +417,7 @@ fn finalize_streaming(
                 tool_tally.observe_responses_event(&evt);
                 buf.extend_from_slice(evt.to_sse_frame().as_bytes());
             }
+            timing.observe_sse(&buf, std::time::Instant::now());
             let _ = client_tx.send(Ok(Bytes::from(buf))).await;
         }
 
@@ -440,6 +449,9 @@ fn finalize_streaming(
         let upstream_effort_echo = converter.upstream_effort().map(str::to_string);
 
         // 状态机 + 日志 — HTTP 200 但 SSE 内报错时按「上游 SSE 错误」处理 (对齐智谱前例)
+        if upstream_error.is_none() {
+            upstream_error = timing.error_message().map(str::to_owned);
+        }
         let state_event = if upstream_error.is_some() {
             state_machine::Event::UpstreamSseError {
                 is_quota_exhausted: false,
@@ -447,6 +459,7 @@ fn finalize_streaming(
         } else {
             state_machine::Event::RequestSucceeded
         };
+        let total_ms = start.elapsed().as_millis() as u64;
         let _ = state_machine::apply(&pool, &app, &event_log_tx, sub_rt.clone(), state_event).await;
 
         let entry = RequestLogEntry {
@@ -467,9 +480,10 @@ fn finalize_streaming(
             // HTTP 层仍是 200, 语义层失败靠 status + error_message 区分
             http_status: Some(200),
             ttft_ms: None,
-            total_latency_ms: Some(start.elapsed().as_millis() as u64),
+            first_content_ms: timing.first_content_ms(),
+            total_latency_ms: Some(total_ms),
             upstream_input_tokens: input_tokens,
-            upstream_output_tokens: output_tokens,
+            upstream_output_tokens: output_tokens.filter(|_| timing.has_output_usage()),
             upstream_cache_creation: cache_creation,
             upstream_cache_read: cache_read,
             retry_count,
@@ -519,6 +533,7 @@ fn finalize_non_streaming(
     real_model: String,
     _display_name: String,
     retry_count: u32,
+    start: std::time::Instant,
     log_tx: mpsc::Sender<RequestLogEntry>,
     event_log_tx: mpsc::Sender<EventEntry>,
     pool: SqlitePool,
@@ -528,8 +543,6 @@ fn finalize_non_streaming(
     // 本次 attempt 的思考强度三格 (客户端 / 实际 / 来源), 只写请求日志; 拿不到就是 None。
     effort_log: EffortLog,
 ) -> Response {
-    let start = std::time::Instant::now();
-
     // 提取 usage 字段 (用于日志, 翻译前提; 先过 responses_usage_to_anthropic 归一化缓存命名)
     let usage = upstream_body
         .get("usage")
@@ -590,6 +603,7 @@ fn finalize_non_streaming(
     let log_provider_id = provider_id.clone();
     let log_endpoint_id = endpoint_id.clone();
     tokio::spawn(async move {
+        let total_ms = start.elapsed().as_millis() as u64;
         let _ = state_machine::apply(
             &log_pool,
             &log_app,
@@ -612,7 +626,8 @@ fn finalize_non_streaming(
             status: RequestStatus::Success,
             http_status: Some(200),
             ttft_ms: None,
-            total_latency_ms: Some(start.elapsed().as_millis() as u64),
+            first_content_ms: None,
+            total_latency_ms: Some(total_ms),
             upstream_input_tokens: input_tokens,
             upstream_output_tokens: output_tokens,
             upstream_cache_creation: cache_creation,

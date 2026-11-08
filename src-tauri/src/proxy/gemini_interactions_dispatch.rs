@@ -227,6 +227,7 @@ pub fn finalize_gemini_interactions_response(
     real_model: String,
     display_name: String,
     retry_count: u32,
+    start: std::time::Instant,
     log_tx: mpsc::Sender<RequestLogEntry>,
     event_log_tx: mpsc::Sender<EventEntry>,
     pool: SqlitePool,
@@ -250,6 +251,7 @@ pub fn finalize_gemini_interactions_response(
             real_model,
             display_name,
             retry_count,
+            start,
             log_tx,
             event_log_tx,
             pool,
@@ -271,6 +273,7 @@ pub fn finalize_gemini_interactions_response(
             real_model,
             display_name,
             retry_count,
+            start,
             log_tx,
             event_log_tx,
             pool,
@@ -312,6 +315,7 @@ fn finalize_streaming(
     real_model: String,
     _display_name: String,
     retry_count: u32,
+    start: std::time::Instant,
     log_tx: mpsc::Sender<RequestLogEntry>,
     event_log_tx: mpsc::Sender<EventEntry>,
     pool: SqlitePool,
@@ -325,7 +329,7 @@ fn finalize_streaming(
     let (client_tx, client_rx) = mpsc::channel::<Result<Bytes, std::io::Error>>(64);
 
     tokio::spawn(async move {
-        let start = std::time::Instant::now();
+        let mut timing = crate::proxy::request_timing::StreamTiming::new(start);
         let mut converter = InteractionsSseConverter::new_with_extras(&real_model, emit_thoughts);
         let mut buffer = BytesMut::with_capacity(8 * 1024);
         let mut tool_tally = ToolUseTally::default();
@@ -340,6 +344,7 @@ fn finalize_streaming(
                 Ok(c) => c,
                 Err(e) => {
                     warn!(?e, "Gemini Interactions upstream stream error");
+                    timing.fail(upstream::describe_error(&e));
                     let payload = serde_json::to_string(&serde_json::json!({"error": upstream::describe_error(&e)}))
                         .unwrap_or_else(|_| r#"{"error":"unknown"}"#.into());
                     let _ = client_tx
@@ -363,6 +368,7 @@ fn finalize_streaming(
                 let Some(frame_json) = parse_interactions_sse_frame(frame_str) else {
                     continue;
                 };
+                timing.observe_interactions_frame(&frame_json);
                 let anth_events = converter.feed(&frame_json);
                 if anth_events.is_empty() {
                     continue;
@@ -372,6 +378,7 @@ fn finalize_streaming(
                     tool_tally.observe_event_json(&evt.data);
                     buf.extend_from_slice(&evt.to_sse_bytes());
                 }
+                timing.observe_sse(&buf, std::time::Instant::now());
                 if client_tx.send(Ok(Bytes::from(buf))).await.is_err() {
                     return;
                 }
@@ -388,6 +395,7 @@ fn finalize_streaming(
         }
 
         // 兜底 message_delta + message_stop
+        timing.finish_stream();
         let tail = converter.finalize();
         if !tail.is_empty() {
             let mut buf = Vec::new();
@@ -395,15 +403,17 @@ fn finalize_streaming(
                 tool_tally.observe_event_json(&evt.data);
                 buf.extend_from_slice(&evt.to_sse_bytes());
             }
+            timing.observe_sse(&buf, std::time::Instant::now());
             let _ = client_tx.send(Ok(Bytes::from(buf))).await;
         }
 
+        let total_ms = start.elapsed().as_millis() as u64;
         let _ = state_machine::apply(
             &pool,
             &app,
             &event_log_tx,
             sub_rt.clone(),
-            state_machine::Event::RequestSucceeded,
+            if timing.error_message().is_some() { state_machine::Event::NetworkError } else { state_machine::Event::RequestSucceeded },
         )
         .await;
 
@@ -428,16 +438,17 @@ fn finalize_streaming(
                 if m.is_empty() { None } else { Some(m.to_string()) }
             },
             is_streaming: true,
-            status: RequestStatus::Success,
+            status: if timing.error_message().is_some() { RequestStatus::Error } else { RequestStatus::Success },
             http_status: Some(200),
             ttft_ms: None,
-            total_latency_ms: Some(start.elapsed().as_millis() as u64),
+            first_content_ms: timing.first_content_ms(),
+            total_latency_ms: Some(total_ms),
             upstream_input_tokens: input_tokens,
-            upstream_output_tokens: output_tokens,
+            upstream_output_tokens: output_tokens.filter(|_| timing.has_output_usage()),
             upstream_cache_creation: None,
             upstream_cache_read: cache_read,
             retry_count,
-            error_message: None,
+            error_message: timing.error_message().map(str::to_owned),
             upstream_response_body: None,
             client_tool: ctx.info.tool,
             client_user_agent: ctx.info.user_agent.clone(),
@@ -483,6 +494,7 @@ async fn collect_to_json_response(
     real_model: String,
     _display_name: String,
     retry_count: u32,
+    start: std::time::Instant,
     log_tx: mpsc::Sender<RequestLogEntry>,
     event_log_tx: mpsc::Sender<EventEntry>,
     pool: SqlitePool,
@@ -493,7 +505,6 @@ async fn collect_to_json_response(
     effort_log: EffortLog,
     body_dump_tx: Option<mpsc::Sender<BodyDumpEntry>>,
 ) -> Response {
-    let start = std::time::Instant::now();
     let mut collector = InteractionsNonStreamingCollector::new_with_extras(&real_model, emit_thoughts);
     let mut buffer = BytesMut::with_capacity(8 * 1024);
     // 调试模式: 累积上游原始 SSE 字节, 流结束后落盘。
@@ -536,6 +547,7 @@ async fn collect_to_json_response(
         tally.fields(&ctx.tools)
     };
 
+    let total_ms = start.elapsed().as_millis() as u64;
     let _ = state_machine::apply(
         &pool,
         &app,
@@ -577,7 +589,8 @@ async fn collect_to_json_response(
         status: RequestStatus::Success,
         http_status: Some(200),
         ttft_ms: None,
-        total_latency_ms: Some(start.elapsed().as_millis() as u64),
+        first_content_ms: None,
+        total_latency_ms: Some(total_ms),
         upstream_input_tokens: input_tokens,
         upstream_output_tokens: output_tokens,
         upstream_cache_creation: None,

@@ -962,11 +962,11 @@ html:not([data-platform="macos"]) .main.flush { padding-top: 0; }
 .table td.mono.muted { color: var(--ink-3); }
 .table td.mono.strong { color: var(--ink-2); font-weight: 500; }
 
-/* 请求日志有十列: 窄窗口只滚动表格, 避免被 .main 的 overflow-x:clip 截掉右侧。
- * 列宽合计 1100px; fixed 布局阻止任意长的模型名 / 厂商名撑大整张表。 */
+/* 请求日志有十二列: 窄窗口只滚动表格, 避免被 .main 的 overflow-x:clip 截掉右侧。
+ * 列宽合计 1305px; fixed 布局阻止任意长的模型名 / 厂商名撑大整张表。 */
 .request-log-scroll { max-width: 100%; overflow-x: auto; border-radius: inherit; }
 .request-log-scroll:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
-.request-log-table { min-width: 1100px; table-layout: fixed; }
+.request-log-table { min-width: 1305px; table-layout: fixed; }
 .request-log-table th, .request-log-table td { padding-left: 10px; padding-right: 10px; overflow-wrap: anywhere; }
 .request-log-table .tnum { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .request-log-name { display: block; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -4218,3 +4218,9 @@ html:not([data-platform="macos"]) .main.flush { padding-top: 0; }
 .hp-chip-x:hover { color: var(--err); }
 .hp-auto-mode { font-size: 11.5px; }
 .hp-auto-mode code { font-size: 11.5px; }
+
+.rd-overview-table { table-layout: fixed; }
+.rd-overview-table th:first-child { width: 34%; }
+.rd-provider-value { display: flex; align-items: center; gap: 6px; }
+.rd-provider-value > span:last-child { min-width: 0; }
+.rd-overview-error { color: var(--err); white-space: pre-wrap; }
