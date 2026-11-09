@@ -1,0 +1,65 @@
+# Standard Compute provider
+#
+# Docs (checked 2026-11):
+#   - Anthropic Messages API: https://docs.standardcompute.com
+#       Endpoint: https://api.stdcmpt.com/v1/messages
+#       Request body follows the official Anthropic format.
+#   - Auth: Authorization: Bearer <STANDARDCOMPUTE_API_KEY>
+#       Get a key: https://standardcompute.com
+#   - /v1/models: https://api.stdcmpt.com/v1/models
+#       Same host and prefix as messages; used here for dynamic model_discovery.
+#   - Model ID "StandardCompute" is routed: each request goes to the cheapest
+#     enabled model that can handle it, with automatic fallback.
+
+id: standardcompute
+display_name: "Standard Compute"
+icon: ""
+category: aggregator
+description:
+  zh: "Standard Compute 模型网关，模型 StandardCompute 会把每个请求路由到能处理它的最便宜的已启用模型，并自动回退"
+  zh-Hant: "Standard Compute 模型閘道，模型 StandardCompute 會把每個請求路由到能處理它的最便宜的已啟用模型，並自動回退"
+  en: "Standard Compute model gateway; the StandardCompute model routes each request to the cheapest enabled model that can handle it, with automatic fallback"
+  ja: "Standard Compute モデルゲートウェイ。StandardCompute モデルは各リクエストを処理可能な最も安価な有効モデルへルーティングし、自動フォールバックします"
+homepage: "https://standardcompute.com"
+docs_url: "https://docs.standardcompute.com"
+api_key_url: "https://standardcompute.com"
+
+compatibility: untested
+compatibility_notes:
+
+endpoints:
+  - id: default
+    label:
+      zh: "全球 · 订阅 API"
+      zh-Hant: "全球 · 訂閱 API"
+      en: "Global · Subscription API"
+      ja: "グローバル · サブスクリプション API"
+    description:
+      zh: "Standard Compute 默认端点"
+      zh-Hant: "Standard Compute 預設端點"
+      en: "Standard Compute's default endpoint"
+      ja: "Standard Compute の既定エンドポイント"
+    base_url: "https://api.stdcmpt.com"
+    messages_path: "/v1/messages"
+    region: global
+    billing: subscription
+
+default_endpoint: default
+
+auth:
+  type: api_key
+  header_name: "Authorization"
+  header_format: bearer
+
+required_headers:
+  anthropic-version: "2023-06-01"
+
+forward_headers: []
+
+model_discovery:
+  # Standard Compute /v1/models, same host and prefix as messages
+  enabled: true
+  path: "/v1/models"
+  cache_ttl_hours: 24
+  example_models:
+    - "StandardCompute"
