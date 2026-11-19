@@ -1,12 +1,11 @@
 import { useState } from "react";
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useQuery } from "@tanstack/react-query";
+import { Link } from "react-router";
+import { agentNames, liveSessionQueryKey, useAgentMonitor, type AgentClient } from "@/hooks/useAgentMonitor";
 import { useSubscriptions } from "@/hooks/useSubscriptions";
 import { useT, type TFunction } from "@/i18n";
 import { fmtCompact, fmtNum } from "@/lib/format";
 import { isTauriHost, runtime } from "@/runtime";
-
-type Client = "claude" | "codex";
-type MonitorConfiguration = Record<Client | `${Client}_cleanup_pending`, boolean>;
 
 interface Usage {
   input: number;
@@ -29,7 +28,7 @@ interface Activity {
 }
 
 interface Session {
-  client: Client;
+  client: AgentClient;
   id: string;
   cwd: string | null;
   permission: string | null;
@@ -61,10 +60,7 @@ interface Session {
   activities: Activity[];
 }
 
-const clients = { claude: "Claude Code", codex: "Codex CLI" };
 const sessionKey = (row: Session) => `${row.client}:${row.id}`;
-const snapshots = ["live-client-sessions"] as const;
-const configuration = ["live-client-sessions", "configuration"] as const;
 const translate = (t: TFunction, key: string) => t(`liveSessions.${key}`);
 const time = (ms: number) => new Date(ms).toLocaleTimeString();
 const duration = (ms: number) => ms < 1000 ? `${ms} ms` : `${(ms / 1000).toFixed(1)} s`;
@@ -80,26 +76,18 @@ export function LiveSessionSection({ variant }: { variant: "classic" | "sketch" 
 function DesktopSessions({ variant }: { variant: "classic" | "sketch" }) {
   const { t } = useT();
   const [selected, setSelected] = useState<string>();
-  const queryClient = useQueryClient();
-  const enabled = useQuery({
-    queryKey: configuration,
-    queryFn: () => runtime.invoke<MonitorConfiguration>("session_monitor_status"),
-  });
+  const connections = useAgentMonitor(3_000);
+  const enabled = connections.data?.filter((row) => row.connection === "enabled") ?? [];
   const loaded = useQuery({
-    queryKey: snapshots,
+    queryKey: liveSessionQueryKey,
     queryFn: () => runtime.invoke<Session[]>("get_live_sessions"),
-    enabled: Boolean(enabled.data?.claude || enabled.data?.codex),
+    enabled: enabled.length > 0,
     refetchInterval: 850,
   });
-  const configure = useMutation({
-    mutationFn: ({ client, enabled }: { client: Client; enabled: boolean }) =>
-      runtime.invoke<void>("configure_session_monitor", { client, enabled }),
-    onSettled: () => queryClient.invalidateQueries({ queryKey: snapshots }),
-  });
-  const rows = loaded.data?.filter((row) => enabled.data?.[row.client]) ?? [];
+  const rows = loaded.data?.filter((row) => enabled.some((connection) => connection.client === row.client)) ?? [];
   const active = rows.find((row) => sessionKey(row) === selected) ?? rows[0];
   const sketch = variant === "sketch";
-  const failure = configure.error ?? enabled.error ?? loaded.error;
+  const failure = connections.error ?? loaded.error;
   const errorMessage = typeof failure === "object" && failure && "message" in failure
     ? String(failure.message)
     : String(failure ?? "");
@@ -111,36 +99,14 @@ function DesktopSessions({ variant }: { variant: "classic" | "sketch" }) {
         {rows.length > 0 && <span className="session-muted">{t("liveSessions.count", { count: rows.length })}</span>}
       </header>
       <div className={sketch ? "card-body" : undefined}>
-        <details className="session-setup" open={!enabled.data?.claude && !enabled.data?.codex ? true : undefined}>
-          <summary>{translate(t, "setup")}</summary>
-          <p className="session-muted">{translate(t, "setupHint")}</p>
-          <div className="session-actions">
-            {(Object.keys(clients) as Client[]).map((client) => {
-              const on = enabled.data?.[client];
-              const cleanup = enabled.data?.[`${client}_cleanup_pending`];
-              const action = on ? "disable" : cleanup ? "retryCleanup" : "enable";
-              return (
-                <button
-                  key={client}
-                  type="button"
-                  disabled={!enabled.data || configure.isPending}
-                  onClick={() => configure.mutate({ client, enabled: action === "enable" })}
-                >
-                  {configure.isPending && configure.variables.client === client
-                    ? translate(t, "configuring")
-                    : t(`liveSessions.${action}`, { client: clients[client] })}
-                </button>
-              );
-            })}
-          </div>
-        </details>
+        <Link className="session-management-link" to="/agent-monitor">{t("agentMonitor.manage")}</Link>
         {failure != null && <p role="alert" className="session-error">{errorMessage || translate(t, "error")}</p>}
         {active ? (
           <div className="session-layout">
             <div className="session-picker" role="group" aria-label={translate(t, "title")}>
               {rows.map((row) => (
                 <button type="button" key={sessionKey(row)} aria-pressed={row === active} onClick={() => setSelected(sessionKey(row))}>
-                  <strong>{clients[row.client]}</strong>
+                  <strong>{agentNames[row.client]}</strong>
                   <span className="session-muted">{row.cwd?.split(/[\\/]/).filter(Boolean).at(-1) ?? "—"} · {row.id.slice(0, 8)}</span>
                   <span data-state={row.status}>{clientStatus(t, row)}</span>
                 </button>
@@ -148,7 +114,7 @@ function DesktopSessions({ variant }: { variant: "classic" | "sketch" }) {
             </div>
             <SessionDetails key={sessionKey(active)} row={active} />
           </div>
-        ) : <p className="session-muted">{translate(t, !enabled.data?.claude && !enabled.data?.codex ? "disabled" : "waiting")}</p>}
+        ) : <p className="session-muted">{translate(t, enabled.length === 0 ? "disabled" : "waiting")}</p>}
       </div>
     </section>
   );
@@ -183,7 +149,7 @@ function SessionDetails({ row }: { row: Session }) {
   return (
     <div className="session-details">
       <div className="session-heading">
-        <strong>{clients[row.client]} <span className="session-muted">· {row.id.slice(0, 8)}</span></strong>
+        <strong>{agentNames[row.client]} <span className="session-muted">· {row.id.slice(0, 8)}</span></strong>
         <span className="session-state" data-state={row.status}>{clientStatus(t, row)}</span>
       </div>
       <p className="session-muted session-cwd">{row.cwd ?? "—"}{row.model && ` · ${row.model}`}{row.permission && ` · ${row.permission}`}{elapsed !== null && ` · ${t("liveSessions.turnTime", { duration: duration(Math.max(0, elapsed)) })}`}</p>

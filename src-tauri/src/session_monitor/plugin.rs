@@ -1,7 +1,7 @@
 use std::path::{Path, PathBuf};
 use std::process::Stdio;
 
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use serde_json::{json, Map, Value};
 use tokio::{fs, process::Command};
 
@@ -11,28 +11,80 @@ use crate::error::{AppError, AppResult};
 
 const MARKETPLACE: &str = "cc-router-local";
 const PLUGIN: &str = "cc-router-session-monitor";
+const PLUGIN_VERSION: &str = "1.0.0";
 const ORIGINAL_STATUS: &str = "status-line-original.json";
 const INSTALLED_STATUS: &str = "status-line-installed.json";
 
+#[derive(Clone, Copy, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum Action {
+    Enable,
+    Pause,
+    Clear,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
+enum Connection {
+    Unconfigured,
+    Enabled,
+    Paused,
+    CleanupPending,
+}
+
 #[derive(Serialize)]
 pub struct Status {
-    claude: bool,
-    codex: bool,
-    claude_cleanup_pending: bool,
-    codex_cleanup_pending: bool,
+    client: Client,
+    connection: Connection,
+    last_report_ms: Option<i64>,
+    plugin_version: Option<&'static str>,
+    error: Option<String>,
 }
 
 pub(super) fn cleanup_flag(root: &Path, client: Client) -> PathBuf {
     root.join(format!("{}.cleanup-pending", client.name()))
 }
 
-pub(super) async fn status(monitor: &Monitor) -> AppResult<Status> {
-    Ok(Status {
-        claude: fs::try_exists(flag(&monitor.root, Client::Claude)).await?,
-        codex: fs::try_exists(flag(&monitor.root, Client::Codex)).await?,
-        claude_cleanup_pending: fs::try_exists(cleanup_flag(&monitor.root, Client::Claude)).await?,
-        codex_cleanup_pending: fs::try_exists(cleanup_flag(&monitor.root, Client::Codex)).await?,
+pub(super) fn pause_flag(root: &Path, client: Client) -> PathBuf {
+    root.join(format!("{}.paused", client.name()))
+}
+
+async fn client_status(root: &Path, client: Client) -> AppResult<Connection> {
+    Ok(if fs::try_exists(cleanup_flag(root, client)).await? {
+        Connection::CleanupPending
+    } else if fs::try_exists(flag(root, client)).await? {
+        Connection::Enabled
+    } else if fs::try_exists(pause_flag(root, client)).await? {
+        Connection::Paused
+    } else {
+        Connection::Unconfigured
     })
+}
+
+pub(super) async fn status(monitor: &Monitor) -> AppResult<Vec<Status>> {
+    let mut rows = Vec::new();
+    for client in [Client::Claude, Client::Codex] {
+        let connection = client_status(&monitor.root, client).await?;
+        let (last_report_ms, error) = monitor
+            .store
+            .lock()
+            .map(|store| {
+                (
+                    store.last_report.get(&client).copied(),
+                    store.errors.get(&client).cloned(),
+                )
+            })
+            .unwrap_or_default();
+        rows.push(Status {
+            client,
+            connection,
+            last_report_ms,
+            error,
+            plugin_version: matches!(connection, Connection::Enabled | Connection::Paused)
+                .then_some(PLUGIN_VERSION),
+        });
+    }
+    Ok(rows)
 }
 
 fn single_quote(s: &str, powershell: bool) -> String {
@@ -121,8 +173,12 @@ fn hooks(exe: &Path, root: &Path, client: Client) -> AppResult<Value> {
     Ok(json!({ "hooks": events }))
 }
 
+fn marketplace_root(root: &Path, client: Client) -> PathBuf {
+    root.join(format!("marketplace-{}", client.name()))
+}
+
 async fn prepare_marketplace(root: &Path, exe: &Path, client: Client) -> AppResult<PathBuf> {
-    let marketplace = root.join(format!("marketplace-{}", client.name()));
+    let marketplace = marketplace_root(root, client);
     let plugin = marketplace.join("plugins").join(PLUGIN);
     let (manifest_dir, catalog_dir, entry) = match client {
         Client::Claude => (
@@ -153,7 +209,7 @@ async fn prepare_marketplace(root: &Path, exe: &Path, client: Client) -> AppResu
     )
     .await?;
     write_json(&plugin.join(manifest_dir).join("plugin.json"), &json!({
-        "name": PLUGIN, "version": "1.0.0", "description": "Local session metadata for cc-router"
+        "name": PLUGIN, "version": PLUGIN_VERSION, "description": "Local session metadata for cc-router"
     })).await?;
     write_json(&plugin.join("hooks/hooks.json"), &hooks(exe, root, client)?).await?;
     Ok(marketplace)
@@ -192,15 +248,34 @@ fn executable(client: Client) -> PathBuf {
         .unwrap_or_else(|| PathBuf::from(program))
 }
 
-async fn run(cli: &Path, args: &[&str]) -> AppResult<()> {
+async fn cli_output(cli: &Path, args: &[&str], timeout: u64) -> AppResult<std::process::Output> {
     let mut child = Command::new(cli);
     child.args(args).stdin(Stdio::null()).kill_on_drop(true);
     #[cfg(windows)]
     child.creation_flags(0x08000000);
-    let output = tokio::time::timeout(std::time::Duration::from_secs(20), child.output())
+    tokio::time::timeout(std::time::Duration::from_secs(timeout), child.output())
         .await
         .map_err(|_| AppError::BadRequest("CLI plugin command timed out".into()))?
-        .map_err(|error| AppError::BadRequest(format!("{}: {error}", cli.display())))?;
+        .map_err(|error| AppError::BadRequest(format!("{}: {error}", cli.display())))
+}
+
+pub(super) async fn version(client: Client) -> Option<String> {
+    let output = cli_output(&executable(client), &["--version"], 3)
+        .await
+        .ok()?;
+    if !output.status.success() {
+        return None;
+    }
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    stdout
+        .lines()
+        .map(str::trim)
+        .find(|line| !line.is_empty())
+        .map(|line| line.chars().take(100).collect())
+}
+
+async fn run(cli: &Path, args: &[&str]) -> AppResult<()> {
+    let output = cli_output(cli, args, 20).await?;
     if !output.status.success() {
         if args.starts_with(&["plugin", "uninstall"])
             && args.contains(&"--json")
@@ -210,6 +285,17 @@ async fn run(cli: &Path, args: &[&str]) -> AppResult<()> {
             return Ok(());
         }
         let stderr = String::from_utf8_lossy(&output.stderr);
+        if args.starts_with(&["plugin", "marketplace", "remove"]) {
+            let not_configured = serde_json::from_slice::<Value>(&output.stdout)
+                .is_ok_and(|value| value["failureCode"] == "not_configured")
+                || stderr.lines().any(|line| {
+                    line.trim()
+                        == "Error: marketplace `cc-router-local` is not configured or installed"
+                });
+            if not_configured {
+                return Ok(());
+            }
+        }
         let stdout = String::from_utf8_lossy(&output.stdout);
         let detail: String = if stderr.trim().is_empty() {
             stdout.trim()
@@ -389,6 +475,36 @@ async fn restore_status_line(root: &Path) -> AppResult<()> {
     Ok(())
 }
 
+async fn owns_marketplace(root: &Path, cli: &Path, client: Client) -> AppResult<Option<bool>> {
+    let output = cli_output(cli, &["plugin", "marketplace", "list", "--json"], 5).await?;
+    if !output.status.success() {
+        return Err(AppError::BadRequest(
+            "Could not read the CLI plugin marketplaces".into(),
+        ));
+    }
+    let catalog: Value = serde_json::from_slice(&output.stdout)?;
+    let (items, path_key) = match client {
+        Client::Claude => (&catalog, "path"),
+        Client::Codex => (&catalog["marketplaces"], "root"),
+    };
+    let items = items
+        .as_array()
+        .ok_or_else(|| AppError::BadRequest("Unrecognized CLI marketplace list".into()))?;
+    let Some(entry) = items.iter().find(|entry| entry["name"] == MARKETPLACE) else {
+        return Ok(None);
+    };
+    let expected = marketplace_root(root, client);
+    let owned = entry[path_key].as_str().is_some_and(|path| {
+        let path = Path::new(path);
+        path == expected
+            || match (path.canonicalize(), expected.canonicalize()) {
+                (Ok(path), Ok(expected)) => path == expected,
+                _ => false,
+            }
+    });
+    Ok(Some(owned))
+}
+
 async fn remove_if_present(path: &Path) -> std::io::Result<()> {
     match fs::remove_file(path).await {
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
@@ -396,13 +512,37 @@ async fn remove_if_present(path: &Path) -> std::io::Result<()> {
     }
 }
 
-pub(super) async fn configure(monitor: &Monitor, client: Client, enabled: bool) -> AppResult<()> {
+pub(super) async fn configure(monitor: &Monitor, client: Client, action: Action) -> AppResult<()> {
     let root = &monitor.root;
     let cli = executable(client);
     let selector = format!("{PLUGIN}@{MARKETPLACE}");
     let marker = flag(root, client);
     let cleanup = cleanup_flag(root, client);
-    if enabled {
+    let paused = pause_flag(root, client);
+    let current = client_status(root, client).await?;
+    if matches!(action, Action::Pause) {
+        if current == Connection::Enabled {
+            fs::rename(&marker, &paused).await?;
+            stop_sessions(monitor, client).await;
+        }
+        return Ok(());
+    }
+    if matches!(action, Action::Enable) {
+        match current {
+            Connection::Enabled => return Ok(()),
+            Connection::Paused => {
+                // A new marker timestamp excludes events from before the pause.
+                fs::write(&marker, b"").await?;
+                remove_if_present(&paused).await?;
+                return Ok(());
+            }
+            Connection::CleanupPending => {
+                return Err(AppError::BadRequest(
+                    "Finish removing the current connection before reconnecting".into(),
+                ))
+            }
+            Connection::Unconfigured => {}
+        }
         private_dir(root)?;
         private_dir(&root.join("inbox"))?;
         let exe = std::env::var_os("APPIMAGE")
@@ -413,41 +553,72 @@ pub(super) async fn configure(monitor: &Monitor, client: Client, enabled: bool) 
         let marketplace = marketplace
             .to_str()
             .ok_or_else(|| AppError::BadRequest("Session monitor requires UTF-8 paths".into()))?;
+        if owns_marketplace(root, &cli, client).await? == Some(false) {
+            return Err(AppError::BadRequest(
+                "The cc-router-local marketplace name is already in use".into(),
+            ));
+        }
+        // Persist a recoverable state before the first external config write.
+        fs::write(&cleanup, b"").await?;
         run(&cli, &["plugin", "marketplace", "add", marketplace]).await?;
         if client == Client::Claude {
             run(&cli, &["plugin", "install", &selector]).await?;
-            if let Err(error) = install_status_line(root, &exe).await {
-                let _ = run(&cli, &["plugin", "uninstall", &selector, "--json"]).await;
-                return Err(error);
-            }
+            install_status_line(root, &exe).await?;
         } else {
             run(&cli, &["plugin", "add", &selector]).await?;
         }
         fs::write(marker, b"").await?;
         remove_if_present(&cleanup).await?;
     } else {
-        match fs::rename(&marker, &cleanup).await {
-            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
-                if !fs::try_exists(&cleanup).await? {
-                    return Ok(());
-                }
+        match current {
+            Connection::Enabled => fs::rename(&marker, &cleanup).await?,
+            Connection::Paused => fs::rename(&paused, &cleanup).await?,
+            Connection::CleanupPending => {}
+            Connection::Unconfigured => return Ok(()),
+        }
+        remove_if_present(&marker).await?;
+        remove_if_present(&paused).await?;
+        stop_sessions(monitor, client).await;
+        if client == Client::Claude {
+            restore_status_line(root).await?;
+        }
+        let owned = owns_marketplace(root, &cli, client).await?;
+        if owned != Some(false) {
+            match client {
+                Client::Claude => run(&cli, &["plugin", "uninstall", &selector, "--json"]).await?,
+                Client::Codex => run(&cli, &["plugin", "remove", &selector]).await?,
             }
+        }
+        if owned == Some(true) {
+            let mut args = vec!["plugin", "marketplace", "remove", MARKETPLACE, "--json"];
+            if client == Client::Claude {
+                args.extend(["--scope", "user"]);
+            }
+            run(&cli, &args).await?;
+        }
+        match fs::remove_dir_all(marketplace_root(root, client)).await {
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
             result => result?,
         }
-        super::collector::drain(monitor).await;
-        if let Ok(mut store) = monitor.store.lock() {
-            store.sessions.retain(|(tool, _), _| *tool != client);
-        }
-        match client {
-            Client::Claude => {
-                restore_status_line(root).await?;
-                run(&cli, &["plugin", "uninstall", &selector, "--json"]).await?;
-            }
-            Client::Codex => run(&cli, &["plugin", "remove", &selector]).await?,
+        if client == Client::Claude {
+            // Existing terminals may still use status-line.sh until reopened.
+            // Its embedded original command works without these ownership records.
+            remove_if_present(&root.join(ORIGINAL_STATUS)).await?;
+            remove_if_present(&root.join(INSTALLED_STATUS)).await?;
         }
         remove_if_present(&cleanup).await?;
+        if let Ok(mut store) = monitor.store.lock() {
+            store.last_report.remove(&client);
+        }
     }
     Ok(())
+}
+
+async fn stop_sessions(monitor: &Monitor, client: Client) {
+    super::collector::drain(monitor).await;
+    if let Ok(mut store) = monitor.store.lock() {
+        store.sessions.retain(|(tool, _), _| *tool != client);
+    }
 }
 
 #[cfg(test)]
@@ -507,20 +678,26 @@ mod tests {
         write_json(&current, &original).await.unwrap();
         let monitor = Monitor::new(root.path().to_owned());
         for client in [Client::Claude, Client::Codex] {
-            configure(&monitor, client, true).await.unwrap();
+            configure(&monitor, client, Action::Enable).await.unwrap();
             assert!(flag(&monitor.root, client).is_file());
+            configure(&monitor, client, Action::Pause).await.unwrap();
+            assert_eq!(
+                client_status(&monitor.root, client).await.unwrap(),
+                Connection::Paused
+            );
             if client == Client::Claude {
                 let mut installed = read_json(&current).await.unwrap().unwrap();
                 installed["statusLine"]["padding"] = json!(2);
                 write_json(&current, &json!([])).await.unwrap();
-                assert!(configure(&monitor, client, false).await.is_err());
+                assert!(configure(&monitor, client, Action::Clear).await.is_err());
                 assert!(!flag(&monitor.root, client).is_file());
                 assert!(cleanup_flag(&monitor.root, client).is_file());
                 write_json(&current, &installed).await.unwrap();
             }
-            configure(&monitor, client, false).await.unwrap();
+            configure(&monitor, client, Action::Clear).await.unwrap();
             assert!(!flag(&monitor.root, client).is_file());
             assert!(!cleanup_flag(&monitor.root, client).is_file());
+            assert!(!marketplace_root(&monitor.root, client).is_dir());
         }
         let restored = read_json(&current).await.unwrap().unwrap();
         assert_eq!(
@@ -528,5 +705,59 @@ mod tests {
             original["statusLine"]["command"]
         );
         assert_eq!(restored["statusLine"]["padding"], 2);
+    }
+}
+
+#[cfg(test)]
+mod management_tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn factory_reset_pauses_collection_but_preserves_the_clear_action() {
+        let root = tempfile::tempdir().unwrap();
+        let monitor = Monitor::new(root.path().to_owned());
+        fs::create_dir_all(&monitor.root).await.unwrap();
+        fs::write(flag(&monitor.root, Client::Claude), b"")
+            .await
+            .unwrap();
+        fs::write(cleanup_flag(&monitor.root, Client::Codex), b"")
+            .await
+            .unwrap();
+
+        monitor.clear_opt_in().await;
+        assert_eq!(
+            client_status(&monitor.root, Client::Claude).await.unwrap(),
+            Connection::Paused
+        );
+        assert_eq!(
+            client_status(&monitor.root, Client::Codex).await.unwrap(),
+            Connection::CleanupPending
+        );
+    }
+
+    #[tokio::test]
+    async fn pausing_and_resuming_preserves_the_installed_connection() {
+        let root = tempfile::tempdir().unwrap();
+        let monitor = Monitor::new(root.path().to_owned());
+        fs::create_dir_all(&monitor.root).await.unwrap();
+        fs::write(flag(&monitor.root, Client::Claude), b"")
+            .await
+            .unwrap();
+
+        configure(&monitor, Client::Claude, Action::Pause)
+            .await
+            .unwrap();
+        assert_eq!(
+            client_status(&monitor.root, Client::Claude).await.unwrap(),
+            Connection::Paused
+        );
+        assert!(!flag(&monitor.root, Client::Claude).is_file());
+        configure(&monitor, Client::Claude, Action::Enable)
+            .await
+            .unwrap();
+        assert_eq!(
+            client_status(&monitor.root, Client::Claude).await.unwrap(),
+            Connection::Enabled
+        );
     }
 }

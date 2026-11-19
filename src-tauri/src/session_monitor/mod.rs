@@ -452,12 +452,18 @@ impl Session {
 #[derive(Default)]
 struct Store {
     sessions: HashMap<(Client, String), Session>,
+    last_report: HashMap<Client, i64>,
+    errors: HashMap<Client, String>,
 }
 
 impl Store {
     fn apply(&mut self, event: Event) {
         let mut activity = event.activity;
         let at = activity.at_ms;
+        self.last_report
+            .entry(event.client)
+            .and_modify(|last| *last = (*last).max(at))
+            .or_insert(at);
         let kind = activity.kind.as_str();
         let key = (event.client, event.id.clone());
         if self.sessions.len() >= MAX_SESSIONS && !self.sessions.contains_key(&key) {
@@ -696,20 +702,20 @@ impl Monitor {
     pub async fn clear_opt_in(&self) {
         let _guard = self.install_lock.lock().await;
         for client in [Client::Claude, Client::Codex] {
-            for path in [
-                collector::flag(&self.root, client),
-                plugin::cleanup_flag(&self.root, client),
-            ] {
-                if let Err(error) = tokio::fs::remove_file(&path).await {
-                    if error.kind() != std::io::ErrorKind::NotFound {
-                        tracing::warn!(?error, "session monitoring opt-in could not be cleared");
-                    }
+            // Factory reset stops consent to collect. Keep the connection visible
+            // so the user can still remove the external plugin from the desktop.
+            let path = collector::flag(&self.root, client);
+            if let Err(error) =
+                tokio::fs::rename(&path, plugin::pause_flag(&self.root, client)).await
+            {
+                if error.kind() != std::io::ErrorKind::NotFound {
+                    tracing::warn!(?error, "session monitoring opt-in could not be cleared");
                 }
             }
         }
         collector::drain(self).await;
         if let Ok(mut store) = self.store.lock() {
-            store.sessions.clear();
+            *store = Store::default();
         }
     }
 
@@ -827,7 +833,7 @@ pub fn get_live_sessions(state: State<'_, Monitor>) -> Vec<Session> {
 }
 
 #[tauri::command]
-pub async fn session_monitor_status(state: State<'_, Monitor>) -> AppResult<plugin::Status> {
+pub async fn session_monitor_status(state: State<'_, Monitor>) -> AppResult<Vec<plugin::Status>> {
     plugin::status(&state).await
 }
 
@@ -835,10 +841,28 @@ pub async fn session_monitor_status(state: State<'_, Monitor>) -> AppResult<plug
 pub async fn configure_session_monitor(
     state: State<'_, Monitor>,
     client: Client,
-    enabled: bool,
+    action: MonitorAction,
 ) -> AppResult<()> {
     let _guard = state.install_lock.lock().await;
-    plugin::configure(&state, client, enabled).await
+    let result = plugin::configure(&state, client, action).await;
+    if let Ok(mut store) = state.store.lock() {
+        match &result {
+            Ok(()) => {
+                store.errors.remove(&client);
+            }
+            Err(error) => {
+                store.errors.insert(client, error.to_string());
+            }
+        }
+    }
+    result
 }
+
+#[tauri::command]
+pub async fn session_monitor_client_version(client: Client) -> Option<String> {
+    plugin::version(client).await
+}
+
+pub use plugin::Action as MonitorAction;
 
 pub use collector::cli_entry;

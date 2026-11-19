@@ -130,6 +130,7 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             session_monitor::get_live_sessions,
             session_monitor::session_monitor_status,
+            session_monitor::session_monitor_client_version,
             session_monitor::configure_session_monitor,
             commands::providers::list_providers,
             commands::subscriptions::list_subscriptions,

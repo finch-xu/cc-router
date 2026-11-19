@@ -7,7 +7,7 @@ import type { CSSProperties, ReactNode } from "react";
  * 滤镜 #ccr-rough-icon 由根节点的 <SketchDefs /> 提供。
  */
 export type SidebarIconName =
-  | "guide" | "live" | "vm" | "subs" | "logs" | "stats"
+  | "guide" | "live" | "agent" | "vm" | "subs" | "logs" | "stats"
   | "receipts" | "updates" | "backup" | "settings" | "about" | "logout" | "whatsnew"
   // 侧栏底部的两枚图案按钮: 明暗模式三态 + 当前主题
   | "mode-system" | "mode-light" | "mode-dark" | "theme";
@@ -66,6 +66,18 @@ const ICONS: Record<SidebarIconName, IconDef> = {
         <path d="M8.6 16 L12.5 16 C 16.5 16, 16.8 9.2, 21 9.2 L 26 9.2" />
         <path d="M12.5 16 C 16.5 16, 16.8 22.8, 21 22.8 L 26 22.8" />
         <path d="M23.2 6.6 L26.4 9.2 L23.2 11.8 M23.2 20.2 L26.4 22.8 L23.2 25.4" />
+      </>
+    ),
+  },
+  agent: {
+    blob: BLOB.c,
+    fill: "var(--fill-cactus)",
+    draw: () => (
+      <>
+        <rect style={PAPER} x="7" y="10" width="18" height="15" rx="4" />
+        <path d="M16 10 V6 M4 16 V21 M28 16 V21 M13 21 H19" />
+        <circle style={DOT} cx="12" cy="16" r="1.4" />
+        <circle style={DOT} cx="20" cy="16" r="1.4" />
       </>
     ),
   },

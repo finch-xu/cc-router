@@ -218,7 +218,8 @@ web_commands! {
     // 托盘只属于桌面 app; 前端也只在桌面运行时才调它
     get_live_sessions() => Err::<(), AppError>(AppError::BadRequest(DESKTOP_ONLY.into())),
     session_monitor_status() => Err::<(), AppError>(AppError::BadRequest(DESKTOP_ONLY.into())),
-    configure_session_monitor(client: crate::session_monitor::Client, enabled: bool) => Err::<(), AppError>(AppError::BadRequest(DESKTOP_ONLY.into())),
+    session_monitor_client_version(client: crate::session_monitor::Client) => Err::<(), AppError>(AppError::BadRequest(DESKTOP_ONLY.into())),
+    configure_session_monitor(client: crate::session_monitor::Client, action: crate::session_monitor::MonitorAction) => Err::<(), AppError>(AppError::BadRequest(DESKTOP_ONLY.into())),
     set_tray_update() => Err::<(), AppError>(AppError::BadRequest(DESKTOP_ONLY.into())),
     // Claude Code integration
     read_claude_code_settings() => commands::integrations::read_claude_code_settings(st).await,
