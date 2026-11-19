@@ -1,5 +1,7 @@
 import { useId, useState } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
+import { ModelSelect } from "@/components/ModelSlotPicker";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { api } from "@/api/tauri";
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { SUBSCRIPTIONS_KEY, SUBSCRIPTION_DETAIL_KEY } from "@/hooks/useSubscriptions";
@@ -145,6 +147,7 @@ function ModelEditor({ model, subscriptions, knownNames, onClose, onSaved }: {
       return next;
     });
   }
+  const modeId = useId();
   const first = targets[0];
   return (
     <form className="grid gap-4 max-w-3xl" onSubmit={(event) => {
@@ -164,15 +167,18 @@ function ModelEditor({ model, subscriptions, knownNames, onClose, onSaved }: {
       <details open={targets.length > 1 || mode !== "sequential" ? true : undefined}>
         <summary>{t("customModels.advanced")}</summary>
         <div className="mt-3 grid gap-3">
-          <label className="grid gap-1 w-fit">
-            {t("virtualModels.mode.label")}
-            <select className="select" value={mode} disabled={save.isPending}
-              onChange={(event) => setMode(event.target.value as RoutingMode)}>
-              {(Object.keys(MODE_LABEL_KEY) as RoutingMode[]).map((item) => (
-                <option key={item} value={item}>{t(MODE_LABEL_KEY[item])}</option>
-              ))}
-            </select>
-          </label>
+          <div className="grid gap-1 w-fit">
+            <label htmlFor={modeId}>{t("virtualModels.mode.label")}</label>
+            <Select value={mode} disabled={save.isPending}
+              onValueChange={(value) => setMode(value as RoutingMode)}>
+              <SelectTrigger id={modeId}><SelectValue /></SelectTrigger>
+              <SelectContent>
+                {(Object.keys(MODE_LABEL_KEY) as RoutingMode[]).map((item) => (
+                  <SelectItem key={item} value={item}>{t(MODE_LABEL_KEY[item])}</SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
           {targets.slice(1).map((target, offset) => {
             const index = offset + 1;
             return <div key={index} className="grid gap-2">
@@ -213,43 +219,53 @@ function TargetFields({ target, subscriptions, targets, disabled, onChange }: {
   onChange: (value: CustomVirtualModelTarget) => void;
 }) {
   const { t } = useT();
-  const listId = useId();
+  const subscriptionId = useId();
+  const modelId = useId();
   const client = useQueryClient();
   const discovery = useMutation({
     mutationFn: api.refreshModelList,
     onSuccess: () => { void client.invalidateQueries({ queryKey: SUBSCRIPTIONS_KEY }); },
   });
   const sub = subscriptions.find((item) => item.id === target.subscription_id);
-  const models = new Set([...(sub?.model_cache?.models.map((model) => model.id) ?? []),
-    ...(sub?.model_discovery.example_models ?? [])]);
+  const models = new Map((sub?.model_cache?.models ?? []).map((model) => [model.id, model]));
+  for (const id of sub?.model_discovery.example_models ?? []) {
+    if (id && !models.has(id)) models.set(id, { id });
+  }
   return (
-    <div className="grid gap-3 sm:grid-cols-2">
-      <label className="grid gap-1">
-        {t("customModels.subscription")}
-        <select className="select" value={target.subscription_id} disabled={disabled}
-          onChange={(event) => {
+    <div className="grid items-start gap-3 sm:grid-cols-2">
+      <div className="grid min-w-0 gap-1">
+        <label htmlFor={subscriptionId}>{t("customModels.subscription")}</label>
+        <Select value={target.subscription_id} disabled={disabled}
+          onValueChange={(value) => {
             discovery.reset();
-            onChange({ subscription_id: event.target.value, upstream_model_id: "" });
+            onChange({ subscription_id: value, upstream_model_id: "" });
           }}>
-          <option value="">{t("customModels.selectSubscription")}</option>
-          {subscriptions.map((item) => (
-            <option key={item.id} value={item.id}
-              disabled={item.id !== target.subscription_id && targets.some((row) => row.subscription_id === item.id)}>
-              {item.display_name}
-            </option>
-          ))}
-        </select>
-      </label>
-      <div className="grid gap-1">
-        <label className="grid gap-1">
-          {t("customModels.upstream")}
-          <input className="input mono" list={listId} maxLength={160} value={target.upstream_model_id}
-            disabled={disabled || !sub}
-            onChange={(event) => onChange({ ...target, upstream_model_id: event.target.value })} />
-          <datalist id={listId}>
-            {[...models].map((id) => <option key={id} value={id} />)}
-          </datalist>
-        </label>
+          <SelectTrigger id={subscriptionId}>
+            <SelectValue placeholder={t("customModels.selectSubscription")} />
+          </SelectTrigger>
+          <SelectContent>
+            {subscriptions.map((item) => (
+              <SelectItem key={item.id} value={item.id}
+                disabled={item.id !== target.subscription_id && targets.some((row) => row.subscription_id === item.id)}>
+                {item.display_name}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+      </div>
+      <div className="grid min-w-0 gap-1">
+        <label htmlFor={modelId}>{t("customModels.upstream")}</label>
+        <ModelSelect
+          key={target.subscription_id}
+          id={modelId}
+          current={target.upstream_model_id}
+          models={[...models.values()]}
+          showHistorical={!!target.upstream_model_id && !models.has(target.upstream_model_id)}
+          disabled={disabled || !sub}
+          maxCustomLength={160}
+          onSelect={(value) => onChange({ ...target, upstream_model_id: value })}
+          t={t}
+        />
         {sub?.model_discovery.enabled && (
           <div>
             <button type="button" className="btn sm" disabled={disabled || discovery.isPending}

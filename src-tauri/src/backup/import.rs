@@ -227,9 +227,18 @@ pub fn resolve_secrets(file: &ExportFile, plain: SecretsPlain) -> AppResult<Reso
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(tag = "kind", content = "subscription_id", rename_all = "snake_case")]
+pub enum CustomBindingIssue {
+    NameConflict,
+    InvalidTarget(Uuid),
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct InvalidEntry {
     pub name: String,
     pub reason: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub custom_binding_issue: Option<CustomBindingIssue>,
 }
 
 #[derive(Debug, Default, Clone, PartialEq, Eq, Serialize)]
@@ -278,7 +287,7 @@ pub fn plan(
                 continue;
             }
             Verdict::SkipInvalid(reason) => {
-                report.skipped_invalid.push(InvalidEntry { name: sub.display_name.clone(), reason });
+                report.skipped_invalid.push(InvalidEntry { name: sub.display_name.clone(), reason, custom_binding_issue: None });
                 continue;
             }
             Verdict::New => {}
@@ -339,6 +348,7 @@ pub fn plan(
                 report.skipped_bindings.push(InvalidEntry {
                     name: vm.name.as_str().to_owned(),
                     reason: "A local custom model already uses this name".into(),
+                    custom_binding_issue: Some(CustomBindingIssue::NameConflict),
                 });
                 continue;
             }
@@ -357,6 +367,7 @@ pub fn plan(
                     report.skipped_bindings.push(InvalidEntry {
                         name: vm.name.as_str().to_owned(),
                         reason: format!("Unavailable or invalid target subscription {id}"),
+                        custom_binding_issue: Some(CustomBindingIssue::InvalidTarget(*id)),
                     });
                 }
             }
@@ -377,7 +388,7 @@ pub fn plan(
             }
             if let Some((protocol, name)) = protocol_of.get(id) {
                 if let Some(reason) = vm.name.binding_rejection(*protocol, name) {
-                    report.skipped_bindings.push(InvalidEntry { name: name.to_string(), reason });
+                    report.skipped_bindings.push(InvalidEntry { name: name.to_string(), reason, custom_binding_issue: None });
                     continue;
                 }
             }

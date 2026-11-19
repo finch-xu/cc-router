@@ -252,9 +252,17 @@ export function ImportConfigDialog({
               <li>
                 {t("backup.import.report.skippedBindings", { count: report.skipped_bindings!.length })}
                 <ul style={{ paddingLeft: 18 }}>
-                  {report.skipped_bindings!.map((e) => (
-                    <li key={e.name + e.reason}>{t("backup.import.report.invalidItem", { name: e.name, reason: e.reason })}</li>
-                  ))}
+                  {report.skipped_bindings!.map((e, index) => {
+                    const issue = e.custom_binding_issue;
+                    const reason = issue?.kind === "name_conflict"
+                      ? t("customModels.importNameConflict")
+                      : issue?.kind === "invalid_target"
+                        ? t("customModels.importInvalidTarget", { id: issue.subscription_id })
+                        : e.reason;
+                    return (
+                      <li key={index}>{t("backup.import.report.invalidItem", { name: e.name, reason })}</li>
+                    );
+                  })}
                 </ul>
               </li>
             )}

@@ -1183,8 +1183,14 @@ export interface ImportReport {
   skipped_oauth: string[];
   /** 没通过新建订阅校验而跳过的订阅 */
   skipped_invalid: { name: string; reason: string }[];
-  /** 跨类绑定 (对话订阅 ↔ model-jev) 被跳过的记录; 后端为空时省略 */
-  skipped_bindings?: { name: string; reason: string }[];
+  /** 被跳过的路由绑定。旧版后端只返回 reason。 */
+  skipped_bindings?: {
+    name: string;
+    reason: string;
+    custom_binding_issue?:
+      | { kind: "name_conflict" }
+      | { kind: "invalid_target"; subscription_id: string };
+  }[];
   disabled_missing_key: string[];
   token_imported: boolean;
   token_error?: string;

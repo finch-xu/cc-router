@@ -450,6 +450,7 @@ export function ModelSelect({
   current,
   models,
   showHistorical,
+  maxCustomLength,
   disabled,
   onSelect,
   ariaLabel,
@@ -460,6 +461,7 @@ export function ModelSelect({
   current: string;
   models: ModelInfo[];
   showHistorical: boolean;
+  maxCustomLength?: number;
   disabled?: boolean;
   onSelect: (v: string) => void;
   ariaLabel?: string;
@@ -492,8 +494,8 @@ export function ModelSelect({
   return (
     <Select
       // 核心槽空值只是未选提示 → Radix placeholder; 兜底槽空值是合法选择 (= 透传) → sentinel 项
-      value={current || (noneLabel !== undefined ? MODEL_NONE : undefined)}
-      onValueChange={(v) => onSelect(v === MODEL_NONE ? "" : v)}
+      value={current || (noneLabel !== undefined ? MODEL_NONE : "")}
+      onValueChange={(v) => onSelect(noneLabel !== undefined && v === MODEL_NONE ? "" : v)}
       disabled={disabled}
       onOpenChange={(next) => {
         setOpen(next);
@@ -519,6 +521,7 @@ export function ModelSelect({
             className="input"
             style={{ fontSize: 12, padding: "6px 10px" }}
             placeholder={t("modelSlot.searchPlaceholder")}
+            maxLength={maxCustomLength}
             value={query}
             onChange={(e) => setQuery(e.target.value)}
             // 阻断 Radix Select 的 typeahead / 方向键抢焦点; Esc 放行用于关闭面板

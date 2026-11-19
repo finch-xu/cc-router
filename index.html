@@ -12,7 +12,7 @@
       // 键名与主题表须与 src/hooks/useTheme.tsx 的 MODE_KEY、src/themes/index.ts 的 THEMES / ART_ATTR 保持一致。
       (function () {
         var root = document.documentElement;
-        var theme = "sketch";
+        var theme = "quiet";
         try {
           var t = localStorage.getItem("cc-router-theme");
           var dark =
@@ -21,7 +21,7 @@
               window.matchMedia("(prefers-color-scheme: dark)").matches);
           if (dark) root.classList.add("dark");
           var saved = localStorage.getItem("cc-router-ui-theme");
-          if (saved === "classic" || saved === "win2000" || saved === "quiet") theme = saved;
+          if (saved === "classic" || saved === "win2000" || saved === "sketch" || saved === "quiet") theme = saved;
         } catch (e) {}
         root.setAttribute("data-theme", theme);
         root.setAttribute(

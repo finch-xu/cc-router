@@ -1,6 +1,6 @@
 import { CustomVirtualModels } from "@/components/virtual-models/CustomVirtualModels";
 import { useMemo, useState } from "react";
-import { Check, Copy, Search } from "lucide-react";
+import { Check, Search } from "lucide-react";
 import {
   Dialog,
   DialogContent,
@@ -16,7 +16,6 @@ import { VmRouteMap } from "@/components/schedule/VmRouteMap";
 import { buildRouteMap, pageModelColors, type RouteMapData } from "@/components/schedule/routeMap";
 import { useHostClock } from "@/hooks/useHostClock";
 import { useSubscriptions } from "@/hooks/useSubscriptions";
-import { useProxyStatus } from "@/hooks/useSettings";
 import { useVirtualModels, useUpdateVirtualModel } from "@/hooks/useVirtualModels";
 import { isAnthropicPassthrough } from "@/lib/authTypes";
 import type { ModelColor } from "@/lib/modelColor";
@@ -25,7 +24,6 @@ import { slotNow, slotNowText } from "@/lib/slotNow";
 import { customProviderLabel } from "@/lib/providerLabels";
 import { providerName as localProviderName } from "@/lib/providerText";
 import { VM_META, VM_ORDER, isJev, jevModelOf, vmAccepts, vmNameToSlot } from "@/lib/virtualModels";
-import { runtime } from "@/runtime";
 import { useT, type TFunction } from "@/i18n";
 import type {
   RoutingMode,
@@ -254,7 +252,6 @@ function VirtualModelCard({
       ) : (
         <div className="field-hint">{t("common.loading")}</div>
       )}
-      {jev && <JevAccessHint />}
 
       <AddSubscriptionDialog
         open={pickerOpen}
@@ -474,44 +471,5 @@ function AddSubscriptionDialog({
         </DialogFooter>
       </DialogContent>
     </Dialog>
-  );
-}
-
-/**
- * jev 卡片底部的接入示例: 调用方是用户自己的代码, 没有 CC 那样现成的环境变量片段。
- * model 写虚拟名 model-jev, 后端按每条订阅的 Jev 槽 / 端点示例模型改写, 所以对任何上游都能直接用。
- */
-function JevAccessHint() {
-  const { t } = useT();
-  const status = useProxyStatus();
-  const [copied, setCopied] = useState(false);
-  const base = status.data?.base_url ?? "http://127.0.0.1:23456";
-  const curl = [
-    `curl ${base}/v1/systemone \\`,
-    `  -H "Content-Type: application/json" \\`,
-    `  -H "Authorization: Bearer <cc-router token>" \\`,
-    `  -d '{"model":"model-jev","state":"Hello World","questions":{"says_hello":{"type":"noul","instructions":"Does the state text contain a greeting?"}}}'`,
-  ].join("\n");
-  return (
-    <div className="jev-access">
-      <b>{t("virtualModels.jev.access")}</b>
-      <span className="mono">{base}/v1/systemone</span>
-      <span>{t("virtualModels.jev.keyHint")}</span>
-      <button
-        type="button"
-        className="jev-copy"
-        onClick={() => {
-          runtime
-            .copyText(curl)
-            .then(() => {
-              setCopied(true);
-              setTimeout(() => setCopied(false), 1500);
-            })
-            .catch(() => {});
-        }}
-      >
-        <Copy size={11} /> {copied ? t("virtualModels.jev.copied") : t("virtualModels.jev.copyCurl")}
-      </button>
-    </div>
   );
 }
