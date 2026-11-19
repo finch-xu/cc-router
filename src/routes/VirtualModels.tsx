@@ -1,3 +1,4 @@
+import { CustomVirtualModels } from "@/components/virtual-models/CustomVirtualModels";
 import { useMemo, useState } from "react";
 import { Check, Copy, Search } from "lucide-react";
 import {
@@ -38,6 +39,7 @@ const MODES: RoutingMode[] = ["sequential", "round_robin", "sticky"];
 
 export function VirtualModelsPage() {
   const { t } = useT();
+  const [custom, setCustom] = useState(false);
   const subs = useSubscriptions();
   const vms = useVirtualModels();
   const clock = useHostClock();
@@ -75,26 +77,35 @@ export function VirtualModelsPage() {
     <>
       <div className="page-header">
         <h1>{t("virtualModels.title")}</h1>
-        <div className="subtitle">{t("virtualModels.subtitle")}</div>
+        {!custom && <div className="subtitle">{t("virtualModels.subtitle")}</div>}
       </div>
 
-      <ViewTimeBar at={at} isNow={isNow} onPick={setSelected} onNow={() => setSelected(null)} />
-
-      <div className="slot-grid">
-        {orderedVms.map((vm) => (
-          <VirtualModelCard
-            key={vm.name}
-            vm={vm}
-            subsMap={subsMap}
-            allSubs={subs.data ?? []}
-            at={subsReady ? at : null}
-            isNow={isNow}
-            colors={colors}
-          />
-        ))}
+      <div className="radio-group mb-4 w-fit" role="group" aria-label={t("virtualModels.title")}>
+        <button type="button" className={!custom ? "on" : ""} aria-pressed={!custom}
+          onClick={() => setCustom(false)}>{t("customModels.builtIn")}</button>
+        <button type="button" className={custom ? "on" : ""} aria-pressed={custom}
+          onClick={() => setCustom(true)}>{t("customModels.custom")}</button>
       </div>
 
-      <RouteLegend />
+      {custom ? <CustomVirtualModels subscriptions={subs.data ?? []} /> : <>
+        <ViewTimeBar at={at} isNow={isNow} onPick={setSelected} onNow={() => setSelected(null)} />
+
+        <div className="slot-grid">
+          {orderedVms.map((vm) => (
+            <VirtualModelCard
+              key={vm.name}
+              vm={vm}
+              subsMap={subsMap}
+              allSubs={subs.data ?? []}
+              at={subsReady ? at : null}
+              isNow={isNow}
+              colors={colors}
+            />
+          ))}
+        </div>
+
+        <RouteLegend />
+      </>}
 
       <StarPrompt className="page-end" />
     </>

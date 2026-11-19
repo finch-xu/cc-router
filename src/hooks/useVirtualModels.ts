@@ -4,6 +4,15 @@ import type { UpdateVirtualModelInput, VirtualModelName } from "@/types";
 
 export const VIRTUAL_MODELS_KEY = ["virtual-models"] as const;
 
+export const CUSTOM_VIRTUAL_MODELS_KEY = [...VIRTUAL_MODELS_KEY, "custom"] as const;
+
+export function useCustomVirtualModels() {
+  return useQuery({
+    queryKey: CUSTOM_VIRTUAL_MODELS_KEY,
+    queryFn: api.listCustomVirtualModels,
+  });
+}
+
 export function useVirtualModels() {
   return useQuery({
     queryKey: VIRTUAL_MODELS_KEY,

@@ -19,6 +19,7 @@ pub struct VirtualModelSnapshot {
     pub name: VirtualModelName,
     pub mode: RoutingMode,
     pub subscription_ids: Vec<Uuid>,
+    pub upstream_models: BTreeMap<Uuid, String>,
 }
 
 pub struct SecretOptions<'a> {
@@ -74,13 +75,16 @@ pub fn build_export(
         subscriptions.push(exp);
     }
 
-    let by_name: HashMap<VirtualModelName, &VirtualModelSnapshot> =
-        vms.iter().map(|v| (v.name, v)).collect();
+    let by_name: HashMap<&VirtualModelName, &VirtualModelSnapshot> =
+        vms.iter().map(|v| (&v.name, v)).collect();
+    let mut custom_names: Vec<_> = vms.iter().filter(|vm| vm.name.is_custom()).map(|vm| vm.name.clone()).collect();
+    custom_names.sort_by(|a, b| a.as_str().cmp(b.as_str()));
     let virtual_models = VirtualModelName::all()
         .into_iter()
+        .chain(custom_names)
         .map(|name| match by_name.get(&name) {
-            Some(v) => ExportVirtualModel { name, mode: v.mode, subscription_ids: v.subscription_ids.clone() },
-            None => ExportVirtualModel { name, mode: RoutingMode::Sequential, subscription_ids: Vec::new() },
+            Some(v) => ExportVirtualModel { name, mode: v.mode, subscription_ids: v.subscription_ids.clone(), upstream_models: v.upstream_models.clone() },
+            None => ExportVirtualModel { name, mode: RoutingMode::Sequential, subscription_ids: Vec::new(), upstream_models: BTreeMap::new() },
         })
         .filter(|vm: &ExportVirtualModel| !(vm.name.is_jev() && vm.subscription_ids.is_empty()))
         .collect();
@@ -98,7 +102,7 @@ pub fn build_export(
 
     Ok(ExportFile {
         format: FORMAT.into(),
-        version: VERSION,
+        version: if vms.iter().any(|vm| vm.name.is_custom()) { VERSION } else { 1 },
         app_version: app_version.into(),
         exported_at: now,
         subscriptions,
@@ -128,6 +132,7 @@ mod tests {
             name: VirtualModelName::Opus,
             mode: RoutingMode::Sticky,
             subscription_ids: vec![rows[1].id, rows[0].id],
+            upstream_models: BTreeMap::new(),
         }]
     }
 
@@ -139,6 +144,7 @@ mod tests {
             name: VirtualModelName::Jev,
             mode: RoutingMode::Sequential,
             subscription_ids: vec![r[0].id],
+            upstream_models: BTreeMap::new(),
         });
         let file = build_export(&r, &v, None, "6.1.0", Utc::now()).unwrap();
         assert_eq!(file.virtual_models.len(), 6);

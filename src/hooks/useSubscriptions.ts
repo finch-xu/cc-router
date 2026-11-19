@@ -60,6 +60,14 @@ export function useCreateSubscription() {
   });
 }
 
+export function useCloneSubscription() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, name }: { id: string; name: string }) => api.cloneSubscription(id, name),
+    onSuccess: () => invalidateSubscriptions(queryClient),
+  });
+}
+
 export function useUpdateSubscription() {
   const queryClient = useQueryClient();
   return useMutation({

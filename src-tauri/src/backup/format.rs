@@ -18,7 +18,7 @@ use crate::virtual_model::model::{RoutingMode, VirtualModelName};
 
 pub const FORMAT: &str = "cc-router-export";
 /// Bump only on incompatible changes; additive optional fields keep the version.
-pub const VERSION: u32 = 1;
+pub const VERSION: u32 = 2;
 pub const FIELD_API_KEY: &str = "api_key";
 
 pub fn header_field(name: &str) -> String {
@@ -135,6 +135,8 @@ pub struct ExportVirtualModel {
     pub mode: RoutingMode,
     #[serde(default)]
     pub subscription_ids: Vec<Uuid>,
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub upstream_models: BTreeMap<Uuid, String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -404,7 +406,7 @@ pub fn parse_file(text: &str) -> crate::error::AppResult<ExportFile> {
         return Err(AppError::BadRequest("文件里有重复的订阅 id".into()));
     }
     let mut names = HashSet::new();
-    if !file.virtual_models.iter().all(|v| names.insert(v.name)) {
+    if !file.virtual_models.iter().all(|v| names.insert(&v.name)) {
         return Err(AppError::BadRequest("文件里有重复的虚拟模型".into()));
     }
     Ok(file)

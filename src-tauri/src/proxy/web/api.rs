@@ -106,7 +106,7 @@ use crate::commands::statistics::{BreakdownBy, StatsRange};
 use crate::commands::subscriptions::{
     CreateSubscriptionInput, ProbeCustomModelsInput, SubscriptionPatch,
 };
-use crate::commands::virtual_models::UpdateVirtualModelInput;
+use crate::commands::virtual_models::{CustomVirtualModelDto, CustomVirtualModelInput, UpdateVirtualModelInput};
 use crate::settings::model::SettingsPatch;
 use crate::subscription::model::KiroDisguise;
 use crate::subscription::quota::TokenQuotas;
@@ -122,6 +122,7 @@ web_commands! {
     // subscriptions
     list_subscriptions() => commands::subscriptions::list_subscriptions(st).await,
     get_subscription(id: String) => commands::subscriptions::get_subscription(st, args.id).await,
+    clone_subscription(id: String, display_name: String) => commands::subscriptions::clone_subscription(st, args.id, args.display_name).await,
     create_subscription(input: CreateSubscriptionInput) => commands::subscriptions::create_subscription(st, args.input).await,
     preview_outbound_headers(subscription_id: String, header_policy: crate::subscription::header_policy::HeaderPolicy, headers: std::collections::BTreeMap<String, String>, auth_header_name: Option<String>, auth_header_format: Option<crate::provider::model::AuthHeaderFormat>) => commands::header_preview::preview_outbound_headers(st, args.subscription_id, args.header_policy, args.headers, args.auth_header_name, args.auth_header_format).await,
     update_subscription(id: String, patch: SubscriptionPatch) => commands::subscriptions::update_subscription(st, args.id, args.patch).await,
@@ -151,6 +152,10 @@ web_commands! {
     forget_kiro_oauth_cache(subscription_id: String) => commands::oauth::forget_kiro_oauth_cache(st, args.subscription_id).await,
     update_kiro_disguise_fields(subscription_id: String, disguise: KiroDisguise) => commands::oauth::update_kiro_disguise_fields(st, args.subscription_id, args.disguise).await,
     // virtual models
+    list_custom_virtual_models() => commands::virtual_models::list_custom_virtual_models(st).await,
+    create_custom_virtual_model(model: CustomVirtualModelDto) => commands::virtual_models::create_custom_virtual_model(st, args.model).await,
+    update_custom_virtual_model(name: String, input: CustomVirtualModelInput) => commands::virtual_models::update_custom_virtual_model(st, args.name, args.input).await,
+    delete_custom_virtual_model(name: String) => commands::virtual_models::delete_custom_virtual_model(st, args.name).await,
     list_virtual_models() => commands::virtual_models::list_virtual_models(st).await,
     update_virtual_model(name: String, input: UpdateVirtualModelInput) => commands::virtual_models::update_virtual_model(st, args.name, args.input).await,
     // request logs

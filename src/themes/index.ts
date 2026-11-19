@@ -12,7 +12,7 @@
  *
  * index.html 里有一段首帧前的内联脚本同步这两个属性, 增删主题时要一起改。
  */
-export type ThemeId = "classic" | "sketch" | "win2000";
+export type ThemeId = "classic" | "sketch" | "win2000" | "quiet";
 export type ThemeArt = "plain" | "sketch" | "win2k";
 
 export interface ThemeDef {
@@ -27,6 +27,7 @@ export const THEMES: readonly ThemeDef[] = [
   { id: "classic", art: "plain", labelKey: "theme.name.classic" },
   { id: "sketch", art: "sketch", labelKey: "theme.name.sketch" },
   { id: "win2000", art: "win2k", labelKey: "theme.name.win2000" },
+  { id: "quiet", art: "plain", labelKey: "theme.name.quiet" },
 ];
 
 /** 画风 → data-art 的值 (含继承链) */

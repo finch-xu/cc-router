@@ -1,3 +1,4 @@
+import { CustomModelMappings } from "@/components/virtual-models/CustomModelMappings";
 import { useMemo, useState } from "react";
 import { useNavigate } from "react-router";
 import { ArrowRight, Check, Copy, Lock } from "lucide-react";
@@ -28,6 +29,7 @@ export function ClassicLiveRoutingPage() {
       <ClientAccessSection variant="classic" />
       <AccessSection />
       <MappingSection />
+      <CustomModelMappings />
     </div>
   );
 }

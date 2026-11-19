@@ -1,3 +1,4 @@
+import type { CustomVirtualModelDto, CustomVirtualModelInput } from "@/types";
 import { runtime } from "@/runtime";
 
 const invoke = runtime.invoke;
@@ -69,6 +70,8 @@ export const api = {
   listSubscriptions: () => invoke<SubscriptionDto[]>("list_subscriptions"),
   getSubscription: (id: string) =>
     invoke<SubscriptionDto>("get_subscription", { id }),
+  cloneSubscription: (id: string, displayName: string) =>
+    invoke<SubscriptionDto>("clone_subscription", { id, displayName }),
   createSubscription: (input: CreateSubscriptionInput) =>
     invoke<SubscriptionDto>("create_subscription", { input }),
   updateSubscription: (id: string, patch: SubscriptionPatch) =>
@@ -120,6 +123,13 @@ export const api = {
     invoke<void>("update_kiro_disguise_fields", { subscriptionId, disguise }),
 
   // virtual models
+  listCustomVirtualModels: () => invoke<CustomVirtualModelDto[]>("list_custom_virtual_models"),
+  createCustomVirtualModel: (model: CustomVirtualModelDto) =>
+    invoke<void>("create_custom_virtual_model", { model }),
+  updateCustomVirtualModel: (name: string, input: CustomVirtualModelInput) =>
+    invoke<void>("update_custom_virtual_model", { name, input }),
+  deleteCustomVirtualModel: (name: string) =>
+    invoke<void>("delete_custom_virtual_model", { name }),
   listVirtualModels: () => invoke<VirtualModelDto[]>("list_virtual_models"),
   updateVirtualModel: (name: VirtualModelName, input: UpdateVirtualModelInput) =>
     invoke<void>("update_virtual_model", { name, input }),

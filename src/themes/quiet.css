@@ -1,0 +1,86 @@
+/* The quiet theme uses the plain layout with neutral surfaces and coral actions. */
+:root:where([data-theme="quiet"]) {
+  --bg: #fcfcfd;
+  --surface: #fff;
+  --surface-2: #f6f6f8;
+  --surface-3: #ededef;
+  --line: #e3e3e8;
+  --line-2: #d6d6df;
+  --ink: #1a1b20;
+  --ink-2: #3d3e47;
+  --ink-3: #60616d;
+  --ink-4: #72737e;
+  --ink-5: #9d9ea9;
+
+  --accent: #aa4935;
+  --accent-ink: #973b29;
+  --accent-bg: #fbeee9;
+  --accent-line: #e5b7a8;
+
+  --background: 240 20% 99%;
+  --foreground: 230 10% 11%;
+  --card: 0 0% 100%;
+  --card-foreground: var(--foreground);
+  --popover: var(--card);
+  --popover-foreground: var(--foreground);
+  --primary: 10 52% 44%;
+  --primary-foreground: 0 0% 100%;
+  --secondary: 240 6% 94%;
+  --secondary-foreground: var(--foreground);
+  --muted: var(--secondary);
+  --muted-foreground: 235 6% 40%;
+  --accent-foreground: 10 57% 38%;
+  --border: 240 10% 90%;
+  --input: 240 12% 86%;
+  --ring: var(--primary);
+
+  --rf-router-bg: var(--accent-bg);
+}
+
+.dark:where([data-theme="quiet"]) {
+  --bg: #202124;
+  --surface: #27282c;
+  --surface-2: #242529;
+  --surface-3: #34353a;
+  --line: #414248;
+  --line-2: #515259;
+  --ink: #f0f0f2;
+  --ink-2: #d5d5dc;
+  --ink-3: #b3b3be;
+  --ink-4: #9c9da8;
+  --ink-5: #797a86;
+
+  --accent: #ffad93;
+  --accent-ink: #ffbda9;
+  --accent-bg: #49332e;
+  --accent-line: #795043;
+
+  --background: 225 6% 13%;
+  --foreground: 240 7% 95%;
+  --card: 228 6% 16%;
+  --primary: 14 100% 79%;
+  --primary-foreground: 14 26% 12%;
+  --secondary: 230 5% 22%;
+  --muted-foreground: 240 7% 73%;
+  --accent-foreground: 14 100% 83%;
+  --border: 230 5% 27%;
+  --input: 230 5% 33%;
+}
+
+@layer utilities {
+  :where([data-theme="quiet"]) .radio-group button.on {
+    background: var(--surface);
+    color: var(--ink);
+    box-shadow: 0 1px 2px rgb(0 0 0 / 12%);
+  }
+
+  :where([data-theme="quiet"]) .btn.primary {
+    background: hsl(var(--primary));
+    border-color: hsl(var(--primary));
+    color: hsl(var(--primary-foreground));
+  }
+
+  :where([data-theme="quiet"]) .btn.primary:hover {
+    background: color-mix(in srgb, hsl(var(--primary)) 90%, var(--ink));
+  }
+}

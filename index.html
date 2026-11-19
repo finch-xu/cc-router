@@ -21,12 +21,12 @@
               window.matchMedia("(prefers-color-scheme: dark)").matches);
           if (dark) root.classList.add("dark");
           var saved = localStorage.getItem("cc-router-ui-theme");
-          if (saved === "classic" || saved === "win2000") theme = saved;
+          if (saved === "classic" || saved === "win2000" || saved === "quiet") theme = saved;
         } catch (e) {}
         root.setAttribute("data-theme", theme);
         root.setAttribute(
           "data-art",
-          { sketch: "sketch", classic: "plain", win2000: "plain win2k" }[theme]
+          { sketch: "sketch", classic: "plain", win2000: "plain win2k", quiet: "plain" }[theme]
         );
       })();
     </script>

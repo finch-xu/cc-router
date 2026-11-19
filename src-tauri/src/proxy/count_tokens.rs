@@ -88,13 +88,17 @@ pub async fn handle(state: &AppState, client_headers: HeaderMap, body: Bytes) ->
     let Some(model) = parsed.get("model").and_then(|v| v.as_str()).map(str::to_string) else {
         return error_response(StatusCode::BAD_REQUEST, "invalid_request_error", "缺少 model 字段");
     };
-    let vm = VirtualModelName::parse(&model).unwrap_or(VirtualModelName::Fallback);
+    let vm_config = {
+        let models = state.virtual_models.read().await;
+        let Some(config) = crate::virtual_model::model::VirtualModelConfig::resolve(&models, &model) else {
+            return not_available();
+        };
+        config.clone()
+    };
+    let vm = &vm_config.name;
     if vm.is_jev() {
         return not_available();
     }
-    let Some(vm_config) = state.virtual_models.read().await.get(&vm).cloned() else {
-        return not_available();
-    };
     let clock = WallClock::now();
     let subs = state.subscriptions.read().await.clone();
     let order = build_candidate_order(&vm_config, &subs, Utc::now(), clock, None).await;
@@ -103,9 +107,12 @@ pub async fn handle(state: &AppState, client_headers: HeaderMap, body: Bytes) ->
         let Some(rt) = subs.get(&sub_id) else { continue };
         let (target, row) = {
             let g = rt.read().await;
-            (target_for(&g.row, vm, clock), g.row.clone())
+            (target_for(&g.row, vm.clone(), clock), g.row.clone())
         };
-        let Some(target) = target else { continue };
+        let Some(mut target) = target else { continue };
+        if let Some(upstream) = vm_config.upstream_models.get(&sub_id) {
+            target.model = Some(upstream.clone());
+        }
         if let Some(m) = &target.model {
             parsed["model"] = Value::String(m.clone());
         }

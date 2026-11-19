@@ -79,7 +79,7 @@ async fn snapshot_vms(state: &AppState) -> Vec<VirtualModelSnapshot> {
     let guard = state.virtual_models.read().await;
     guard
         .values()
-        .map(|c| VirtualModelSnapshot { name: c.name, mode: c.mode, subscription_ids: c.subscription_ids.clone() })
+        .map(|c| VirtualModelSnapshot { name: c.name.clone(), mode: c.mode, subscription_ids: c.subscription_ids.clone(), upstream_models: c.upstream_models.clone().into_iter().collect() })
         .collect()
 }
 
@@ -90,7 +90,7 @@ async fn local_state(state: &AppState) -> LocalState {
         .read()
         .await
         .values()
-        .map(|c| (c.name, c.subscription_ids.clone()))
+        .map(|c| (c.name.clone(), c.subscription_ids.clone()))
         .collect();
     LocalState { existing_ids, bindings, providers: state.providers.clone() }
 }
@@ -181,6 +181,7 @@ async fn run_import(state: &AppState, text: String, options: ImportOptions) -> A
         _ => None,
     };
 
+    let _edit = state.route_edits.lock().await;
     let local = local_state(state).await;
     let plan = import::plan(&file, secrets.as_ref(), &local, Utc::now());
     import::apply(&state.db, &plan).await?;
@@ -193,6 +194,9 @@ async fn run_import(state: &AppState, text: String, options: ImportOptions) -> A
     }
     {
         let mut vms = state.virtual_models.write().await;
+        for route in &plan.custom_routes {
+            vms.insert(route.name.clone(), route.clone());
+        }
         for (name, ids) in &plan.bindings {
             if let Some(cfg) = vms.get_mut(name) {
                 cfg.subscription_ids = ids.clone();

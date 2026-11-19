@@ -192,6 +192,11 @@ export function ImportConfigDialog({
               </table>
             </div>
 
+            {preview.custom_model_conflicts?.length > 0 && (
+              <p className="field-hint">
+                {t("customModels.importConflicts", { names: preview.custom_model_conflicts.join(", ") })}
+              </p>
+            )}
             {preview.has_secrets ? (
               <>
                 {!skipSecrets && (

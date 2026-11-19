@@ -29,6 +29,10 @@ pub struct AffinityTable {
 }
 
 impl AffinityTable {
+    pub fn clear_model(&mut self, vm: &VirtualModelName) {
+        self.map.retain(|(name, _), _| name != vm);
+    }
+
     pub fn get(&mut self, vm: VirtualModelName, key: &str, now: Instant) -> Option<Uuid> {
         let k = (vm, key.to_string());
         let pin = self.map.get_mut(&k)?;

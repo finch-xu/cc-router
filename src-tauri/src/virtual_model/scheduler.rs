@@ -24,7 +24,7 @@ pub struct ScheduleOrder {
 /// Whether the subscription serves this virtual model's slot at `clock`. Fallback / jev have no
 /// four-slot mapping and always pass (never use `VirtualModelName::slot` here: it maps them to
 /// Sonnet).
-pub(crate) fn provides_slot_at(row: &SubscriptionRow, vm: VirtualModelName, clock: WallClock) -> bool {
+pub(crate) fn provides_slot_at(row: &SubscriptionRow, vm: &VirtualModelName, clock: WallClock) -> bool {
     vm.four_slot()
         .map_or(true, |slot| row.slot_model_at(slot, clock).is_some())
 }
@@ -32,7 +32,7 @@ pub(crate) fn provides_slot_at(row: &SubscriptionRow, vm: VirtualModelName, cloc
 /// 可调度 = 状态 / 冷却 / 限额都允许, 且此刻 (`clock`) 提供该虚拟模型的槽位。
 fn schedulable(
     rt: &SubscriptionRuntime,
-    vm: VirtualModelName,
+    vm: &VirtualModelName,
     now: DateTime<Utc>,
     clock: WallClock,
 ) -> bool {
@@ -62,7 +62,7 @@ pub async fn build_candidate_order(
         if let Some(pin) = pinned {
             let pin_ok = match all_subs.get(&pin) {
                 Some(rt) if vm.subscription_ids.contains(&pin) => {
-                    schedulable(&*rt.read().await, vm.name, now, clock)
+                    schedulable(&*rt.read().await, &vm.name, now, clock)
                 }
                 _ => false,
             };
@@ -75,7 +75,7 @@ pub async fn build_candidate_order(
                         continue;
                     }
                     let Some(rt) = all_subs.get(&sub_id) else { continue };
-                    if schedulable(&*rt.read().await, vm.name, now, clock) {
+                    if schedulable(&*rt.read().await, &vm.name, now, clock) {
                         candidate_ids.push(sub_id);
                     }
                 }
@@ -103,7 +103,7 @@ pub async fn build_candidate_order(
         let sub_id = vm.subscription_ids[idx];
         let Some(rt) = all_subs.get(&sub_id) else { continue };
         let guard = rt.read().await;
-        if schedulable(&guard, vm.name, now, clock) {
+        if schedulable(&guard, &vm.name, now, clock) {
             if chosen_index.is_none() {
                 chosen_index = Some(idx);
             }
@@ -170,6 +170,7 @@ mod tests {
             name: VirtualModelName::Sonnet,
             mode: RoutingMode::Sequential,
             subscription_ids: ids.to_vec(),
+            upstream_models: Default::default(),
             last_used_index: 0,
         };
         let order = build_candidate_order(&vm, &map, Utc::now(), noon(), None).await;
@@ -192,6 +193,7 @@ mod tests {
             name: VirtualModelName::Opus,
             mode: RoutingMode::RoundRobin,
             subscription_ids: ids.to_vec(),
+            upstream_models: Default::default(),
             last_used_index: 0,
         };
         let order = build_candidate_order(&vm, &map, Utc::now(), noon(), None).await;
@@ -212,6 +214,7 @@ mod tests {
             name: VirtualModelName::Haiku,
             mode: RoutingMode::Sequential,
             subscription_ids: ids.to_vec(),
+            upstream_models: Default::default(),
             last_used_index: 0,
         };
         let order = build_candidate_order(&vm, &map, Utc::now(), noon(), None).await;
@@ -240,6 +243,7 @@ mod tests {
             name: VirtualModelName::Sonnet,
             mode: RoutingMode::Sticky,
             subscription_ids: ids.to_vec(),
+            upstream_models: Default::default(),
             last_used_index: 0,
         };
         let order = build_candidate_order(&vm, &map, Utc::now(), noon(), Some(ids[2])).await;
@@ -265,6 +269,7 @@ mod tests {
             name: VirtualModelName::Sonnet,
             mode: RoutingMode::Sticky,
             subscription_ids: ids.to_vec(),
+            upstream_models: Default::default(),
             last_used_index: 0,
         };
         // 钉住的 ids[2] 不可调度 → 轮询: start=1
@@ -287,6 +292,7 @@ mod tests {
             name: VirtualModelName::Opus,
             mode: RoutingMode::Sequential,
             subscription_ids: ids.to_vec(),
+            upstream_models: Default::default(),
             last_used_index: 0,
         };
         let o = build_candidate_order(&seq, &map, Utc::now(), noon(), Some(ids[2])).await;
@@ -296,6 +302,7 @@ mod tests {
             name: VirtualModelName::Opus,
             mode: RoutingMode::RoundRobin,
             subscription_ids: ids.to_vec(),
+            upstream_models: Default::default(),
             last_used_index: 0,
         };
         let o = build_candidate_order(&rr, &map, Utc::now(), noon(), Some(ids[2])).await;
@@ -326,6 +333,7 @@ mod tests {
             name: VirtualModelName::Opus,
             mode: RoutingMode::Sequential,
             subscription_ids: ids.clone(),
+            upstream_models: Default::default(),
             last_used_index: 0,
         };
         let o = build_candidate_order(&vm, &map, Utc::now(), noon(), None).await;
@@ -347,6 +355,7 @@ mod tests {
             name: VirtualModelName::Opus,
             mode: RoutingMode::RoundRobin,
             subscription_ids: ids.clone(),
+            upstream_models: Default::default(),
             last_used_index: 0,
         };
         // start = 1 (ids[1]), which has no opus model at noon -> skip to ids[2]
@@ -366,6 +375,7 @@ mod tests {
             name: VirtualModelName::Opus,
             mode: RoutingMode::Sticky,
             subscription_ids: ids.clone(),
+            upstream_models: Default::default(),
             last_used_index: 0,
         };
         let o = build_candidate_order(&vm, &map, Utc::now(), noon(), Some(ids[0])).await;
@@ -388,9 +398,10 @@ mod tests {
             a.row.model_slots.sonnet = String::new();
             let (map, ids) = insert_all(vec![a]);
             let vm = VirtualModelConfig {
-                name,
+                name: name.clone(),
                 mode: RoutingMode::Sequential,
                 subscription_ids: ids.clone(),
+                upstream_models: Default::default(),
                 last_used_index: 0,
             };
             let o = build_candidate_order(&vm, &map, Utc::now(), noon(), None).await;

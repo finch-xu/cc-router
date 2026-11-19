@@ -62,7 +62,7 @@ pub async fn auth_layer(State(state): State<AppState>, req: Request<Body>, next:
 /// 从两类 header 中尝试提取 token,任一存在即返回。
 /// 优先 `x-api-key`(CC 默认 ANTHROPIC_API_KEY env 走这里),
 /// 其次 `Authorization: Bearer <token>`(CC 的 ANTHROPIC_AUTH_TOKEN env 走这里)。
-fn extract_token(headers: &HeaderMap) -> Option<String> {
+pub(crate) fn extract_token(headers: &HeaderMap) -> Option<String> {
     if let Some(v) = headers.get("x-api-key").and_then(|v| v.to_str().ok()) {
         if !v.is_empty() {
             return Some(v.to_string());
