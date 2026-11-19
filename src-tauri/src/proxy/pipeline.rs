@@ -108,7 +108,7 @@ pub(crate) fn unavailable_reason(
     if let Some(p) = g.row.token_quotas.first_exceeded(&g.quota_usage, now) {
         return format!("已达 {} token 限额", p.label_zh());
     }
-    if g.is_dispatchable(now) && !provides_slot_at(&g.row, vm, clock) {
+    if g.is_dispatchable(now) && !provides_slot_at(&g.row, &vm, clock) {
         return NO_SLOT_MODEL_NOW.to_string();
     }
     format!("{:?}", g.state)
@@ -197,26 +197,20 @@ pub async fn dispatch(
     is_streaming: bool,
     ctx: &ClientContext,
 ) -> AppResult<Response> {
-    // 1. 解析虚拟模型; 非三个虚拟名走 fallback（透传原始 model）
-    let vm_name = VirtualModelName::parse(model).unwrap_or(VirtualModelName::Fallback);
+    let vm_config = {
+        let models = state.virtual_models.read().await;
+        let Some(config) = crate::virtual_model::model::VirtualModelConfig::resolve(&models, model) else {
+            return Ok(overloaded::response(VirtualModelName::Fallback, &[]));
+        };
+        config.clone()
+    };
+    let vm_name = vm_config.name.clone();
     let is_fallback = vm_name.is_fallback();
-
-    if let Some(resp) = jev_only_via_systemone(vm_name) {
+    if let Some(resp) = jev_only_via_systemone(vm_name.clone()) {
         return Ok(resp);
     }
-
-    // 2. 获取候选订阅顺序
-    let vm_config = {
-        let guard = state.virtual_models.read().await;
-        match guard.get(&vm_name) {
-            Some(cfg) => cfg.clone(),
-            None => {
-                return Ok(overloaded::response(vm_name, &[]));
-            }
-        }
-    };
     if vm_config.subscription_ids.is_empty() {
-        return Ok(overloaded::response(vm_name, &[]));
+        return Ok(overloaded::response(vm_name.clone(), &[]));
     }
 
     let now_instant = Instant::now();
@@ -226,7 +220,7 @@ pub async fn dispatch(
                 .session_affinity
                 .lock()
                 .unwrap_or_else(|e| e.into_inner());
-            t.get(vm_name, key, now_instant)
+            t.get(vm_name.clone(), key, now_instant)
         }
         _ => None,
     };
@@ -244,11 +238,11 @@ pub async fn dispatch(
         for sub_id in &vm_config.subscription_ids {
             if let Some(rt) = subs_map.get(sub_id) {
                 let g = rt.read().await;
-                let reason = unavailable_reason(&g, vm_name, now, clock);
+                let reason = unavailable_reason(&g, vm_name.clone(), now, clock);
                 summary.push(format!("- {}: {}", g.row.display_name, reason));
             }
         }
-        return Ok(overloaded::response_with_summary(vm_name, &summary));
+        return Ok(overloaded::response_with_summary(vm_name.clone(), &summary));
     }
 
     // 更新轮询索引（round_robin / sticky 未命中时；sticky 命中钉住返回 None 不前进）
@@ -306,7 +300,7 @@ pub async fn dispatch(
         // 四槽: 此刻生效模型 (时段规则 → 默认); 没有则跳过此候选, 不发请求不计 retry。
         let slot_model = {
             let g = rt.read().await;
-            match candidate_model_or_skip(&g.row, vm_name, clock) {
+            match candidate_model_or_skip(&g.row, vm_name.clone(), clock) {
                 Ok(m) => m,
                 Err(reason) => {
                     warn!(%sub_id, display_name = %g.row.display_name, reason, "candidate skipped: slot has no model at this time");
@@ -345,7 +339,7 @@ pub async fn dispatch(
             } else {
                 None
             };
-            let real_model = match slot_model {
+            let real_model = match vm_config.upstream_models.get(&sub_id).cloned().or(slot_model) {
                 Some(m) => m,
                 None => fallback_override
                     .clone()
@@ -353,7 +347,7 @@ pub async fn dispatch(
             };
             // 订阅槽位级 forced effort: 用户给该订阅的该槽位固定了档位时, 丢弃客户端传入的
             // effort 强制使用它 (fallback 恒 None, 见 [`slot_forced_effort`])。
-            let forced_effort = slot_forced_effort(&guard.row, vm_name, clock);
+            let forced_effort = slot_forced_effort(&guard.row, vm_name.clone(), clock);
             (
                 guard.row.provider_id.clone(),
                 guard.row.endpoint_id.clone(),
@@ -403,7 +397,7 @@ pub async fn dispatch(
                     .session_affinity
                     .lock()
                     .unwrap_or_else(|e| e.into_inner());
-                t.pin(vm_name, key, sub_id, Instant::now());
+                t.pin(vm_name.clone(), key, sub_id, Instant::now());
             }
         }
         last_upstream_error = None;
@@ -433,7 +427,7 @@ pub async fn dispatch(
                 expose_reasoning: yaml_expose_reasoning,
             };
 
-            emit_attempt_started(state, sub_id, vm_name);
+            emit_attempt_started(state, sub_id, vm_name.clone());
             let mut upstream_capture = crate::proxy::header_log::UpstreamHeaderCapture::default();
             let dispatch_res = oauth_dispatch::dispatch_oauth_attempt(
                 &state.http_client,
@@ -459,10 +453,10 @@ pub async fn dispatch(
             let total_ms = start.elapsed().as_millis() as u64;
             match dispatch_res {
                 Ok(ok) => {
-                    emit_attempt_finished(state, sub_id, vm_name, true);
+                    emit_attempt_finished(state, sub_id, vm_name.clone(), true);
                     return Ok(oauth_dispatch::finalize_oauth_response(
                         ok,
-                        vm_name,
+                        vm_name.clone(),
                         attempt_id,
                         sub_id,
                         provider_id,
@@ -481,7 +475,7 @@ pub async fn dispatch(
                     ));
                 }
                 Err(err) => {
-                    emit_attempt_finished(state, sub_id, vm_name, false);
+                    emit_attempt_finished(state, sub_id, vm_name.clone(), false);
                     let (event, retryable) = match &err {
                         OAuthDispatchError::Auth(_) => (state_machine::Event::HttpStatus(401), false),
                         OAuthDispatchError::Upstream { status, .. } => {
@@ -507,7 +501,7 @@ pub async fn dispatch(
                     let entry = RequestLogEntry {
                         id: attempt_id,
                         timestamp_ms: chrono::Utc::now().timestamp_millis(),
-                        virtual_model_name: vm_name,
+                        virtual_model_name: vm_name.clone(),
                         subscription_id: sub_id,
                         provider_id: provider_id.clone(),
                         endpoint_id: endpoint_id.clone(),
@@ -564,7 +558,7 @@ pub async fn dispatch(
             let effort_log = kiro_effort_log(&request_body);
             let mut kiro_body = request_body.clone();
             kiro_body["model"] = Value::String(real_model.clone());
-            emit_attempt_started(state, sub_id, vm_name);
+            emit_attempt_started(state, sub_id, vm_name.clone());
             let mut upstream_capture = crate::proxy::header_log::UpstreamHeaderCapture::default();
             let dispatch_res = oauth_dispatch::dispatch_kiro_attempt(
                 &state.http_client,
@@ -588,10 +582,10 @@ pub async fn dispatch(
             let total_ms = start.elapsed().as_millis() as u64;
             match dispatch_res {
                 Ok(ok) => {
-                    emit_attempt_finished(state, sub_id, vm_name, true);
+                    emit_attempt_finished(state, sub_id, vm_name.clone(), true);
                     return Ok(oauth_dispatch::finalize_kiro_response(
                         ok,
-                        vm_name,
+                        vm_name.clone(),
                         attempt_id,
                         sub_id,
                         provider_id,
@@ -610,7 +604,7 @@ pub async fn dispatch(
                     ));
                 }
                 Err(err) => {
-                    emit_attempt_finished(state, sub_id, vm_name, false);
+                    emit_attempt_finished(state, sub_id, vm_name.clone(), false);
                     let (event, retryable) = match &err {
                         OAuthDispatchError::Auth(_) => (state_machine::Event::HttpStatus(401), false),
                         OAuthDispatchError::Upstream { status, .. } => {
@@ -636,7 +630,7 @@ pub async fn dispatch(
                     let entry = RequestLogEntry {
                         id: attempt_id,
                         timestamp_ms: chrono::Utc::now().timestamp_millis(),
-                        virtual_model_name: vm_name,
+                        virtual_model_name: vm_name.clone(),
                         subscription_id: sub_id,
                         provider_id: provider_id.clone(),
                         endpoint_id: endpoint_id.clone(),
@@ -702,7 +696,7 @@ pub async fn dispatch(
                 include_thoughts: yaml_expose_reasoning,
             };
 
-            emit_attempt_started(state, sub_id, vm_name);
+            emit_attempt_started(state, sub_id, vm_name.clone());
             let mut upstream_capture = crate::proxy::header_log::UpstreamHeaderCapture::default();
             let dispatch_res = gemini_dispatch::dispatch_gemini_attempt(
                 &state.http_client,
@@ -728,10 +722,10 @@ pub async fn dispatch(
             let total_ms = start.elapsed().as_millis() as u64;
             match dispatch_res {
                 Ok(ok) => {
-                    emit_attempt_finished(state, sub_id, vm_name, true);
+                    emit_attempt_finished(state, sub_id, vm_name.clone(), true);
                     return Ok(gemini_dispatch::finalize_gemini_response(
                         ok,
-                        vm_name,
+                        vm_name.clone(),
                         attempt_id,
                         sub_id,
                         provider_id,
@@ -750,7 +744,7 @@ pub async fn dispatch(
                     ));
                 }
                 Err(err) => {
-                    emit_attempt_finished(state, sub_id, vm_name, false);
+                    emit_attempt_finished(state, sub_id, vm_name.clone(), false);
                     let (event, retryable) = match &err {
                         OAuthDispatchError::Auth(_) => (state_machine::Event::HttpStatus(401), false),
                         OAuthDispatchError::Upstream { status, .. } => {
@@ -776,7 +770,7 @@ pub async fn dispatch(
                     let entry = RequestLogEntry {
                         id: attempt_id,
                         timestamp_ms: chrono::Utc::now().timestamp_millis(),
-                        virtual_model_name: vm_name,
+                        virtual_model_name: vm_name.clone(),
                         subscription_id: sub_id,
                         provider_id: provider_id.clone(),
                         endpoint_id: endpoint_id.clone(),
@@ -850,7 +844,7 @@ pub async fn dispatch(
                 None
             };
 
-            emit_attempt_started(state, sub_id, vm_name);
+            emit_attempt_started(state, sub_id, vm_name.clone());
             let mut upstream_capture = crate::proxy::header_log::UpstreamHeaderCapture::default();
             let dispatch_res = gemini_interactions_dispatch::dispatch_gemini_interactions_attempt(
                 &state.http_client,
@@ -878,10 +872,10 @@ pub async fn dispatch(
             let total_ms = start.elapsed().as_millis() as u64;
             match dispatch_res {
                 Ok(ok) => {
-                    emit_attempt_finished(state, sub_id, vm_name, true);
+                    emit_attempt_finished(state, sub_id, vm_name.clone(), true);
                     return Ok(gemini_interactions_dispatch::finalize_gemini_interactions_response(
                         ok,
-                        vm_name,
+                        vm_name.clone(),
                         attempt_id,
                         sub_id,
                         provider_id,
@@ -901,7 +895,7 @@ pub async fn dispatch(
                     ));
                 }
                 Err(err) => {
-                    emit_attempt_finished(state, sub_id, vm_name, false);
+                    emit_attempt_finished(state, sub_id, vm_name.clone(), false);
                     let (event, retryable) = match &err {
                         OAuthDispatchError::Auth(_) => (state_machine::Event::HttpStatus(401), false),
                         OAuthDispatchError::Upstream { status, .. } => {
@@ -927,7 +921,7 @@ pub async fn dispatch(
                     let entry = RequestLogEntry {
                         id: attempt_id,
                         timestamp_ms: chrono::Utc::now().timestamp_millis(),
-                        virtual_model_name: vm_name,
+                        virtual_model_name: vm_name.clone(),
                         subscription_id: sub_id,
                         provider_id: provider_id.clone(),
                         endpoint_id: endpoint_id.clone(),
@@ -1003,7 +997,7 @@ pub async fn dispatch(
                 dialect: detect_responses_dialect(&url, &real_model),
             };
 
-            emit_attempt_started(state, sub_id, vm_name);
+            emit_attempt_started(state, sub_id, vm_name.clone());
             let mut upstream_capture = crate::proxy::header_log::UpstreamHeaderCapture::default();
             let dispatch_res = openai_responses_dispatch::dispatch_openai_responses_attempt(
                 &state.http_client,
@@ -1028,10 +1022,10 @@ pub async fn dispatch(
             let total_ms = start.elapsed().as_millis() as u64;
             match dispatch_res {
                 Ok(ok) => {
-                    emit_attempt_finished(state, sub_id, vm_name, true);
+                    emit_attempt_finished(state, sub_id, vm_name.clone(), true);
                     return Ok(openai_responses_dispatch::finalize_openai_responses(
                         ok,
-                        vm_name,
+                        vm_name.clone(),
                         attempt_id,
                         sub_id,
                         provider_id,
@@ -1050,7 +1044,7 @@ pub async fn dispatch(
                     ));
                 }
                 Err(err) => {
-                    emit_attempt_finished(state, sub_id, vm_name, false);
+                    emit_attempt_finished(state, sub_id, vm_name.clone(), false);
                     let (event, retryable) = match &err {
                         OAuthDispatchError::Auth(_) => (state_machine::Event::HttpStatus(401), false),
                         OAuthDispatchError::Upstream { status, .. } => {
@@ -1076,7 +1070,7 @@ pub async fn dispatch(
                     let entry = RequestLogEntry {
                         id: attempt_id,
                         timestamp_ms: chrono::Utc::now().timestamp_millis(),
-                        virtual_model_name: vm_name,
+                        virtual_model_name: vm_name.clone(),
                         subscription_id: sub_id,
                         provider_id: provider_id.clone(),
                         endpoint_id: endpoint_id.clone(),
@@ -1148,7 +1142,7 @@ pub async fn dispatch(
                 expose_reasoning: yaml_expose_reasoning,
             };
 
-            emit_attempt_started(state, sub_id, vm_name);
+            emit_attempt_started(state, sub_id, vm_name.clone());
             let mut upstream_capture = crate::proxy::header_log::UpstreamHeaderCapture::default();
             let dispatch_res =
                 openai_chat_completions_dispatch::dispatch_openai_chat_completions_attempt(
@@ -1174,11 +1168,11 @@ pub async fn dispatch(
             let total_ms = start.elapsed().as_millis() as u64;
             match dispatch_res {
                 Ok(ok) => {
-                    emit_attempt_finished(state, sub_id, vm_name, true);
+                    emit_attempt_finished(state, sub_id, vm_name.clone(), true);
                     return Ok(
                         openai_chat_completions_dispatch::finalize_openai_chat_completions(
                             ok,
-                            vm_name,
+                            vm_name.clone(),
                             attempt_id,
                             sub_id,
                             provider_id,
@@ -1198,7 +1192,7 @@ pub async fn dispatch(
                     );
                 }
                 Err(err) => {
-                    emit_attempt_finished(state, sub_id, vm_name, false);
+                    emit_attempt_finished(state, sub_id, vm_name.clone(), false);
                     let (event, retryable) = match &err {
                         OAuthDispatchError::Auth(_) => {
                             (state_machine::Event::HttpStatus(401), false)
@@ -1226,7 +1220,7 @@ pub async fn dispatch(
                     let entry = RequestLogEntry {
                         id: attempt_id,
                         timestamp_ms: chrono::Utc::now().timestamp_millis(),
-                        virtual_model_name: vm_name,
+                        virtual_model_name: vm_name.clone(),
                         subscription_id: sub_id,
                         provider_id: provider_id.clone(),
                         endpoint_id: endpoint_id.clone(),
@@ -1377,7 +1371,7 @@ pub async fn dispatch(
             "forwarding to upstream"
         );
 
-        emit_attempt_started(state, sub_id, vm_name);
+        emit_attempt_started(state, sub_id, vm_name.clone());
 
         let mut upstream_capture = crate::proxy::header_log::UpstreamHeaderCapture {
             request: crate::proxy::header_log::capture_tagged(
@@ -1410,7 +1404,7 @@ pub async fn dispatch(
                 body: resp_body,
                 body_text,
             }) => {
-                emit_attempt_finished(state, sub_id, vm_name, status.is_success());
+                emit_attempt_finished(state, sub_id, vm_name.clone(), status.is_success());
                 // 调试模式: dump 上游真实响应体. 优先 body_text(原始字节, 错误路径有),
                 // 其次 resp_body 序列化(成功路径 JSON Value).
                 if debug_mode {
@@ -1483,7 +1477,7 @@ pub async fn dispatch(
                 let entry = RequestLogEntry {
                     id: attempt_id,
                     timestamp_ms: chrono::Utc::now().timestamp_millis(),
-                    virtual_model_name: vm_name,
+                    virtual_model_name: vm_name.clone(),
                     subscription_id: sub_id,
                     provider_id: provider_id.clone(),
                     endpoint_id: endpoint_id.clone(),
@@ -1548,7 +1542,7 @@ pub async fn dispatch(
             }) => {
                 // 流式：若非 2xx 按非流式错误处理
                 if !status.is_success() {
-                    emit_attempt_finished(state, sub_id, vm_name, false);
+                    emit_attempt_finished(state, sub_id, vm_name.clone(), false);
                     let event = state_machine::Event::HttpStatus(status.as_u16());
                     let _ = state_machine::apply(
                         &state.db,
@@ -1588,7 +1582,7 @@ pub async fn dispatch(
                         // 仅对智谱按已知 1308 / 5h 文案判长冷却; 其他 provider 一律视为短期速率限制.
                         let is_quota_exhausted = provider_id == "zhipu"
                             && sse::classify_zhipu_sse_error(code.as_deref(), message.as_deref());
-                        emit_attempt_finished(state, sub_id, vm_name, false);
+                        emit_attempt_finished(state, sub_id, vm_name.clone(), false);
                         let _ = state_machine::apply(
                             &state.db,
                             &state.app_handle,
@@ -1615,7 +1609,7 @@ pub async fn dispatch(
                         let entry = RequestLogEntry {
                             id: attempt_id,
                             timestamp_ms: chrono::Utc::now().timestamp_millis(),
-                            virtual_model_name: vm_name,
+                            virtual_model_name: vm_name.clone(),
                             subscription_id: sub_id,
                             provider_id: provider_id.clone(),
                             endpoint_id: endpoint_id.clone(),
@@ -1657,7 +1651,7 @@ pub async fn dispatch(
                         continue;
                     }
                     sse::PeekResult::Network(e) => {
-                        emit_attempt_finished(state, sub_id, vm_name, false);
+                        emit_attempt_finished(state, sub_id, vm_name.clone(), false);
                         warn!(?e, "upstream stream error during lookahead");
                         let _ = state_machine::apply(
                             &state.db,
@@ -1671,7 +1665,7 @@ pub async fn dispatch(
                         let entry = RequestLogEntry {
                             id: attempt_id,
                             timestamp_ms: chrono::Utc::now().timestamp_millis(),
-                            virtual_model_name: vm_name,
+                            virtual_model_name: vm_name.clone(),
                             subscription_id: sub_id,
                             provider_id: provider_id.clone(),
                             endpoint_id: endpoint_id.clone(),
@@ -1710,7 +1704,7 @@ pub async fn dispatch(
                     sse::PeekResult::Malformed(bytes) => {
                         // 罕见: 上游返了 SSE Content-Type 但流首格式不对 / 提前结束.
                         // 保守: 标 NetworkError + retry 切下家, body_dump 留证.
-                        emit_attempt_finished(state, sub_id, vm_name, false);
+                        emit_attempt_finished(state, sub_id, vm_name.clone(), false);
                         warn!(
                             "stream first event malformed (len={}), retrying",
                             bytes.len()
@@ -1737,7 +1731,7 @@ pub async fn dispatch(
                         stream,
                         first_byte_at,
                     } => {
-                        emit_attempt_finished(state, sub_id, vm_name, true);
+                        emit_attempt_finished(state, sub_id, vm_name.clone(), true);
                         let _ = state_machine::apply(
                             &state.db,
                             &state.app_handle,
@@ -1766,7 +1760,7 @@ pub async fn dispatch(
                         let response = sse::stream_response(
                             resp_headers,
                             stream,
-                            vm_name,
+                            vm_name.clone(),
                             attempt_id,
                             sub_id,
                             provider_id,
@@ -1791,7 +1785,7 @@ pub async fn dispatch(
                 }
             }
             Err(upstream::UpstreamError::Reqwest(e)) => {
-                emit_attempt_finished(state, sub_id, vm_name, false);
+                emit_attempt_finished(state, sub_id, vm_name.clone(), false);
                 warn!(?e, "upstream network error");
                 let _ = state_machine::apply(
                     &state.db,
@@ -1806,7 +1800,7 @@ pub async fn dispatch(
                 let entry = RequestLogEntry {
                     id: attempt_id,
                     timestamp_ms: chrono::Utc::now().timestamp_millis(),
-                    virtual_model_name: vm_name,
+                    virtual_model_name: vm_name.clone(),
                     subscription_id: sub_id,
                     provider_id: provider_id.clone(),
                     endpoint_id: endpoint_id.clone(),
@@ -1873,7 +1867,7 @@ pub async fn dispatch(
                 summary.push(format!("- {}: {}", g.row.display_name, NO_SLOT_MODEL_NOW));
             } else {
                 // 被调度过滤掉、没被尝试的订阅 (限额 / 此时段无模型) 也要说清原因, 不能只显示状态名。
-                let reason = unavailable_reason(&g, vm_name, now, clock);
+                let reason = unavailable_reason(&g, vm_name.clone(), now, clock);
                 summary.push(format!("- {}: {}", g.row.display_name, reason));
             }
         }
@@ -1890,7 +1884,7 @@ pub async fn dispatch(
         })),
     );
 
-    let mut resp = overloaded::response_with_summary(vm_name, &summary);
+    let mut resp = overloaded::response_with_summary(vm_name.clone(), &summary);
     response_headers::set_retry_after(resp.headers_mut(), response_headers::retry_after_secs(cooldowns_ms));
     Ok(resp)
 }

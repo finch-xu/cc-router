@@ -467,6 +467,47 @@ pub async fn create_subscription(
         }
     };
 
+    insert_subscription(&state, row).await
+}
+
+#[tauri::command]
+pub async fn clone_subscription(
+    state: State<'_, AppState>,
+    id: String,
+    display_name: String,
+) -> AppResult<SubscriptionDto> {
+    let id = Uuid::parse_str(&id).map_err(|_| AppError::BadRequest("Invalid subscription ID".into()))?;
+    let display_name = display_name.trim();
+    if display_name.is_empty() || display_name.chars().count() > 80 {
+        return Err(AppError::BadRequest("Enter a subscription name of 1–80 characters".into()));
+    }
+    let source = state.subscriptions.read().await.get(&id).cloned()
+        .ok_or_else(|| AppError::SubscriptionNotFound(id.to_string()))?;
+    let row = duplicate_subscription_row(&source.read().await.row, display_name, Utc::now())?;
+    insert_subscription(&state, row).await
+}
+
+fn duplicate_subscription_row(
+    source: &SubscriptionRow,
+    display_name: &str,
+    now: chrono::DateTime<Utc>,
+) -> AppResult<SubscriptionRow> {
+    let mut row = source.clone();
+    if matches!(row.auth_type, AuthType::ChatgptOauth | AuthType::KiroOauth) {
+        return Err(AppError::BadRequest("OAuth subscriptions require separate authorization".into()));
+    }
+    row.id = Uuid::new_v4();
+    row.display_name = display_name.to_owned();
+    row.created_at = now;
+    row.updated_at = now;
+    row.oauth_metadata = OAuthMetadata::default();
+    row.is_auth_failed = false;
+    row.last_error_message = None;
+    Ok(row)
+}
+
+async fn insert_subscription(state: &AppState, row: SubscriptionRow) -> AppResult<SubscriptionDto> {
+    let id = row.id;
     store::insert(&state.db, &row).await?;
 
     let rt = Arc::new(RwLock::new(SubscriptionRuntime::from_row(row)));
@@ -689,6 +730,8 @@ pub async fn update_subscription_key(
 #[tauri::command]
 pub async fn delete_subscription(state: State<'_, AppState>, id: String) -> AppResult<()> {
     let id = Uuid::parse_str(&id).map_err(|_| AppError::BadRequest("无效 id".into()))?;
+    let _edit = state.route_edits.lock().await;
+    store::delete(&state.db, &id).await?;
     {
         let mut subs = state.subscriptions.write().await;
         subs.remove(&id);
@@ -697,10 +740,10 @@ pub async fn delete_subscription(state: State<'_, AppState>, id: String) -> AppR
         let mut vms = state.virtual_models.write().await;
         for vm in vms.values_mut() {
             vm.subscription_ids.retain(|x| *x != id);
+            vm.upstream_models.remove(&id);
         }
     }
     state.chatgpt_oauth.forget(id).await;
-    store::delete(&state.db, &id).await?;
     Ok(())
 }
 
@@ -757,7 +800,7 @@ pub async fn test_connection(
 
     // 选模型与带的思考强度用同一时刻, 不会一个按半点前、一个按半点后
     let clock = crate::subscription::schedule::WallClock::now();
-    let (model, slot) = match ping::pick_test_model_at(&row, clock) {
+    let (model, slot) = match ping::pick_bound_test_model_at(&state, &row, clock).await {
         Some(m) => m,
         None => {
             let note = ping::ProbeNote::NoTestModel;
@@ -1501,5 +1544,34 @@ mod protocol_tests {
         s.opus = vec![rule("08:15")];
         let err = check_schedules_for(EndpointProtocol::Systemone, &s).unwrap_err();
         assert!(err.to_string().contains("System One"), "{err}");
+    }
+}
+
+#[cfg(test)]
+mod clone_tests {
+    use super::*;
+
+    #[test]
+    fn api_key_copy_keeps_config_and_resets_failure() {
+        let mut source = SubscriptionRow::test_fixture("anthropic", "default");
+        source.auth_type = AuthType::ApiKey;
+        source.api_key = "test-key".into();
+        source.enabled = false;
+        source.is_auth_failed = true;
+        source.last_error_message = Some("expired".into());
+        let now = Utc::now();
+        let copy = duplicate_subscription_row(&source, "Copy", now).unwrap();
+
+        assert_ne!(copy.id, source.id);
+        assert_eq!(copy.api_key, source.api_key);
+        assert_eq!(copy.base_url, source.base_url);
+        assert_eq!(copy.display_name, "Copy");
+        assert_eq!(copy.created_at, now);
+        assert!(!copy.enabled);
+        assert!(!copy.is_auth_failed);
+        assert!(copy.last_error_message.is_none());
+        assert!(source.is_auth_failed);
+        source.auth_type = AuthType::ChatgptOauth;
+        assert!(duplicate_subscription_row(&source, "OAuth copy", now).is_err());
     }
 }

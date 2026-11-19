@@ -229,7 +229,7 @@ pub async fn get_receipt_summary(
 
     for vm in RECEIPT_VM_ORDER {
         let mut sub_items = buckets.remove(vm.as_str()).unwrap_or_default();
-        if !receipt_item_visible(vm, !sub_items.is_empty()) {
+        if !receipt_item_visible(vm.clone(), !sub_items.is_empty()) {
             continue;
         }
         // sub_items 内按 request_count 降序, 让用得多的订阅排前面 (小票阅读视角)

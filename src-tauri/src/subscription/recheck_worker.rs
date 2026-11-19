@@ -94,7 +94,7 @@ async fn scan_and_recheck(state: &AppState) {
 
         // 选模型与带的思考强度用同一时刻, 不会一个按半点前、一个按半点后
         let clock = crate::subscription::schedule::WallClock::now();
-        let Some((model, slot)) = ping::pick_test_model_at(&row, clock) else {
+        let Some((model, slot)) = ping::pick_bound_test_model_at(state, &row, clock).await else {
             debug!(%sub_id, "recheck_worker: 无可用 model, 跳过");
             continue;
         };

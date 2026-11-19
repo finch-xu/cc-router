@@ -1,28 +1,34 @@
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
-#[derive(Debug, Clone, Copy, Hash, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Hash, PartialEq, Eq)]
 pub enum VirtualModelName {
-    /// 最强模型 (Claude Fable 5), 对应 ANTHROPIC_DEFAULT_FABLE_MODEL, 用于最难/最长任务。
-    #[serde(rename = "model-fable")]
     Fable,
-    #[serde(rename = "model-opus")]
     Opus,
-    #[serde(rename = "model-sonnet")]
     Sonnet,
-    #[serde(rename = "model-haiku")]
     Haiku,
-    /// 兜底：请求的 model 不是前三个虚拟名时走这里，透传原始 model 给订阅。
-    #[serde(rename = "model-fallback")]
     Fallback,
-    /// Jev 决策模型 (System One 协议): 只服务 `POST /v1/systemone`, 只绑端点协议为 systemone 的订阅。
-    /// 与另外五个互相隔离 (见 [`VirtualModelName::accepts`])。
-    #[serde(rename = "model-jev")]
     Jev,
+    Custom(std::sync::Arc<str>),
+}
+
+impl Serialize for VirtualModelName {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        serializer.serialize_str(self.as_str())
+    }
+}
+
+impl<'de> Deserialize<'de> for VirtualModelName {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let name = String::deserialize(deserializer)?;
+        Self::all().into_iter().find(|built_in| built_in.as_str() == name)
+            .or_else(|| Self::custom(&name))
+            .ok_or_else(|| serde::de::Error::custom("invalid virtual model name"))
+    }
 }
 
 impl VirtualModelName {
-    pub fn as_str(&self) -> &'static str {
+    pub fn as_str(&self) -> &str {
         match self {
             VirtualModelName::Fable => "model-fable",
             VirtualModelName::Opus => "model-opus",
@@ -30,14 +36,33 @@ impl VirtualModelName {
             VirtualModelName::Haiku => "model-haiku",
             VirtualModelName::Fallback => "model-fallback",
             VirtualModelName::Jev => "model-jev",
+            VirtualModelName::Custom(name) => name,
         }
+    }
+
+    pub fn custom(name: &str) -> Option<Self> {
+        let suffix = name.strip_prefix("model-")?;
+        if name.len() > 64 || Self::all().iter().any(|built_in| built_in.as_str() == name)
+            || !suffix.split('-').all(|part| !part.is_empty() && part.bytes().all(|c| c.is_ascii_lowercase() || c.is_ascii_digit()))
+        {
+            return None;
+        }
+        Some(Self::Custom(name.into()))
+    }
+
+    pub fn without_prefix(name: &str) -> &str {
+        let name = name.strip_prefix("anthropic/").unwrap_or(name);
+        name.strip_prefix("openai/").unwrap_or(name)
+    }
+
+    pub fn is_custom(&self) -> bool {
+        matches!(self, Self::Custom(_))
     }
 
     pub fn parse(s: &str) -> Option<Self> {
         // LiteLLM-style 厂商前缀 (issue #5): anthropic/ 用于 Anthropic 兼容入口,
         // openai/ 用于 OpenAI Responses 兼容入口 (POST /v1/responses, v2.3+).
-        let s = s.strip_prefix("anthropic/").unwrap_or(s);
-        let s = s.strip_prefix("openai/").unwrap_or(s);
+        let s = Self::without_prefix(s);
 
         // 虚拟模型名: 精确映射.
         match s {
@@ -86,11 +111,11 @@ impl VirtualModelName {
 
     /// fallback / jev 不对应任何四槽 slot。为保持签名这里返回 sonnet, 正确的调用路径
     /// 应该先判断 `is_fallback()` / `is_jev()`。
-    pub fn slot(self) -> SubscriptionSlot {
+    pub fn slot(&self) -> SubscriptionSlot {
         match self {
             VirtualModelName::Fable => SubscriptionSlot::Fable,
             VirtualModelName::Opus => SubscriptionSlot::Opus,
-            VirtualModelName::Sonnet | VirtualModelName::Fallback | VirtualModelName::Jev => {
+            VirtualModelName::Sonnet | VirtualModelName::Fallback | VirtualModelName::Jev | VirtualModelName::Custom(_) => {
                 SubscriptionSlot::Sonnet
             }
             VirtualModelName::Haiku => SubscriptionSlot::Haiku,
@@ -100,24 +125,24 @@ impl VirtualModelName {
     /// The subscription slot this virtual model really reads, or `None` for fallback / jev
     /// (they have no four-slot mapping). Unlike [`Self::slot`], safe for time-schedule filtering
     /// and model rewriting.
-    pub fn four_slot(self) -> Option<SubscriptionSlot> {
+    pub fn four_slot(&self) -> Option<SubscriptionSlot> {
         match self {
-            VirtualModelName::Fallback | VirtualModelName::Jev => None,
+            VirtualModelName::Fallback | VirtualModelName::Jev | VirtualModelName::Custom(_) => None,
             other => Some(other.slot()),
         }
     }
 
-    pub fn is_fallback(self) -> bool {
+    pub fn is_fallback(&self) -> bool {
         matches!(self, VirtualModelName::Fallback)
     }
 
-    pub fn is_jev(self) -> bool {
+    pub fn is_jev(&self) -> bool {
         matches!(self, VirtualModelName::Jev)
     }
 
     /// 绑定隔离: model-jev 只收 systemone 订阅, 其余五个只收对话类 (messages) 订阅。
     /// 写入 (绑定命令)、导入、运行时三处都用它判断。
-    pub fn accepts(self, protocol: crate::provider::model::EndpointProtocol) -> bool {
+    pub fn accepts(&self, protocol: crate::provider::model::EndpointProtocol) -> bool {
         use crate::provider::model::EndpointProtocol;
         match protocol {
             EndpointProtocol::Systemone => self.is_jev(),
@@ -127,7 +152,7 @@ impl VirtualModelName {
 
     /// 不能绑定时给出原因 (中文, 直接上屏)。能绑定返回 None。
     pub fn binding_rejection(
-        self,
+        &self,
         protocol: crate::provider::model::EndpointProtocol,
         sub_name: &str,
     ) -> Option<String> {
@@ -175,8 +200,22 @@ pub struct VirtualModelConfig {
     pub name: VirtualModelName,
     pub mode: RoutingMode,
     pub subscription_ids: Vec<Uuid>,
+    pub upstream_models: std::collections::HashMap<Uuid, String>,
     /// 轮询模式专用，不持久化（§7.1）
     pub last_used_index: usize,
+}
+
+impl VirtualModelConfig {
+    pub fn resolve<'a>(
+        configs: &'a std::collections::HashMap<VirtualModelName, Self>,
+        requested: &str,
+    ) -> Option<&'a Self> {
+        let name = VirtualModelName::parse(requested)
+            .or_else(|| VirtualModelName::custom(VirtualModelName::without_prefix(requested))
+                .filter(|name| configs.contains_key(name)))
+            .unwrap_or(VirtualModelName::Fallback);
+        configs.get(&name)
+    }
 }
 
 #[cfg(test)]

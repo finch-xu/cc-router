@@ -1,7 +1,7 @@
 import { type ReactNode } from "react";
 import { Link, useSearchParams } from "react-router";
 // Boxes 图标随「其他 AI Agent」tab 一起暂时下线, 恢复时加回 import
-import { Bot, Plug } from "lucide-react";
+import { Bot, Info, Plug } from "lucide-react";
 import ClaudeCode from "@lobehub/icons/es/ClaudeCode";
 import Cline from "@lobehub/icons/es/Cline";
 import Codex from "@lobehub/icons/es/Codex";
@@ -13,13 +13,17 @@ import Qwen from "@lobehub/icons/es/Qwen";
 import RooCode from "@lobehub/icons/es/RooCode";
 import { ClaudeCodeSettingsEditor } from "@/components/ClaudeCodeSettingsEditor";
 import { CopyableBlock } from "@/components/CopyableBlock";
+import { PlainBasicInfo } from "@/components/guide/PlainBasicInfo";
+import { SketchBasicInfo } from "@/components/guide/SketchBasicInfo";
+import { useTheme } from "@/hooks/useTheme";
+import { isPlainBased } from "@/themes";
 import { useEnvSnippet, useProxyEndpoint, useSettings } from "@/hooks/useSettings";
 import { buildRecommendedCodexAuth, buildRecommendedCodexConfig } from "@/lib/recommendedCodexConfig";
 import { buildRecommendedEnv } from "@/lib/recommendedClaudeCodeEnv";
 import { useT } from "@/i18n";
 import { cn } from "@/lib/utils";
 
-const TAB_IDS = ["claude-code", "codex", "cc-switch", "openclaw", "hermes", "opencode", "generic", "others"] as const;
+const TAB_IDS = ["basic", "claude-code", "codex", "cc-switch", "openclaw", "hermes", "opencode", "generic", "others"] as const;
 type Tab = (typeof TAB_IDS)[number];
 
 function isTab(v: string | null): v is Tab {
@@ -38,14 +42,16 @@ const COMING_SOON: { name: string; icon: ReactNode }[] = [
 
 export function GuidePage() {
   const { t } = useT();
+  const { art } = useTheme();
   // 当前标签落在 `?tab=` 上 (同设置页), 引导窗口「更多工具」能直接跳到对应工具
   const [searchParams, setSearchParams] = useSearchParams();
   const rawTab = searchParams.get("tab");
-  const tab: Tab = isTab(rawTab) ? rawTab : "generic";
+  const tab: Tab = isTab(rawTab) ? rawTab : "basic";
   const setTab = (next: Tab) =>
-    setSearchParams(next === "generic" ? {} : { tab: next }, { replace: true });
+    setSearchParams(next === "basic" ? {} : { tab: next }, { replace: true });
 
   const TABS: { id: Tab; label: string; icon: ReactNode; disabled?: boolean }[] = [
+    { id: "basic", label: t("guide.tab.basic"), icon: <Info size={ICON_SIZE} /> },
     { id: "generic", label: t("guide.tab.generic"), icon: <Plug size={ICON_SIZE} /> },
     { id: "claude-code", label: "Claude Code", icon: <ClaudeCode.Color size={ICON_SIZE} /> },
     { id: "codex", label: "Codex", icon: <Codex size={ICON_SIZE} /> },
@@ -80,6 +86,7 @@ export function GuidePage() {
         ))}
       </div>
 
+      {tab === "basic" && (isPlainBased(art) ? <PlainBasicInfo /> : <SketchBasicInfo />)}
       {tab === "claude-code" && <ClaudeCodeTab />}
       {tab === "codex" && <CodexTab />}
       {tab === "cc-switch" && <CcSwitchTab />}

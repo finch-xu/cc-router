@@ -449,7 +449,7 @@ pub async fn dispatch(state: &AppState, raw_body: Bytes, client_model: String, c
     let pinned = match (vm_config.mode, ctx.session_key.as_deref()) {
         (RoutingMode::Sticky, Some(key)) => {
             let mut t = state.session_affinity.lock().unwrap_or_else(|e| e.into_inner());
-            t.get(vm, key, Instant::now())
+            t.get(vm.clone(), key, Instant::now())
         }
         _ => None,
     };

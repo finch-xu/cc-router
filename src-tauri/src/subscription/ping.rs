@@ -503,6 +503,26 @@ pub fn pick_test_model_at(
         .map(|m| (m, None))
 }
 
+/// Prefer the established slot probe, then an explicit route target over a provider example.
+pub async fn pick_bound_test_model_at(
+    state: &AppState,
+    row: &SubscriptionRow,
+    at: WallClock,
+) -> Option<(String, Option<SubscriptionSlot>)> {
+    let baseline = pick_test_model_at(row, at);
+    if matches!(baseline, Some((_, Some(_))))
+        || row.endpoint_protocol == crate::provider::model::EndpointProtocol::Systemone
+    {
+        return baseline;
+    }
+    let routes = state.virtual_models.read().await;
+    routes.values()
+        .filter_map(|route| route.upstream_models.get(&row.id).map(|model| (route.name.as_str(), model)))
+        .min_by_key(|(name, _)| *name)
+        .map(|(_, model)| (model.clone(), None))
+        .or(baseline)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

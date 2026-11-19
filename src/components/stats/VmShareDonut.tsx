@@ -17,10 +17,15 @@ export const VM_COLOR: Record<VirtualModelName, string> = {
   "model-jev": "var(--vm-jev)",
 };
 
+function customModelColor(name: string): string {
+  const hue = [...name].reduce((value, char) => (value * 31 + char.charCodeAt(0)) % 360, 0);
+  return `oklch(0.63 0.13 ${hue})`;
+}
+
 type Metric = "requests" | "tokens";
 
 interface Slice {
-  name: VirtualModelName;
+  name: string;
   label: string;
   color: string;
   value: number;
@@ -30,7 +35,7 @@ interface Slice {
 }
 
 /**
- * 虚拟模型份额环图 (≤6 段) + 右侧图例表 (名称 / 数值 / 占比 / 成功率)。
+ * 虚拟模型份额环图 + 右侧图例表 (名称 / 数值 / 占比 / 成功率)。
  * 环图只有一个度量, 右上角切换「请求数 / Token」; Token = input + output (不含缓存, 与 KPI 口径一致)。
  */
 export function VmShareDonut({
@@ -44,12 +49,14 @@ export function VmShareDonut({
 }) {
   const { t } = useT();
   const [metric, setMetric] = useState<Metric>("requests");
-  const [activeKey, setActiveKey] = useState<VirtualModelName | null>(null);
+  const [activeKey, setActiveKey] = useState<string | null>(null);
 
   const slices: Slice[] = useMemo(() => {
     const byKey = new Map(items.map((it) => [it.key, it]));
     // 按 VM_ORDER 固定顺序排好再交给 Pie (recharts 不承诺扇区顺序), 0 值过滤
-    return VM_ORDER.flatMap((name) => {
+    const builtIns: ReadonlySet<string> = new Set(VM_ORDER);
+    const custom = [...byKey.keys()].filter((name) => !builtIns.has(name)).sort();
+    return [...VM_ORDER, ...custom].flatMap((name) => {
       const it = byKey.get(name);
       if (!it) return [];
       const tokens = it.total_input_tokens + it.total_output_tokens;
@@ -58,8 +65,8 @@ export function VmShareDonut({
       return [
         {
           name,
-          label: t(VM_META[name].labelKey),
-          color: VM_COLOR[name],
+          label: builtIns.has(name) ? t(VM_META[name as VirtualModelName].labelKey) : name,
+          color: builtIns.has(name) ? VM_COLOR[name as VirtualModelName] : customModelColor(name),
           value,
           requests: it.request_count,
           tokens,

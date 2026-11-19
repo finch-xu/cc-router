@@ -1,3 +1,4 @@
+import { useCustomVirtualModels } from "@/hooks/useVirtualModels";
 import { useEffect, useMemo, useState } from "react";
 import { useSearchParams } from "react-router";
 import { Download, RefreshCw, ScrollText, X } from "lucide-react";
@@ -28,7 +29,7 @@ import {
   type RequestLogDto,
   type RequestLogFilters,
   type RequestStatus,
-  type VirtualModelName,
+  type CustomVirtualModelName,
 } from "@/types";
 
 const PAGE_SIZE = 10;
@@ -45,7 +46,8 @@ export function RequestLogsPage() {
   const { t } = useT();
   const [searchParams, setSearchParams] = useSearchParams();
   const [page, setPage] = useState(1);
-  const [vmFilter, setVmFilter] = useState<VirtualModelName | undefined>();
+  const customModels = useCustomVirtualModels();
+  const [vmFilter, setVmFilter] = useState<CustomVirtualModelName | undefined>();
   const [providerFilter, setProviderFilter] = useState<string | undefined>();
   const [statusFilter, setStatusFilter] = useState<RequestStatus | undefined>();
   const [clientFilter, setClientFilter] = useState<string | undefined>();
@@ -168,7 +170,7 @@ export function RequestLogsPage() {
         <Select
           value={vmFilter ?? ALL}
           onValueChange={(v) => {
-            setVmFilter(v === ALL ? undefined : (v as VirtualModelName));
+            setVmFilter(v === ALL ? undefined : (v as CustomVirtualModelName));
             setPage(1);
           }}
         >
@@ -177,7 +179,7 @@ export function RequestLogsPage() {
           </SelectTrigger>
           <SelectContent>
             <SelectItem value={ALL}>{t("requestLogs.filter.allVm")}</SelectItem>
-            {(Object.keys(VM_META) as VirtualModelName[]).map((name) => (
+            {[...Object.keys(VM_META), ...(customModels.data ?? []).map((model) => model.name)].map((name) => (
               <SelectItem key={name} value={name}>
                 {name}
               </SelectItem>

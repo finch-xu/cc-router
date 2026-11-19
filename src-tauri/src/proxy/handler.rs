@@ -874,17 +874,32 @@ const MODEL_IDS: &[&str] = &[
 ];
 
 /// GET /v1/models
-/// 返回 cc-router 对外暴露的固定模型清单, 无鉴权 (与 /health 同级在 auth_layer 直通).
+/// 内置模型始终可见。代理鉴权开启时，自定义模型只对通过鉴权的客户端可见。
 ///
 /// schema 是 **Anthropic /v1/models + OpenAI /v1/models 超集**: 同时填两边的字段
 /// (`type`+`object`, `display_name`+`owned_by`, `created_at`+`created`),
 /// 两边 SDK 都按 `extra: allow` 忽略未知字段, 共用同一路径对客户端透明。
-pub async fn models() -> Response {
+pub async fn models(State(state): State<AppState>, headers: HeaderMap) -> Response {
     const CREATED_AT_ISO: &str = "2026-01-01T00:00:00Z"; // Anthropic 字段 (ISO 字符串)
     const CREATED_UNIX: i64 = 1_767_225_600; // OpenAI 字段 (Unix 秒, 同一时刻)
 
-    let data: Vec<serde_json::Value> = MODEL_IDS
-        .iter()
+    let include_custom = {
+        let settings = state.settings.read().await;
+        !settings.auth_enabled
+            || super::middleware::extract_token(&headers).as_deref() == Some(settings.auth_token.as_str())
+    };
+    let mut ids: Vec<String> = MODEL_IDS.iter().map(|id| (*id).to_owned()).collect();
+    if include_custom {
+        let models = state.virtual_models.read().await;
+        let mut custom: Vec<_> = models.values()
+            .filter(|config| config.name.is_custom() && !config.subscription_ids.is_empty())
+            .map(|config| config.name.as_str().to_owned())
+            .collect();
+        custom.sort_unstable();
+        ids.extend(custom.iter().map(|id| format!("anthropic/{id}")));
+        ids.extend(custom);
+    }
+    let data: Vec<serde_json::Value> = ids.iter()
         .map(|id| {
             json!({
                 // Anthropic 字段
@@ -900,17 +915,22 @@ pub async fn models() -> Response {
         })
         .collect();
 
-    Json(json!({
+    let mut response = Json(json!({
         // OpenAI list wrapper (extra: allow → Anthropic SDK 忽略)
         "object": "list",
         // 通用字段
         "data": data,
         // Anthropic page wrapper
         "has_more": false,
-        "first_id": MODEL_IDS.first(),
-        "last_id": MODEL_IDS.last(),
+        "first_id": ids.first(),
+        "last_id": ids.last(),
     }))
-    .into_response()
+    .into_response();
+    response.headers_mut().insert(
+        axum::http::header::CACHE_CONTROL,
+        HeaderValue::from_static("no-store"),
+    );
+    response
 }
 
 #[cfg(test)]

@@ -366,7 +366,7 @@ export interface SubscriptionDto {
   created_at: number;
   updated_at: number;
   /** 该订阅被哪些虚拟模型引用 */
-  referenced_by: VirtualModelName[];
+  referenced_by: CustomVirtualModelName[];
   /** 缓存的模型列表（可能为空，fetched_at = Unix ms） */
   model_cache?: {
     fetched_at: number;
@@ -551,6 +551,22 @@ export type LastErrorCode =
 export type RefreshModelListResult =
   | { kind: "auto"; models: ModelInfo[]; fetched_at: number }
   | { kind: "manual_fallback"; reason: string };
+
+export type CustomVirtualModelName = `model-${string}`;
+
+export interface CustomVirtualModelTarget {
+  subscription_id: string;
+  upstream_model_id: string;
+}
+
+export interface CustomVirtualModelInput {
+  mode: RoutingMode;
+  targets: CustomVirtualModelTarget[];
+}
+
+export interface CustomVirtualModelDto extends CustomVirtualModelInput {
+  name: CustomVirtualModelName;
+}
 
 export interface VirtualModelDto {
   name: VirtualModelName;
@@ -782,7 +798,7 @@ export interface RequestHeaders {
 export interface RequestLogDto {
   id: string;
   timestamp: number;
-  virtual_model_name: VirtualModelName;
+  virtual_model_name: CustomVirtualModelName;
   subscription_id: string;
   provider_id: string;
   endpoint_id: string;
@@ -840,7 +856,7 @@ export interface ListRequestsResult {
 }
 
 export interface RequestLogFilters {
-  virtual_model_name?: VirtualModelName;
+  virtual_model_name?: CustomVirtualModelName;
   provider_id?: string;
   status?: RequestStatus;
   subscription_id?: string;
@@ -1033,12 +1049,12 @@ export interface QuotaReachedPayload {
 // 路由实时事件(对应 proxy/pipeline.rs 里 emit 的 payload)
 export interface RouteAttemptStartedEvent {
   subscription_id: string;
-  virtual_model: VirtualModelName;
+  virtual_model: CustomVirtualModelName;
 }
 
 export interface RouteAttemptFinishedEvent {
   subscription_id: string;
-  virtual_model: VirtualModelName;
+  virtual_model: CustomVirtualModelName;
   success: boolean;
 }
 
@@ -1152,6 +1168,7 @@ export interface ImportPreview {
   has_secrets: boolean;
   local_subscription_count: number;
   subscriptions: ImportPreviewItem[];
+  custom_model_conflicts: string[];
 }
 
 export interface ImportOptions {
@@ -1166,8 +1183,14 @@ export interface ImportReport {
   skipped_oauth: string[];
   /** 没通过新建订阅校验而跳过的订阅 */
   skipped_invalid: { name: string; reason: string }[];
-  /** 跨类绑定 (对话订阅 ↔ model-jev) 被跳过的记录; 后端为空时省略 */
-  skipped_bindings?: { name: string; reason: string }[];
+  /** 被跳过的路由绑定。旧版后端只返回 reason。 */
+  skipped_bindings?: {
+    name: string;
+    reason: string;
+    custom_binding_issue?:
+      | { kind: "name_conflict" }
+      | { kind: "invalid_target"; subscription_id: string };
+  }[];
   disabled_missing_key: string[];
   token_imported: boolean;
   token_error?: string;

@@ -24,6 +24,8 @@ pub struct AppState {
     pub db: sqlx::SqlitePool,
     pub providers: Arc<HashMap<String, Provider>>,
     pub subscriptions: Arc<RwLock<HashMap<Uuid, Arc<RwLock<SubscriptionRuntime>>>>>,
+    /// Serializes route writes, subscription removal, and backup imports across SQLite and memory.
+    pub route_edits: Arc<tokio::sync::Mutex<()>>,
     pub virtual_models: Arc<RwLock<HashMap<VirtualModelName, VirtualModelConfig>>>,
     pub settings: Arc<RwLock<Settings>>,
     /// HTTP listener 实际绑定到的端口. None=HTTP listener 未启用 (HTTPS-only 模式).

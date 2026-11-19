@@ -57,6 +57,7 @@ pub struct ImportPreview {
     pub has_secrets: bool,
     pub local_subscription_count: usize,
     pub subscriptions: Vec<PreviewItem>,
+    pub custom_model_conflicts: Vec<String>,
 }
 
 /// Re-runs the checks `create_subscription` / `update_subscription` apply, so an edited file
@@ -147,6 +148,9 @@ pub fn preview(file: &ExportFile, local: &LocalState) -> ImportPreview {
         exported_at: file.exported_at.timestamp_millis(),
         has_secrets: file.secrets.is_some(),
         local_subscription_count: local.existing_ids.len(),
+        custom_model_conflicts: file.virtual_models.iter()
+            .filter(|vm| vm.name.is_custom() && local.bindings.contains_key(&vm.name))
+            .map(|vm| vm.name.as_str().to_owned()).collect(),
         subscriptions: file
             .subscriptions
             .iter()
@@ -223,9 +227,18 @@ pub fn resolve_secrets(file: &ExportFile, plain: SecretsPlain) -> AppResult<Reso
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(tag = "kind", content = "subscription_id", rename_all = "snake_case")]
+pub enum CustomBindingIssue {
+    NameConflict,
+    InvalidTarget(Uuid),
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct InvalidEntry {
     pub name: String,
     pub reason: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub custom_binding_issue: Option<CustomBindingIssue>,
 }
 
 #[derive(Debug, Default, Clone, PartialEq, Eq, Serialize)]
@@ -248,6 +261,7 @@ pub struct ImportPlan {
     pub inserts: Vec<SubscriptionRow>,
     /// Full new binding list for each virtual model that changes.
     pub bindings: Vec<(VirtualModelName, Vec<Uuid>)>,
+    pub custom_routes: Vec<crate::virtual_model::model::VirtualModelConfig>,
     pub modes: Vec<(VirtualModelName, RoutingMode)>,
     pub report: ImportReport,
 }
@@ -273,7 +287,7 @@ pub fn plan(
                 continue;
             }
             Verdict::SkipInvalid(reason) => {
-                report.skipped_invalid.push(InvalidEntry { name: sub.display_name.clone(), reason });
+                report.skipped_invalid.push(InvalidEntry { name: sub.display_name.clone(), reason, custom_binding_issue: None });
                 continue;
             }
             Verdict::New => {}
@@ -327,7 +341,45 @@ pub fn plan(
 
     let mut bindings = Vec::new();
     let mut modes = Vec::new();
+    let mut custom_routes = Vec::new();
     for vm in &file.virtual_models {
+        if vm.name.is_custom() {
+            if local.bindings.contains_key(&vm.name) {
+                report.skipped_bindings.push(InvalidEntry {
+                    name: vm.name.as_str().to_owned(),
+                    reason: "A local custom model already uses this name".into(),
+                    custom_binding_issue: Some(CustomBindingIssue::NameConflict),
+                });
+                continue;
+            }
+            let mut subscription_ids = Vec::new();
+            let mut upstream_models = HashMap::new();
+            for id in &vm.subscription_ids {
+                let eligible = new_ids.contains(id)
+                    && protocol_of.get(id).is_some_and(|(protocol, _)| vm.name.accepts(*protocol));
+                let upstream = vm.upstream_models.get(id).map(|model| model.trim())
+                    .filter(|model| !model.is_empty() && model.chars().count() <= 160);
+                if let (true, Some(upstream)) = (eligible, upstream) {
+                    if upstream_models.insert(*id, upstream.to_owned()).is_none() {
+                        subscription_ids.push(*id);
+                    }
+                } else {
+                    report.skipped_bindings.push(InvalidEntry {
+                        name: vm.name.as_str().to_owned(),
+                        reason: format!("Unavailable or invalid target subscription {id}"),
+                        custom_binding_issue: Some(CustomBindingIssue::InvalidTarget(*id)),
+                    });
+                }
+            }
+            custom_routes.push(crate::virtual_model::model::VirtualModelConfig {
+                name: vm.name.clone(),
+                mode: vm.mode,
+                subscription_ids,
+                upstream_models,
+                last_used_index: 0,
+            });
+            continue;
+        }
         let current = local.bindings.get(&vm.name).cloned().unwrap_or_default();
         let mut next = current.clone();
         for id in &vm.subscription_ids {
@@ -336,7 +388,7 @@ pub fn plan(
             }
             if let Some((protocol, name)) = protocol_of.get(id) {
                 if let Some(reason) = vm.name.binding_rejection(*protocol, name) {
-                    report.skipped_bindings.push(InvalidEntry { name: name.to_string(), reason });
+                    report.skipped_bindings.push(InvalidEntry { name: name.to_string(), reason, custom_binding_issue: None });
                     continue;
                 }
             }
@@ -344,13 +396,13 @@ pub fn plan(
         }
         if next != current {
             if current.is_empty() {
-                modes.push((vm.name, vm.mode));
+                modes.push((vm.name.clone(), vm.mode));
             }
-            bindings.push((vm.name, next));
+            bindings.push((vm.name.clone(), next));
         }
     }
 
-    ImportPlan { inserts, bindings, modes, report }
+    ImportPlan { inserts, bindings, custom_routes, modes, report }
 }
 
 pub async fn apply(pool: &sqlx::SqlitePool, plan: &ImportPlan) -> AppResult<()> {
@@ -362,10 +414,14 @@ pub async fn apply(pool: &sqlx::SqlitePool, plan: &ImportPlan) -> AppResult<()> 
         sub_store::insert_on(&mut tx, row).await?;
     }
     for (name, ids) in &plan.bindings {
-        vm_store::save_bindings_on(&mut tx, *name, ids).await?;
+        vm_store::save_bindings_on(&mut tx, name, ids).await?;
     }
     for (name, mode) in &plan.modes {
-        vm_store::save_mode_on(&mut tx, *name, *mode).await?;
+        vm_store::save_mode_on(&mut tx, name, *mode).await?;
+    }
+    for route in &plan.custom_routes {
+        vm_store::save_mode_on(&mut tx, &route.name, route.mode).await?;
+        vm_store::save_targets_on(&mut tx, &route.name, &route.subscription_ids, &route.upstream_models).await?;
     }
     tx.commit().await?;
     Ok(())
@@ -421,6 +477,7 @@ mod tests {
             name: VirtualModelName::Opus,
             mode: RoutingMode::Sticky,
             subscription_ids: rows.iter().map(|r| r.id).collect(),
+            upstream_models: Default::default(),
         }];
         let secrets = with_secrets.then(|| SecretOptions { password: PW, auth_token: "tok", cost: KdfCost::FAST });
         let file = build_export(&rows, &vms, secrets, "6.1.0", Utc::now()).unwrap();
@@ -434,6 +491,35 @@ mod tests {
     fn resolved(f: &Fixture) -> ResolvedSecrets {
         let plain = open(f.file.secrets.as_ref().unwrap(), PW).unwrap();
         resolve_secrets(&f.file, plain).unwrap()
+    }
+
+    #[tokio::test]
+    async fn custom_model_backup_roundtrip_and_conflict() {
+        let f = fixture(false);
+        let sub = &f.rows[1];
+        let name = VirtualModelName::custom("model-hy4").unwrap();
+        let snapshot = VirtualModelSnapshot {
+            name: name.clone(),
+            mode: RoutingMode::Sticky,
+            subscription_ids: vec![sub.id],
+            upstream_models: std::collections::BTreeMap::from([(sub.id, "hy4".to_owned())]),
+        };
+        let exported = build_export(&f.rows, &[snapshot], None, "6.7.0", Utc::now()).unwrap();
+        assert_eq!(exported.version, 2);
+        let file = crate::backup::format::parse_file(&serde_json::to_string(&exported).unwrap()).unwrap();
+
+        let import = plan(&file, None, &empty_local(), Utc::now());
+        let pool = sqlx::sqlite::SqlitePoolOptions::new().max_connections(1)
+            .connect("sqlite::memory:").await.unwrap();
+        crate::db::run_migrations(&pool).await.unwrap();
+        apply(&pool, &import).await.unwrap();
+        let routes = crate::virtual_model::store::load_all(&pool).await.unwrap();
+        assert_eq!(routes[&name].upstream_models[&sub.id], "hy4");
+
+        let mut local = empty_local();
+        local.bindings.insert(name, vec![]);
+        assert_eq!(preview(&file, &local).custom_model_conflicts, vec!["model-hy4"]);
+        assert!(plan(&file, None, &local, Utc::now()).custom_routes.is_empty());
     }
 
     #[test]
@@ -942,6 +1028,7 @@ mod tests {
             name: VirtualModelName::Jev,
             mode: RoutingMode::Sequential,
             subscription_ids: vec![chat_id, jev_id],
+            upstream_models: Default::default(),
         });
         let plan = plan(&f.file, Some(&resolved(&f)), &empty_local(), Utc::now());
 

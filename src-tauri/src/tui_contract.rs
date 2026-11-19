@@ -599,6 +599,10 @@ fn route_attempt_payloads_match() {
     let finished_view: dto::RouteAttempt = through_json(&finished);
     assert_eq!(finished_view.virtual_model, "model-sonnet");
     assert_eq!(finished_view.success, Some(true));
+
+    let custom = VirtualModelName::custom("model-hy4").unwrap();
+    let custom_view: dto::RouteAttempt = through_json(&route_attempt_payload(id, custom, Some(true)));
+    assert_eq!(custom_view.virtual_model, "model-hy4");
 }
 
 /// `RequestLogDto` 全部字段为 `Some` 时, `dto::RequestLog` 逐字段接住。

@@ -1,10 +1,12 @@
+import { useState } from "react";
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
 import { Link } from "react-router";
 import { Plus, Key } from "lucide-react";
 import { StatusBadge } from "@/components/StatusBadge";
 import { ProviderLogo } from "@/components/ProviderLogo";
 import { EmptyState } from "@/components/EmptyState";
 import { BalanceBadge } from "@/components/SubscriptionBalanceCard";
-import { useSubscriptions } from "@/hooks/useSubscriptions";
+import { useCloneSubscription, useSubscriptions } from "@/hooks/useSubscriptions";
 import { useProviders } from "@/hooks/useProviders";
 import { useT } from "@/i18n";
 import { providerName } from "@/lib/providerText";
@@ -34,6 +36,9 @@ export function SubscriptionsPage() {
   const { t, locale } = useT();
   const subs = useSubscriptions();
   const providers = useProviders();
+  const clone = useCloneSubscription();
+  const [source, setSource] = useState<SubscriptionDto | null>(null);
+  const [name, setName] = useState("");
 
   return (
     <>
@@ -71,7 +76,7 @@ export function SubscriptionsPage() {
                 <th style={{ width: 220 }}>{t("subscriptions.col.quota")}</th>
                 <th style={{ width: 90 }}>{t("subscriptions.col.referenced")}</th>
                 <th style={{ width: 100 }}>{t("subscriptions.col.updatedAt")}</th>
-                <th style={{ width: 80 }}></th>
+                <th></th>
               </tr>
             </thead>
             <tbody>
@@ -134,9 +139,20 @@ export function SubscriptionsPage() {
                       {fmtTimeShort(sub.updated_at)}
                     </td>
                     <td>
-                      <Link className="btn sm" to={`/subscriptions/${sub.id}`}>
-                        {t("subscriptions.view")}
-                      </Link>
+                      <div className="flex flex-wrap gap-1.5">
+                        <Link className="btn sm" to={`/subscriptions/${sub.id}`}>
+                          {t("subscriptions.view")}
+                        </Link>
+                        {sub.auth_type !== "chatgpt_oauth" && sub.auth_type !== "kiro_oauth" && (
+                          <button type="button" className="btn sm" onClick={() => {
+                            clone.reset();
+                            setSource(sub);
+                            setName(t("subscriptions.clone.defaultName", { name: sub.display_name }));
+                          }}>
+                            {t("subscriptions.clone.action")}
+                          </button>
+                        )}
+                      </div>
                     </td>
                   </tr>
                 );
@@ -145,6 +161,36 @@ export function SubscriptionsPage() {
           </table>
         </div>
       )}
+      <Dialog open={source !== null} onOpenChange={(open) => {
+        if (!open && !clone.isPending) setSource(null);
+      }}>
+        <DialogContent className="cc-dialog">
+          <DialogHeader>
+            <DialogTitle>{t("subscriptions.clone.action")}</DialogTitle>
+          </DialogHeader>
+          <form className="grid gap-4" onSubmit={(event) => {
+            event.preventDefault();
+            if (!source || !name.trim() || clone.isPending) return;
+            clone.mutate({ id: source.id, name }, { onSuccess: () => setSource(null) });
+          }}>
+            <label className="grid gap-1">
+              {t("subscriptions.clone.name")}
+              <input className="input" required maxLength={80} value={name}
+                onChange={(event) => setName(event.target.value)} disabled={clone.isPending} />
+            </label>
+            <p className="field-hint">{t("subscriptions.clone.hint")}</p>
+            {clone.isError && <p role="alert">{t("subscriptions.clone.error")}</p>}
+            <DialogFooter>
+              <button type="button" className="btn" disabled={clone.isPending} onClick={() => setSource(null)}>
+                {t("common.cancel")}
+              </button>
+              <button type="submit" className="btn primary" disabled={clone.isPending || !name.trim()}>
+                {t("subscriptions.clone.create")}
+              </button>
+            </DialogFooter>
+          </form>
+        </DialogContent>
+      </Dialog>
     </>
   );
 }

@@ -2150,32 +2150,6 @@ html:not([data-platform="macos"]) .main.flush { padding-top: 0; }
   font-size: 9.5px;
   color: var(--ink-2);
 }
-.jev-access {
-  grid-column: 1 / -1;
-  margin-top: 10px;
-  padding: 9px 12px;
-  border-radius: 10px;
-  background: var(--surface-2);
-  font-size: 11.5px;
-  color: var(--ink-3);
-  display: flex;
-  gap: 10px;
-  align-items: center;
-  flex-wrap: wrap;
-}
-.jev-access b { color: var(--ink-2); font-weight: 600; }
-.jev-copy {
-  margin-left: auto;
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-  font-size: 11px;
-  color: var(--accent-ink);
-  border: 1.3px solid var(--accent-line);
-  border-radius: var(--r-sketch);
-  padding: 1px 8px;
-  background: transparent;
-}
 
 /* ============================================================
  * 实时路由页: 页头 + 四张卡片 (路由图 / 接入信息 / API 入口 / 虚拟模型映射)
