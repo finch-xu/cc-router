@@ -357,6 +357,7 @@
   "guide.codex.trouble.item4": "Wrong model or model_not_found: the model field is misspelled. A misspelled name falls through to the fallback virtual model — use a virtual model name from the table above.",
   "guide.codex.trouble.item5": "Connection refused: the cc-router proxy isn't running, or the port in base_url doesn't match the actual port. Use the address shown at the top of this page.",
   "guide.tab.others": "Other AI agents",
+  "guide.tab.basic": "Basic information",
   "guide.tab.generic": "Generic Integration",
   "guide.generic.intro": "cc-router exposes four entry points: the first three are chat protocols that share the same subscriptions, virtual models, quotas and session affinity; the fourth, /v1/systemone, serves Jev decision models and only routes to model-jev. The \"Entry\" column in Request Logs shows which one each request came through. Pick the section matching the protocol your tool speaks.",
   "guide.generic.row.baseUrl": "Base URL",

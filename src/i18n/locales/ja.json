@@ -357,6 +357,7 @@
   "guide.codex.trouble.item4": "モデルが違う、または model_not_found：model の綴りが間違っています。綴りを誤った名前は fallback 仮想モデルに回されるので、上の表の仮想モデル名を使ってください。",
   "guide.codex.trouble.item5": "接続が拒否される：cc-router のプロキシが動いていないか、base_url のポートが実際のポートと一致していません。このページ上部に表示されているアドレスを使ってください。",
   "guide.tab.others": "その他の AI エージェント",
+  "guide.tab.basic": "基本情報",
   "guide.tab.generic": "汎用接続方法",
   "guide.generic.intro": "cc-router には 4 つの入口があります。最初の 3 つは会話プロトコルで、サブスクリプション・仮想モデル・上限・セッション親和性を共有します。4 つ目の /v1/systemone は Jev 意思決定モデル用で、model-jev のみを使います。リクエストログの「入口」列で各リクエストがどの入口から来たか確認できます。ツールが対応するプロトコルの項目を選んでください。",
   "guide.generic.row.baseUrl": "Base URL",

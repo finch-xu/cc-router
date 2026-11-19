@@ -357,6 +357,7 @@
   "guide.codex.trouble.item4": "模型不对或报 model_not_found：model 字段拼错了，拼错的名字会落到 fallback 虚拟模型，按上表填写虚拟模型名。",
   "guide.codex.trouble.item5": "连接被拒绝：cc-router 代理没有运行，或 base_url 里的端口与实际端口不一致，以本页顶部显示的地址为准。",
   "guide.tab.others": "其他 AI Agent",
+  "guide.tab.basic": "基本信息",
   "guide.tab.generic": "通用接入方式",
   "guide.generic.intro": "cc-router 提供四个入口：前三个是对话协议，共用同一套订阅、虚拟模型、限额与会话亲和；第四个 /v1/systemone 服务 Jev 决策模型，只走 model-jev。请求日志的「入口接口」一栏能看到每条请求从哪个入口进来。按你的工具支持的协议选择对应的接入方式。",
   "guide.generic.row.baseUrl": "Base URL",

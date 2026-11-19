@@ -357,6 +357,7 @@
   "guide.codex.trouble.item4": "模型不對或報 model_not_found：model 欄位拼錯了，拼錯的名字會落到 fallback 虛擬模型，按上表填寫虛擬模型名。",
   "guide.codex.trouble.item5": "連線被拒絕：cc-router 代理沒有執行，或 base_url 裡的連接埠與實際連接埠不一致，以本頁頂部顯示的位址為準。",
   "guide.tab.others": "其他 AI Agent",
+  "guide.tab.basic": "基本資訊",
   "guide.tab.generic": "通用接入方式",
   "guide.generic.intro": "cc-router 提供四個入口：前三個是對話協議，共用同一套訂閱、虛擬模型、額度與工作階段親和；第四個 /v1/systemone 服務 Jev 決策模型，只走 model-jev。請求紀錄的「入口介面」一欄能看到每條請求從哪個入口進來。按你的工具支援的協議選擇對應的接入方式。",
   "guide.generic.row.baseUrl": "Base URL",
