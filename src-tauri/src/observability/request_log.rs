@@ -144,6 +144,8 @@ pub struct RequestLogEntry {
     pub error_message: Option<String>,
     /// 仅错误路径填充, 截断至 4KB
     pub upstream_response_body: Option<String>,
+    /// Transient join key for the desktop session monitor. Never persisted by flush_batch.
+    pub monitor_session: Option<(crate::session_monitor::Client, String)>,
     /// 客户端识别 (Claude Code / Zed / Codex CLI / ...), None 表示未识别 → 前端展示 "unk"
     pub client_tool: Option<&'static str>,
     /// 客户端原始 User-Agent (识别成功时也保留, 用于详情抽屉)
@@ -233,10 +235,12 @@ pub async fn run_consumer(
                 match maybe_entry {
                     Some(entry) => {
                         let rt = subscriptions.read().await.get(&entry.subscription_id).cloned();
+                        let mut auth_type = None;
                         if let Some(rt) = rt {
                             let now = Utc::now();
                             let crossed = {
                                 let mut g = rt.write().await;
+                                auth_type = Some(g.row.auth_type);
                                 apply_entry_to_quota(&mut g, &entry, now)
                             };
                             dirty.insert(entry.subscription_id);
@@ -263,6 +267,7 @@ pub async fn run_consumer(
                                 }
                             }
                         }
+                        crate::session_monitor::observe_proxy(&app, &entry, auth_type).await;
                         if buffer.len() >= BUFFER_MAX {
                             buffer.pop_front();
                         }
@@ -654,6 +659,7 @@ mod tests {
             retry_count: 0,
             error_message: None,
             upstream_response_body: None,
+            monitor_session: None,
             client_tool: None,
             client_user_agent: None,
             client_version: None,

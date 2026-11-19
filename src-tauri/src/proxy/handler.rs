@@ -74,12 +74,13 @@ pub async fn messages(
         entry_kind: RequestEntryKind::Messages,
         http_version: Some(format_http_version(version)),
         session_key: session_key::extract(&headers, &parsed, RequestEntryKind::Messages),
+        monitor_identity: None,
         tools: tool_log::request_tool_shape(&parsed),
         request_headers_log: crate::proxy::header_log::serialize(&headers, log_headers),
         log_headers,
         upstream_request_headers_log: None,
         upstream_response_headers_log: None,
-    };
+    }.with_monitor_identity(&headers, &parsed);
 
     info!(
         %model,
@@ -200,12 +201,13 @@ pub async fn responses(
         http_version: Some(format_http_version(version)),
         // 用翻译前的原始 parsed: request_to_anthropic 会丢 prompt_cache_key.
         session_key: session_key::extract(&headers, &parsed, RequestEntryKind::Responses),
+        monitor_identity: None,
         tools: tool_log::request_tool_shape(&anthropic_body),
         request_headers_log: crate::proxy::header_log::serialize(&headers, log_headers),
         log_headers,
         upstream_request_headers_log: None,
         upstream_response_headers_log: None,
-    };
+    }.with_monitor_identity(&headers, &parsed);
 
     info!(
         %model,
@@ -552,6 +554,7 @@ pub async fn chat_completions(
         http_version: Some(format_http_version(version)),
         // 用翻译前的原始 parsed: 会话键分支读原始 `user` 字段.
         session_key: session_key::extract(&headers, &parsed, RequestEntryKind::ChatCompletions),
+        monitor_identity: None,
         tools: tool_log::request_tool_shape(&anthropic_body),
         request_headers_log: crate::proxy::header_log::serialize(&headers, log_headers),
         log_headers,
@@ -822,6 +825,7 @@ pub async fn systemone(
         entry_kind: RequestEntryKind::SystemOne,
         http_version: Some(format_http_version(version)),
         session_key: session_key::extract(&headers, &parsed, RequestEntryKind::SystemOne),
+        monitor_identity: None,
         tools: Default::default(),
         request_headers_log: crate::proxy::header_log::serialize(&headers, log_headers),
         log_headers,

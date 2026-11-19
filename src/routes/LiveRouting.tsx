@@ -1,3 +1,4 @@
+import { LiveSessionSection } from "@/components/LiveSessionSection";
 import { ClientAccessSection } from "@/components/ClientAccessSection";
 import { RouteFlowDiagram } from "@/components/RouteFlowDiagram";
 import { RouteFlowDiagramClassic } from "@/components/RouteFlowDiagramClassic";
@@ -12,6 +13,7 @@ export function LiveRoutingPage() {
     return (
       <div className="page-flow">
         <RouteFlowDiagramClassic />
+        <LiveSessionSection variant="classic" />
         <ClientAccessSection variant="classic" />
       </div>
     );
@@ -33,6 +35,7 @@ export function LiveRoutingPage() {
         </div>
       </div>
       <RouteFlowDiagram />
+      <LiveSessionSection variant="sketch" />
       <ClientAccessSection variant="sketch" />
     </div>
   );

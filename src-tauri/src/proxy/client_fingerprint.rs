@@ -93,6 +93,8 @@ pub struct ClientContext {
     pub http_version: Option<String>,
     /// 会话亲和键 (见 proxy::session_key). None = 本请求不参与 sticky.
     pub session_key: Option<String>,
+    // Runtime telemetry identity has stricter rules than sticky routing.
+    pub monitor_identity: Option<(crate::session_monitor::Client, String)>,
     /// 请求侧工具形状 (声明工具数 / 回传 tool_result 数), 对 Anthropic 形态 body 算一次。
     pub tools: crate::proxy::tool_log::RequestToolShape,
     /// 入站请求头, 已脱敏序列化 (proxy/header_log.rs); 关闭「记录请求头」时为 None。
@@ -106,6 +108,48 @@ pub struct ClientContext {
 }
 
 impl ClientContext {
+    pub(crate) fn monitor_session(&self) -> Option<(crate::session_monitor::Client, String)> {
+        self.monitor_identity.clone()
+    }
+
+    pub(crate) fn with_monitor_identity(mut self, headers: &HeaderMap, body: &serde_json::Value) -> Self {
+        self.monitor_identity = self.extract_monitor_identity(headers, body);
+        self
+    }
+
+    fn extract_monitor_identity(&self, headers: &HeaderMap, body: &serde_json::Value) -> Option<(crate::session_monitor::Client, String)> {
+        use crate::session_monitor::{session_id, Client};
+        let peer = self.ip.as_deref()?.parse::<std::net::IpAddr>().ok()?;
+        if !peer.to_canonical().is_loopback() {
+            return None;
+        }
+        let header = |name| headers.get(name).and_then(|value| value.to_str().ok());
+        let (client, id) = match (self.info.tool, self.entry_kind) {
+            (Some("claude-code"), RequestEntryKind::Messages) => (Client::Claude, header("x-claude-code-session-id")?.to_owned()),
+            (Some("codex-cli"), RequestEntryKind::Responses) => {
+                let metadata = body["client_metadata"]["x-codex-turn-metadata"].as_str()
+                    .or_else(|| header("x-codex-turn-metadata"));
+                // Forks and agents may reuse prompt_cache_key and session-id for routing.
+                // Prefer the event's session identity. Without it, only join an explicit
+                // thread ID or the older underscore header, never a cache key.
+                let explicit = body["client_metadata"]["session_id"].as_str();
+                let id = match (explicit, metadata) {
+                    (Some(id), _) => id.to_owned(),
+
+                    (None, Some(raw)) if raw.len() <= 8192 => {
+                        let value: serde_json::Value = serde_json::from_str(raw).ok()?;
+                        value["session_id"].as_str()?.to_owned()
+                    }
+                    (None, Some(_)) => return None,
+                    (None, None) => header("thread-id").or_else(|| header("session_id"))?.to_owned(),
+                };
+                (Client::Codex, id)
+            }
+            _ => return None,
+        };
+        Some((client, session_id(&id)?.to_owned()))
+    }
+
     /// 本 attempt 的 ctx: 带上刚采集到的上游两组头, 其余字段不变。
     pub fn with_upstream_headers(
         &self,
