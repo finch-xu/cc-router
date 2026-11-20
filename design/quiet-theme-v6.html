@@ -1,0 +1,890 @@
+<!doctype html>
+<html lang="zh-CN" data-mode="light" data-accent="coral">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>简洁主题 v6 设计稿</title>
+<style>
+/* ============================================================
+ * 「简洁」v6 —— 分层 + 重心
+ *   1. 三层底色分区，不靠线：侧栏(暖灰) / 画布(近白) / 浮起卡片(纯白+柔阴影)
+ *   2. 每页只有一块「主卡」(更大阴影 + 大号数字)，是这一页的视觉重心
+ *   3. 平时安静、出事显眼：正常 = 绿点灰字；限流 / 失效 = 带底色标签 + 行内操作
+ *   4. 品牌珊瑚色只给：主按钮、选中项图标、活跃连线、首选路由、图表主序列
+ *   5. 设置这种「一条一条」的内容才用描边分组 + 行分隔线（同 T3 设置页）
+ * ============================================================ */
+:root {
+  --sidebar:  #f3f2f0;
+  --bg:       #fbfbfa;
+  --card:     #ffffff;
+  --well:     #f3f2ef;   /* 卡内凹陷区 / 输入框 / 分段控件底 */
+  --well-2:   #e9e7e3;
+  --hair:     rgb(41 37 36 / 8%);   /* 只给设置分组、弹层 */
+  --ink:      #1c1917;
+  --ink-2:    #44403c;
+  --ink-3:    #78716c;
+  --ink-4:    #a8a29e;
+
+  --accent:      #d4553a;
+  --accent-2:    #b9442b;
+  --accent-soft: #fcede7;
+  --accent-ring: rgb(212 85 58 / 20%);
+
+  --ok:   #16a34a; --ok-soft:   #e7f6ec;
+  --warn: #c97a00; --warn-soft: #fdf2d9;
+  --err:  #d93a2f; --err-soft:  #fdeceb;
+  --idle: #a8a29e;
+
+  --sh-pill: 0 0 0 1px rgb(41 37 36 / 6%), 0 1px 2px rgb(41 37 36 / 6%);
+  --sh-card: 0 0 0 1px rgb(41 37 36 / 5%), 0 1px 2px rgb(41 37 36 / 4%), 0 6px 18px -8px rgb(41 37 36 / 12%);
+  --sh-hero: 0 0 0 1px rgb(41 37 36 / 5%), 0 2px 4px rgb(41 37 36 / 4%), 0 18px 44px -16px rgb(41 37 36 / 20%);
+
+  --r-lg: 16px; --r: 12px; --r-sm: 8px;
+  --font: Inter, -apple-system, BlinkMacSystemFont, "Segoe UI Variable Text", "Segoe UI", Roboto, "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", "Noto Sans SC", system-ui, sans-serif;
+  --mono: "JetBrains Mono", ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+  --ease: cubic-bezier(.2,.7,.2,1);
+}
+:root[data-accent="blue"] { --accent:#2459e0; --accent-2:#1b47b8; --accent-soft:#ebf0fd; --accent-ring: rgb(36 89 224 / 20%); }
+:root[data-mode="dark"] {
+  --sidebar:  #131211;
+  --bg:       #1a1918;
+  --card:     #242220;
+  --well:     #1e1d1b;
+  --well-2:   #2e2b29;
+  --hair:     rgb(255 255 255 / 7%);
+  --ink:      #f5f4f2;
+  --ink-2:    #d6d3d1;
+  --ink-3:    #a29c97;
+  --ink-4:    #6d6864;
+  --accent:      #ea7353;
+  --accent-2:    #f29a80;
+  --accent-soft: rgb(234 115 83 / 14%);
+  --accent-ring: rgb(234 115 83 / 28%);
+  --ok:   #34c46e; --ok-soft:   rgb(52 196 110 / 13%);
+  --warn: #e8a530; --warn-soft: rgb(232 165 48 / 14%);
+  --err:  #f0645a; --err-soft:  rgb(240 100 90 / 14%);
+  --sh-pill: 0 0 0 1px rgb(255 255 255 / 7%), 0 1px 2px rgb(0 0 0 / 40%);
+  --sh-card: 0 0 0 1px rgb(255 255 255 / 6%), 0 8px 22px -10px rgb(0 0 0 / 60%);
+  --sh-hero: 0 0 0 1px rgb(255 255 255 / 7%), 0 22px 50px -18px rgb(0 0 0 / 75%);
+}
+:root[data-mode="dark"][data-accent="blue"] { --accent:#5b8cff; --accent-2:#8fb0ff; --accent-soft: rgb(91 140 255 / 14%); --accent-ring: rgb(91 140 255 / 28%); }
+
+* { box-sizing: border-box; }
+html { background: #e7e5e2; }
+:root[data-mode="dark"] { background: #0c0b0b; }
+body { margin: 0; font: 13.5px/1.55 var(--font); color: var(--ink); -webkit-font-smoothing: antialiased; }
+button { font: inherit; color: inherit; cursor: pointer; border: 0; background: none; }
+.mono { font-family: var(--mono); font-size: .93em; letter-spacing: -.01em; }
+.num { font-variant-numeric: tabular-nums; }
+.c2 { color: var(--ink-2); } .c3 { color: var(--ink-3); } .c4 { color: var(--ink-4); }
+.r { text-align: right; }
+svg.i { width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-width: 1.7; stroke-linecap: round; stroke-linejoin: round; flex: none; }
+
+/* ---------- 文档外壳 ---------- */
+.doc { max-width: 1440px; margin: 0 auto; padding: 28px 24px 60px; }
+.doc-head { display: flex; gap: 24px; align-items: flex-end; justify-content: space-between; flex-wrap: wrap; margin-bottom: 20px; color: var(--ink); }
+.doc-head h1 { font-size: 20px; margin: 0 0 4px; letter-spacing: -.01em; }
+.doc-head p { margin: 0; color: var(--ink-3); max-width: 760px; }
+.doc-ctrl { display: flex; gap: 8px; }
+
+/* ---------- 窗口 ---------- */
+.window { display: grid; grid-template-columns: 236px 1fr; height: 860px; border-radius: 14px; overflow: hidden; background: var(--bg);
+  box-shadow: 0 0 0 1px rgb(0 0 0 / 10%), 0 30px 80px -30px rgb(0 0 0 / 35%); }
+
+/* ---------- 侧栏 ---------- */
+.sidebar { background: var(--sidebar); display: flex; flex-direction: column; padding: 40px 12px 12px; gap: 2px; min-height: 0; overflow: auto; }
+.lights { position: absolute; margin: -28px 0 0 6px; display: flex; gap: 8px; }
+.lights i { width: 12px; height: 12px; border-radius: 50%; background: #ff5f57; } .lights i:nth-child(2){background:#febc2e} .lights i:nth-child(3){background:#28c840}
+.brand { display: flex; align-items: center; gap: 10px; padding: 6px 8px 16px; }
+.brand img { width: 30px; height: 30px; border-radius: 8px; }
+.brand b { display: block; font-size: 14px; letter-spacing: -.01em; }
+.brand small { display: block; color: var(--ink-3); font-size: 11.5px; margin-top: -1px; }
+.nav-label { font-size: 11px; color: var(--ink-4); padding: 14px 10px 4px; letter-spacing: .02em; }
+.nav-item { display: flex; align-items: center; gap: 10px; width: 100%; padding: 7px 10px; border-radius: 9px; color: var(--ink-2); text-align: left; transition: background .12s var(--ease); }
+.nav-item svg { color: var(--ink-3); }
+.nav-item:hover { background: rgb(41 37 36 / 5%); }
+:root[data-mode="dark"] .nav-item:hover { background: rgb(255 255 255 / 5%); }
+.nav-item.active { background: var(--card); color: var(--ink); font-weight: 550; box-shadow: var(--sh-pill); }
+.nav-item.active svg { color: var(--accent); }
+.nav-item .end { margin-left: auto; font-size: 11.5px; color: var(--ink-4); font-variant-numeric: tabular-nums; }
+.nav-item .badge { margin-left: auto; min-width: 18px; height: 18px; padding: 0 5px; border-radius: 9px; background: var(--err); color: #fff; font-size: 11px; font-weight: 600; display: grid; place-items: center; }
+.side-foot { margin-top: auto; display: flex; flex-direction: column; gap: 8px; padding-top: 12px; }
+.proxy-card { background: var(--card); border-radius: 12px; padding: 10px 12px; box-shadow: var(--sh-pill); }
+.proxy-card .t { display: flex; align-items: center; gap: 8px; font-weight: 550; font-size: 12.5px; }
+.proxy-card .a { display: flex; align-items: center; justify-content: space-between; margin-top: 4px; color: var(--ink-3); font-size: 11.5px; }
+.side-tools { display: flex; align-items: center; gap: 2px; padding: 0 2px; }
+.side-tools .ver { margin-left: auto; font-size: 11.5px; color: var(--ink-4); }
+
+/* ---------- 通用件 ---------- */
+.dot { width: 7px; height: 7px; border-radius: 50%; background: var(--idle); display: inline-block; flex: none; }
+.dot.ok { background: var(--ok); } .dot.warn { background: var(--warn); } .dot.err { background: var(--err); }
+.dot.pulse { box-shadow: 0 0 0 0 color-mix(in srgb, var(--ok) 50%, transparent); animation: pulse 2s infinite; }
+@keyframes pulse { 70% { box-shadow: 0 0 0 6px transparent; } 100% { box-shadow: 0 0 0 0 transparent; } }
+@media (prefers-reduced-motion: reduce) { .dot.pulse { animation: none; } }
+
+.pill { display: inline-flex; align-items: center; gap: 6px; height: 22px; padding: 0 9px; border-radius: 11px; font-size: 12px; font-weight: 500; white-space: nowrap; }
+.pill.ok   { color: var(--ink-2); padding-left: 2px; }
+.pill.warn { background: var(--warn-soft); color: var(--warn); }
+.pill.err  { background: var(--err-soft); color: var(--err); }
+.pill.acc  { background: var(--accent-soft); color: var(--accent); }
+.pill.mute { background: var(--well); color: var(--ink-3); }
+.pill .dot { width: 6px; height: 6px; }
+.pill.warn .dot { background: var(--warn); } .pill.err .dot { background: var(--err); }
+
+.btn { display: inline-flex; align-items: center; gap: 6px; height: 32px; padding: 0 12px; border-radius: 9px; font-weight: 500; white-space: nowrap; transition: background .12s var(--ease), box-shadow .12s var(--ease); }
+.btn svg.i { width: 15px; height: 15px; }
+.btn.primary { background: var(--accent); color: #fff; box-shadow: 0 1px 2px rgb(0 0 0 / 12%), inset 0 1px 0 rgb(255 255 255 / 16%); }
+.btn.primary:hover { background: var(--accent-2); }
+:root[data-mode="dark"] .btn.primary { color: #1a0c08; }
+:root[data-mode="dark"][data-accent="blue"] .btn.primary { color: #fff; }
+.btn.soft { background: var(--card); box-shadow: var(--sh-pill); }
+.btn.ghost { color: var(--ink-2); }
+.btn.ghost:hover, .btn.soft:hover { background: var(--well); }
+.btn.sm { height: 26px; padding: 0 9px; font-size: 12.5px; border-radius: 7px; }
+.btn.danger { background: var(--err); color: #fff; }
+.icon-btn { width: 30px; height: 30px; border-radius: 8px; display: grid; place-items: center; color: var(--ink-3); }
+.icon-btn:hover { background: rgb(41 37 36 / 6%); color: var(--ink); }
+
+.seg { display: inline-flex; padding: 3px; gap: 2px; background: var(--well); border-radius: 10px; }
+.seg button { height: 26px; padding: 0 11px; border-radius: 7px; color: var(--ink-3); font-size: 12.5px; font-weight: 500; white-space: nowrap; }
+.seg button:hover { color: var(--ink); }
+.seg button.on { background: var(--card); color: var(--ink); box-shadow: var(--sh-pill); }
+.seg.sm button { height: 22px; padding: 0 8px; font-size: 12px; }
+
+.select { display: inline-flex; align-items: center; gap: 8px; height: 30px; padding: 0 10px 0 12px; border-radius: 9px; background: var(--card); box-shadow: var(--sh-pill); color: var(--ink-2); font-size: 12.5px; }
+.select::after { content: ""; width: 6px; height: 6px; border: solid var(--ink-4); border-width: 0 1.5px 1.5px 0; transform: rotate(45deg) translateY(-2px); margin-left: 4px; }
+.select.set { background: var(--accent-soft); color: var(--accent); box-shadow: none; }
+.select.set::after { border-color: var(--accent); }
+
+.switch { width: 38px; height: 22px; border-radius: 11px; background: var(--well-2); position: relative; transition: background .15s var(--ease); flex: none; }
+.switch::after { content: ""; position: absolute; top: 3px; left: 3px; width: 16px; height: 16px; border-radius: 50%; background: #fff; box-shadow: 0 1px 2px rgb(0 0 0 / 25%); transition: transform .15s var(--ease); }
+.switch.on { background: var(--accent); } .switch.on::after { transform: translateX(16px); }
+
+.plogo { width: 30px; height: 30px; border-radius: 9px; display: grid; place-items: center; font-weight: 700; font-size: 13px; color: #fff; flex: none; }
+.plogo.sm { width: 20px; height: 20px; border-radius: 6px; font-size: 10px; }
+.p-A { background: #c96f4f; } .p-Z { background: #3a5bd9; } .p-K { background: #1f1f1f; } .p-D { background: #4d6bfe; }
+:root[data-mode="dark"] .p-K { background: #3a3836; }
+
+/* ---------- 主区 ---------- */
+.main { display: flex; flex-direction: column; min-width: 0; min-height: 0; }
+.screen { display: none; flex: 1; min-height: 0; overflow: auto; }
+.screen.on { display: block; animation: enter .24s var(--ease); }
+@keyframes enter { from { opacity: 0; transform: translateY(4px); } }
+@media (prefers-reduced-motion: reduce) { .screen.on { animation: none; } }
+.page { max-width: 1080px; margin: 0 auto; padding: 36px 40px 56px; }
+.page.wide { max-width: none; }
+.ph { display: flex; align-items: center; gap: 16px; margin-bottom: 22px; flex-wrap: wrap; }
+.ph h1 { font-size: 22px; font-weight: 650; letter-spacing: -.015em; margin: 0; }
+.ph .sub { color: var(--ink-3); font-size: 13px; margin-top: 2px; }
+.ph .actions { margin-left: auto; display: flex; gap: 8px; align-items: center; }
+
+.card { background: var(--card); border-radius: var(--r-lg); box-shadow: var(--sh-card); }
+.hero { background: var(--card); border-radius: 20px; box-shadow: var(--sh-hero); }
+.sec { margin-top: 34px; }
+.sec-head { display: flex; align-items: baseline; gap: 10px; margin-bottom: 12px; }
+.sec-head h2 { font-size: 15px; font-weight: 620; margin: 0; letter-spacing: -.005em; }
+.sec-head .note { color: var(--ink-4); font-size: 12px; }
+.sec-head .end { margin-left: auto; }
+
+/* 表格：无线，行悬停 */
+.tbl { width: 100%; border-collapse: separate; border-spacing: 0; }
+.tbl th { font-weight: 500; font-size: 12px; color: var(--ink-4); text-align: left; padding: 0 12px 8px; white-space: nowrap; }
+.tbl td { padding: 9px 12px; white-space: nowrap; }
+.tbl tbody tr { transition: background .1s; }
+.tbl tbody tr:hover td { background: var(--well); }
+.tbl tbody tr td:first-child { border-radius: 9px 0 0 9px; } .tbl tbody tr td:last-child { border-radius: 0 9px 9px 0; }
+.who { display: inline-flex; align-items: center; gap: 9px; }
+
+/* ---------- 实时路由 ---------- */
+.kpis { display: grid; grid-template-columns: repeat(4, 1fr); padding: 22px 26px 6px; gap: 12px; }
+.kpi .l { font-size: 12px; color: var(--ink-3); display: flex; align-items: center; gap: 6px; }
+.kpi .v { font-size: 28px; font-weight: 650; letter-spacing: -.02em; line-height: 1.25; margin-top: 2px; font-variant-numeric: tabular-nums; }
+.kpi .v small { font-size: 14px; color: var(--ink-4); font-weight: 500; margin-left: 2px; }
+.kpi .s { font-size: 12px; color: var(--ink-3); }
+.kpi .s .up { color: var(--ok); } .kpi .s .w { color: var(--warn); }
+.kpi.focus .v { color: var(--accent); }
+
+.topo { position: relative; display: grid; grid-template-columns: 180px 1fr 230px; align-items: center; padding: 18px 26px 26px; min-height: 300px; }
+.topo svg.lines { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; overflow: visible; }
+.topo .col { display: flex; flex-direction: column; gap: 12px; position: relative; z-index: 1; }
+.topo .col-label { font-size: 11.5px; color: var(--ink-4); margin-bottom: 2px; }
+.node { display: flex; align-items: center; gap: 9px; height: 40px; padding: 0 12px; border-radius: 11px; background: var(--well); color: var(--ink-3); font-weight: 500; }
+.node .n { margin-left: auto; font-size: 11px; color: #fff; background: var(--accent); border-radius: 8px; padding: 0 6px; height: 17px; display: grid; place-items: center; font-weight: 600; }
+.node.live { background: var(--card); color: var(--ink); box-shadow: var(--sh-card); }
+.node.live svg { color: var(--accent); }
+.node .t { line-height: 1.25; min-width: 0; }
+.node .t b { font-weight: 550; display: block; font-size: 13px; }
+.node .t small { font-size: 11.5px; color: var(--ink-3); display: flex; align-items: center; gap: 5px; }
+.up-node { height: 48px; }
+.up-node.warn { background: var(--warn-soft); } .up-node.warn small { color: var(--warn); }
+.up-node.err  { background: var(--err-soft); }  .up-node.err small { color: var(--err); }
+.up-node.live { background: var(--card); }
+.hub { justify-self: center; z-index: 1; display: flex; flex-direction: column; align-items: center; gap: 8px; text-align: center; }
+.hub .mark { width: 76px; height: 76px; border-radius: 24px; background: var(--card); display: grid; place-items: center;
+  box-shadow: 0 0 0 6px var(--accent-ring), var(--sh-card); }
+.hub .mark img { width: 46px; height: 46px; border-radius: 12px; }
+.hub b { font-size: 14px; }
+.hub small { color: var(--ink-3); font-family: var(--mono); font-size: 11.5px; margin-top: -6px; }
+
+.below { display: grid; grid-template-columns: 1.5fr 1fr; gap: 28px; margin-top: 34px; }
+.attn { display: flex; flex-direction: column; gap: 10px; }
+.alert { border-radius: 14px; padding: 12px 14px; display: grid; grid-template-columns: auto 1fr auto; gap: 4px 12px; align-items: center; }
+.alert.err { background: var(--err-soft); } .alert.warn { background: var(--warn-soft); }
+.alert .ic { width: 28px; height: 28px; border-radius: 8px; display: grid; place-items: center; background: var(--card); grid-row: span 2; }
+.alert.err .ic { color: var(--err); } .alert.warn .ic { color: var(--warn); }
+.alert b { font-weight: 600; font-size: 13px; }
+.alert small { color: var(--ink-2); font-size: 12px; grid-column: 2; }
+.alert .btn { grid-row: 1 / span 2; grid-column: 3; }
+.all-good { border-radius: 14px; padding: 12px 14px; background: var(--well); color: var(--ink-3); font-size: 12.5px; display: flex; gap: 8px; align-items: center; }
+
+/* ---------- 虚拟模型 ---------- */
+.timebar { display: inline-flex; align-items: center; gap: 10px; padding: 6px 6px 6px 14px; border-radius: 12px; background: var(--card); box-shadow: var(--sh-pill); margin-bottom: 22px; }
+.timebar .lbl { color: var(--ink-3); font-size: 12.5px; }
+.vms { display: grid; gap: 16px; }
+.vm { padding: 18px 20px 14px; }
+.vm-head { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; margin-bottom: 12px; }
+.vm-head .name { font-family: var(--mono); font-size: 15px; font-weight: 600; letter-spacing: -.02em; }
+.vm-head .desc { color: var(--ink-3); font-size: 12.5px; }
+.vm-head .end { margin-left: auto; display: flex; gap: 10px; align-items: center; }
+.route { display: grid; grid-template-columns: 22px 1.2fr 1.1fr 180px 116px; align-items: center; gap: 12px; padding: 8px 10px; border-radius: 11px; }
+.route + .route { margin-top: 2px; }
+.route .ord { width: 22px; height: 22px; border-radius: 7px; background: var(--well); color: var(--ink-3); font-size: 11.5px; font-weight: 600; display: grid; place-items: center; }
+.route .sub { display: flex; align-items: center; gap: 9px; font-weight: 500; }
+.route .model { font-family: var(--mono); font-size: 12.5px; color: var(--ink-2); }
+.route .tag { justify-self: end; }
+.route.first { background: var(--accent-soft); }
+.route.first .ord { background: var(--accent); color: #fff; }
+.route.first .model { color: var(--ink); }
+.route.off { opacity: .55; }
+.day { position: relative; height: 6px; border-radius: 3px; background: var(--well-2); }
+.day i { position: absolute; top: 0; bottom: 0; border-radius: 3px; background: color-mix(in srgb, var(--ink) 30%, transparent); }
+.route.first .day i { background: var(--accent); }
+.day b { position: absolute; top: -4px; bottom: -4px; width: 2px; border-radius: 1px; background: var(--ink); left: 56%; }
+.add-route { margin: 4px 0 0 34px; }
+.vm-warn { display: flex; align-items: center; gap: 12px; border-radius: 12px; padding: 12px 14px; background: var(--warn-soft); color: var(--ink-2); }
+.vm-warn svg { color: var(--warn); }
+.vm-warn .btn { margin-left: auto; }
+
+/* ---------- 订阅 ---------- */
+.filters { display: flex; gap: 8px; margin-bottom: 18px; align-items: center; flex-wrap: wrap; }
+.chip { height: 30px; padding: 0 12px; border-radius: 15px; display: inline-flex; align-items: center; gap: 7px; color: var(--ink-3); font-weight: 500; font-size: 12.5px; }
+.chip b { font-weight: 600; color: var(--ink-4); font-variant-numeric: tabular-nums; }
+.chip:hover { background: var(--well); }
+.chip.on { background: var(--card); color: var(--ink); box-shadow: var(--sh-pill); }
+.chip.on b { color: var(--ink-3); }
+.chip.err { color: var(--err); } .chip.err b { color: var(--err); }
+.subs { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; }
+.sub-card { padding: 18px 18px 14px; display: flex; flex-direction: column; gap: 14px; transition: box-shadow .15s var(--ease), transform .15s var(--ease); }
+.sub-card:hover { box-shadow: var(--sh-hero); }
+.sub-top { display: flex; align-items: center; gap: 12px; }
+.sub-top .plogo { width: 38px; height: 38px; border-radius: 11px; font-size: 15px; }
+.sub-top .t b { font-size: 14.5px; font-weight: 600; display: block; }
+.sub-top .t small { color: var(--ink-3); font-size: 12px; }
+.sub-top .pill { margin-left: auto; }
+.quota .row { display: flex; justify-content: space-between; font-size: 12px; color: var(--ink-3); margin-bottom: 6px; }
+.quota .row b { color: var(--ink); font-weight: 600; font-variant-numeric: tabular-nums; }
+.bar { height: 6px; border-radius: 3px; background: var(--well-2); overflow: hidden; }
+.bar i { display: block; height: 100%; border-radius: 3px; background: var(--ok); }
+.bar i.warn { background: var(--warn); }
+.slots { display: flex; gap: 6px; flex-wrap: wrap; }
+.slot { font-family: var(--mono); font-size: 11.5px; padding: 3px 8px; border-radius: 7px; background: var(--well); color: var(--ink-2); }
+.slot em { font-style: normal; color: var(--ink-4); margin-right: 5px; }
+.sub-foot { display: flex; align-items: center; gap: 4px; margin: 0 -6px -4px; }
+.sub-foot .when { color: var(--ink-4); font-size: 12px; margin-left: 6px; margin-right: auto; }
+.inline-fix { display: flex; align-items: center; gap: 10px; border-radius: 10px; padding: 9px 10px 9px 12px; background: var(--err-soft); color: var(--err); font-size: 12.5px; }
+.inline-fix .btn { margin-left: auto; }
+.sub-card.add { align-items: center; justify-content: center; text-align: center; background: transparent; box-shadow: none; border: 1.5px dashed var(--well-2); color: var(--ink-3); min-height: 120px; }
+.sub-card.add:hover { background: var(--well); box-shadow: none; }
+
+/* ---------- 日志 ---------- */
+.log-card { padding: 6px; overflow: auto; }
+.log-card .tbl th { padding: 12px 10px 8px; position: sticky; top: 0; background: var(--card); }
+.log-card .tbl td { padding: 8px 10px; font-size: 12.5px; }
+.log-card tr.bad td { background: color-mix(in srgb, var(--err-soft) 55%, transparent); }
+.log-card tr.slow td { background: color-mix(in srgb, var(--warn-soft) 55%, transparent); }
+.code { font-family: var(--mono); font-size: 12px; font-weight: 600; }
+.pager { display: flex; align-items: center; justify-content: space-between; padding: 14px 4px 0; color: var(--ink-3); font-size: 12px; }
+
+/* ---------- 统计 ---------- */
+.stat-hero { display: grid; grid-template-columns: repeat(4, 1fr); }
+.stat-hero .kpi { padding: 22px 24px; }
+.stat-hero .kpi + .kpi { box-shadow: inset 1px 0 0 var(--hair); }
+.spark { display: block; width: 100%; height: 34px; margin-top: 10px; }
+.minor { display: flex; gap: 36px; padding: 16px 4px 0; flex-wrap: wrap; }
+.minor div { font-size: 12px; color: var(--ink-3); }
+.minor b { display: block; font-size: 17px; color: var(--ink); font-weight: 600; font-variant-numeric: tabular-nums; }
+.heat-card { padding: 18px 20px; }
+.heat { display: grid; grid-auto-flow: column; grid-template-rows: repeat(7, 11px); gap: 3px; overflow: hidden; }
+.heat i { width: 11px; height: 11px; border-radius: 3px; background: var(--well-2); }
+.heat i.l1 { background: color-mix(in srgb, var(--accent) 25%, var(--card)); }
+.heat i.l2 { background: color-mix(in srgb, var(--accent) 55%, var(--card)); }
+.heat i.l3 { background: var(--accent); }
+.heat-legend { display: flex; align-items: center; gap: 4px; justify-content: flex-end; color: var(--ink-4); font-size: 11.5px; margin-top: 10px; }
+.heat-legend i { width: 11px; height: 11px; border-radius: 3px; display: inline-block; }
+.two { display: grid; grid-template-columns: 1.4fr 1fr; gap: 16px; }
+.chart-card { padding: 18px 20px; }
+.chart { display: flex; align-items: flex-end; gap: 14px; height: 170px; padding-top: 10px; }
+.chart .b { flex: 1; display: flex; flex-direction: column-reverse; gap: 2px; }
+.chart .b i { display: block; border-radius: 5px 5px 2px 2px; }
+.chart .b i.ok { background: var(--accent); opacity: .9; }
+.chart .b:last-child i.ok { opacity: 1; }
+.chart .b i.bad { background: var(--ink-2); border-radius: 3px; }
+.axis { display: flex; gap: 14px; margin-top: 8px; color: var(--ink-4); font-size: 11.5px; }
+.axis span { flex: 1; text-align: center; }
+.legend { display: flex; gap: 12px; margin-left: auto; font-size: 12px; color: var(--ink-3); }
+.legend span::before { content: ""; display: inline-block; width: 8px; height: 8px; border-radius: 2px; background: var(--c); margin-right: 6px; }
+.share { display: grid; gap: 14px; margin-top: 4px; }
+.share .row { display: grid; grid-template-columns: 110px 1fr 40px; gap: 12px; align-items: center; font-size: 12.5px; }
+.share .bar { height: 8px; border-radius: 4px; }
+.share .bar i { border-radius: 4px; background: var(--accent); }
+
+/* ---------- 设置：描边分组 + 分隔线 (T3 设置页同款) ---------- */
+.set-wrap { max-width: none; }
+.set-sec { margin-top: 30px; }
+.set-sec:first-child { margin-top: 0; }
+.set-sec h2 { font-size: 15px; font-weight: 620; margin: 0 0 10px; }
+.group { background: var(--card); border-radius: 14px; box-shadow: 0 0 0 1px var(--hair), 0 1px 2px rgb(41 37 36 / 3%); }
+.group .row { display: flex; align-items: center; gap: 24px; padding: 14px 18px; }
+.group .row + .row { box-shadow: inset 0 1px 0 var(--hair); }
+.group .row > div:first-child { flex: 1; min-width: 0; }
+.group .row b { font-weight: 550; display: block; }
+.group .row small { color: var(--ink-3); font-size: 12.5px; display: block; margin-top: 2px; }
+.group .row.danger b { color: var(--err); }
+
+/* ---------- 接入指南 ---------- */
+.endpoint-hero { padding: 24px 26px; display: grid; grid-template-columns: 1fr auto; gap: 18px 24px; align-items: center; }
+.endpoint-hero .lbl { font-size: 12px; color: var(--ink-3); margin-bottom: 4px; display: flex; gap: 8px; align-items: center; }
+.endpoint-hero .url { font-family: var(--mono); font-size: 22px; font-weight: 600; letter-spacing: -.02em; }
+.endpoint-hero .meta { grid-column: 1 / -1; display: flex; gap: 28px; flex-wrap: wrap; padding-top: 16px; box-shadow: inset 0 1px 0 var(--hair); }
+.endpoint-hero .meta div { font-size: 12px; color: var(--ink-3); }
+.endpoint-hero .meta b { display: block; color: var(--ink); font-weight: 500; font-size: 13px; margin-top: 2px; }
+.snippet { background: #1c1917; color: #e7e5e4; border-radius: 16px; padding: 16px 18px; font-family: var(--mono); font-size: 12.5px; line-height: 1.75; white-space: pre; position: relative; box-shadow: var(--sh-card); overflow: auto; }
+:root[data-mode="dark"] .snippet { background: #0f0e0d; }
+.snippet .k { color: #f0a58e; } .snippet .s { color: #a7d3a0; } .snippet .cm { color: #78716c; }
+:root[data-accent="blue"] .snippet .k { color: #9db8ff; }
+.snippet .btn { position: absolute; top: 10px; right: 10px; background: rgb(255 255 255 / 10%); color: #fff; }
+.ep { display: grid; grid-template-columns: 52px auto 1fr; gap: 6px 14px; align-items: center; }
+.ep .m { font-family: var(--mono); font-size: 11px; font-weight: 600; color: var(--ink-3); background: var(--well); border-radius: 6px; text-align: center; padding: 2px 0; }
+.ep .m.post { color: var(--accent); background: var(--accent-soft); }
+
+/* ---------- 文档：规则与 token ---------- */
+.notes { display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px; margin-top: 28px; }
+.note-card { background: var(--card); border-radius: 16px; padding: 18px 20px; box-shadow: var(--sh-card); color: var(--ink); }
+.note-card h3 { margin: 0 0 10px; font-size: 14px; }
+.note-card ul { margin: 0; padding-left: 18px; color: var(--ink-2); font-size: 12.5px; }
+.note-card li + li { margin-top: 6px; }
+.sw-row { display: flex; align-items: center; gap: 10px; font-size: 12.5px; color: var(--ink-2); padding: 3px 0; }
+.sw-row .sw { width: 22px; height: 22px; border-radius: 7px; box-shadow: 0 0 0 1px var(--hair); flex: none; }
+.sw-row .mono { margin-left: auto; color: var(--ink-4); }
+
+@media (max-width: 900px) {
+  .window { grid-template-columns: 1fr; height: auto; }
+  .sidebar { display: none; }
+  .page { padding: 24px 16px 40px; }
+  .kpis, .stat-hero { grid-template-columns: repeat(2, 1fr); }
+  .below, .two, .subs, .notes { grid-template-columns: 1fr; }
+  .topo { grid-template-columns: 1fr; gap: 18px; }
+  .route { grid-template-columns: 22px 1fr 1fr; }
+  .route .day, .route .tag { display: none; }
+}
+</style>
+</head>
+<body>
+<svg width="0" height="0" style="position:absolute"><defs>
+  <symbol id="book" viewBox="0 0 24 24"><path d="M2 4h7a3 3 0 0 1 3 3v13a2 2 0 0 0-2-2H2zM22 4h-7a3 3 0 0 0-3 3v13a2 2 0 0 1 2-2h8z"/></symbol>
+  <symbol id="activity" viewBox="0 0 24 24"><path d="M22 12h-4l-3 9L9 3l-3 9H2"/></symbol>
+  <symbol id="layers" viewBox="0 0 24 24"><path d="m12 2 10 5-10 5L2 7z"/><path d="m2 17 10 5 10-5M2 12l10 5 10-5"/></symbol>
+  <symbol id="key" viewBox="0 0 24 24"><circle cx="7.5" cy="15.5" r="4.5"/><path d="m10.7 12.3 9.8-9.8M17 6l3 3M14 9l2 2"/></symbol>
+  <symbol id="scroll" viewBox="0 0 24 24"><path d="M15 12h-5M15 8h-5M19 17V5a2 2 0 0 0-2-2H4"/><path d="M8 21h12a2 2 0 0 0 2-2v-1a1 1 0 0 0-1-1H11a1 1 0 0 0-1 1v1a2 2 0 1 1-4 0V5a2 2 0 1 0-4 0v2a1 1 0 0 0 1 1h3"/></symbol>
+  <symbol id="i-chart" viewBox="0 0 24 24"><path d="M3 3v18h18"/><path d="M7 15v2M11 10v7M15 12v5M19 6v11"/></symbol>
+  <symbol id="receipt" viewBox="0 0 24 24"><path d="M4 2v20l2-1 2 1 2-1 2 1 2-1 2 1 2-1 2 1V2l-2 1-2-1-2 1-2-1-2 1-2-1-2 1z"/><path d="M16 8h-6a2 2 0 1 0 0 4h4a2 2 0 1 1 0 4H8M12 17.5v-11"/></symbol>
+  <symbol id="refresh" viewBox="0 0 24 24"><path d="M21 12a9 9 0 0 1-15 6.7L3 16M3 12a9 9 0 0 1 15-6.7L21 8"/><path d="M21 3v5h-5M3 21v-5h5"/></symbol>
+  <symbol id="db" viewBox="0 0 24 24"><ellipse cx="12" cy="5" rx="9" ry="3"/><path d="M3 5v14a9 3 0 0 0 18 0V5M3 12a9 3 0 0 0 18 0"/></symbol>
+  <symbol id="gear" viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M12 2v3M12 19v3M4.2 4.2l2.1 2.1M17.7 17.7l2.1 2.1M2 12h3M19 12h3M4.2 19.8l2.1-2.1M17.7 6.3l2.1-2.1"/></symbol>
+  <symbol id="info" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><path d="M12 16v-4M12 8h.01"/></symbol>
+  <symbol id="party" viewBox="0 0 24 24"><path d="M5.8 11.3 2 22l10.7-3.8M4 3h.01M22 8h.01M15 2h.01M22 20h.01"/><path d="M11 13c1.9 1.9 2.8 4.1 2 4.9s-3 0-4.9-2-2.8-4.1-2-4.9 3 0 4.9 2z"/></symbol>
+  <symbol id="sunmoon" viewBox="0 0 24 24"><path d="M12 8a2.8 2.8 0 0 0 4 4 4 4 0 1 1-4-4M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2"/></symbol>
+  <symbol id="palette" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 3a9 9 0 0 0 0 18z" fill="currentColor" stroke="none"/></symbol>
+  <symbol id="plus" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></symbol>
+  <symbol id="copy" viewBox="0 0 24 24"><rect x="9" y="9" width="12" height="12" rx="2"/><path d="M5 15V5a2 2 0 0 1 2-2h10"/></symbol>
+  <symbol id="dl" viewBox="0 0 24 24"><path d="M12 3v12m0 0-4-4m4 4 4-4M4 21h16"/></symbol>
+  <symbol id="clock" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></symbol>
+  <symbol id="term" viewBox="0 0 24 24"><path d="m4 17 6-6-6-6M12 19h8"/></symbol>
+  <symbol id="more" viewBox="0 0 24 24"><circle cx="5" cy="12" r=".8"/><circle cx="12" cy="12" r=".8"/><circle cx="19" cy="12" r=".8"/></symbol>
+  <symbol id="alert" viewBox="0 0 24 24"><path d="M10.3 3.9 1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0zM12 9v4M12 17h.01"/></symbol>
+  <symbol id="pause" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M10 9v6M14 9v6"/></symbol>
+  <symbol id="check" viewBox="0 0 24 24"><path d="M20 6 9 17l-5-5"/></symbol>
+  <symbol id="search" viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></symbol>
+  <symbol id="arrow" viewBox="0 0 24 24"><path d="M5 12h14M13 6l6 6-6 6"/></symbol>
+</defs></svg>
+
+<div class="doc">
+  <header class="doc-head">
+    <div>
+      <h1>「简洁」主题 v6 · 分层与视觉重心</h1>
+      <p>在 v5 的基础上改三件事：暖灰三层底色代替分割线来分区；每页一块浮起的主卡做视觉重心；平时安静、出问题才用带底色的标签与行内操作抢注意力。点击左侧导航切页面。</p>
+    </div>
+    <div class="doc-ctrl">
+      <div class="seg" id="accSeg"><button class="on" data-v="coral">珊瑚（品牌）</button><button data-v="blue">蓝</button></div>
+      <div class="seg" id="modeSeg"><button class="on" data-v="light">浅色</button><button data-v="dark">暗色</button></div>
+    </div>
+  </header>
+
+  <div class="window">
+    <aside class="sidebar">
+      <div class="lights"><i></i><i></i><i></i></div>
+      <div class="brand"><img src="data:image/png;base64,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" alt=""><div><b>cc-router</b><small>多订阅聚合代理</small></div></div>
+      <button class="nav-item" data-go="guide"><svg class="i"><use href="#book"/></svg>接入指南</button>
+      <div class="nav-label">路由</div>
+      <button class="nav-item active" data-go="live"><svg class="i"><use href="#activity"/></svg>实时路由</button>
+      <button class="nav-item" data-go="vm"><svg class="i"><use href="#layers"/></svg>虚拟模型<span class="end">6</span></button>
+      <button class="nav-item" data-go="subs"><svg class="i"><use href="#key"/></svg>订阅管理<span class="badge" title="1 个订阅凭证失效">1</span></button>
+      <div class="nav-label">观测</div>
+      <button class="nav-item" data-go="logs"><svg class="i"><use href="#scroll"/></svg>请求日志</button>
+      <button class="nav-item" data-go="stats"><svg class="i"><use href="#i-chart"/></svg>数据统计</button>
+      <button class="nav-item" data-go="stats"><svg class="i"><use href="#receipt"/></svg>用量小票</button>
+      <div class="nav-label">系统</div>
+      <button class="nav-item" data-go="settings"><svg class="i"><use href="#gear"/></svg>设置</button>
+      <button class="nav-item" data-go="settings"><svg class="i"><use href="#db"/></svg>备份与迁移</button>
+      <button class="nav-item" data-go="settings"><svg class="i"><use href="#info"/></svg>关于</button>
+      <div class="side-foot">
+        <div class="proxy-card">
+          <div class="t"><span class="dot ok pulse"></span>代理运行中</div>
+          <div class="a"><span class="mono">127.0.0.1:23456</span><button class="icon-btn" style="width:22px;height:22px" title="复制"><svg class="i" style="width:13px;height:13px"><use href="#copy"/></svg></button></div>
+        </div>
+        <div class="side-tools">
+          <button class="icon-btn" id="sideMode" title="明暗模式"><svg class="i"><use href="#sunmoon"/></svg></button>
+          <button class="icon-btn" title="界面主题"><svg class="i"><use href="#palette"/></svg></button>
+          <button class="icon-btn" title="更新内容"><svg class="i"><use href="#party"/></svg></button>
+          <span class="ver mono">v6.7.0</span>
+        </div>
+      </div>
+    </aside>
+
+    <main class="main">
+      <!-- ================= 实时路由 ================= -->
+      <section class="screen on" id="s-live"><div class="page">
+        <div class="ph">
+          <div><h1>实时路由</h1><div class="sub">4 个槽位 + 1 兜底 · 4 家厂商在用</div></div>
+          <div class="actions"><div class="seg sm"><button class="on">实时</button><button>暂停</button></div></div>
+        </div>
+
+        <div class="hero">
+          <div class="kpis">
+            <div class="kpi focus"><div class="l"><span class="dot ok pulse"></span>正在处理</div><div class="v">2</div><div class="s">Claude Code · model-opus</div></div>
+            <div class="kpi"><div class="l">今天请求</div><div class="v">1,284</div><div class="s"><span class="up">↑ 12%</span> 比昨天同时段</div></div>
+            <div class="kpi"><div class="l">成功率</div><div class="v">99.1<small>%</small></div><div class="s">12 次失败</div></div>
+            <div class="kpi"><div class="l">可调度订阅</div><div class="v">2<small>/ 4</small></div><div class="s"><span class="w">1 限流 · 1 凭证失效</span></div></div>
+          </div>
+          <div class="topo" id="topo">
+            <svg class="lines" id="topoLines"></svg>
+            <div class="col" id="colL">
+              <div class="col-label">客户端</div>
+              <div class="node live" data-k="c0"><svg class="i"><use href="#term"/></svg>Claude<span class="n">2</span></div>
+              <div class="node" data-k="c1"><svg class="i"><use href="#term"/></svg>Codex</div>
+              <div class="node" data-k="c2"><svg class="i"><use href="#term"/></svg>OpenCode</div>
+              <div class="node" data-k="c3"><svg class="i"><use href="#term"/></svg>Others</div>
+            </div>
+            <div class="hub" id="hub"><div class="mark"><img src="data:image/png;base64,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" alt=""></div><b>cc-router</b><small>127.0.0.1:23456</small></div>
+            <div class="col" id="colR">
+              <div class="col-label">上游订阅</div>
+              <div class="node up-node live" data-k="u0"><span class="plogo sm p-A">A</span><div class="t"><b>Anthropic 主号</b><small><span class="dot ok"></span>正常 · 正在回流</small></div></div>
+              <div class="node up-node warn" data-k="u1"><span class="plogo sm p-Z">Z</span><div class="t"><b>智谱 GLM 包月</b><small>限流 · 42 秒后恢复</small></div></div>
+              <div class="node up-node" data-k="u2"><span class="plogo sm p-K">K</span><div class="t"><b style="color:var(--ink-2)">Kimi 国际版</b><small><span class="dot ok"></span>正常 · 空闲</small></div></div>
+              <div class="node up-node err" data-k="u3"><span class="plogo sm p-D">D</span><div class="t"><b>DeepSeek</b><small>凭证失效 · 401</small></div></div>
+            </div>
+          </div>
+        </div>
+
+        <div class="below">
+          <div>
+            <div class="sec-head"><h2>客户端接入</h2><span class="note">保留期内真的发过请求的客户端</span></div>
+            <table class="tbl num">
+              <thead><tr><th>客户端</th><th>最近请求</th><th class="r">请求数</th><th class="r">Token</th></tr></thead>
+              <tbody>
+                <tr><td><span class="who"><span class="dot ok"></span><b style="font-weight:550">Claude Code</b></span></td><td class="c2">刚刚</td><td class="r mono">1,271</td><td class="r mono">47.9M</td></tr>
+                <tr><td><span class="who"><span class="dot"></span>Claude Desktop</span></td><td class="c3">3 小时前</td><td class="r mono c2">13</td><td class="r mono c2">0.3M</td></tr>
+                <tr><td><span class="who c4"><span class="dot" style="opacity:.4"></span>Codex</span></td><td class="c4">从未</td><td class="r mono c4">0</td><td class="r mono c4">0</td></tr>
+                <tr><td><span class="who c4"><span class="dot" style="opacity:.4"></span>OpenCode</span></td><td class="c4">从未</td><td class="r mono c4">0</td><td class="r mono c4">0</td></tr>
+                <tr><td><span class="who c4"><span class="dot" style="opacity:.4"></span>Anthropic SDK</span></td><td class="c4">从未</td><td class="r mono c4">0</td><td class="r mono c4">0</td></tr>
+              </tbody>
+            </table>
+          </div>
+          <div>
+            <div class="sec-head"><h2>需要处理</h2><span class="note">2 项</span></div>
+            <div class="attn">
+              <div class="alert err"><span class="ic"><svg class="i"><use href="#key"/></svg></span><b>DeepSeek 凭证失效</b><small>上游返回 401，已从 model-sonnet / haiku 的调度里跳过</small><button class="btn sm soft">更新 Key</button></div>
+              <div class="alert warn"><span class="ic"><svg class="i"><use href="#clock"/></svg></span><b>智谱 GLM 包月 限流冷却</b><small>42 秒后自动恢复，期间请求顺延到下一家</small><button class="btn sm ghost">查看</button></div>
+            </div>
+          </div>
+        </div>
+      </div></section>
+
+      <!-- ================= 虚拟模型 ================= -->
+      <section class="screen" id="s-vm"><div class="page">
+        <div class="ph">
+          <div><h1>虚拟模型</h1><div class="sub">虚拟模型 → 订阅（顺序即优先级）→ 真实模型</div></div>
+          <div class="actions"><div class="seg"><button class="on">内置</button><button>自定义</button></div></div>
+        </div>
+        <div class="timebar">
+          <svg class="i c3"><use href="#clock"/></svg><span class="lbl">查看时刻</span>
+          <div class="seg sm"><button>一</button><button>二</button><button>三</button><button>四</button><button class="on">五</button><button>六</button><button>日</button></div>
+          <span class="mono" style="font-weight:600">13:16</span>
+          <button class="btn sm ghost">回到现在</button>
+        </div>
+        <div class="vms" id="vmList"></div>
+      </div></section>
+
+      <!-- ================= 订阅管理 ================= -->
+      <section class="screen" id="s-subs"><div class="page">
+        <div class="ph">
+          <div><h1>订阅管理</h1><div class="sub">每个订阅对应一个厂商的 API Key，状态实时反映健康检查结果</div></div>
+          <div class="actions"><button class="btn primary"><svg class="i"><use href="#plus"/></svg>添加订阅</button></div>
+        </div>
+        <div class="filters">
+          <button class="chip on">全部 <b>4</b></button>
+          <button class="chip">正常 <b>2</b></button>
+          <button class="chip">限流 <b>1</b></button>
+          <button class="chip err"><span class="dot err"></span>需要处理 <b>1</b></button>
+        </div>
+        <div class="subs" id="subCards"></div>
+      </div></section>
+
+      <!-- ================= 请求日志 ================= -->
+      <section class="screen" id="s-logs"><div class="page wide">
+        <div class="ph">
+          <h1>请求日志</h1>
+          <div class="seg"><button class="on">请求</button><button>订阅事件</button><button>系统异常 <b style="color:var(--err);margin-left:2px">3</b></button></div>
+          <div class="actions"><button class="btn ghost"><svg class="i"><use href="#dl"/></svg>导出 CSV</button><button class="btn soft"><svg class="i"><use href="#refresh"/></svg>刷新</button></div>
+        </div>
+        <div class="filters">
+          <button class="select">全部虚拟模型</button><button class="select">全部厂商</button><button class="select set">只看失败</button><button class="select">全部客户端</button>
+          <span style="margin-left:auto" class="c3 num" >128 条 · 12 条失败</span>
+        </div>
+        <div class="card log-card">
+          <table class="tbl num">
+            <thead><tr><th>时间</th><th>状态</th><th>客户端</th><th>虚拟模型</th><th>真实模型</th><th>厂商</th><th class="r">输入</th><th class="r">输出</th><th class="r">速度</th><th class="r">首字</th><th class="r">耗时</th></tr></thead>
+            <tbody id="logRows"></tbody>
+          </table>
+        </div>
+        <div class="pager"><span class="num">第 1 / 3 页</span><span style="display:flex;gap:6px"><button class="btn sm ghost" disabled style="opacity:.45">上一页</button><button class="btn sm soft">下一页</button></span></div>
+      </div></section>
+
+      <!-- ================= 数据统计 ================= -->
+      <section class="screen" id="s-stats"><div class="page">
+        <div class="ph">
+          <h1>数据统计</h1>
+          <div class="actions"><div class="seg"><button>今天</button><button class="on">近 7 天</button><button>近 30 天</button><button>近 90 天</button><button>全部</button></div></div>
+        </div>
+        <div class="hero stat-hero">
+          <div class="kpi"><div class="l">总请求</div><div class="v">8,416</div><div class="s"><span class="up">↑ 18%</span> 比上一周期</div><svg class="spark" id="sp0"></svg></div>
+          <div class="kpi"><div class="l">总 Token</div><div class="v">312<small>M</small></div><div class="s">输入 298M · 输出 14M</div><svg class="spark" id="sp1"></svg></div>
+          <div class="kpi"><div class="l">成功率</div><div class="v">99.0<small>%</small></div><div class="s">85 次失败</div><svg class="spark" id="sp2"></svg></div>
+          <div class="kpi"><div class="l">平均耗时</div><div class="v">6.21<small>s</small></div><div class="s">P95 14.8s</div><svg class="spark" id="sp3"></svg></div>
+        </div>
+        <div class="minor">
+          <div>缓存读取占比<b>86%</b></div>
+          <div>工具调用<b>5,902</b></div>
+          <div>工具调用轮次占比<b>49%</b></div>
+          <div>活跃订阅<b>4</b></div>
+        </div>
+        <div class="sec">
+          <div class="card heat-card">
+            <div class="sec-head"><h2>全年 Token 用量</h2><span class="note">近 365 天每日输入 + 输出</span><span class="end mono c3" style="font-size:12px">共 4.1B</span></div>
+            <div class="heat" id="heat"></div>
+            <div class="heat-legend">少 <i style="background:var(--well-2)"></i><i class="l1" style="background:color-mix(in srgb,var(--accent) 25%,var(--card))"></i><i style="background:color-mix(in srgb,var(--accent) 55%,var(--card))"></i><i style="background:var(--accent)"></i> 多</div>
+          </div>
+        </div>
+        <div class="sec two">
+          <div class="card chart-card">
+            <div class="sec-head"><h2>请求趋势</h2><div class="legend"><span style="--c:var(--accent)">成功</span><span style="--c:var(--ink-2)">失败</span></div></div>
+            <div class="chart" id="chart"></div>
+            <div class="axis"><span>11/14</span><span>11/15</span><span>11/16</span><span>11/17</span><span>11/18</span><span>11/19</span><span>今天</span></div>
+          </div>
+          <div class="card chart-card">
+            <div class="sec-head"><h2>虚拟模型份额</h2><div class="seg sm end"><button class="on">请求</button><button>Token</button></div></div>
+            <div class="share">
+              <div class="row"><span class="mono">model-sonnet</span><div class="bar"><i style="width:55%"></i></div><span class="r mono c2">55%</span></div>
+              <div class="row"><span class="mono">model-opus</span><div class="bar"><i style="width:33%;opacity:.75"></i></div><span class="r mono c2">33%</span></div>
+              <div class="row"><span class="mono">model-haiku</span><div class="bar"><i style="width:10%;opacity:.5"></i></div><span class="r mono c2">10%</span></div>
+              <div class="row"><span class="mono">model-fallback</span><div class="bar"><i style="width:2%;opacity:.35"></i></div><span class="r mono c2">2%</span></div>
+            </div>
+          </div>
+        </div>
+      </div></section>
+
+      <!-- ================= 设置 ================= -->
+      <section class="screen" id="s-settings"><div class="page" style="max-width:840px">
+        <div class="ph">
+          <h1>设置</h1>
+          <div class="seg"><button class="on">通用</button><button>代理</button><button>安全与访问</button><button>Web &amp; TUI</button><button>高级</button></div>
+        </div>
+        <div class="set-wrap">
+          <div class="set-sec">
+            <h2>语言与启动</h2>
+            <div class="group">
+              <div class="row"><div><b>界面语言</b><small>「跟随系统」读取系统语言：简体中文、繁體中文、日本語，其他为 English。</small></div><button class="select">简体中文</button></div>
+              <div class="row"><div><b>开机自启动</b><small>登录系统后在后台启动代理，窗口不弹出。</small></div><button class="switch on"></button></div>
+              <div class="row"><div><b>新手引导</b><small>重新走一遍语言、订阅和接入设置。</small></div><button class="btn soft sm">重新打开</button></div>
+            </div>
+          </div>
+          <div class="set-sec">
+            <h2>外观</h2>
+            <div class="group">
+              <div class="row"><div><b>界面主题</b><small>简洁是默认主题；手绘是速写本风格；经典是改版前的样式。</small></div><div class="seg sm"><button class="on">简洁</button><button>手绘</button><button>经典</button><button>Win2000</button></div></div>
+              <div class="row"><div><b>明暗模式</b></div><div class="seg sm" id="modeSeg2"><button>跟随系统</button><button class="on" data-v="light">浅色</button><button data-v="dark">暗色</button></div></div>
+              <div class="row"><div><b>减少动效</b><small>关闭页面过渡与路由图流动动画。</small></div><button class="switch"></button></div>
+            </div>
+          </div>
+          <div class="set-sec">
+            <h2>更新</h2>
+            <div class="group">
+              <div class="row"><div><b>更新源</b></div><button class="select">中国大陆</button></div>
+              <div class="row"><div><b>自动检查更新</b><small>启动时查询一次新版本；关闭后只在手动检查时联网。</small></div><button class="switch on"></button></div>
+            </div>
+          </div>
+          <div class="set-sec">
+            <h2>重置</h2>
+            <div class="group">
+              <div class="row danger"><div><b>恢复出厂设置</b><small>删除全部订阅、虚拟模型绑定与请求日志，然后重启。</small></div><button class="btn sm soft" style="color:var(--err)">恢复出厂设置…</button></div>
+            </div>
+          </div>
+        </div>
+      </div></section>
+
+      <!-- ================= 接入指南 ================= -->
+      <section class="screen" id="s-guide"><div class="page" style="max-width:900px">
+        <div class="ph">
+          <div><h1>接入指南</h1><div class="sub">把 cc-router 当作 Anthropic Messages 兼容端点接入各类客户端</div></div>
+        </div>
+        <div class="hero endpoint-hero">
+          <div>
+            <div class="lbl"><span class="dot ok pulse"></span>接入地址 · 仅本机</div>
+            <div class="url">http://127.0.0.1:23456</div>
+          </div>
+          <button class="btn primary"><svg class="i"><use href="#copy"/></svg>复制地址</button>
+          <div class="meta">
+            <div>鉴权 Token<b class="mono">0b2686bc••••a7da</b></div>
+            <div>协议<b>HTTP · h2 关闭</b></div>
+            <div>CORS<b class="mono">*</b></div>
+            <div style="margin-left:auto;align-self:end"><button class="btn sm ghost">去设置 <svg class="i" style="width:13px;height:13px"><use href="#arrow"/></svg></button></div>
+          </div>
+        </div>
+
+        <div class="sec">
+          <div class="sec-head"><h2>选择你的客户端</h2></div>
+          <div class="seg" style="margin-bottom:14px"><button class="on">Claude Code</button><button>Codex</button><button>cc-switch</button><button>OpenCode</button><button>OpenClaw</button><button>Hermes Agent</button><button>通用</button></div>
+          <div class="snippet"><button class="btn sm"><svg class="i" style="width:13px;height:13px"><use href="#copy"/></svg>复制</button><span class="cm"># 追加到 ~/.zshrc，或写进 ~/.claude/settings.json 的 env</span>
+<span class="k">export</span> ANTHROPIC_BASE_URL=<span class="s">"http://127.0.0.1:23456"</span>
+<span class="k">export</span> ANTHROPIC_AUTH_TOKEN=<span class="s">"0b2686bc…a7da"</span>
+<span class="k">export</span> ANTHROPIC_DEFAULT_OPUS_MODEL=<span class="s">"model-opus"</span>
+<span class="k">export</span> ANTHROPIC_DEFAULT_SONNET_MODEL=<span class="s">"model-sonnet"</span>
+<span class="k">export</span> ANTHROPIC_DEFAULT_HAIKU_MODEL=<span class="s">"model-haiku"</span></div>
+        </div>
+
+        <div class="sec two" style="grid-template-columns:1fr 1fr;gap:32px">
+          <div>
+            <div class="sec-head"><h2>API 入口</h2></div>
+            <div class="ep">
+              <span class="m post">POST</span><span class="mono">/v1/messages</span><span class="c3">Anthropic Messages</span>
+              <span class="m post">POST</span><span class="mono">/v1/responses</span><span class="c3">OpenAI Responses</span>
+              <span class="m post">POST</span><span class="mono">/v1/chat/completions</span><span class="c3">Chat Completions</span>
+              <span class="m post">POST</span><span class="mono">/v1/systemone</span><span class="c3">只调度 model-jev</span>
+              <span class="m">GET</span><span class="mono">/v1/models</span><span class="c3">虚拟模型列表</span>
+              <span class="m">GET</span><span class="mono">/health</span><span class="c3">健康检查</span>
+            </div>
+          </div>
+          <div>
+            <div class="sec-head"><h2>此刻的映射</h2></div>
+            <table class="tbl"><tbody>
+              <tr><td class="mono">model-fable</td><td class="c3">→</td><td><span class="who"><span class="plogo sm p-A">A</span>Anthropic 主号</span></td></tr>
+              <tr><td class="mono">model-opus</td><td class="c3">→</td><td><span class="who"><span class="plogo sm p-A">A</span>Anthropic 主号</span></td></tr>
+              <tr><td class="mono">model-sonnet</td><td class="c3">→</td><td><span class="who"><span class="plogo sm p-A">A</span>Anthropic 主号 <span class="pill warn" style="height:18px;font-size:11px">顺延</span></span></td></tr>
+              <tr><td class="mono">model-haiku</td><td class="c3">→</td><td><span class="who"><span class="plogo sm p-K">K</span>Kimi 国际版</span></td></tr>
+            </tbody></table>
+          </div>
+        </div>
+      </div></section>
+    </main>
+  </div>
+
+  <div class="notes">
+    <div class="note-card">
+      <h3>三层底色（浅 / 暗）</h3>
+      <div class="sw-row"><span class="sw" style="background:var(--sidebar)"></span>侧栏 · 最深的一层<span class="mono">#f3f2f0 / #131211</span></div>
+      <div class="sw-row"><span class="sw" style="background:var(--bg)"></span>画布 · 次要内容直接放这里<span class="mono">#fbfbfa / #1a1918</span></div>
+      <div class="sw-row"><span class="sw" style="background:var(--card)"></span>浮起卡片 · 主卡 + 实体卡<span class="mono">#ffffff / #242220</span></div>
+      <div class="sw-row"><span class="sw" style="background:var(--well)"></span>凹陷 · 控件底 / 非活跃节点<span class="mono">#f3f2ef / #1e1d1b</span></div>
+      <div class="sw-row"><span class="sw" style="background:var(--ink)"></span>正文 · 暖黑<span class="mono">#1c1917 / #f5f4f2</span></div>
+      <div class="sw-row"><span class="sw" style="background:var(--accent)"></span>品牌珊瑚<span class="mono" id="accHex"></span></div>
+    </div>
+    <div class="note-card">
+      <h3>重心怎么来</h3>
+      <ul>
+        <li><b>一页一块主卡</b>：更大的阴影 + 20px 圆角 + 28px 大数字。实时路由是拓扑图，统计是 4 个核心指标，接入指南是接入地址。</li>
+        <li><b>侧栏选中 = 白色浮起胶囊</b>（同 T3 线程列表），图标变珊瑚色；侧栏底部常驻代理状态卡。</li>
+        <li><b>异常抢眼</b>：正常只是绿点；限流 / 失效用淡色底标签，并就地给出「更新 Key」之类的下一步；侧栏导航上出红色计数。</li>
+        <li><b>首选路由</b>：虚拟模型里「此刻首选」整行珊瑚底，时段条同色，一眼看出请求会去哪。</li>
+      </ul>
+    </div>
+    <div class="note-card">
+      <h3>相对 v5 的变化</h3>
+      <ul>
+        <li>冷锌灰 → 暖石灰（stone），蓝色强调 → 品牌珊瑚（蓝作为可选项保留）。</li>
+        <li>48px 顶栏小标题 → 22px 页面大标题 + 一行说明；页内 tab 改为分段控件。</li>
+        <li>订阅由表格改为实体卡片，额度条按用量变色，失效卡片内嵌修复入口。</li>
+        <li>图表、热力图改用强调色色阶，不再全灰。</li>
+        <li>分割线仍然只在设置页出现：设置项是一条一条的，描边分组 + 行分隔更合理。</li>
+        <li>动效只留：页面进入淡入 4px、在途请求连线上的流动点、运行中脉冲；均尊重 reduced-motion。</li>
+      </ul>
+    </div>
+  </div>
+</div>
+
+<script>
+const $ = s => document.querySelector(s);
+const root = document.documentElement;
+
+/* ---- 订阅卡 ---- */
+const subs = [
+  { st:'ok', l:'A', name:'Anthropic 主号', prov:'Anthropic · 全球', q:34, qtxt:'1.2M / 3.5M', slots:[['fable','claude-fable-5-2'],['opus','claude-opus-5-5'],['sonnet','claude-sonnet-5-5']], when:'2 分钟前使用' },
+  { st:'warn', l:'Z', name:'智谱 GLM 包月', prov:'智谱 · 中国', q:88, qtxt:'4.4M / 5M', slots:[['fable','glm-5.1'],['opus','glm-5.1']], when:'13:02 限流', cool:'42 秒' },
+  { st:'ok', l:'K', name:'Kimi 国际版', prov:'Moonshot · 全球', q:null, slots:[['fable','kimi-k3'],['opus','kimi-k3'],['haiku','kimi-k3-turbo']], when:'昨天使用' },
+  { st:'err', l:'D', name:'DeepSeek', prov:'DeepSeek · 全球', q:null, slots:[['sonnet','deepseek-v4'],['haiku','deepseek-v4']], when:'11/18 最后成功' },
+];
+const pill = s => s.st === 'ok' ? '<span class="pill ok"><span class="dot ok"></span>正常</span>'
+  : s.st === 'warn' ? `<span class="pill warn"><span class="dot"></span>限流 · ${s.cool}</span>`
+  : '<span class="pill err"><span class="dot"></span>凭证失效</span>';
+$('#subCards').innerHTML = subs.map(s => `<div class="card sub-card">
+  <div class="sub-top"><span class="plogo p-${s.l}">${s.l}</span><div class="t"><b>${s.name}</b><small>${s.prov}</small></div>${pill(s)}</div>
+  ${s.st === 'err' ? '<div class="inline-fix"><svg class="i"><use href="#alert"/></svg>上游返回 401，API Key 可能已被撤销<button class="btn sm danger">更新 Key</button></div>'
+    : s.q != null ? `<div class="quota"><div class="row"><span>今日限额</span><span><b>${s.q}%</b> · ${s.qtxt}</span></div><div class="bar"><i class="${s.q > 80 ? 'warn' : ''}" style="width:${s.q}%"></i></div></div>`
+    : '<div class="quota"><div class="row"><span>今日限额</span><span class="c4">未设限额</span></div><div class="bar"></div></div>'}
+  <div class="slots">${s.slots.map(x => `<span class="slot"><em>${x[0]}</em>${x[1]}</span>`).join('')}</div>
+  <div class="sub-foot"><span class="when">${s.when}</span><button class="btn sm ghost">测试</button><button class="btn sm ghost">编辑</button><button class="icon-btn" style="width:26px;height:26px"><svg class="i"><use href="#more"/></svg></button></div>
+</div>`).join('') + `<button class="card sub-card add"><svg class="i" style="width:20px;height:20px"><use href="#plus"/></svg><span>添加订阅</span><small class="c4" style="margin-top:-8px">支持 30+ 厂商与自定义入口</small></button>`;
+
+/* ---- 日志 ---- */
+const logs = [
+  ['13:16:42','ok','200','Claude Code','model-opus','claude-opus-5-5','A','Anthropic','42.1k','812','61 t/s','1.42s','14.9s'],
+  ['13:16:31','ok','200','Claude Code','model-sonnet','claude-sonnet-5-5','A','Anthropic','18.4k','341','44 t/s','0.96s','8.21s'],
+  ['13:16:27','warn','429','Claude Code','model-opus','glm-5.1','Z','智谱 GLM','0','0','—','—','0.31s'],
+  ['13:16:12','ok','200','Claude Code','model-haiku','kimi-k3-turbo','K','Moonshot','6.1k','122','88 t/s','0.40s','1.80s'],
+  ['13:15:58','err','401','Claude Code','model-sonnet','deepseek-v4','D','DeepSeek','0','0','—','—','0.28s'],
+  ['13:15:40','ok','200','Claude Desktop','model-opus','claude-opus-5-5','A','Anthropic','22.7k','530','57 t/s','1.20s','9.48s'],
+  ['13:15:02','ok','200','Claude Code','model-fallback','gpt-5.5','K','Moonshot','11.3k','207','39 t/s','2.11s','5.66s'],
+  ['13:14:51','ok','200','Claude Code','model-opus','claude-opus-5-5','A','Anthropic','9.8k','96','63 t/s','1.31s','4.11s'],
+  ['13:14:20','ok','200','Claude Code','model-haiku','kimi-k3-turbo','K','Moonshot','3.2k','88','91 t/s','0.38s','1.22s'],
+  ['13:13:58','ok','200','Claude Code','model-sonnet','claude-sonnet-5-5','A','Anthropic','30.6k','604','52 t/s','1.04s','12.7s'],
+];
+const st = l => l[1] === 'ok' ? `<span class="who"><span class="dot ok"></span><span class="code c3">${l[2]}</span></span>`
+  : `<span class="pill ${l[1]}" style="height:20px"><span class="code">${l[2]}</span>${l[1] === 'err' ? '凭证失效' : '限流'}</span>`;
+$('#logRows').innerHTML = logs.map(l => `<tr class="${l[1] === 'err' ? 'bad' : l[1] === 'warn' ? 'slow' : ''}">
+  <td class="mono c3">${l[0]}</td><td>${st(l)}</td><td class="c2">${l[3]}</td><td class="mono">${l[4]}</td><td class="mono c2">${l[5]}</td>
+  <td><span class="who"><span class="plogo sm p-${l[6]}">${l[6]}</span>${l[7]}</span></td>
+  <td class="r mono c2">${l[8]}</td><td class="r mono c2">${l[9]}</td><td class="r mono c3">${l[10]}</td><td class="r mono c3">${l[11]}</td><td class="r mono" style="font-weight:600">${l[12]}</td></tr>`).join('');
+
+/* ---- 虚拟模型 ---- */
+const vms = [
+  ['model-fable','最强 · Hardest tasks','顺序',[['Anthropic 主号','claude-fable-5-2','ok',[0,100]],['智谱 GLM 包月','glm-5.1','warn',[0,100]],['Kimi 国际版','kimi-k3','ok',[0,100]]],0],
+  ['model-opus','高级任务 · Plan Mode','顺序',[['Anthropic 主号','claude-opus-5-5','ok',[0,100]],['智谱 GLM 包月','glm-5.1','warn',[0,100]],['Kimi 国际版','kimi-k3','ok',[0,100]]],0],
+  ['model-sonnet','主对话 · Default chat','轮询',[['DeepSeek','deepseek-v4','err',[0,100]],['Anthropic 主号','claude-sonnet-5-5','ok',[33,92]]],1],
+  ['model-haiku','小任务 · Tool calls','会话亲和',[['Kimi 国际版','kimi-k3-turbo','ok',[0,100]],['DeepSeek','deepseek-v4','err',[0,100]]],0],
+];
+const tagOf = (r, first) => r[2] === 'err' ? '<span class="pill err tag"><span class="dot"></span>凭证失效 · 跳过</span>'
+  : first ? '<span class="pill acc tag">此刻首选</span>'
+  : r[2] === 'warn' ? '<span class="pill warn tag"><span class="dot"></span>冷却中</span>' : '<span class="pill mute tag">备选</span>';
+$('#vmList').innerHTML = vms.map(v => `<div class="card vm">
+  <div class="vm-head"><span class="name">${v[0]}</span><span class="desc">${v[1]}</span>
+    <div class="end"><div class="seg sm">${['顺序','轮询','会话亲和'].map(m => `<button class="${m === v[2] ? 'on' : ''}">${m}</button>`).join('')}</div></div></div>
+  ${v[3].map((r, i) => { const first = i === v[4]; return `<div class="route ${first ? 'first' : ''} ${r[2] === 'err' ? 'off' : ''}">
+    <span class="ord">${i + 1}</span>
+    <span class="sub"><span class="dot ${r[2]}"></span>${r[0]}</span>
+    <span class="model">${r[1]}</span>
+    <span class="day" title="生效时段"><i style="left:${r[3][0]}%;width:${r[3][1] - r[3][0]}%"></i><b></b></span>
+    ${tagOf(r, first)}</div>`; }).join('')}
+  <div class="add-route"><button class="btn sm ghost"><svg class="i" style="width:13px;height:13px"><use href="#plus"/></svg>添加订阅</button></div>
+</div>`).join('') + `<div class="card vm">
+  <div class="vm-head"><span class="name">model-fallback</span><span class="desc">兜底 · 不匹配前四个槽位的请求</span>
+    <div class="end"><span class="pill warn"><span class="dot"></span>未绑定</span></div></div>
+  <div class="vm-warn"><svg class="i"><use href="#alert"/></svg>还没有绑定订阅：未知模型名的请求会直接返回 503。<button class="btn sm soft"><svg class="i" style="width:13px;height:13px"><use href="#plus"/></svg>绑定订阅</button></div>
+</div>`;
+
+/* ---- 统计 ---- */
+let h = '';
+for (let i = 0; i < 53 * 7; i++) {
+  const r = Math.random(), recent = i > 53 * 7 - 120;
+  h += `<i class="${recent ? (r > .62 ? 'l3' : r > .3 ? 'l2' : 'l1') : r > .9 ? 'l1' : r > .97 ? 'l2' : ''}"></i>`;
+}
+$('#heat').innerHTML = h;
+$('#chart').innerHTML = [980, 1120, 1260, 1050, 1390, 1480, 1136].map((v, i) => {
+  const bad = [8, 12, 30, 6, 11, 9, 9][i];
+  return `<div class="b"><i class="ok" style="height:${v / 1500 * 150}px"></i><i class="bad" style="height:${Math.max(3, bad * .5)}px"></i></div>`;
+}).join('');
+function spark(id, pts, color) {
+  const el = $(id), w = 200, hgt = 34, max = Math.max(...pts), min = Math.min(...pts);
+  const xy = pts.map((p, i) => [i / (pts.length - 1) * w, hgt - 4 - (p - min) / (max - min || 1) * (hgt - 8)]);
+  const d = xy.map((p, i) => (i ? 'L' : 'M') + p[0].toFixed(1) + ',' + p[1].toFixed(1)).join(' ');
+  el.setAttribute('viewBox', `0 0 ${w} ${hgt}`); el.setAttribute('preserveAspectRatio', 'none');
+  el.innerHTML = `<path d="${d} L${w},${hgt} L0,${hgt} Z" fill="${color}" opacity=".10"/><path d="${d}" fill="none" stroke="${color}" stroke-width="1.6" vector-effect="non-scaling-stroke"/>`;
+}
+spark('#sp0', [980, 1120, 1260, 1050, 1390, 1480, 1136], 'var(--accent)');
+spark('#sp1', [38, 41, 49, 40, 52, 55, 37], 'var(--ink-3)');
+spark('#sp2', [99.2, 98.9, 97.6, 99.4, 99.2, 99.4, 99.2], 'var(--ink-3)');
+spark('#sp3', [5.8, 6.1, 7.4, 5.9, 6.3, 6.0, 6.2], 'var(--ink-3)');
+
+/* ---- 拓扑连线：按节点实际位置画 ---- */
+function drawTopo() {
+  const box = $('#topo'), svg = $('#topoLines');
+  if (!box.offsetParent || getComputedStyle(box).gridTemplateColumns.split(' ').length < 3) { svg.innerHTML = ''; return; }
+  const B = box.getBoundingClientRect();
+  const mark = $('#hub .mark').getBoundingClientRect();
+  const hubL = { x: mark.left - B.left - 6, y: mark.top - B.top + mark.height / 2 };
+  const hubR = { x: mark.right - B.left + 6, y: hubL.y };
+  const curve = (a, b) => `M${a.x},${a.y} C${(a.x + b.x) / 2},${a.y} ${(a.x + b.x) / 2},${b.y} ${b.x},${b.y}`;
+  const reduce = matchMedia('(prefers-reduced-motion: reduce)').matches;
+  let p = '';
+  document.querySelectorAll('#colL .node').forEach(n => {
+    const r = n.getBoundingClientRect(), a = { x: r.right - B.left, y: r.top - B.top + r.height / 2 };
+    const live = n.classList.contains('live'), d = curve(a, hubL);
+    p += `<path d="${d}" fill="none" stroke="${live ? 'var(--accent)' : 'var(--well-2)'}" stroke-width="${live ? 2 : 1.2}" ${live ? '' : 'stroke-dasharray="2 4"'}/>`;
+    if (live && !reduce) p += `<circle r="3" fill="var(--accent)"><animateMotion dur="1.4s" repeatCount="indefinite" path="${d}"/></circle>`;
+  });
+  document.querySelectorAll('#colR .node').forEach(n => {
+    const r = n.getBoundingClientRect(), b = { x: r.left - B.left, y: r.top - B.top + r.height / 2 };
+    const cls = n.classList, d = curve(hubR, b);
+    const color = cls.contains('live') ? 'var(--accent)' : cls.contains('warn') ? 'var(--warn)' : cls.contains('err') ? 'var(--err)' : 'var(--well-2)';
+    const dash = cls.contains('live') ? '' : 'stroke-dasharray="2 4"';
+    p += `<path d="${d}" fill="none" stroke="${color}" stroke-width="${cls.contains('live') ? 2 : 1.2}" ${dash} opacity="${cls.contains('warn') || cls.contains('err') ? .55 : 1}"/>`;
+    if (cls.contains('live') && !reduce) p += `<circle r="3" fill="var(--accent)"><animateMotion dur="1.4s" begin="-.7s" repeatCount="indefinite" path="${d}"/></circle>`;
+  });
+  svg.innerHTML = p;
+}
+
+/* ---- 切换 ---- */
+function setMode(v) {
+  root.dataset.mode = v;
+  document.querySelectorAll('#modeSeg button, #modeSeg2 button[data-v]').forEach(b => b.classList.toggle('on', b.dataset.v === v));
+  $('#accHex').textContent = getComputedStyle(root).getPropertyValue('--accent').trim();
+}
+document.querySelectorAll('#modeSeg button, #modeSeg2 button[data-v]').forEach(b => b.onclick = () => setMode(b.dataset.v));
+$('#sideMode').onclick = () => setMode(root.dataset.mode === 'dark' ? 'light' : 'dark');
+document.querySelectorAll('#accSeg button').forEach(b => b.onclick = () => {
+  root.dataset.accent = b.dataset.v;
+  document.querySelectorAll('#accSeg button').forEach(x => x.classList.toggle('on', x === b));
+  setMode(root.dataset.mode);
+});
+document.querySelectorAll('.nav-item[data-go]').forEach(n => n.onclick = () => {
+  document.querySelectorAll('.nav-item').forEach(x => x.classList.toggle('active', x === n));
+  document.querySelectorAll('.screen').forEach(s => s.classList.toggle('on', s.id === 's-' + n.dataset.go));
+  if (n.dataset.go === 'live') requestAnimationFrame(drawTopo);
+});
+const q = new URLSearchParams(location.search);
+if (q.get('mode')) setMode(q.get('mode')); else setMode(matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light');
+if (q.get('accent')) document.querySelector(`#accSeg button[data-v="${q.get('accent')}"]`)?.click();
+if (q.get('page')) document.querySelector(`.nav-item[data-go="${q.get('page')}"]`)?.click();
+requestAnimationFrame(drawTopo);
+addEventListener('resize', drawTopo);
+</script>
+</body>
+</html>
