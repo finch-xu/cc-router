@@ -1,4 +1,5 @@
 import { Navigate, Route, Routes } from "react-router";
+import { AgentMonitorPage } from "@/routes/AgentMonitor";
 import { AppShell } from "@/components/layout/AppShell";
 import { VirtualModelsPage } from "@/routes/VirtualModels";
 import { LiveRoutingPage } from "@/routes/LiveRouting";
@@ -40,6 +41,7 @@ function AppInner() {
       <Route element={<AppShell />}>
         <Route index element={<Navigate to="/virtual-models" replace />} />
         <Route path="/live-routing" element={<LiveRoutingPage />} />
+        <Route path="/agent-monitor" element={<AgentMonitorPage />} />
         <Route path="/virtual-models" element={<VirtualModelsPage />} />
         <Route path="/subscriptions" element={<SubscriptionsPage />} />
         <Route path="/subscriptions/new" element={<SubscriptionNewPage />} />

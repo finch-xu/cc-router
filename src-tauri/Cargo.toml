@@ -96,10 +96,11 @@ chacha20poly1305 = "0.11.0"
 zeroize = "1.9.1"
 getrandom = "0.4.3"
 
+tempfile = "3.27.0"
+
 [dev-dependencies]
 async-compression = { version = "0.4.51", features = ["tokio", "gzip", "zlib", "brotli", "zstd"] }
 wiremock = "0.6.5"
-tempfile = "3.27.0"
 # 契约测试用: 把真实 DTO 反序列化进 TUI 的视图结构体。依赖方向只能是这一个。
 cc-router-tui = { path = "crates/cc-router-tui" }
 

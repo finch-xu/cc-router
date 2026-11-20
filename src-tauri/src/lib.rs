@@ -8,6 +8,7 @@ pub mod commands;
 pub mod db;
 pub mod error;
 pub mod integrations;
+pub mod session_monitor;
 pub mod oauth;
 pub mod observability;
 pub mod provider;
@@ -92,6 +93,9 @@ pub fn run() {
             observability::logger::init(&app_data_dir)?;
             info!(?app_data_dir, "cc-router starting");
 
+            app.manage(session_monitor::Monitor::new(app_data_dir.clone()));
+            session_monitor::Monitor::start(app.handle().clone());
+
             // 窗口几何自适应 —— 必须先于 bootstrap: 几何计算是同步且极快的, 而
             // bootstrap 要跑 DB migration / provider 加载 / TLS。配合
             // tauri.conf.json 的 visible=false, 用户看到的第一帧就是正确尺寸。
@@ -124,6 +128,10 @@ pub fn run() {
         })
         .on_window_event(tray::on_window_event)
         .invoke_handler(tauri::generate_handler![
+            session_monitor::get_live_sessions,
+            session_monitor::session_monitor_status,
+            session_monitor::session_monitor_client_version,
+            session_monitor::configure_session_monitor,
             commands::providers::list_providers,
             commands::subscriptions::list_subscriptions,
             commands::subscriptions::get_subscription,

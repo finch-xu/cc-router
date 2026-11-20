@@ -1,6 +1,6 @@
 //! 应用级命令（factory reset 等）。
 
-use tauri::{AppHandle, State};
+use tauri::{AppHandle, Manager, State};
 use tracing::{info, warn};
 
 use crate::db::paths;
@@ -24,6 +24,10 @@ pub async fn factory_reset(state: State<'_, AppState>, app: AppHandle) -> AppRes
         if let Err(e) = app.autolaunch().disable() {
             warn!(?e, "factory reset: failed to disable autostart");
         }
+    }
+
+    if let Some(monitor) = app.try_state::<crate::session_monitor::Monitor>() {
+        monitor.clear_opt_in().await;
     }
 
     // 3. 删除 DB / settings 文件

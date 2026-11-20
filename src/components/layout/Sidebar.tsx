@@ -5,6 +5,7 @@ import {
   ArrowRight,
   BarChart3,
   BookOpen,
+  Bot,
   DatabaseBackup,
   Info,
   Key,
@@ -27,7 +28,7 @@ import { useVirtualModels } from "@/hooks/useVirtualModels";
 import { useProxyStatus } from "@/hooks/useSettings";
 import { useUpdater } from "@/hooks/useUpdater";
 import { useT } from "@/i18n";
-import { runtime, webLogout, webSession } from "@/runtime";
+import { isTauriHost, runtime, webLogout, webSession } from "@/runtime";
 import { LogoMark } from "@/components/sketch/LogoMark";
 import { SidebarIcon, type SidebarIconName } from "@/components/sketch/SidebarIcon";
 import { useReleaseNotesDialog } from "@/components/release-notes/ReleaseNotesController";
@@ -42,6 +43,7 @@ import { isPlainBased, nextThemeId, themeDef, type ThemeArt } from "@/themes";
 const PLAIN_ICONS: Record<SidebarIconName, LucideIcon> = {
   guide: BookOpen,
   live: Activity,
+  agent: Bot,
   vm: Layers,
   subs: Key,
   logs: ScrollText,
@@ -115,6 +117,7 @@ export function Sidebar() {
       dotTone: "ok",
       dotLabelKey: "sidebar.proxyRunning",
     },
+    ...(isTauriHost ? [{ to: "/agent-monitor", label: t("agentMonitor.title"), icon: "agent" as const }] : []),
     {
       to: "/virtual-models",
       label: t("sidebar.nav.virtualModels"),

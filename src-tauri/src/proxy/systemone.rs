@@ -338,6 +338,7 @@ pub fn log_entry(
         retry_count,
         error_message,
         upstream_response_body: upstream_body,
+        monitor_session: None,
         client_tool: ctx.info.tool,
         client_user_agent: ctx.info.user_agent.clone(),
         client_version: ctx.info.version.clone(),
