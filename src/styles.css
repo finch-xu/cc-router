@@ -1774,91 +1774,6 @@ html:not([data-platform="macos"]) .main.flush { padding-top: 0; }
 
 /* === 请求详情弹窗 ===
  * 抬头 (状态标签 + 时间 / ID) → 路由路径 4 节点 → 用量 5 格 → 请求 / 客户端 两栏 → 工具 / 错误 / 上游原文 */
-.rd-body { display: flex; flex-direction: column; gap: 16px; font-size: 12.5px; }
-.rd-body .muted { color: var(--ink-4); }
-.rd-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; }
-.rd-head-tags { display: flex; align-items: center; flex-wrap: wrap; gap: 6px 8px; min-width: 0; }
-.rd-head-meta { display: inline-flex; align-items: center; gap: 6px; min-width: 0; color: var(--ink-3); font-size: 11.5px; margin-left: 4px; }
-.rd-id { max-width: 260px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.rd-sep { color: var(--ink-5); }
-.rd-head .btn { flex-shrink: 0; }
-
-.rd-route {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr) auto minmax(0, 1fr) auto minmax(0, 1.15fr);
-  align-items: stretch;
-  gap: 8px;
-}
-.rd-node {
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-  min-width: 0;
-  padding: 10px 12px;
-  background: var(--bg);
-  border: 1.5px solid var(--line-2);
-  border-radius: var(--r-sketch);
-}
-.rd-node:nth-child(4n+3) { border-radius: var(--r-sketch-alt); }
-.rd-node.accent { border-color: var(--stroke); background: var(--surface); box-shadow: 3px 3px 0 var(--accent-line); }
-.rd-node-label { font-size: 10.5px; color: var(--ink-4); }
-.rd-node-value { font-size: 13px; font-weight: 600; color: var(--ink); min-width: 0; }
-.rd-node-value.mono { font-size: 12.5px; }
-.rd-node-sub { font-size: 11px; color: var(--ink-3); min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.rd-node-sub-row { display: flex; align-items: center; gap: 6px; }
-.rd-ellipsis { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
-.rd-arrow { align-self: center; color: var(--ink-4); }
-
-.rd-stats { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 10px; }
-.rd-stat {
-  padding: 9px 12px;
-  border: 1.5px dashed var(--line-2);
-  border-radius: var(--r-sketch-alt);
-}
-.rd-stat-label { font-size: 10.5px; color: var(--ink-4); }
-.rd-stat-value { font-size: 17px; font-weight: 600; color: var(--ink-2); margin-top: 2px; }
-.rd-stat.strong { border-style: solid; border-color: var(--stroke); }
-.rd-stat.strong .rd-stat-value { color: var(--ink); }
-
-.rd-cols { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; align-items: start; }
-.rd-card {
-  padding: 12px 14px;
-  border: 1.5px solid var(--line-2);
-  border-radius: var(--r-card-alt);
-  background: var(--surface);
-  min-width: 0;
-}
-.rd-card-title {
-  margin: 0 0 8px;
-  font-family: var(--font-display);
-  font-size: 14.5px;
-  font-weight: 600;
-  color: var(--ink);
-}
-.rd-kv { display: grid; grid-template-columns: max-content minmax(0, 1fr); gap: 7px 14px; margin: 0; }
-.rd-kv dt { color: var(--ink-3); white-space: nowrap; }
-.rd-kv dd { margin: 0; min-width: 0; word-break: break-word; color: var(--ink-2); }
-.rd-tool-counts { display: flex; flex-wrap: wrap; gap: 6px 18px; margin-bottom: 8px; color: var(--ink-3); }
-.rd-tool-counts .mono { color: var(--ink); font-weight: 600; }
-.rd-error { font-size: 12.5px; }
-.rd-pre {
-  margin: 0;
-  padding: 12px 14px;
-  font-size: 12px;
-  max-height: 320px;
-  overflow: auto;
-  white-space: pre-wrap;
-  word-break: break-word;
-  background: var(--surface-2);
-  border: 1.5px dashed var(--line-2);
-  border-radius: var(--r-card-alt);
-}
-@media (max-width: 760px) {
-  .rd-route { grid-template-columns: minmax(0, 1fr); }
-  .rd-arrow { transform: rotate(90deg); justify-self: center; }
-  .rd-stats { grid-template-columns: repeat(2, minmax(0, 1fr)); }
-  .rd-cols { grid-template-columns: minmax(0, 1fr); }
-}
 
 /* === Tabs === */
 .tabs {
@@ -3293,35 +3208,13 @@ html:not([data-platform="macos"]) .main.flush { padding-top: 0; }
 /* === Tailwind base override 兼容: 让原 ui/* shadcn 组件颜色仍可读 === */
 
 /* === 请求详情弹窗: 左分类右内容 (设计稿 ①, 手绘为默认画风; 经典画风见 themes/plain.css) === */
-.cc-dialog.rd-split { width: min(94vw, 960px); max-width: 960px; height: min(88vh, 760px); display: flex; flex-direction: column; gap: 12px; overflow: hidden; }
-.rd-split .rd-dialog-head, .rd-split > .rd-head { flex-shrink: 0; }
-.rd-split-body { flex: 1; min-height: 0; display: flex; border-top: 1.5px dashed var(--line-2); margin: 0 -24px -24px; }
+
 /* 左栏: 与侧边栏 .nav-item 同一套「纸条」 —— 选中项墨线 + 不规则圆角 + 错位投影 */
-.rd-nav { width: 170px; flex-shrink: 0; display: flex; flex-direction: column; gap: 3px; padding: 12px 10px; border-right: 1.5px dashed var(--line-2); overflow-y: auto; }
-.rd-nav-item {
-  display: flex; align-items: center; justify-content: space-between; gap: 6px;
-  text-align: left; padding: 7px 10px; font-size: 13px; font-weight: 500; color: var(--ink-2);
-  background: none; border: 1.6px solid transparent; border-radius: var(--r-sketch); cursor: pointer;
-  transition: background-color .15s, border-color .15s, box-shadow .15s, color .15s;
-}
-.rd-nav-item:hover { background: var(--surface); border-color: var(--line-2); color: var(--ink); }
-.rd-nav-item[data-state="active"] { background: var(--surface); border-color: var(--stroke); box-shadow: 3px 3px 0 var(--fill-oat); color: var(--ink); font-weight: 600; }
-.rd-nav-item:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
 /* 条数: 手写数字写在歪歪的小圈里 (同侧边栏 .badge) */
-.rd-nav-n {
-  min-width: 24px; height: 20px; padding: 0 5px; display: inline-grid; place-items: center;
-  font-family: var(--font-hand); font-size: 16px; font-weight: 700; line-height: 1; color: var(--ink-2);
-  border: 1.3px solid var(--line-2); border-radius: var(--r-blob); transform: rotate(-4deg);
-}
-.rd-nav-item[data-state="active"] .rd-nav-n { background: var(--fill-butter); border-color: var(--stroke); color: var(--ink); }
+
 /* 分组标题: 手写批注, 前面一小段陶土色波浪线 */
-.rd-nav-group { display: flex; align-items: center; gap: 6px; padding: 12px 10px 2px; font-family: var(--font-hand); font-size: 16px; color: var(--ink-3); }
-.rd-nav-group::before {
-  content: ""; width: 18px; height: 6px; flex-shrink: 0; background: var(--accent);
-  -webkit-mask: var(--squiggle) left center / 60px 6px; mask: var(--squiggle) left center / 60px 6px;
-}
-.rd-pane { flex: 1; min-width: 0; overflow-y: auto; padding: 16px 20px 20px; }
-.rd-pane .rd-body:focus { outline: none; }
+
 /* 右栏标题: 衬线 + 两道陶土色笔触下划线; 副标手写 */
 .rd-pane-title { display: flex; align-items: baseline; gap: 8px; margin: 0 0 14px; font-family: var(--font-display); font-size: 16px; font-weight: 600; }
 .rd-pane-title > span:first-child { position: relative; padding-bottom: 4px; }
@@ -3366,10 +3259,7 @@ html:not([data-platform="macos"]) .main.flush { padding-top: 0; }
 .hpv-body { display: flex; flex-direction: column; gap: 20px; }
 .hpv-open { align-self: flex-start; }
 @media (max-width: 640px) {
-  .rd-split-body { flex-direction: column; }
-  .rd-nav { width: auto; flex-direction: row; overflow-x: auto; border-right: 0; border-bottom: 1.5px dashed var(--line-2); }
-  .rd-nav-group { display: none; }
-  .rd-nav-item { white-space: nowrap; }
+
   .rd-table-k { white-space: normal; word-break: break-all; }
 }
 }
@@ -3860,12 +3750,6 @@ html:not([data-platform="macos"]) .main.flush { padding-top: 0; }
 .hp-chip-x:hover { color: var(--err); }
 .hp-auto-mode { font-size: 11.5px; }
 .hp-auto-mode code { font-size: 11.5px; }
-
-.rd-overview-table { table-layout: fixed; }
-.rd-overview-table th:first-child { width: 34%; }
-.rd-provider-value { display: flex; align-items: center; gap: 6px; }
-.rd-provider-value > span:last-child { min-width: 0; }
-.rd-overview-error { color: var(--err); white-space: pre-wrap; }
 
 /* Live routing client session monitor, shared by both routing layouts. */
 .live-sessions .session-muted { color: var(--ink-3); font-size: .85em; }

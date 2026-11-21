@@ -2,17 +2,16 @@
  * 请求日志列表 (设计稿 design/request-logs-v1.html ①)。
  * 行组件与实时路由共用 (components/requests/RequestRow), 数据是同一份摘要 (`items[].summary`);
  * 同一次入站请求里失败的尝试 (同 trace_id) 缩进挂在最终那次下面。
- * 筛选与页码全在 URL 里 (lib/requestLogQuery.ts)。
+ * 筛选与页码全在 URL 里 (lib/requestLogQuery.ts); 点一行进整页详情 /request-logs/:id。
  */
 import { Fragment, useEffect, useMemo, useState } from "react";
-import { useSearchParams } from "react-router";
+import { useNavigate, useSearchParams } from "react-router";
 import { keepPreviousData, useQuery } from "@tanstack/react-query";
 import { Download, RefreshCw, ScrollText, Search, X } from "lucide-react";
 import { api } from "@/api/tauri";
 import { runtime } from "@/runtime";
 import { EmptyState } from "@/components/EmptyState";
 import { Pagination } from "@/components/Pagination";
-import { RequestDetailDialog } from "@/components/RequestDetailDialog";
 import { PurposeChips, RequestRow } from "@/components/requests/RequestRow";
 import { useLiveSessions } from "@/components/live/useLiveSessions";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
@@ -94,7 +93,9 @@ export function RequestLogsPage() {
   const subs = useSubscriptions();
   const providers = useProviders();
   const sessions = useLiveSessions();
-  const [activeRequest, setActiveRequest] = useState<RequestLogDto | null>(null);
+  const navigate = useNavigate();
+  // 详情页带着列表的筛选: 返回时原样恢复, 「上一条 / 下一条」也在同一份结果里走
+  const open = (id: string) => navigate(`/request-logs/${id}${searchParams.size ? `?${searchParams}` : ""}`);
   const [exporting, setExporting] = useState(false);
   const [exportMsg, setExportMsg] = useState<string | null>(null);
   const [search, setSearch] = useState(query.q);
@@ -324,7 +325,7 @@ export function RequestLogsPage() {
                       sub={subsById.get(head.subscription_id)}
                       session={head.summary.session ? sessions.get(head.summary.session.id) : undefined}
                       mode="link"
-                      onActivate={() => setActiveRequest(head)}
+                      onActivate={() => open(head.id)}
                       t={t}
                     />
                     {chain.map((a, i) => (
@@ -336,7 +337,7 @@ export function RequestLogsPage() {
                         next={subName(order[i + 1].subscription_id)}
                         attempt={{ index: a.summary.retry_count + 1, total: Math.max(total, a.summary.retry_count + 1) }}
                         mode="link"
-                        onActivate={() => setActiveRequest(a)}
+                        onActivate={() => open(a.id)}
                         t={t}
                       />
                     ))}
@@ -355,8 +356,6 @@ export function RequestLogsPage() {
           />
         </div>
       </section>
-
-      <RequestDetailDialog request={activeRequest} onClose={() => setActiveRequest(null)} />
     </>
   );
 }

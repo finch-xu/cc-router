@@ -406,7 +406,6 @@
 :where([data-theme="quiet"]) .card > .table { padding: 6px; }
 :where([data-theme="quiet"]) .rd-table th,
 :where([data-theme="quiet"]) .rd-table td { border-bottom: none; }
-:where([data-theme="quiet"]) .rd-card { border: none; background: var(--surface-3); box-shadow: none; border-radius: 12px; }
 
 /* ---------- 统计: 核心指标是一排数字卡 ---------- */
 :where([data-theme="quiet"]) .stat {

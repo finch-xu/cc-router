@@ -9,6 +9,7 @@ import { SubscriptionNewPage } from "@/routes/SubscriptionNew";
 import { SubscriptionEditPage } from "@/routes/SubscriptionEdit";
 import { SettingsPage } from "@/routes/Settings";
 import { LogsPage } from "@/routes/Logs";
+import { RequestDetailPage } from "@/routes/RequestDetail";
 import { StatisticsPage } from "@/routes/Statistics";
 import { ReceiptsPage } from "@/routes/Receipts";
 import { AboutPage } from "@/routes/About";
@@ -47,6 +48,7 @@ function AppInner() {
         <Route path="/subscriptions/new" element={<SubscriptionNewPage />} />
         <Route path="/subscriptions/:id" element={<SubscriptionEditPage />} />
         <Route path="/request-logs" element={<LogsPage />} />
+        <Route path="/request-logs/:id" element={<RequestDetailPage />} />
         <Route path="/statistics" element={<StatisticsPage />} />
         <Route path="/receipts" element={<ReceiptsPage />} />
         <Route path="/guide" element={<GuidePage />} />

@@ -552,8 +552,7 @@ html:not([data-platform="macos"]):where([data-art~="win2k"]) .window-title {
 /* === 列表行 === */
 :where([data-art~="win2k"]) .stat { border: none; background: var(--w-win); box-shadow: var(--bevel-sunken); }
 :where([data-art~="win2k"]) .codeblock,
-:where([data-art~="win2k"]) .copyline,
-:where([data-art~="win2k"]) .rd-pre { border: none; background: var(--w-win); box-shadow: var(--bevel-sunken); }
+:where([data-art~="win2k"]) .copyline { border: none; background: var(--w-win); box-shadow: var(--bevel-sunken); }
 :where([data-art~="win2k"]) .codeblock .copy,
 :where([data-art~="win2k"]) .copyline-copy { border: none; background: var(--w-face); color: var(--w-text); box-shadow: var(--bevel-raised); }
 
@@ -653,10 +652,6 @@ html:not([data-platform="macos"]):where([data-art~="win2k"]) .window-title {
 :where([data-art~="win2k"]) .pick-row.on :is(.pick-name, .pick-meta, .pick-label, .pick-model, .pick-used) { color: var(--w-selt); }
 :where([data-art~="win2k"]) .pick-check,
 :where([data-art~="win2k"]) .pick-row.on .pick-check { border: none; background: var(--w-win); color: var(--w-text); box-shadow: var(--bevel-sunken); }
-:where([data-art~="win2k"]) .rd-node,
-:where([data-art~="win2k"]) .rd-stat,
-:where([data-art~="win2k"]) .rd-card { border: none; background: var(--w-win); box-shadow: var(--bevel-shallow); }
-:where([data-art~="win2k"]) .rd-node.accent { background: var(--w-win); box-shadow: var(--bevel-sunken); }
 
 /* ============================================================
  * 实时路由页 (经典版结构 LiveRoutingClassic): 画布是凹陷的白框,
