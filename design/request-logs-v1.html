@@ -1,0 +1,552 @@
+<!doctype html>
+<html lang="zh-CN" data-mode="light">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>请求日志 v1 设计稿</title>
+<style>
+/* ============================================================
+ * 请求日志 v1 —— 「实时路由是请求日志的一个窗口」
+ *   1. 一条请求 = 一行, 实时路由与请求日志共用同一个行组件 (RequestRow):
+ *      左「它在干什么」(用途 / 会话 / 轮次 / 前因→后果), 右「怎么被路由」+ 消耗。
+ *   2. 请求日志 = 全量历史 + 完整筛选; 实时路由 = 最近 1 小时的同一份数据, 只展示概要。
+ *   3. 详情从弹窗改为整页 /request-logs/:id, 信息分区 + 右侧目录, 能看到同一请求的全部尝试与同会话前后请求。
+ *   4. 实时路由的行展开后给「查看完整详情」, 卡片头给「在请求日志里查看」(带上时间窗)。
+ * 设计令牌与 design/live-routing-v1.html / quiet-theme-v6.html 一致。
+ * ============================================================ */
+:root {
+  --sidebar:#f3f2f0; --bg:#fbfbfa; --card:#ffffff; --well:#f3f2ef; --well-2:#e9e7e3;
+  --hair: rgb(41 37 36 / 8%);
+  --ink:#1c1917; --ink-2:#44403c; --ink-3:#78716c; --ink-4:#a8a29e;
+  --accent:#d4553a; --accent-soft:#fcede7;
+  --ok:#16a34a; --ok-soft:#e7f6ec; --warn:#c97a00; --warn-soft:#fdf2d9; --err:#d93a2f; --err-soft:#fdeceb; --idle:#a8a29e;
+  --agent:#7c5cd6; --agent-soft:#f0ecfb;
+  --sh-pill: 0 0 0 1px rgb(41 37 36 / 6%), 0 1px 2px rgb(41 37 36 / 6%);
+  --sh-card: 0 0 0 1px rgb(41 37 36 / 5%), 0 1px 2px rgb(41 37 36 / 4%), 0 6px 18px -8px rgb(41 37 36 / 12%);
+  --font: Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", "Noto Sans SC", system-ui, sans-serif;
+  --mono: "JetBrains Mono", ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+  --tk-cr: color-mix(in srgb, var(--accent) 16%, var(--card));
+  --tk-cw: color-mix(in srgb, var(--accent) 42%, var(--card));
+  --tk-in: var(--accent);
+  --tk-out: var(--ink-2);
+}
+:root[data-mode="dark"] {
+  --sidebar:#131211; --bg:#1a1918; --card:#242220; --well:#1e1d1b; --well-2:#2e2b29;
+  --hair: rgb(255 255 255 / 7%);
+  --ink:#f5f4f2; --ink-2:#d6d3d1; --ink-3:#a29c97; --ink-4:#6d6864;
+  --accent:#ea7353; --accent-soft: rgb(234 115 83 / 14%);
+  --ok:#34c46e; --ok-soft: rgb(52 196 110 / 13%); --warn:#e8a530; --warn-soft: rgb(232 165 48 / 14%); --err:#f0645a; --err-soft: rgb(240 100 90 / 14%);
+  --agent:#a48bf0; --agent-soft: rgb(164 139 240 / 14%);
+  --sh-pill: 0 0 0 1px rgb(255 255 255 / 7%), 0 1px 2px rgb(0 0 0 / 40%);
+  --sh-card: 0 0 0 1px rgb(255 255 255 / 6%), 0 8px 22px -10px rgb(0 0 0 / 60%);
+}
+* { box-sizing: border-box; }
+html { background: #e7e5e2; }
+:root[data-mode="dark"] { background: #0c0b0b; }
+body { margin: 0; font: 13.5px/1.55 var(--font); color: var(--ink); -webkit-font-smoothing: antialiased; background: inherit; }
+button { font: inherit; color: inherit; cursor: pointer; border: 0; background: none; }
+.mono { font-family: var(--mono); font-size: .93em; letter-spacing: -.01em; }
+.num { font-variant-numeric: tabular-nums; }
+.muted { color: var(--ink-3); } .faint { color: var(--ink-4); }
+
+.doc { max-width: 1440px; margin: 0 auto; padding: 28px 24px 80px; }
+.doc-head { display: flex; gap: 24px; align-items: flex-end; justify-content: space-between; flex-wrap: wrap; margin-bottom: 18px; }
+.doc-head h1 { font-size: 20px; margin: 0 0 4px; }
+.doc-head p { margin: 0; color: var(--ink-3); max-width: 860px; }
+.screen-label { margin: 44px 0 10px; display: flex; align-items: baseline; gap: 12px; flex-wrap: wrap; }
+.screen-label b { font-size: 15px; }
+.screen-label span { color: var(--ink-3); font-size: 12.5px; }
+.notes { margin: 12px 0 0; padding: 14px 18px; border-radius: 12px; background: var(--card); box-shadow: var(--sh-pill); color: var(--ink-2); font-size: 12.5px; }
+.notes ol { margin: 0; padding-left: 18px; } .notes li + li { margin-top: 3px; }
+
+.window { display: grid; grid-template-columns: 220px 1fr; border-radius: 14px; overflow: hidden; background: var(--bg);
+  box-shadow: 0 0 0 1px rgb(0 0 0 / 10%), 0 30px 80px -30px rgb(0 0 0 / 35%); }
+.sidebar { background: var(--sidebar); padding: 44px 12px 12px; display: flex; flex-direction: column; gap: 2px; }
+.brand { display: flex; align-items: center; gap: 10px; padding: 0 8px 14px; }
+.brand i { width: 28px; height: 28px; border-radius: 8px; background: var(--accent); display: block; }
+.brand b { display: block; font-size: 14px; } .brand small { color: var(--ink-3); font-size: 11.5px; }
+.nav { display: flex; align-items: center; gap: 10px; padding: 7px 10px; border-radius: 9px; color: var(--ink-2); }
+.nav.on { background: var(--card); color: var(--ink); font-weight: 550; box-shadow: var(--sh-pill); }
+.nav .e { margin-left: auto; font-size: 11.5px; color: var(--ink-4); }
+.nav .live { margin-left: auto; width: 7px; height: 7px; border-radius: 50%; background: var(--ok); }
+.main { min-width: 0; }
+.page { max-width: 1160px; margin: 0 auto; padding: 26px 30px 40px; }
+
+.dot { width: 7px; height: 7px; border-radius: 50%; background: var(--idle); display: inline-block; flex: none; }
+.dot.ok { background: var(--ok); } .dot.err { background: var(--err); } .dot.warn { background: var(--warn); }
+.pill { display: inline-flex; align-items: center; gap: 5px; height: 22px; padding: 0 9px; border-radius: 11px; font-size: 12px; font-weight: 500; white-space: nowrap; background: var(--well); color: var(--ink-3); }
+.pill.ok { background: var(--ok-soft); color: var(--ok); } .pill.err { background: var(--err-soft); color: var(--err); } .pill.warn { background: var(--warn-soft); color: var(--warn); }
+.btn { display: inline-flex; align-items: center; gap: 6px; height: 30px; padding: 0 12px; border-radius: 9px; font-weight: 500; white-space: nowrap; background: var(--card); box-shadow: var(--sh-pill); }
+.btn.sm { height: 26px; padding: 0 9px; font-size: 12px; border-radius: 8px; }
+.btn.primary { background: var(--accent); color: #fff; box-shadow: none; }
+.btn.ghost { background: none; box-shadow: none; color: var(--ink-3); }
+.seg { display: inline-flex; padding: 3px; gap: 2px; background: var(--well); border-radius: 10px; }
+.seg button { height: 26px; padding: 0 11px; border-radius: 7px; color: var(--ink-3); font-size: 12.5px; font-weight: 500; }
+.seg button.on { background: var(--card); color: var(--ink); box-shadow: var(--sh-pill); }
+.card { background: var(--card); border-radius: 16px; box-shadow: var(--sh-card); }
+.card-head { display: flex; align-items: center; gap: 10px; padding: 16px 20px 10px; flex-wrap: wrap; }
+.card-title { font-weight: 650; font-size: 14px; }
+.card-sub { color: var(--ink-3); font-size: 12.5px; }
+.link { margin-left: auto; color: var(--ink-3); font-size: 12.5px; display: inline-flex; gap: 4px; align-items: center; }
+.link:hover { color: var(--accent); }
+.plogo { width: 18px; height: 18px; border-radius: 5px; display: inline-grid; place-items: center; font-weight: 700; font-size: 9.5px; color: #fff; flex: none; }
+.plogo.ds { background: #4d6bfe; } .plogo.ai { background: #78716c; } .plogo.an { background: #1c1917; }
+:root[data-mode="dark"] .plogo.an { background: #57534e; }
+
+.ph { display: flex; align-items: flex-end; gap: 14px; flex-wrap: wrap; margin-bottom: 16px; }
+.ph h1 { font-size: 22px; font-weight: 650; letter-spacing: -.015em; margin: 0; }
+.ph .sub { color: var(--ink-3); font-size: 13px; margin-top: 2px; }
+.ph .actions { margin-left: auto; display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+
+/* ---------- 筛选 ---------- */
+.fbar { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; padding: 4px 20px 12px; }
+.chip { display: inline-flex; align-items: center; gap: 6px; height: 28px; padding: 0 11px; border-radius: 14px; color: var(--ink-2); font-size: 12.5px; }
+.chip b { font-weight: 500; color: var(--ink-4); font-variant-numeric: tabular-nums; }
+.chip.on { background: var(--well-2); color: var(--ink); font-weight: 550; }
+.chip.err b { color: var(--err); }
+.chip .sd { width: 7px; height: 7px; border-radius: 50%; }
+.gap { width: 1px; height: 18px; background: var(--hair); margin: 0 6px; }
+.select { display: inline-flex; align-items: center; gap: 6px; height: 28px; padding: 0 10px; border-radius: 8px; background: var(--well); color: var(--ink-2); font-size: 12.5px; }
+.select::after { content: "▾"; color: var(--ink-4); font-size: 10px; }
+.select.set { background: var(--accent-soft); color: var(--accent); }
+.search { flex: 1; min-width: 200px; height: 28px; border-radius: 8px; background: var(--well); color: var(--ink-4); font-size: 12.5px; display: flex; align-items: center; padding: 0 10px; }
+
+/* ---------- 行组件 (实时路由与请求日志共用) ---------- */
+.feed { padding: 0 8px 8px; }
+.day { padding: 12px 12px 6px; font-size: 12px; color: var(--ink-4); display: flex; gap: 8px; align-items: center; }
+.day::after { content: ""; flex: 1; height: 1px; background: var(--hair); }
+.ev { display: grid; grid-template-columns: 76px 96px minmax(0, 1fr) minmax(220px, 290px) 150px; gap: 14px; align-items: center; padding: 11px 12px; border-radius: 12px; cursor: pointer; }
+.ev + .ev { box-shadow: inset 0 1px 0 var(--hair); }
+.ev:hover { background: var(--well); box-shadow: none; }
+.ev:hover + .ev { box-shadow: none; }
+.ev.sel { background: var(--accent-soft); }
+.ev .tm { font-family: var(--mono); font-size: 12px; color: var(--ink-3); line-height: 1.3; }
+.ev .tm small { display: block; color: var(--ink-4); font-size: 11px; }
+.ptag { display: inline-flex; align-items: center; gap: 5px; height: 24px; padding: 0 9px; border-radius: 7px; font-size: 12px; font-weight: 550; white-space: nowrap; justify-self: start; box-shadow: 0 0 0 1px var(--hair); color: var(--ink-3); }
+.ptag.main { color: var(--accent); background: var(--accent-soft); box-shadow: none; }
+.ptag.agent { color: var(--agent); background: var(--agent-soft); box-shadow: none; }
+.ptag.old { color: var(--ink-4); box-shadow: 0 0 0 1px var(--hair) inset; }
+.what, .rt, .mx { min-width: 0; }
+.l1 { display: flex; align-items: center; gap: 7px; min-width: 0; white-space: nowrap; overflow: hidden; }
+.l2 { color: var(--ink-3); font-size: 12.5px; margin-top: 2px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.sess { display: inline-flex; align-items: center; gap: 5px; color: var(--ink-3); font-size: 12.5px; }
+.sess i { width: 7px; height: 7px; border-radius: 50%; background: #b0458c; }
+.sess.b i { background: #2a8f8a; }
+.sess .mono { color: var(--ink-4); }
+.what b { font-weight: 600; }
+.tool { font-family: var(--mono); font-size: 11.5px; padding: 1px 6px; border-radius: 5px; background: var(--well-2); color: var(--ink-2); }
+.arr { color: var(--ink-4); margin: 0 5px; }
+.rt .m { font-family: var(--mono); font-weight: 600; font-size: 12.5px; }
+.rt .s { overflow: hidden; text-overflow: ellipsis; }
+.rt .l2 { font-family: var(--mono); font-size: 12px; }
+.rt .e { color: var(--err); font-family: var(--font); }
+.rt .w { color: var(--warn); font-family: var(--font); }
+.mx { text-align: right; }
+.mx .l1 { justify-content: flex-end; font-weight: 600; font-variant-numeric: tabular-nums; }
+.mx .l2 { font-size: 12px; font-variant-numeric: tabular-nums; }
+.ev.err .tm { color: var(--err); }
+.ev.err .mx .l1 { color: var(--err); }
+/* 同一请求的失败尝试: 缩进挂在最终尝试下面 */
+.ev.attempt { grid-template-columns: 76px 96px minmax(0, 1fr) minmax(220px, 290px) 150px; padding-top: 6px; padding-bottom: 6px; }
+.ev.attempt .ptag { visibility: hidden; }
+.ev.attempt .what { padding-left: 14px; border-left: 2px solid var(--hair); }
+.ev.attempt + .ev, .ev + .ev.attempt { box-shadow: none; }
+.more { grid-column: 1 / -1; margin: 6px 0 2px; padding: 12px 14px; border-radius: 10px; background: var(--well); display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 8px 18px; font-size: 12.5px; }
+.more small { display: block; color: var(--ink-4); font-size: 11px; }
+.more .why { grid-column: 1 / -1; display: flex; gap: 8px; align-items: center; flex-wrap: wrap; padding-top: 8px; box-shadow: inset 0 1px 0 var(--hair); }
+.more .why .btn { margin-left: auto; }
+.pager { display: flex; align-items: center; justify-content: space-between; padding: 6px 20px 16px; color: var(--ink-3); font-size: 12.5px; }
+.pager .pg { display: flex; gap: 4px; }
+.pager .pg button { min-width: 28px; height: 28px; border-radius: 8px; font-variant-numeric: tabular-nums; }
+.pager .pg button.on { background: var(--well-2); color: var(--ink); font-weight: 600; }
+
+/* ---------- 详情页 ---------- */
+.pbar { position: sticky; top: 0; z-index: 2; display: flex; align-items: center; gap: 10px; padding: 14px 30px; background: color-mix(in srgb, var(--bg) 88%, transparent); backdrop-filter: blur(8px); box-shadow: inset 0 -1px 0 var(--hair); flex-wrap: wrap; }
+.crumb { color: var(--ink-3); display: inline-flex; gap: 6px; align-items: center; }
+.pbar h2 { margin: 0; font-size: 16px; font-weight: 650; }
+.pbar .r { margin-left: auto; display: flex; gap: 6px; align-items: center; }
+.dpage { display: grid; grid-template-columns: minmax(0, 1fr) 176px; gap: 26px; max-width: 1160px; margin: 0 auto; padding: 22px 30px 50px; }
+.dcol { display: flex; flex-direction: column; gap: 16px; min-width: 0; }
+.toc { position: sticky; top: 76px; align-self: start; display: flex; flex-direction: column; gap: 1px; font-size: 12.5px; }
+.toc small { color: var(--ink-4); padding: 0 10px 6px; font-size: 11px; }
+.toc a { padding: 5px 10px; border-radius: 7px; color: var(--ink-3); text-decoration: none; display: flex; justify-content: space-between; }
+.toc a.on { background: var(--card); color: var(--ink); box-shadow: var(--sh-pill); font-weight: 550; }
+.toc a b { font-weight: 500; color: var(--ink-4); }
+.sec { padding: 4px 20px 18px; }
+.hero { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 20px; padding: 20px; align-items: center; }
+.hero .story { font-size: 15px; margin-top: 6px; }
+.hero .meta { color: var(--ink-3); font-size: 12.5px; margin-top: 8px; display: flex; gap: 14px; flex-wrap: wrap; }
+.stats { display: grid; grid-template-columns: repeat(4, auto); gap: 0; }
+.stat { padding: 2px 18px; min-width: 96px; }
+.stat + .stat { box-shadow: inset 1px 0 0 var(--hair); }
+.stat small { display: block; color: var(--ink-3); font-size: 12px; }
+.stat b { font-size: 21px; font-weight: 650; letter-spacing: -.02em; font-variant-numeric: tabular-nums; }
+.stat b em { font-style: normal; font-size: 12px; color: var(--ink-4); font-weight: 500; margin-left: 2px; }
+
+.chain { display: flex; align-items: stretch; gap: 0; overflow-x: auto; padding: 4px 0 2px; }
+.node { min-width: 150px; padding: 10px 12px; border-radius: 12px; box-shadow: 0 0 0 1px var(--hair); background: var(--card); }
+.node small { display: block; font-size: 11px; color: var(--ink-4); margin-bottom: 2px; }
+.node .n { font-weight: 600; display: flex; gap: 6px; align-items: center; white-space: nowrap; }
+.node .d { color: var(--ink-3); font-size: 12px; font-family: var(--mono); margin-top: 2px; white-space: nowrap; }
+.node.bad { background: var(--err-soft); box-shadow: none; }
+.node.bad .d { color: var(--err); }
+.node.cur { box-shadow: 0 0 0 1.5px var(--accent); }
+.link-arrow { align-self: center; color: var(--ink-4); padding: 0 6px; font-size: 13px; white-space: nowrap; }
+.link-arrow.fo { color: var(--warn); font-size: 11.5px; text-align: center; }
+.attempts { display: flex; flex-direction: column; gap: 6px; }
+.att { display: grid; grid-template-columns: 28px 1fr auto auto; gap: 12px; align-items: center; padding: 8px 12px; border-radius: 10px; background: var(--well); font-size: 12.5px; }
+.att .k { font-family: var(--mono); color: var(--ink-4); }
+.att.cur { background: var(--accent-soft); }
+
+.timing { margin-top: 4px; }
+.tbar { position: relative; height: 26px; border-radius: 8px; background: var(--well); display: flex; overflow: hidden; font-size: 11.5px; }
+.tbar span { display: flex; align-items: center; padding: 0 8px; white-space: nowrap; }
+.tbar .wait { background: var(--well-2); color: var(--ink-3); }
+.tbar .gen { background: color-mix(in srgb, var(--accent) 22%, var(--card)); color: var(--ink); }
+.tlegend { display: flex; justify-content: space-between; color: var(--ink-4); font-size: 11.5px; margin-top: 6px; font-family: var(--mono); }
+.tok { display: flex; height: 12px; border-radius: 6px; overflow: hidden; margin: 10px 0 10px; }
+.tok i { display: block; }
+.tlist { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; font-size: 12.5px; }
+.tlist div small { display: flex; gap: 6px; align-items: center; color: var(--ink-3); font-size: 12px; }
+.tlist div small i { width: 9px; height: 9px; border-radius: 3px; }
+.tlist div b { font-variant-numeric: tabular-nums; font-weight: 600; }
+.grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+.kv { display: grid; grid-template-columns: 108px minmax(0, 1fr); gap: 7px 14px; font-size: 12.5px; }
+.kv dt { color: var(--ink-3); } .kv dd { margin: 0; min-width: 0; overflow-wrap: anywhere; }
+.chainline { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+.chainline .pill { height: 22px; }
+.guess { font-size: 11.5px; color: var(--warn); background: var(--warn-soft); padding: 1px 7px; border-radius: 6px; }
+.why-box { margin-top: 10px; padding: 10px 12px; border-radius: 10px; background: var(--well); font-size: 12.5px; color: var(--ink-2); }
+.slist { display: flex; flex-direction: column; }
+.srow { display: grid; grid-template-columns: 64px 84px 1fr auto; gap: 10px; align-items: center; padding: 7px 10px; border-radius: 9px; font-size: 12.5px; }
+.srow .ptag { height: 20px; font-size: 11px; padding: 0 7px; }
+.srow.cur { background: var(--accent-soft); }
+.srow .tm { font-family: var(--mono); font-size: 11.5px; color: var(--ink-3); }
+.tabs { display: flex; gap: 2px; padding: 0 20px; box-shadow: inset 0 -1px 0 var(--hair); }
+.tabs button { padding: 9px 12px; color: var(--ink-3); font-size: 12.5px; position: relative; }
+.tabs button b { font-weight: 500; color: var(--ink-4); margin-left: 4px; }
+.tabs button.on { color: var(--ink); font-weight: 600; }
+.tabs button.on::after { content: ""; position: absolute; left: 10px; right: 10px; bottom: 0; height: 2px; border-radius: 2px; background: var(--accent); }
+table.h { width: 100%; border-collapse: collapse; font-size: 12px; font-family: var(--mono); }
+table.h td { padding: 6px 8px; vertical-align: top; box-shadow: inset 0 -1px 0 var(--hair); }
+table.h td:first-child { color: var(--ink-3); width: 34%; }
+.src { font-family: var(--font); font-size: 11px; padding: 1px 6px; border-radius: 5px; background: var(--well-2); color: var(--ink-3); white-space: nowrap; }
+.src.auth { background: var(--warn-soft); color: var(--warn); } .src.custom { background: var(--agent-soft); color: var(--agent); } .src.fw { background: var(--ok-soft); color: var(--ok); }
+pre.body { margin: 0; padding: 12px 14px; border-radius: 10px; background: var(--well); font: 12px/1.6 var(--mono); color: var(--ink-2); white-space: pre-wrap; }
+
+/* ---------- 实时路由截取 ---------- */
+.lv-page { max-width: 1160px; margin: 0 auto; padding: 22px 28px 36px; }
+.gutter-note { border: 1.5px dashed var(--accent); border-radius: 18px; padding: 0; position: relative; }
+.gutter-note > span { position: absolute; top: -11px; left: 18px; background: var(--bg); padding: 0 6px; font-size: 11.5px; color: var(--accent); }
+
+@media (max-width: 900px) {
+  .window { grid-template-columns: 1fr; } .sidebar { display: none; }
+  .dpage { grid-template-columns: 1fr; } .toc { display: none; }
+  .ev, .ev.attempt { grid-template-columns: 64px 1fr; } .ev .rt, .ev .mx { grid-column: 2; text-align: left; } .mx .l1 { justify-content: flex-start; }
+  .ev .ptag { grid-row: 2; }
+  .hero, .grid2 { grid-template-columns: 1fr; } .stats { grid-template-columns: repeat(2, 1fr); }
+  .more, .tlist { grid-template-columns: 1fr 1fr; }
+}
+</style>
+</head>
+<body>
+<div class="doc">
+  <div class="doc-head">
+    <div>
+      <h1>请求日志 v1 · 与实时路由统一</h1>
+      <p>一条请求只有一种长相。实时路由看最近 1 小时、只给概要；请求日志看全部历史、可筛选、可进整页详情。两边共用同一个行组件和同一份数据（实时 ⊂ 日志）。</p>
+    </div>
+    <div class="seg"><button class="on" onclick="document.documentElement.dataset.mode='light';this.classList.add('on');this.nextElementSibling.classList.remove('on')">浅色</button><button onclick="document.documentElement.dataset.mode='dark';this.classList.add('on');this.previousElementSibling.classList.remove('on')">深色</button></div>
+  </div>
+
+  <!-- ===================== 1. 请求日志列表 ===================== -->
+  <div class="screen-label"><b>① 请求日志 · 列表</b><span>表格改成与实时事件同款的两行式列表；按天分组；失败后切换的尝试折叠在最终那次下面</span></div>
+  <div class="window">
+    <aside class="sidebar">
+      <div class="brand"><i></i><div><b>cc-router</b><small>多订阅聚合代理</small></div></div>
+      <div class="nav">接入指南</div><div class="nav">实时路由<span class="live"></span></div><div class="nav">Agent 监控</div>
+      <div class="nav">虚拟模型<span class="e">6</span></div><div class="nav">订阅管理<span class="e">23</span></div>
+      <div class="nav on">请求日志</div><div class="nav">数据统计</div><div class="nav">用量小票</div><div class="nav">设置</div>
+    </aside>
+    <main class="main">
+      <div class="page">
+        <div class="ph">
+          <div><h1>请求日志</h1><div class="sub">今天 · 412 条请求 · 3 次失败 · 1 次失败后切换成功</div></div>
+          <div class="actions">
+            <div class="seg"><button>1 小时</button><button class="on">今天</button><button>7 天</button><button>30 天</button><button>全部</button></div>
+            <button class="btn sm">导出 CSV</button>
+            <button class="btn sm">刷新</button>
+          </div>
+        </div>
+        <section class="card">
+          <div class="fbar" style="padding-top:14px">
+            <button class="chip on">全部 <b>412</b></button><button class="chip">主对话 <b>188</b></button><button class="chip">子 Agent <b>96</b></button><button class="chip">后台任务 <b>125</b></button><button class="chip err">失败 <b>3</b></button>
+            <span class="gap"></span>
+            <button class="chip on">所有会话</button><button class="chip"><i class="sd" style="background:#b0458c"></i>abc</button><button class="chip"><i class="sd" style="background:#2a8f8a"></i>cc-router</button><button class="chip faint">+3</button>
+          </div>
+          <div class="fbar">
+            <span class="select">虚拟模型</span><span class="select set">订阅：DeepSeek h5fsan ✕</span><span class="select">客户端</span><span class="select">状态</span>
+            <span class="search">搜索模型名 / 工具名 / 请求 ID</span>
+          </div>
+          <div class="feed">
+            <div class="day">今天 · 11 月 21 日 周五</div>
+            <div class="ev">
+              <span class="tm">13:07:37</span>
+              <span class="ptag">⚙ 后台任务</span>
+              <div class="what"><div class="l1"><span class="sess"><i></i>abc <span class="mono">2d90</span></span><b>后台小任务</b></div><div class="l2">不带工具的后台请求</div></div>
+              <div class="rt"><div class="l1"><span class="m">model-sonnet</span><span class="arr">→</span><span class="plogo ds">D</span><span class="s">DeepSeek h5fsan</span></div><div class="l2">deepseek-v4-pro</div></div>
+              <div class="mx"><div class="l1">31.3k tok</div><div class="l2 muted">首字 — · 共 1.7 s</div></div>
+            </div>
+            <div class="ev sel">
+              <span class="tm">13:07:36</span>
+              <span class="ptag main">▢ 主对话</span>
+              <div class="what"><div class="l1"><span class="sess"><i></i>abc <span class="mono">2d90</span></span><b>第 2 轮 · 第 2 步</b></div><div class="l2">返回 <span class="tool">ToolSearch</span><span class="arr">→</span>调用 <span class="tool">WebSearch</span></div></div>
+              <div class="rt"><div class="l1"><span class="m">model-opus</span><span class="arr">→</span><span class="plogo ds">D</span><span class="s">DeepSeek h5fsan</span></div><div class="l2"><span class="w">失败后切换 ·</span> deepseek-v4-pro · max</div></div>
+              <div class="mx"><div class="l1">56.8k tok</div><div class="l2 muted">首字 1.3 s · 共 2.9 s</div></div>
+            </div>
+            <div class="ev attempt err">
+              <span class="tm">13:07:34</span>
+              <span class="ptag main">▢</span>
+              <div class="what"><div class="l1 muted">尝试 1 / 2</div></div>
+              <div class="rt"><div class="l1"><span class="m">model-opus</span><span class="arr">→</span><span class="plogo ai">A</span><span class="s">Aiberm-9</span></div><div class="l2"><span class="e">限流 429</span><span class="w"> → 切换到 DeepSeek h5fsan</span></div></div>
+              <div class="mx"><div class="l1">429</div><div class="l2 muted">0.4 s</div></div>
+            </div>
+            <div class="ev">
+              <span class="tm">13:07:16</span>
+              <span class="ptag main">▢ 主对话</span>
+              <div class="what"><div class="l1"><span class="sess"><i></i>abc <span class="mono">2d90</span></span><b>第 2 轮 · 第 1 步</b></div><div class="l2">用户新提问<span class="arr">→</span>调用 <span class="tool">ToolSearch</span> <span class="tool">Skill</span></div></div>
+              <div class="rt"><div class="l1"><span class="m">model-opus</span><span class="arr">→</span><span class="plogo ai">A</span><span class="s">Aiberm-9</span></div><div class="l2">claude-opus-5-5 · xhigh</div></div>
+              <div class="mx"><div class="l1">50.5k tok</div><div class="l2 muted">首字 13.8 s · 共 22.9 s</div></div>
+            </div>
+            <div class="ev">
+              <span class="tm">13:05:52</span>
+              <span class="ptag agent">◇ 子 Agent</span>
+              <div class="what"><div class="l1"><span class="sess b"><i></i>cc-router <span class="mono">91fe</span></span><b>Explore · 第 4 步</b></div><div class="l2">返回 <span class="tool">Grep</span> ×3<span class="arr">→</span>调用 <span class="tool">Read</span> ×2</div></div>
+              <div class="rt"><div class="l1"><span class="m">model-haiku</span><span class="arr">→</span><span class="plogo an">A</span><span class="s">Anthropic it8xjh</span></div><div class="l2">claude-haiku-5-5</div></div>
+              <div class="mx"><div class="l1">18.2k tok</div><div class="l2 muted">首字 0.6 s · 共 1.9 s</div></div>
+            </div>
+            <div class="day">昨天 · 11 月 20 日 周四</div>
+            <div class="ev">
+              <span class="tm">23:41:08<small>v6.7 之前</small></span>
+              <span class="ptag old">未记录用途</span>
+              <div class="what"><div class="l1"><span class="sess">Claude Code</span><b class="muted" style="font-weight:500">/v1/messages · 23 个工具</b></div><div class="l2">结束：end_turn</div></div>
+              <div class="rt"><div class="l1"><span class="m">model-sonnet</span><span class="arr">→</span><span class="plogo ai">A</span><span class="s">Aiberm-9</span></div><div class="l2">claude-sonnet-5-5</div></div>
+              <div class="mx"><div class="l1">12.0k tok</div><div class="l2 muted">首字 0.9 s · 共 4.4 s</div></div>
+            </div>
+          </div>
+          <div class="pager"><span>第 1–50 条，共 412 条 · 第 1 页每 5 秒自动刷新</span><div class="pg"><button>‹</button><button class="on">1</button><button>2</button><button>3</button><button>…</button><button>9</button><button>›</button></div></div>
+        </section>
+      </div>
+    </main>
+  </div>
+  <div class="notes"><ol>
+    <li>行组件与实时路由<b>完全同一个</b>（<span class="mono">components/requests/RequestRow.tsx</span>）；时间列在日志里带日期分组，实时路由只显示时分秒。</li>
+    <li>失败后切换：同一次客户端请求的多次尝试用新增的 <span class="mono">trace_id</span> 归组，最终那次在上，失败的尝试缩进挂在下面（默认展开 1 层，超过 3 次折叠）。</li>
+    <li>点行 → 整页详情 <span class="mono">/request-logs/:id</span>，不再弹窗；列表的筛选 / 页码保存在 URL，返回时原样恢复。</li>
+    <li>老记录（迁移前写入，没有用途 / 会话字段）照常显示，用途标签显示「未记录用途」，标题退回成「入口 · 工具数」。</li>
+  </ol></div>
+
+  <!-- ===================== 2. 详情整页 ===================== -->
+  <div class="screen-label"><b>② 请求详情 · 整页</b><span>/request-logs/:id，通栏页面：顶栏常驻、正文滚动、右侧目录</span></div>
+  <div class="window">
+    <aside class="sidebar">
+      <div class="brand"><i></i><div><b>cc-router</b><small>多订阅聚合代理</small></div></div>
+      <div class="nav">接入指南</div><div class="nav">实时路由<span class="live"></span></div><div class="nav">Agent 监控</div>
+      <div class="nav">虚拟模型<span class="e">6</span></div><div class="nav">订阅管理<span class="e">23</span></div>
+      <div class="nav on">请求日志</div><div class="nav">数据统计</div><div class="nav">用量小票</div><div class="nav">设置</div>
+    </aside>
+    <main class="main">
+      <div class="pbar">
+        <span class="crumb">‹ 请求日志</span><span class="faint">/</span>
+        <h2>第 2 轮 · 第 2 步</h2>
+        <span class="pill ok"><span class="dot ok"></span>成功 200</span>
+        <span class="pill">SSE</span>
+        <span class="pill warn">失败后切换</span>
+        <div class="r">
+          <button class="btn sm ghost">↑ 上一条</button><button class="btn sm ghost">↓ 下一条</button>
+          <button class="btn sm">复制 JSON</button>
+        </div>
+      </div>
+      <div class="dpage">
+        <div class="dcol">
+          <!-- 概览 -->
+          <section class="card hero" id="ov">
+            <div>
+              <div class="l1"><span class="ptag main">▢ 主对话</span><span class="sess"><i></i>abc <span class="mono">2d90…e41c</span></span></div>
+              <div class="story">返回 <span class="tool">ToolSearch</span><span class="arr">→</span>调用 <span class="tool">WebSearch</span></div>
+              <div class="meta"><span>2026-11-21 13:07:36.412</span><span>Claude Code 2.1.84</span><span class="mono">req 7f3a…c902</span></div>
+            </div>
+            <div class="stats">
+              <div class="stat"><small>Token</small><b>56.8<em>k</em></b></div>
+              <div class="stat"><small>首字</small><b>1.3<em>s</em></b></div>
+              <div class="stat"><small>总耗时</small><b>2.9<em>s</em></b></div>
+              <div class="stat"><small>输出速度</small><b>148<em>tok/s</em></b></div>
+            </div>
+          </section>
+
+          <!-- 路由 -->
+          <section class="card" id="route">
+            <div class="card-head"><span class="card-title">路由</span><span class="card-sub">这次客户端请求共尝试 2 次，当前查看第 2 次</span></div>
+            <div class="sec">
+              <div class="chain">
+                <div class="node"><small>客户端</small><div class="n">Claude Code</div><div class="d">/v1/messages · HTTP/1.1</div></div>
+                <span class="link-arrow">→</span>
+                <div class="node"><small>虚拟模型</small><div class="n">model-opus</div><div class="d">轮询 · 3 个订阅</div></div>
+                <span class="link-arrow">→</span>
+                <div class="node bad"><small>尝试 1</small><div class="n"><span class="plogo ai">A</span>Aiberm-9</div><div class="d">429 限流 · 0.4 s</div></div>
+                <span class="link-arrow fo">切换<br>→</span>
+                <div class="node cur"><small>尝试 2 · 本条</small><div class="n"><span class="plogo ds">D</span>DeepSeek h5fsan</div><div class="d">200 · 2.9 s</div></div>
+                <span class="link-arrow">→</span>
+                <div class="node"><small>上游模型</small><div class="n mono">deepseek-v4-pro</div><div class="d">回显 deepseek-v4-pro</div></div>
+              </div>
+            </div>
+          </section>
+
+          <!-- 耗时与 token -->
+          <section class="card" id="perf">
+            <div class="card-head"><span class="card-title">耗时与 Token</span></div>
+            <div class="sec">
+              <div class="timing">
+                <div class="tbar"><span class="wait" style="width:45%">等待首字 1.3 s</span><span class="gen" style="width:55%">生成 1.6 s · 236 tok · 148 tok/s</span></div>
+                <div class="tlegend"><span>0</span><span>1.3 s 首字</span><span>2.9 s 结束</span></div>
+              </div>
+              <div class="tok"><i style="width:82%;background:var(--tk-cr)"></i><i style="width:6%;background:var(--tk-cw)"></i><i style="width:11.6%;background:var(--tk-in)"></i><i style="width:.4%;background:var(--tk-out)"></i></div>
+              <div class="tlist">
+                <div><small><i style="background:var(--tk-cr)"></i>缓存读</small><b>46.6k</b></div>
+                <div><small><i style="background:var(--tk-cw)"></i>缓存写</small><b>3.4k</b></div>
+                <div><small><i style="background:var(--tk-in)"></i>输入（未命中）</small><b>6.6k</b></div>
+                <div><small><i style="background:var(--tk-out)"></i>输出</small><b>236</b></div>
+              </div>
+              <div class="why-box">缓存命中 82% · 输入按协议归一（缓存读写不计入「输入」），与实时路由口径一致</div>
+            </div>
+          </section>
+
+          <div class="grid2">
+            <!-- 判定 -->
+            <section class="card" id="purpose">
+              <div class="card-head"><span class="card-title">请求在做什么</span></div>
+              <div class="sec">
+                <dl class="kv">
+                  <dt>用途</dt><dd>主对话</dd>
+                  <dt>轮次 / 步数</dt><dd>第 2 轮 · 第 2 步</dd>
+                  <dt>回传的工具结果</dt><dd><span class="tool">ToolSearch</span></dd>
+                  <dt>本步调用</dt><dd><span class="tool">WebSearch</span></dd>
+                  <dt>结束原因</dt><dd class="mono">tool_use</dd>
+                  <dt>提供的工具</dt><dd>23 个</dd>
+                </dl>
+                <div class="why-box"><b>判定依据：</b>请求带完整主会话工具集与 Claude Code 主系统提示词，最后一条 user 消息是工具结果。</div>
+              </div>
+            </section>
+            <!-- effort + client -->
+            <section class="card" id="client">
+              <div class="card-head"><span class="card-title">思考强度与客户端</span></div>
+              <div class="sec">
+                <dl class="kv">
+                  <dt>思考强度</dt><dd><div class="chainline"><span class="pill">客户端 high</span>→<span class="pill warn">槽位强制 max</span>→<span class="pill">上游回显 —</span></div></dd>
+                  <dt>客户端</dt><dd>Claude Code 2.1.84</dd>
+                  <dt>入口</dt><dd class="mono">/v1/messages · HTTP/1.1</dd>
+                  <dt>来源 IP</dt><dd class="mono">127.0.0.1</dd>
+                  <dt>User-Agent</dt><dd class="mono">claude-cli/2.1.84 (external, cli)</dd>
+                  <dt>会话</dt><dd class="mono">2d90b7c1-…-e41c · 项目 abc</dd>
+                </dl>
+              </div>
+            </section>
+          </div>
+
+          <!-- 同会话 -->
+          <section class="card" id="session">
+            <div class="card-head"><span class="card-title">同会话前后请求</span><span class="card-sub">abc · 2d90</span><a class="link">在请求日志里只看这个会话 →</a></div>
+            <div class="sec slist">
+              <div class="srow"><span class="tm">13:07:16</span><span class="ptag main">主对话</span><span>第 2 轮 · 第 1 步 · 调用 <span class="tool">ToolSearch</span> <span class="tool">Skill</span></span><span class="muted">Aiberm-9 · 22.9 s</span></div>
+              <div class="srow cur"><span class="tm">13:07:36</span><span class="ptag main">主对话</span><span><b>第 2 轮 · 第 2 步 · 本条</b></span><span class="muted">DeepSeek h5fsan · 2.9 s</span></div>
+              <div class="srow"><span class="tm">13:07:37</span><span class="ptag">后台</span><span>后台小任务</span><span class="muted">DeepSeek h5fsan · 1.7 s</span></div>
+              <div class="srow"><span class="tm">13:07:41</span><span class="ptag main">主对话</span><span>第 2 轮 · 第 3 步 · 回答完毕</span><span class="muted">Aiberm-9 · 8.0 s</span></div>
+            </div>
+          </section>
+
+          <!-- 请求头 -->
+          <section class="card" id="headers">
+            <div class="card-head"><span class="card-title">请求头</span><span class="card-sub">敏感值已打码 · 出站头标明来源</span></div>
+            <div class="tabs"><button>客户端请求 <b>14</b></button><button class="on">发往上游 <b>9</b></button><button>上游响应 <b>11</b></button></div>
+            <div class="sec" style="padding-top:8px">
+              <table class="h">
+                <tr><td>anthropic-version</td><td>2023-06-01</td><td><span class="src fw">透传</span></td></tr>
+                <tr><td>anthropic-beta</td><td>claude-code-20250219,interleaved-thinking-…</td><td><span class="src fw">透传</span></td></tr>
+                <tr><td>authorization</td><td>Bearer sk-…••••</td><td><span class="src auth">鉴权</span></td></tr>
+                <tr><td>x-custom-team</td><td>infra</td><td><span class="src custom">自定义</span></td></tr>
+                <tr><td>user-agent</td><td>claude-cli/2.1.84 (external, cli)</td><td><span class="src fw">透传</span></td></tr>
+                <tr><td>content-type</td><td>application/json</td><td><span class="src">cc-router</span></td></tr>
+              </table>
+            </div>
+          </section>
+
+          <!-- 上游响应体 -->
+          <section class="card" id="body">
+            <div class="card-head"><span class="card-title">上游错误响应</span><span class="card-sub">仅失败的尝试有；本条成功，这里显示尝试 1 的</span></div>
+            <div class="sec"><pre class="body">HTTP 429 · Aiberm-9 · 13:07:34
+{"type":"error","error":{"type":"rate_limit_error","message":"Number of request tokens has exceeded your per-minute rate limit"}}</pre></div>
+          </section>
+        </div>
+        <nav class="toc">
+          <small>本页</small>
+          <a class="on">概览</a><a>路由 <b>2</b></a><a>耗时与 Token</a><a>在做什么</a><a>强度与客户端</a><a>同会话 <b>4</b></a><a>请求头 <b>34</b></a><a>错误响应</a>
+        </nav>
+      </div>
+    </main>
+  </div>
+  <div class="notes"><ol>
+    <li>原弹窗的全部内容都在：概览 / 请求 / 工具 / 三组请求头 / 响应体；新增「路由（全部尝试）」「耗时条」「Token 分段」「同会话前后请求」「判定依据」。</li>
+    <li>顶栏常驻：返回（保留列表筛选与页码）、上一条 / 下一条（在当前筛选结果内移动，键盘 ↑ ↓ 也可）、复制 JSON（不含请求头值，和现在一样）。</li>
+    <li>从实时路由跳过来时这条可能还在日志批量写入队列里（最多 5 秒）：页面先显示「正在写入日志…」，每秒重试，写入后自动出现。</li>
+  </ol></div>
+
+  <!-- ===================== 3. 实时路由 ===================== -->
+  <div class="screen-label"><b>③ 实时路由 · 实时事件</b><span>保持精简；行组件同上；展开只给概要 + 跳转；页面四周恢复留白、可整页滚动（本次已修）</span></div>
+  <div class="window">
+    <aside class="sidebar">
+      <div class="brand"><i></i><div><b>cc-router</b><small>多订阅聚合代理</small></div></div>
+      <div class="nav">接入指南</div><div class="nav on">实时路由<span class="live"></span></div><div class="nav">Agent 监控</div>
+      <div class="nav">虚拟模型<span class="e">6</span></div><div class="nav">订阅管理<span class="e">23</span></div>
+      <div class="nav">请求日志</div><div class="nav">数据统计</div>
+    </aside>
+    <main class="main">
+      <div class="lv-page">
+        <div class="gutter-note"><span>四周 22 / 28 px 留白，.main 不再是 flush</span>
+        <section class="card">
+          <div class="card-head"><span class="card-title">实时事件</span><span class="card-sub">每个请求在做什么 · 点一行看概要</span><a class="link">在请求日志里查看最近 1 小时 →</a></div>
+          <div class="fbar"><button class="chip on">全部 <b>6</b></button><button class="chip">主对话 <b>3</b></button><button class="chip">子 Agent <b>0</b></button><button class="chip">后台任务 <b>3</b></button><button class="chip">失败 <b>0</b></button></div>
+          <div class="feed">
+            <div class="ev sel">
+              <span class="tm">13:07:36</span>
+              <span class="ptag main">▢ 主对话</span>
+              <div class="what"><div class="l1"><span class="sess"><i></i>abc <span class="mono">2d90</span></span><b>第 2 轮 · 第 2 步</b></div><div class="l2">返回 <span class="tool">ToolSearch</span><span class="arr">→</span>调用 <span class="tool">WebSearch</span></div></div>
+              <div class="rt"><div class="l1"><span class="m">model-opus</span><span class="arr">→</span><span class="plogo ds">D</span><span class="s">DeepSeek h5fsan</span></div><div class="l2">deepseek-v4-pro · max</div></div>
+              <div class="mx"><div class="l1">56.8k tok</div><div class="l2 muted">首字 1.3 s · 共 2.9 s</div></div>
+              <div class="more">
+                <div><small>Token 缓存读 / 写 / 输入 / 输出</small>46.6k / 3.4k / 6.6k / 236</div>
+                <div><small>缓存命中</small>82%</div>
+                <div><small>思考强度</small>max（槽位）</div>
+                <div><small>尝试</small>2 次 · 1 次切换</div>
+                <div class="why"><b>判定依据</b><span>带主会话工具集，最后一条是工具结果</span><button class="btn sm primary">查看完整详情 →</button></div>
+              </div>
+            </div>
+            <div class="ev">
+              <span class="tm">13:07:33</span>
+              <span class="ptag">⚙ 后台任务</span>
+              <div class="what"><div class="l1"><span class="sess"><i></i>abc <span class="mono">2d90</span></span><b>后台小任务</b></div><div class="l2">不带工具的后台请求</div></div>
+              <div class="rt"><div class="l1"><span class="m">model-sonnet</span><span class="arr">→</span><span class="plogo ai">A</span><span class="s">Aiberm-9</span></div><div class="l2">claude-sonnet-5-5</div></div>
+              <div class="mx"><div class="l1">73.1k tok</div><div class="l2 muted">首字 — · 共 15.3 s</div></div>
+            </div>
+          </div>
+        </section>
+        </div>
+      </div>
+    </main>
+  </div>
+  <div class="notes"><ol>
+    <li>展开面板删掉「会话 ID / 模型 / 客户端」这类重复项，只留 4 格概要 + 判定依据 + 「查看完整详情」。请求头、UA、IP 一律只在请求日志里。</li>
+    <li>卡片头的链接带时间窗：<span class="mono">/request-logs?range=1h</span>；会话筛选选中时一并带上 <span class="mono">&amp;session=…</span>。</li>
+  </ol></div>
+</div>
+</body>
+</html>
