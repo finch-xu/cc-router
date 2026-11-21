@@ -498,6 +498,9 @@ html[data-platform="web"] { --titlebar-inset: 0px; }
 .win-controls button.close:hover { background: #c42b1c; color: #fff; }
 html:not([data-platform="macos"]) .main { padding-top: calc(22px + var(--titlebar-inset)); }
 html:not([data-platform="macos"]) .main.flush { padding-top: 0; }
+/* 通栏页的顶栏 (.page-bar) 在 Windows / Linux 上会整条落在拖窗带下面: 按钮点不到, 右端还被窗口三键盖住。
+ * 让顶栏自己长出这段高度; 网页界面 inset 为 0 不受影响, macOS 维持内容顶到边。 */
+html:not([data-platform="macos"]) .main.flush > .page-bar { height: calc(52px + var(--titlebar-inset)); padding-top: var(--titlebar-inset); }
 
 .app {
   display: grid;
