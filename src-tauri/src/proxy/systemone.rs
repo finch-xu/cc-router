@@ -374,7 +374,7 @@ impl AttemptSink for LiveSink<'_> {
                 }
             }
             info!(sub_id = %c.sub_id, display_name = %c.display_name, real_model = %c.outbound.real_model, url = %c.outbound.url, "forwarding systemone request");
-            emit_attempt_started(self.state, c.sub_id, VirtualModelName::Jev);
+            emit_attempt_started(self.state, c.sub_id, VirtualModelName::Jev, self.ctx);
             let api_key = c.rt.read().await.row.api_key.clone();
             self.capture = crate::proxy::header_log::UpstreamHeaderCapture {
                 request: crate::proxy::header_log::capture_untagged(

@@ -267,6 +267,7 @@ pub async fn run_consumer(
                                 }
                             }
                         }
+                        crate::observability::live_feed::record(&app, &entry, auth_type);
                         crate::session_monitor::observe_proxy(&app, &entry, auth_type).await;
                         if buffer.len() >= BUFFER_MAX {
                             buffer.pop_front();
@@ -709,6 +710,7 @@ mod tests {
         full.tool_calls = tally.fields(&RequestToolShape {
             tools_offered_count: Some(12),
             tool_result_count: Some(3),
+            ..Default::default()
         });
         let full_id = full.id.to_string();
 
@@ -717,6 +719,7 @@ mod tests {
         bare.tool_calls = ToolLogFields::request_only(&RequestToolShape {
             tools_offered_count: Some(12),
             tool_result_count: Some(0),
+            ..Default::default()
         });
         let bare_id = bare.id.to_string();
 
@@ -1135,7 +1138,7 @@ mod tests {
         e1.client_tool = Some("claude_code");
         let mut t1 = ToolUseTally::default();
         t1.observe_name("Read"); t1.observe_name("Bash"); t1.observe_name("Read");
-        e1.tool_calls = t1.fields(&RequestToolShape { tools_offered_count: Some(9), tool_result_count: Some(2) });
+        e1.tool_calls = t1.fields(&RequestToolShape { tools_offered_count: Some(9), tool_result_count: Some(2), ..Default::default() });
 
         // e2: 未识别客户端, 调 Read×1, 回传 0
         let mut e2 = make_entry(day_start + 1, VirtualModelName::Sonnet, sub, "anthropic",
@@ -1143,13 +1146,13 @@ mod tests {
         e2.client_tool = None;
         let mut t2 = ToolUseTally::default();
         t2.observe_name("Read");
-        e2.tool_calls = t2.fields(&RequestToolShape { tools_offered_count: Some(9), tool_result_count: Some(0) });
+        e2.tool_calls = t2.fields(&RequestToolShape { tools_offered_count: Some(9), tool_result_count: Some(0), ..Default::default() });
 
         // e3: 成功但 0 次工具调用 → 不计入 tool_use_request_count
         let mut e3 = make_entry(day_start + 2, VirtualModelName::Sonnet, sub, "anthropic",
             RequestStatus::Success, Some(100), Some(1), Some(2));
         e3.client_tool = Some("claude_code");
-        e3.tool_calls = ToolUseTally::default().fields(&RequestToolShape { tools_offered_count: Some(9), tool_result_count: Some(1) });
+        e3.tool_calls = ToolUseTally::default().fields(&RequestToolShape { tools_offered_count: Some(9), tool_result_count: Some(1), ..Default::default() });
 
         flush_batch(&pool, vec![e1, e2, e3], vec![]).await.expect("flush");
 

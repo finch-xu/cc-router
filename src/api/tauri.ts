@@ -14,6 +14,7 @@ import type {
   ClaudeCodeReadResult,
   ClaudeCodeWriteOutcome,
   ClientActivityDto,
+  LiveRequest,
   CreateChatGptOAuthSubscriptionInput,
   CreateKiroSubscriptionInput,
   CreateSubscriptionInput,
@@ -167,6 +168,7 @@ export const api = {
     invoke<string>("export_requests_csv_text", { filters }),
   /** Live Routing「客户端接入」: 按 client_tool 聚合的最近活动 (被动流量检测) */
   getClientActivity: () => invoke<ClientActivityDto[]>("get_client_activity"),
+  getLiveRequests: (sinceMs?: number) => invoke<LiveRequest[]>("get_live_requests", { sinceMs }),
 
   // config backup / import
   exportConfig: (path: string, password?: string) =>

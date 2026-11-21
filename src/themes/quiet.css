@@ -427,67 +427,13 @@
 :where([data-theme="quiet"]) .stat-val { font-family: inherit; font-size: 26px; font-weight: 650; letter-spacing: -0.02em; font-variant-numeric: tabular-nums; color: var(--ink); }
 :where([data-theme="quiet"]) .stat-delta.up { color: var(--ok); }
 
-/* ---------- 实时路由: 拓扑图是本页主卡 ---------- */
-:where([data-theme="quiet"]) .lrc-rf-wrap {
-  background: var(--surface);
-  border-bottom: none;
-  border-radius: 20px;
-  box-shadow: var(--q-sh-hero);
-  margin: 20px 24px 8px;
-}
+/* ---------- Agent 会话卡 (经典版通栏区块) ---------- */
 :where([data-theme="quiet"]) .lrc-flush-section,
 :where([data-theme="quiet"]) .lrc-flush-split { background: transparent; }
 :where([data-theme="quiet"]) .lrc-flush-split > * + * { border-left: none; }
 :where([data-theme="quiet"]) .lrc-flush-section,
 :where([data-theme="quiet"]) .lrc-flush-split > * { border-top: none; }
 :where([data-theme="quiet"]) .lrc-flush-title { font-size: 15px; font-weight: 620; }
-:where([data-theme="quiet"]) .lrc-rf-label { text-transform: none; letter-spacing: 0; font-weight: 500; font-size: 11.5px; color: var(--ink-4); }
-:where([data-theme="quiet"]) .lrc-rf-client {
-  border: none;
-  background: var(--surface-3);
-  box-shadow: none;
-  border-radius: 11px;
-}
-:where([data-theme="quiet"]) .lrc-rf-client { height: 40px !important; margin-top: 10px; }
-:where([data-theme="quiet"]) .lrc-rf-client-bar { display: none; }
-:where([data-theme="quiet"]) .lrc-rf-client-body { height: 100%; }
-:where([data-theme="quiet"]) .lrc-rf-client-caret { color: var(--accent); }
-:where([data-theme="quiet"]) .lrc-rf-client-name { font-weight: 550; color: var(--ink); }
-/* 有流量的客户端是白块, 没流量的沉在凹槽色里 */
-:where([data-theme="quiet"]) .lrc-rf-client:not(.dormant) { background: var(--surface); box-shadow: var(--q-sh-card); }
-.dark:where([data-theme="quiet"]) .lrc-rf-client:not(.dormant) { background: var(--q-sel); }
-:where([data-theme="quiet"]) .lrc-rf-client.dormant { background: var(--surface-3); opacity: 1; }
-:where([data-theme="quiet"]) .lrc-rf-client.dormant .lrc-rf-client-caret { color: var(--ink-5); }
-:where([data-theme="quiet"]) .lrc-rf-client.dormant .lrc-rf-client-name { color: var(--ink-4); font-weight: 500; }
-:where([data-theme="quiet"]) .lrc-rf-hub img {
-  border-radius: 22px;
-  background: var(--surface);
-  box-shadow: 0 0 0 6px color-mix(in srgb, var(--accent) 16%, transparent);
-}
-.dark:where([data-theme="quiet"]) .lrc-rf-hub img { box-shadow: 0 0 0 6px color-mix(in srgb, var(--accent) 25%, transparent); }
-/* 上游: 云朵换成平铺块; 正常 = 白块, 异常 = 淡色底 */
-:where([data-theme="quiet"]) .lrc-rf-up > svg { opacity: 0; }
-:where([data-theme="quiet"]) .lrc-rf-up { border-radius: 12px; background: var(--surface); box-shadow: var(--q-sh-card); }
-.dark:where([data-theme="quiet"]) .lrc-rf-up { background: var(--q-sel); }
-:where([data-theme="quiet"]) .lrc-rf-up.err { background: var(--err-bg); box-shadow: none; }
-:where([data-theme="quiet"]) .lrc-rf-up.warn { background: var(--q-warn-bg); box-shadow: none; }
-:where([data-theme="quiet"]) .lrc-rf-up.off { background: var(--surface-3); box-shadow: none; }
-:where([data-theme="quiet"]) .lrc-rf-up-text { padding-top: 0; }
-:where([data-theme="quiet"]) .lrc-rf-up-name,
-:where([data-theme="quiet"]) .lrc-rf-up.err .lrc-rf-up-name { font-weight: 600; color: var(--ink); }
-:where([data-theme="quiet"]) .lrc-rf-up-state { font-size: 10.5px; font-weight: 500; }
-:where([data-theme="quiet"]) .lrc-ca-row,
-:where([data-theme="quiet"]) .lrc-ca-row.group {
-  border-top: none;
-  padding: 7px 8px;
-  margin: 0 -8px;
-  border-radius: 9px;
-}
-:where([data-theme="quiet"]) .lrc-ca-row:not(.head):hover { background: var(--surface-3); }
-:where([data-theme="quiet"]) .lrc-ca-row.head { text-transform: none; letter-spacing: 0; font-weight: 500; font-size: 11.5px; color: var(--ink-4); }
-:where([data-theme="quiet"]) .lrc-ca-row.group:hover .lrc-ca-gname { text-decoration: none; }
-:where([data-theme="quiet"]) .lrc-ca-gname { font-weight: 550; }
-:where([data-theme="quiet"]) .lrc-ca-foot { border-top: none; }
 
 /* ---------- 接入指南: 接入信息是本页主卡 ---------- */
 :where([data-theme="quiet"]) .page-flow > .lrc-flush-split:first-child {

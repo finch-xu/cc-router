@@ -662,23 +662,10 @@ html:not([data-platform="macos"]):where([data-art~="win2k"]) .window-title {
  * 实时路由页 (经典版结构 LiveRoutingClassic): 画布是凹陷的白框,
  * 客户端画成小窗口, 中枢是凸起的方块, 下半的通栏区块换成面板灰
  * ============================================================ */
-:where([data-art~="win2k"]) .lrc-rf-wrap { margin: 8px 8px 0; background: var(--w-win); border-bottom: none; box-shadow: var(--bevel-sunken); }
 :where([data-art~="win2k"]) .lrc-flush-section,
 :where([data-art~="win2k"]) .lrc-flush-split { background: var(--w-face); border-bottom: 1px solid var(--w-sh); box-shadow: 0 1px 0 var(--w-hi); }
 :where([data-art~="win2k"]) .lrc-flush-split > * + * { border-left: 1px solid var(--w-sh); box-shadow: inset 1px 0 0 var(--w-hi); }
 :where([data-art~="win2k"]) .lrc-flush-title { font-size: 12px; }
-:where([data-art~="win2k"]) .lrc-rf-client { border: none; background: var(--w-face); box-shadow: var(--bevel-window); padding: 3px; }
-:where([data-art~="win2k"]) .lrc-rf-client-bar {
-  height: 14px;
-  border-bottom: none;
-  background: linear-gradient(90deg, var(--w-cap1), var(--w-cap2));
-}
-:where([data-art~="win2k"]) .lrc-rf-client-bar i { display: none; }
-:where([data-art~="win2k"]) .lrc-rf-client-body { height: calc(100% - 14px); background: var(--w-win); }
-:where([data-art~="win2k"]) .lrc-rf-client-caret { color: var(--w-text); }
-:where([data-art~="win2k"]) .lrc-rf-hub { background: var(--w-face); box-shadow: var(--bevel-raised); }
-:where([data-art~="win2k"]) .lrc-rf-hub img,
-:where([data-art~="win2k"]).dark .lrc-rf-hub img { box-shadow: none; }
 :where([data-art~="win2k"]) .lrc-access-value { border: none; background: var(--w-face); box-shadow: var(--bevel-sunken); }
 :where([data-art~="win2k"]) .lrc-access-copy,
 :where([data-art~="win2k"]) .lrc-btn-dark,

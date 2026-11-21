@@ -1050,6 +1050,59 @@ export interface QuotaReachedPayload {
 export interface RouteAttemptStartedEvent {
   subscription_id: string;
   virtual_model: CustomVirtualModelName;
+  /** 客户端识别结果; 未识别为 null (老后端没有这个字段) */
+  client_tool?: string | null;
+  purpose?: PurposeKind;
+}
+
+/** 请求用途 (proxy/purpose.rs::PurposeKind) */
+export type PurposeKind =
+  | "main"
+  | "agent"
+  | "compact"
+  | "guard"
+  | "title"
+  | "fetch"
+  | "probe"
+  | "background"
+  | "unknown";
+
+export interface RequestPurpose {
+  kind: PurposeKind;
+  /** true = 靠提示词 / 工具集指纹推断 */
+  guessed: boolean;
+  turn: number | null;
+  step: number | null;
+  /** 本请求回传的是哪些工具的结果 (只有工具名) */
+  prev_tools: string[];
+}
+
+/** 实时路由页的一条请求 (observability/live_feed.rs::LiveRequest), 事件 `live_request` 与 get_live_requests 同形 */
+export interface LiveRequest {
+  id: string;
+  timestamp: number;
+  virtual_model: string;
+  subscription_id: string;
+  provider_id: string;
+  model: string;
+  status: "success" | "error" | "timeout";
+  http_status: number | null;
+  ttft_ms: number | null;
+  total_ms: number | null;
+  /** 未命中缓存的输入 (已按协议归一, 不含缓存读写) */
+  input_tokens: number;
+  output_tokens: number;
+  cache_read_tokens: number;
+  cache_write_tokens: number;
+  client_tool: string | null;
+  effort: string | null;
+  stop_reason: string | null;
+  tool_use_names: string[];
+  tools_offered: number | null;
+  retry_count: number;
+  error: string | null;
+  purpose: RequestPurpose;
+  session: { client: "claude" | "codex"; id: string } | null;
 }
 
 export interface RouteAttemptFinishedEvent {
