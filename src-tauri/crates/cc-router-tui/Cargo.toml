@@ -35,7 +35,7 @@ tui-big-text = "0.8.10"
 tui-input = "0.15.5"
 unicode-width = "0.2.3"
 # URL 参数的格式校验 (与后端同一份 pattern)。
-regex = "1.13.1"
+regex = "1.13.2"
 
 [dev-dependencies]
 insta = "1.49.0"
