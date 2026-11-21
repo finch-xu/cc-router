@@ -339,6 +339,7 @@ pub fn log_entry(
         error_message,
         upstream_response_body: upstream_body,
         monitor_session: None,
+        trace_id: ctx.trace_id.clone(),
         client_tool: ctx.info.tool,
         client_user_agent: ctx.info.user_agent.clone(),
         client_version: ctx.info.version.clone(),

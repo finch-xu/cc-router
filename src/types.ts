@@ -848,6 +848,28 @@ export interface RequestLogDto {
   tool_use_count?: number | null;
   /** 调用名 JSON 数组字符串, 保序允许重复; 0 次时 null; 超长以 "…" 结尾 */
   tool_use_names?: string | null;
+  /** 与实时路由同形的摘要 (同一套口径) */
+  summary: RequestSummary;
+}
+
+/** get_request_detail: 一条请求 + 同一次入站请求的全部尝试 (按时间正序, 含本条) */
+export interface RequestDetailDto {
+  request: RequestLogDto;
+  attempts: RequestSummary[];
+}
+
+export type RequestPurposeFilter = "main" | "agent" | "bg" | "fail";
+
+export interface RequestFacetsDto {
+  purpose: Record<"all" | RequestPurposeFilter, number>;
+  sessions: { client: string | null; id: string; count: number; last_seen: number }[];
+}
+
+export interface RequestNeighborsDto {
+  /** 列表里排在上面 (更新) 的那条 */
+  newer: string | null;
+  /** 列表里排在下面 (更早) 的那条 */
+  older: string | null;
 }
 
 export interface ListRequestsResult {
@@ -862,6 +884,12 @@ export interface RequestLogFilters {
   subscription_id?: string;
   /** ClientToolId 或 CLIENT_TOOL_UNKNOWN_SENTINEL */
   client_tool?: string;
+  since_ms?: number;
+  purpose?: RequestPurposeFilter;
+  session_id?: string;
+  trace_id?: string;
+  /** 模型名 / 工具名 / 请求 id 前缀 */
+  q?: string;
 }
 
 // ===== 统计聚合 (commands/statistics.rs) =====
@@ -1077,8 +1105,11 @@ export interface RequestPurpose {
   prev_tools: string[];
 }
 
-/** 实时路由页的一条请求 (observability/live_feed.rs::LiveRequest), 事件 `live_request` 与 get_live_requests 同形 */
-export interface LiveRequest {
+/**
+ * 一条请求的摘要 (observability/live_feed.rs::RequestSummary)。实时路由的事件行与请求日志的列表行同形:
+ * 事件 `live_request`、get_live_requests、list_requests 的 `items[].summary` 都是它。
+ */
+export interface RequestSummary {
   id: string;
   timestamp: number;
   virtual_model: string;
@@ -1101,9 +1132,15 @@ export interface LiveRequest {
   tools_offered: number | null;
   retry_count: number;
   error: string | null;
-  purpose: RequestPurpose;
+  /** null = 迁移 030 之前写入的老记录, 没有用途信息 */
+  purpose: RequestPurpose | null;
   session: { client: "claude" | "codex"; id: string } | null;
+  /** 同一次入站请求的所有尝试共用; 老记录为 null */
+  trace_id: string | null;
 }
+
+/** 实时路由沿用的名字 */
+export type LiveRequest = RequestSummary;
 
 export interface RouteAttemptFinishedEvent {
   subscription_id: string;

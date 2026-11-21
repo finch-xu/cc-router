@@ -644,6 +644,7 @@ fn request_log_matches() {
         tool_result_count: Some(1),
         tool_use_count: Some(2),
         tool_use_names: Some(r#"["Read","Edit"]"#.into()),
+        summary: crate::observability::live_feed::sample_summary("x"),
     };
     let view: dto::RequestLog = through_json(&real);
     assert_eq!(
@@ -722,6 +723,7 @@ fn request_log_matches() {
         tool_result_count: None,
         tool_use_count: None,
         tool_use_names: None,
+        summary: crate::observability::live_feed::sample_summary("x"),
     };
     let view: dto::RequestLog = through_json(&sparse);
     assert_eq!(
@@ -804,6 +806,7 @@ fn list_requests_result_matches() {
             tool_result_count: None,
             tool_use_count: None,
             tool_use_names: None,
+            summary: crate::observability::live_feed::sample_summary("x"),
         }],
         total: 42,
     };

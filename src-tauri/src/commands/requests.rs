@@ -2,6 +2,7 @@
 //! 支持按 virtual_model_name / provider_id / status 筛选。
 //! 另提供 CSV 导出 (同筛选条件, 流式写文件)。
 
+use std::collections::HashMap;
 use std::io::Write;
 
 use futures::TryStreamExt;
@@ -10,6 +11,8 @@ use sqlx::Row;
 use tauri::State;
 
 use crate::error::AppResult;
+use crate::observability::live_feed::{self, RequestSummary, SUMMARY_COLUMNS};
+use crate::provider::model::AuthType;
 use crate::state::AppState;
 
 #[derive(Debug, Serialize)]
@@ -66,6 +69,9 @@ pub struct RequestLogDto {
     pub tool_use_count: Option<i64>,
     /// JSON 数组字符串, 前端 JSON.parse
     pub tool_use_names: Option<String>,
+    /// 与实时路由同形的摘要 (用途 / 会话 / 归一后的 token / 尝试归组), 列表行与实时事件行共用。
+    /// 由 [`live_feed::from_row`] 生成, 口径与 `live_request` 事件完全一致。
+    pub summary: RequestSummary,
 }
 
 #[derive(Debug, Serialize)]
@@ -84,46 +90,153 @@ pub struct RequestLogFilters {
     /// 按客户端工具筛选。特殊值 `__unknown__` 映射到 `client_tool IS NULL`
     /// (前端筛选器的「未识别」选项), 其余值走 `client_tool = ?` 精确匹配。
     pub client_tool: Option<String>,
+    /// 只看这个时间点 (ms) 之后的请求
+    pub since_ms: Option<i64>,
+    /// 用途分组: main / agent / bg (所有后台类) / fail (非成功), 与实时路由的筛选 chips 同义
+    pub purpose: Option<String>,
+    pub session_id: Option<String>,
+    pub trace_id: Option<String>,
+    /// 模糊搜索: 模型名 (请求 / 回显) / 工具名 / 请求 id 前缀
+    pub q: Option<String>,
 }
+
+/// 实时路由里算作「后台任务」的用途, 与前端 `liveStats.ts::isBackground` 同表
+const BACKGROUND_KINDS: &[&str] = &["compact", "guard", "title", "fetch", "probe", "background"];
 
 // client_tool 特殊值 → 拼 `IS NULL` 而非 `= ?`. 与前端
 // `src/types.ts::CLIENT_TOOL_UNKNOWN_SENTINEL` 必须保持同值, 否则筛选「未识别」会静默失效.
 pub(crate) const UNKNOWN_SENTINEL: &str = "__unknown__";
 
+#[derive(Debug, Clone)]
+pub(crate) enum Bind {
+    S(String),
+    I(i64),
+}
+
+type Query<'q> = sqlx::query::Query<'q, sqlx::Sqlite, sqlx::sqlite::SqliteArguments>;
+
+pub(crate) fn bind_all<'q>(mut q: Query<'q>, binds: &[Bind]) -> Query<'q> {
+    for b in binds {
+        q = match b {
+            Bind::S(v) => q.bind(v.clone()),
+            Bind::I(v) => q.bind(*v),
+        };
+    }
+    q
+}
+
 /// 动态构建 WHERE 子句。列名是白名单字面量, 值走 bind, 无注入风险。
-/// 返回 (where 子句, bind 值列表); `IS NULL` 分支不产生 bind 值。
-/// list_requests 与 export_requests_csv 共用, 保证「导出所见即所得」。
-fn build_filter_clause(filters: &RequestLogFilters) -> (String, Vec<String>) {
-    let active: Vec<(&'static str, &str)> = [
+/// list_requests / 导出 / 计数 / 上一条下一条共用, 保证「导出所见即所得」。
+/// `skip` 里的维度不参与 (筛选 chips 的计数要排除自身那一维)。
+fn build_filter_clause_except(filters: &RequestLogFilters, skip: &[&str]) -> (String, Vec<Bind>) {
+    let mut conds: Vec<String> = Vec::new();
+    let mut binds: Vec<Bind> = Vec::new();
+    let on = |dim: &str| !skip.contains(&dim);
+    let eq = [
         ("virtual_model_name", filters.virtual_model_name.as_deref()),
         ("provider_id", filters.provider_id.as_deref()),
         ("status", filters.status.as_deref()),
         ("subscription_id", filters.subscription_id.as_deref()),
-        ("client_tool", filters.client_tool.as_deref()),
-    ]
-    .into_iter()
-    .filter_map(|(col, val)| val.map(|v| (col, v)))
-    .collect();
-
-    if active.is_empty() {
-        return (String::new(), Vec::new());
+        ("session_id", filters.session_id.as_deref()),
+        ("trace_id", filters.trace_id.as_deref()),
+    ];
+    for (col, val) in eq {
+        if let Some(v) = val.filter(|_| on(col)) {
+            conds.push(format!("{col} = ?"));
+            binds.push(Bind::S(v.to_owned()));
+        }
     }
-    let conds: Vec<String> = active
-        .iter()
-        .map(|(c, v)| {
-            if *c == "client_tool" && *v == UNKNOWN_SENTINEL {
-                format!("{} IS NULL", c)
-            } else {
-                format!("{} = ?", c)
+    if let Some(v) = filters.client_tool.as_deref() {
+        if v == UNKNOWN_SENTINEL {
+            conds.push("client_tool IS NULL".into());
+        } else {
+            conds.push("client_tool = ?".into());
+            binds.push(Bind::S(v.to_owned()));
+        }
+    }
+    if let Some(ms) = filters.since_ms {
+        conds.push("timestamp >= ?".into());
+        binds.push(Bind::I(ms));
+    }
+    if let Some(p) = filters.purpose.as_deref().filter(|_| on("purpose")) {
+        match p {
+            "fail" => conds.push("status != 'success'".into()),
+            "bg" => conds.push(format!(
+                "purpose_kind IN ({})",
+                BACKGROUND_KINDS.iter().map(|k| format!("'{k}'")).collect::<Vec<_>>().join(",")
+            )),
+            other => {
+                conds.push("purpose_kind = ?".into());
+                binds.push(Bind::S(other.to_owned()));
             }
-        })
-        .collect();
-    let binds = active
-        .iter()
-        .filter(|(c, v)| !(*c == "client_tool" && *v == UNKNOWN_SENTINEL))
-        .map(|(_, v)| v.to_string())
-        .collect();
+        }
+    }
+    if let Some(q) = filters.q.as_deref().map(str::trim).filter(|q| !q.is_empty()) {
+        let like = format!("%{}%", q.replace('\\', "\\\\").replace('%', "\\%").replace('_', "\\_"));
+        conds.push(
+            "(real_model_name LIKE ? ESCAPE '\\' OR response_model_name LIKE ? ESCAPE '\\'
+              OR tool_use_names LIKE ? ESCAPE '\\' OR id LIKE ? ESCAPE '\\')"
+                .into(),
+        );
+        for _ in 0..3 {
+            binds.push(Bind::S(like.clone()));
+        }
+        binds.push(Bind::S(format!("{}%", q.replace('%', "").replace('_', ""))));
+    }
+    if conds.is_empty() {
+        return (String::new(), binds);
+    }
     (format!(" WHERE {}", conds.join(" AND ")), binds)
+}
+
+fn build_filter_clause(filters: &RequestLogFilters) -> (String, Vec<Bind>) {
+    build_filter_clause_except(filters, &[])
+}
+
+/// 列表 / 详情共用的列: 详情字段 + 摘要字段 (重名列 SQLite 允许重复出现)。
+const DTO_COLUMNS: &str = "endpoint_id, is_streaming, upstream_response_body,
+    client_user_agent, client_version, client_ip, entry_kind, downstream_http_version,
+    client_effort, effort_source, upstream_effort, tool_result_count, tool_use_count";
+
+fn dto_from_row(r: &sqlx::sqlite::SqliteRow, auth: &HashMap<String, AuthType>) -> RequestLogDto {
+    RequestLogDto {
+        id: r.try_get("id").unwrap_or_default(),
+        timestamp: r.try_get("timestamp").unwrap_or(0),
+        virtual_model_name: r.try_get("virtual_model_name").unwrap_or_default(),
+        subscription_id: r.try_get("subscription_id").unwrap_or_default(),
+        provider_id: r.try_get("provider_id").unwrap_or_default(),
+        endpoint_id: r.try_get("endpoint_id").unwrap_or_default(),
+        real_model_name: r.try_get("real_model_name").unwrap_or_default(),
+        response_model_name: r.try_get("response_model_name").ok(),
+        is_streaming: r.try_get::<i64, _>("is_streaming").unwrap_or(0) != 0,
+        status: r.try_get("status").unwrap_or_default(),
+        http_status: r.try_get("http_status").ok(),
+        total_latency_ms: r.try_get("total_latency_ms").ok(),
+        first_content_ms: r.try_get("first_content_ms").ok(),
+        output_tokens_per_second: row_output_speed(r),
+        input_tokens: r.try_get("upstream_input_tokens").ok(),
+        output_tokens: r.try_get("upstream_output_tokens").ok(),
+        cache_creation_tokens: r.try_get("upstream_cache_creation").ok(),
+        cache_read_tokens: r.try_get("upstream_cache_read").ok(),
+        error_message: r.try_get("error_message").ok(),
+        upstream_response_body: r.try_get("upstream_response_body").ok(),
+        client_tool: r.try_get("client_tool").ok(),
+        client_user_agent: r.try_get("client_user_agent").ok(),
+        client_version: r.try_get("client_version").ok(),
+        client_ip: r.try_get("client_ip").ok(),
+        entry_kind: r.try_get("entry_kind").ok(),
+        downstream_http_version: r.try_get("downstream_http_version").ok(),
+        client_effort: r.try_get("client_effort").ok(),
+        effective_effort: r.try_get("effective_effort").ok(),
+        effort_source: r.try_get("effort_source").ok(),
+        upstream_effort: r.try_get("upstream_effort").ok(),
+        stop_reason: r.try_get("stop_reason").ok(),
+        tools_offered_count: r.try_get("tools_offered_count").ok(),
+        tool_result_count: r.try_get("tool_result_count").ok(),
+        tool_use_count: r.try_get("tool_use_count").ok(),
+        tool_use_names: r.try_get("tool_use_names").ok(),
+        summary: live_feed::from_row(r, auth),
+    }
 }
 
 #[tauri::command]
@@ -141,78 +254,23 @@ pub async fn list_requests(
     let (where_clause, binds) = build_filter_clause(&filters);
 
     let count_sql = format!("SELECT COUNT(*) AS c FROM requests{}", where_clause);
-    let mut count_q = sqlx::query(sqlx::AssertSqlSafe(count_sql.as_str()));
-    for v in &binds {
-        count_q = count_q.bind(v);
-    }
+    let count_q = bind_all(sqlx::query(sqlx::AssertSqlSafe(count_sql.as_str())), &binds);
     let total: i64 = count_q.fetch_one(&state.db).await?.try_get("c")?;
 
     let select_sql = format!(
-        "SELECT id, timestamp, virtual_model_name, subscription_id, provider_id, endpoint_id,
-                real_model_name, response_model_name, is_streaming, status,
-                http_status, total_latency_ms, first_content_ms,
-                upstream_input_tokens, upstream_output_tokens,
-                upstream_cache_creation, upstream_cache_read, error_message,
-                upstream_response_body,
-                client_tool, client_user_agent, client_version, client_ip,
-                entry_kind, downstream_http_version,
-                client_effort, effective_effort, effort_source, upstream_effort,
-                stop_reason, tools_offered_count, tool_result_count, tool_use_count, tool_use_names
-         FROM requests{}
-         ORDER BY timestamp DESC
-         LIMIT ? OFFSET ?",
-        where_clause
+        "SELECT {SUMMARY_COLUMNS}, {DTO_COLUMNS}
+         FROM requests{where_clause}
+         ORDER BY timestamp DESC, id DESC
+         LIMIT ? OFFSET ?"
     );
-    let mut select_q = sqlx::query(sqlx::AssertSqlSafe(select_sql.as_str()));
-    for v in &binds {
-        select_q = select_q.bind(v);
-    }
-    let rows = select_q
+    let rows = bind_all(sqlx::query(sqlx::AssertSqlSafe(select_sql.as_str())), &binds)
         .bind(page_size as i64)
         .bind(offset)
         .fetch_all(&state.db)
         .await?;
 
-    let items = rows
-        .into_iter()
-        .map(|r| RequestLogDto {
-            id: r.try_get("id").unwrap_or_default(),
-            timestamp: r.try_get("timestamp").unwrap_or(0),
-            virtual_model_name: r.try_get("virtual_model_name").unwrap_or_default(),
-            subscription_id: r.try_get("subscription_id").unwrap_or_default(),
-            provider_id: r.try_get("provider_id").unwrap_or_default(),
-            endpoint_id: r.try_get("endpoint_id").unwrap_or_default(),
-            real_model_name: r.try_get("real_model_name").unwrap_or_default(),
-            response_model_name: r.try_get("response_model_name").ok(),
-            is_streaming: r.try_get::<i64, _>("is_streaming").unwrap_or(0) != 0,
-            status: r.try_get("status").unwrap_or_default(),
-            http_status: r.try_get("http_status").ok(),
-            total_latency_ms: r.try_get("total_latency_ms").ok(),
-            first_content_ms: r.try_get("first_content_ms").ok(),
-            output_tokens_per_second: row_output_speed(&r),
-            input_tokens: r.try_get("upstream_input_tokens").ok(),
-            output_tokens: r.try_get("upstream_output_tokens").ok(),
-            cache_creation_tokens: r.try_get("upstream_cache_creation").ok(),
-            cache_read_tokens: r.try_get("upstream_cache_read").ok(),
-            error_message: r.try_get("error_message").ok(),
-            upstream_response_body: r.try_get("upstream_response_body").ok(),
-            client_tool: r.try_get("client_tool").ok(),
-            client_user_agent: r.try_get("client_user_agent").ok(),
-            client_version: r.try_get("client_version").ok(),
-            client_ip: r.try_get("client_ip").ok(),
-            entry_kind: r.try_get("entry_kind").ok(),
-            downstream_http_version: r.try_get("downstream_http_version").ok(),
-            client_effort: r.try_get("client_effort").ok(),
-            effective_effort: r.try_get("effective_effort").ok(),
-            effort_source: r.try_get("effort_source").ok(),
-            upstream_effort: r.try_get("upstream_effort").ok(),
-            stop_reason: r.try_get("stop_reason").ok(),
-            tools_offered_count: r.try_get("tools_offered_count").ok(),
-            tool_result_count: r.try_get("tool_result_count").ok(),
-            tool_use_count: r.try_get("tool_use_count").ok(),
-            tool_use_names: r.try_get("tool_use_names").ok(),
-        })
-        .collect();
+    let auth = live_feed::auth_types(&state).await;
+    let items = rows.iter().map(|r| dto_from_row(r, &auth)).collect();
 
     Ok(ListRequestsResult { items, total })
 }
@@ -269,7 +327,8 @@ provider_id,endpoint_id,real_model_name,response_model_name,is_streaming,status,
 total_latency_ms,input_tokens,output_tokens,cache_creation_tokens,cache_read_tokens,\
 error_message,client_tool,client_user_agent,client_version,client_ip,entry_kind,\
 downstream_http_version,client_effort,effective_effort,effort_source,upstream_effort,\
-stop_reason,tools_offered_count,tool_result_count,tool_use_count,tool_use_names,first_content_ms,output_tokens_per_second";
+stop_reason,tools_offered_count,tool_result_count,tool_use_count,tool_use_names,first_content_ms,output_tokens_per_second,\
+purpose_kind,purpose_turn,purpose_step,session_id,trace_id";
 
 /// 把当前筛选下的请求逐行写成 CSV (带 UTF-8 BOM + 表头), 返回行数.
 /// 桌面导出写文件, 网页导出写 Vec<u8>, 共享同一份 SQL 与格式化.
@@ -290,15 +349,13 @@ pub async fn write_csv<W: Write>(
                 client_tool, client_user_agent, client_version, client_ip,
                 entry_kind, downstream_http_version,
                 client_effort, effective_effort, effort_source, upstream_effort,
-                stop_reason, tools_offered_count, tool_result_count, tool_use_count, tool_use_names
+                stop_reason, tools_offered_count, tool_result_count, tool_use_count, tool_use_names,
+                purpose_kind, purpose_turn, purpose_step, session_id, trace_id
          FROM requests{}
          ORDER BY timestamp ASC",
         where_clause
     );
-    let mut q = sqlx::query(sqlx::AssertSqlSafe(sql.as_str()));
-    for v in &binds {
-        q = q.bind(v);
-    }
+    let q = bind_all(sqlx::query(sqlx::AssertSqlSafe(sql.as_str())), &binds);
 
     let io_err = |e: std::io::Error| crate::error::AppError::Internal(format!("写入 CSV 失败: {e}"));
 
@@ -351,6 +408,11 @@ pub async fn write_csv<W: Write>(
             opt_str(r.try_get("tool_use_names").ok()),
             opt_num(r.try_get("first_content_ms").ok()),
             row_output_speed(&r).map(|v| v.to_string()).unwrap_or_default(),
+            opt_str(r.try_get("purpose_kind").ok()),
+            opt_num(r.try_get("purpose_turn").ok()),
+            opt_num(r.try_get("purpose_step").ok()),
+            opt_str(r.try_get("session_id").ok()),
+            opt_str(r.try_get("trace_id").ok()),
         ]
         .join(",");
         writeln!(w, "{}", line).map_err(io_err)?;
@@ -384,6 +446,199 @@ pub async fn export_requests_csv_text(
     let mut buf: Vec<u8> = Vec::new();
     write_csv(&state, filters.unwrap_or_default(), &mut buf).await?;
     String::from_utf8(buf).map_err(|e| crate::error::AppError::Internal(format!("CSV 非 UTF-8: {e}")))
+}
+
+#[derive(Debug, Serialize)]
+pub struct RequestDetailDto {
+    pub request: RequestLogDto,
+    /// 同一次入站请求的全部尝试 (含本条), 按时间正序; 老记录没有 trace_id 时只有本条
+    pub attempts: Vec<RequestSummary>,
+}
+
+/// 详情页: 一条请求的完整字段 + 同 trace 的全部尝试。找不到返回 None
+/// (从实时路由跳来时这条可能还在批量写入队列里, 前端据此显示「正在写入」并重试)。
+#[tauri::command]
+pub async fn get_request_detail(state: State<'_, AppState>, id: String) -> AppResult<Option<RequestDetailDto>> {
+    let sql = format!("SELECT {SUMMARY_COLUMNS}, {DTO_COLUMNS} FROM requests WHERE id = ?");
+    let Some(row) = sqlx::query(sqlx::AssertSqlSafe(sql.as_str()))
+        .bind(&id)
+        .fetch_optional(&state.db)
+        .await?
+    else {
+        return Ok(None);
+    };
+    let auth = live_feed::auth_types(&state).await;
+    let request = dto_from_row(&row, &auth);
+    let attempts = match request.summary.trace_id.as_deref() {
+        Some(trace) => {
+            let sql = format!("SELECT {SUMMARY_COLUMNS} FROM requests WHERE trace_id = ? ORDER BY timestamp ASC, id ASC");
+            sqlx::query(sqlx::AssertSqlSafe(sql.as_str()))
+                .bind(trace)
+                .fetch_all(&state.db)
+                .await?
+                .iter()
+                .map(|r| live_feed::from_row(r, &auth))
+                .collect()
+        }
+        None => vec![request.summary.clone()],
+    };
+    Ok(Some(RequestDetailDto { request, attempts }))
+}
+
+/// 同一会话里时间上最接近 `around_ms` 的请求 (前后各最多 `radius` 条), 按时间正序。
+#[tauri::command]
+pub async fn list_session_requests(
+    state: State<'_, AppState>,
+    session_id: String,
+    around_ms: i64,
+    radius: Option<u32>,
+) -> AppResult<Vec<RequestSummary>> {
+    let n = radius.unwrap_or(4).clamp(1, 20) as i64;
+    let auth = live_feed::auth_types(&state).await;
+    let before = format!(
+        "SELECT {SUMMARY_COLUMNS} FROM requests WHERE session_id = ? AND timestamp <= ? ORDER BY timestamp DESC, id DESC LIMIT ?"
+    );
+    let after = format!(
+        "SELECT {SUMMARY_COLUMNS} FROM requests WHERE session_id = ? AND timestamp > ? ORDER BY timestamp ASC, id ASC LIMIT ?"
+    );
+    let mut out: Vec<RequestSummary> = sqlx::query(sqlx::AssertSqlSafe(before.as_str()))
+        .bind(&session_id)
+        .bind(around_ms)
+        .bind(n + 1)
+        .fetch_all(&state.db)
+        .await?
+        .iter()
+        .rev()
+        .map(|r| live_feed::from_row(r, &auth))
+        .collect();
+    out.extend(
+        sqlx::query(sqlx::AssertSqlSafe(after.as_str()))
+            .bind(&session_id)
+            .bind(around_ms)
+            .bind(n)
+            .fetch_all(&state.db)
+            .await?
+            .iter()
+            .map(|r| live_feed::from_row(r, &auth)),
+    );
+    Ok(out)
+}
+
+#[derive(Debug, Serialize, PartialEq)]
+pub struct SessionFacet {
+    pub client: Option<String>,
+    pub id: String,
+    pub count: i64,
+    pub last_seen: i64,
+}
+
+#[derive(Debug, Serialize, Default, PartialEq)]
+pub struct RequestFacetsDto {
+    /// 与实时路由的用途 chips 同义: all / main / agent / bg / fail
+    pub purpose: HashMap<&'static str, i64>,
+    /// 当前筛选下最近活跃的会话 (最多 8 个)
+    pub sessions: Vec<SessionFacet>,
+}
+
+/// 列表顶部 chips 的计数。用途计数不受「用途」筛选影响, 会话列表不受「会话」筛选影响。
+#[tauri::command]
+pub async fn get_request_facets(
+    state: State<'_, AppState>,
+    filters: Option<RequestLogFilters>,
+) -> AppResult<RequestFacetsDto> {
+    request_facets(&state.db, &filters.unwrap_or_default()).await
+}
+
+pub(crate) async fn request_facets(db: &sqlx::SqlitePool, filters: &RequestLogFilters) -> AppResult<RequestFacetsDto> {
+    let bg = BACKGROUND_KINDS.iter().map(|k| format!("'{k}'")).collect::<Vec<_>>().join(",");
+    let (where_clause, binds) = build_filter_clause_except(filters, &["purpose"]);
+    let sql = format!(
+        "SELECT COUNT(*) AS a,
+                COALESCE(SUM(purpose_kind = 'main'), 0) AS m,
+                COALESCE(SUM(purpose_kind = 'agent'), 0) AS g,
+                COALESCE(SUM(purpose_kind IN ({bg})), 0) AS b,
+                COALESCE(SUM(status != 'success'), 0) AS f
+         FROM requests{where_clause}"
+    );
+    let r = bind_all(sqlx::query(sqlx::AssertSqlSafe(sql.as_str())), &binds)
+        .fetch_one(db)
+        .await?;
+    let mut purpose = HashMap::new();
+    for (k, c) in [("all", "a"), ("main", "m"), ("agent", "g"), ("bg", "b"), ("fail", "f")] {
+        purpose.insert(k, r.try_get::<i64, _>(c).unwrap_or(0));
+    }
+
+    let (where_clause, binds) = build_filter_clause_except(filters, &["session_id"]);
+    let joiner = if where_clause.is_empty() { " WHERE" } else { " AND" };
+    let sql = format!(
+        "SELECT session_id, MAX(session_client) AS client, COUNT(*) AS c, MAX(timestamp) AS last
+         FROM requests{where_clause}{joiner} session_id IS NOT NULL
+         GROUP BY session_id ORDER BY last DESC LIMIT 8"
+    );
+    let sessions = bind_all(sqlx::query(sqlx::AssertSqlSafe(sql.as_str())), &binds)
+        .fetch_all(db)
+        .await?
+        .iter()
+        .map(|r| SessionFacet {
+            client: r.try_get("client").ok(),
+            id: r.try_get("session_id").unwrap_or_default(),
+            count: r.try_get("c").unwrap_or(0),
+            last_seen: r.try_get("last").unwrap_or(0),
+        })
+        .collect();
+    Ok(RequestFacetsDto { purpose, sessions })
+}
+
+#[derive(Debug, Serialize, Default, PartialEq)]
+pub struct RequestNeighborsDto {
+    /// 列表里排在它上面 (更新) 的那条
+    pub newer: Option<String>,
+    /// 列表里排在它下面 (更早) 的那条
+    pub older: Option<String>,
+}
+
+/// 详情页的「上一条 / 下一条」: 在当前筛选结果里, 按列表同样的排序 (timestamp DESC, id DESC) 找邻居。
+#[tauri::command]
+pub async fn get_request_neighbors(
+    state: State<'_, AppState>,
+    id: String,
+    filters: Option<RequestLogFilters>,
+) -> AppResult<RequestNeighborsDto> {
+    request_neighbors(&state.db, &id, &filters.unwrap_or_default()).await
+}
+
+pub(crate) async fn request_neighbors(
+    db: &sqlx::SqlitePool,
+    id: &str,
+    filters: &RequestLogFilters,
+) -> AppResult<RequestNeighborsDto> {
+    let Some(ts) = sqlx::query_scalar::<_, i64>("SELECT timestamp FROM requests WHERE id = ?")
+        .bind(id)
+        .fetch_optional(db)
+        .await?
+    else {
+        return Ok(RequestNeighborsDto::default());
+    };
+    let (where_clause, binds) = build_filter_clause(filters);
+    let joiner = if where_clause.is_empty() { " WHERE" } else { " AND" };
+    let pick = |cmp: &str, order: &str| {
+        format!(
+            "SELECT id FROM requests{where_clause}{joiner} (timestamp {cmp} ? OR (timestamp = ? AND id {cmp} ?))
+             ORDER BY timestamp {order}, id {order} LIMIT 1"
+        )
+    };
+    let mut out = RequestNeighborsDto::default();
+    for (cmp, order, slot) in [(">", "ASC", &mut out.newer), ("<", "DESC", &mut out.older)] {
+        let sql = pick(cmp, order);
+        *slot = bind_all(sqlx::query(sqlx::AssertSqlSafe(sql.as_str())), &binds)
+            .bind(ts)
+            .bind(ts)
+            .bind(id)
+            .fetch_optional(db)
+            .await?
+            .and_then(|r| r.try_get("id").ok());
+    }
+    Ok(out)
 }
 
 /// 返回前端可在筛选器里展示的「已支持识别的 client tool」白名单。
@@ -456,7 +711,7 @@ fn row_output_speed(row: &sqlx::sqlite::SqliteRow) -> Option<f64> {
 
 #[cfg(test)]
 mod tests {
-    use super::{csv_field, CSV_HEADER};
+    use super::{csv_field, request_facets, request_neighbors, RequestLogFilters, CSV_HEADER};
 
     /// 插入一行最小可用的 requests 记录 (只关心 client_tool / timestamp 聚合)。
     async fn insert_request(
@@ -490,6 +745,91 @@ mod tests {
             .unwrap();
         crate::db::run_migrations(&pool).await.unwrap();
         pool
+    }
+
+    /// 带用途 / 会话 / trace 的行 (迁移 030 之后的形状)
+    async fn insert_rich(pool: &sqlx::SqlitePool, id: &str, ts: i64, purpose: Option<&str>, status: &str, session: Option<&str>, model: &str) {
+        sqlx::query(
+            "INSERT INTO requests (id, timestamp, virtual_model_name, subscription_id, provider_id,
+             endpoint_id, real_model_name, is_streaming, status, purpose_kind, session_id, session_client, tool_use_names)
+             VALUES (?, ?, 'opus', 's', 'p', 'e', ?, 0, ?, ?, ?, 'claude', '[\"WebSearch\"]')",
+        )
+        .bind(id)
+        .bind(ts)
+        .bind(model)
+        .bind(status)
+        .bind(purpose)
+        .bind(session)
+        .execute(pool)
+        .await
+        .unwrap();
+    }
+
+    async fn ids(pool: &sqlx::SqlitePool, f: &RequestLogFilters) -> Vec<String> {
+        let (w, b) = super::build_filter_clause(f);
+        let sql = format!("SELECT id FROM requests{w} ORDER BY timestamp DESC, id DESC");
+        super::bind_all(sqlx::query(sqlx::AssertSqlSafe(sql.as_str())), &b)
+            .fetch_all(pool)
+            .await
+            .unwrap()
+            .iter()
+            .map(|r| sqlx::Row::get::<String, _>(r, "id"))
+            .collect()
+    }
+
+    async fn rich_pool() -> sqlx::SqlitePool {
+        let pool = header_pool().await;
+        insert_rich(&pool, "a", 10, Some("main"), "success", Some("s1"), "claude-opus").await;
+        insert_rich(&pool, "b", 20, Some("agent"), "success", Some("s1"), "claude-haiku").await;
+        insert_rich(&pool, "c", 30, Some("title"), "error", Some("s2"), "deepseek_v4").await;
+        insert_rich(&pool, "d", 30, None, "success", None, "legacy-model").await;
+        pool
+    }
+
+    #[tokio::test]
+    async fn filters_by_purpose_session_time_and_search() {
+        let pool = rich_pool().await;
+        let f = |purpose: Option<&str>| RequestLogFilters { purpose: purpose.map(str::to_owned), ..Default::default() };
+        assert_eq!(ids(&pool, &f(Some("main"))).await, ["a"]);
+        assert_eq!(ids(&pool, &f(Some("bg"))).await, ["c"]);
+        assert_eq!(ids(&pool, &f(Some("fail"))).await, ["c"]);
+        let s1 = RequestLogFilters { session_id: Some("s1".into()), since_ms: Some(15), ..Default::default() };
+        assert_eq!(ids(&pool, &s1).await, ["b"]);
+        let q = |q: &str| RequestLogFilters { q: Some(q.into()), ..Default::default() };
+        assert_eq!(ids(&pool, &q("haiku")).await, ["b"]);
+        // `_` 是 LIKE 通配符, 必须按字面量匹配
+        assert_eq!(ids(&pool, &q("v4")).await, ["c"]);
+        assert_eq!(ids(&pool, &q("e_s")).await, Vec::<String>::new(), "e_s 当通配符会命中 deepseek");
+        assert_eq!(ids(&pool, &q("_v4")).await, ["c"]);
+        assert_eq!(ids(&pool, &q("websearch")).await.len(), 4, "工具名也能搜 (LIKE 不分大小写)");
+    }
+
+    #[tokio::test]
+    async fn facets_ignore_their_own_dimension() {
+        let pool = rich_pool().await;
+        let f = RequestLogFilters { purpose: Some("main".into()), ..Default::default() };
+        let facets = request_facets(&pool, &f).await.unwrap();
+        assert_eq!(facets.purpose["all"], 4, "用途计数不受用途筛选影响");
+        assert_eq!((facets.purpose["main"], facets.purpose["agent"], facets.purpose["bg"], facets.purpose["fail"]), (1, 1, 1, 1));
+        // 会话列表受用途筛选影响 (只剩 main 那条所在的 s1), 按最近活跃排序
+        assert_eq!(facets.sessions.iter().map(|s| (s.id.as_str(), s.count)).collect::<Vec<_>>(), [("s1", 1)]);
+        let all = request_facets(&pool, &RequestLogFilters { session_id: Some("s2".into()), ..Default::default() }).await.unwrap();
+        assert_eq!(all.sessions.iter().map(|s| s.id.as_str()).collect::<Vec<_>>(), ["s2", "s1"], "会话列表不受会话筛选影响");
+    }
+
+    #[tokio::test]
+    async fn neighbors_follow_list_order_and_filters() {
+        let pool = rich_pool().await;
+        // 列表顺序 (timestamp DESC, id DESC): d, c, b, a —— c / d 同毫秒, 按 id 定序
+        let none = RequestLogFilters::default();
+        let n = request_neighbors(&pool, "c", &none).await.unwrap();
+        assert_eq!((n.newer.as_deref(), n.older.as_deref()), (Some("d"), Some("b")));
+        let n = request_neighbors(&pool, "d", &none).await.unwrap();
+        assert_eq!((n.newer.as_deref(), n.older.as_deref()), (None, Some("c")));
+        let s1 = RequestLogFilters { session_id: Some("s1".into()), ..Default::default() };
+        let n = request_neighbors(&pool, "b", &s1).await.unwrap();
+        assert_eq!((n.newer.as_deref(), n.older.as_deref()), (None, Some("a")));
+        assert_eq!(request_neighbors(&pool, "nope", &none).await.unwrap(), Default::default());
     }
 
     #[tokio::test]
@@ -585,9 +925,13 @@ mod tests {
     #[test]
     fn csv_header_has_expected_columns() {
         let cols: Vec<&str> = CSV_HEADER.split(',').collect();
-        assert_eq!(cols.len(), 35, "改了 CSV 列数? 同步 SELECT 与行写入");
+        assert_eq!(cols.len(), 40, "改了 CSV 列数? 同步 SELECT 与行写入");
         assert_eq!(
-            &cols[cols.len() - 11..],
+            &cols[cols.len() - 5..],
+            &["purpose_kind", "purpose_turn", "purpose_step", "session_id", "trace_id"]
+        );
+        assert_eq!(
+            &cols[cols.len() - 16..cols.len() - 5],
             &[
                 "client_effort",
                 "effective_effort",

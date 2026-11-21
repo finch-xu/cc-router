@@ -22,6 +22,7 @@ import {
   isOk,
   matchFilter,
   PURPOSE_META,
+  purposeOf,
   sessionColor,
   sumTokens,
   totalTokens,
@@ -183,7 +184,7 @@ function ToolChips({ names, t }: { names: readonly string[]; t: TFunction }) {
 
 /** 第二行: 「前因 → 后果」 */
 function Story({ r, t }: { r: LiveRequest; t: TFunction }) {
-  const p = r.purpose;
+  const p = purposeOf(r);
   const kind = p.kind;
   if (kind !== "main" && kind !== "agent" && kind !== "unknown") {
     return <>{t(`live.story.${kind}`)}</>;
@@ -217,7 +218,7 @@ function Story({ r, t }: { r: LiveRequest; t: TFunction }) {
 }
 
 function title(r: LiveRequest, session: SessionInfo | undefined, t: TFunction): string {
-  const p = r.purpose;
+  const p = purposeOf(r);
   if (p.kind === "agent") {
     const kinds = session?.runningAgents ?? [];
     const name = kinds.length === 1 ? kinds[0] : t("live.purpose.agent");
@@ -231,8 +232,8 @@ function title(r: LiveRequest, session: SessionInfo | undefined, t: TFunction): 
 
 function why(r: LiveRequest, t: TFunction): string {
   const codex = r.client_tool?.startsWith("codex");
-  if (r.purpose.kind === "main" && codex) return t("live.why.codex");
-  return t(`live.why.${r.purpose.kind}`);
+  if (purposeOf(r).kind === "main" && codex) return t("live.why.codex");
+  return t(`live.why.${purposeOf(r).kind}`);
 }
 
 function FeedRow(props: {
@@ -246,7 +247,7 @@ function FeedRow(props: {
   t: TFunction;
 }) {
   const { r, sub, session, next, fresh, open, onToggle, t } = props;
-  const meta = PURPOSE_META[r.purpose.kind];
+  const meta = PURPOSE_META[purposeOf(r).kind];
   const Icon = meta.icon;
   const ok = isOk(r);
   const cm = clientMeta(clientKey(r.client_tool));
@@ -261,7 +262,7 @@ function FeedRow(props: {
       <span className="tm">{fmtClock(r.timestamp)}</span>
       <span className={`lv-ptag ${meta.tone}`}>
         <Icon size={12} />
-        {t(`live.purpose.${r.purpose.kind}`)}
+        {t(`live.purpose.${purposeOf(r).kind}`)}
       </span>
       <div className="what">
         <div className="l1">
@@ -323,7 +324,7 @@ function FeedRow(props: {
           <div className="why">
             <b>{t("live.more.why")}</b>
             <span>{why(r, t)}</span>
-            {r.purpose.guessed && <span className="guess">{t("live.more.guessed")}</span>}
+            {purposeOf(r).guessed && <span className="guess">{t("live.more.guessed")}</span>}
           </div>
         </div>
       )}

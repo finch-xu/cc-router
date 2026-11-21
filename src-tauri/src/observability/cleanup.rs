@@ -271,6 +271,7 @@ mod tests {
             error_message: None,
             upstream_response_body: None,
             monitor_session: None,
+            trace_id: None,
             client_tool: None,
             client_user_agent: None,
             client_version: None,

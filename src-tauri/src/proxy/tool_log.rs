@@ -187,7 +187,7 @@ pub struct ToolLogFields {
     pub tool_result_count: Option<u32>,
     pub tool_use_count: Option<u32>,
     pub tool_use_names: Option<String>,
-    /// 随请求侧形状带过来的用途; 只进 `live_request` 事件, flush_batch 不写库。
+    /// 随请求侧形状带过来的用途; 写进 requests.purpose_* (migration 030)。
     pub purpose: crate::proxy::purpose::RequestPurpose,
 }
 

@@ -71,6 +71,7 @@ pub async fn messages(
     let info = client_fingerprint::identify(&headers);
     let client_tool = info.tool;
     let ctx = ClientContext {
+        trace_id: Some(uuid::Uuid::new_v4().to_string()),
         info,
         ip: Some(peer.ip().to_string()),
         entry_kind: RequestEntryKind::Messages,
@@ -199,6 +200,7 @@ pub async fn responses(
     let info = client_fingerprint::identify(&headers);
     let client_tool = info.tool;
     let ctx = ClientContext {
+        trace_id: Some(uuid::Uuid::new_v4().to_string()),
         info,
         ip: Some(peer.ip().to_string()),
         entry_kind: RequestEntryKind::Responses,
@@ -554,6 +556,7 @@ pub async fn chat_completions(
     let info = client_fingerprint::identify(&headers);
     let client_tool = info.tool;
     let ctx = ClientContext {
+        trace_id: Some(uuid::Uuid::new_v4().to_string()),
         info,
         ip: Some(peer.ip().to_string()),
         entry_kind: RequestEntryKind::ChatCompletions,
@@ -826,6 +829,7 @@ pub async fn systemone(
     // 「记录请求头」开关每请求读一次, 入站头在这里脱敏序列化 (proxy/header_log.rs)。
     let log_headers = state.settings.read().await.log_request_headers;
     let ctx = ClientContext {
+        trace_id: Some(uuid::Uuid::new_v4().to_string()),
         info: client_fingerprint::identify(&headers),
         ip: Some(peer.ip().to_string()),
         entry_kind: RequestEntryKind::SystemOne,

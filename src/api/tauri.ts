@@ -15,6 +15,10 @@ import type {
   ClaudeCodeWriteOutcome,
   ClientActivityDto,
   LiveRequest,
+  RequestDetailDto,
+  RequestFacetsDto,
+  RequestNeighborsDto,
+  RequestSummary,
   CreateChatGptOAuthSubscriptionInput,
   CreateKiroSubscriptionInput,
   CreateSubscriptionInput,
@@ -169,6 +173,13 @@ export const api = {
   /** Live Routing「客户端接入」: 按 client_tool 聚合的最近活动 (被动流量检测) */
   getClientActivity: () => invoke<ClientActivityDto[]>("get_client_activity"),
   getLiveRequests: (sinceMs?: number) => invoke<LiveRequest[]>("get_live_requests", { sinceMs }),
+  /** 详情页; 还没写进库时为 null (批量写入, 最多 5 秒) */
+  getRequestDetail: (id: string) => invoke<RequestDetailDto | null>("get_request_detail", { id }),
+  listSessionRequests: (sessionId: string, aroundMs: number, radius?: number) =>
+    invoke<RequestSummary[]>("list_session_requests", { sessionId, aroundMs, radius }),
+  getRequestFacets: (filters?: RequestLogFilters) => invoke<RequestFacetsDto>("get_request_facets", { filters }),
+  getRequestNeighbors: (id: string, filters?: RequestLogFilters) =>
+    invoke<RequestNeighborsDto>("get_request_neighbors", { id, filters }),
 
   // config backup / import
   exportConfig: (path: string, password?: string) =>
