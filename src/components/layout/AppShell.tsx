@@ -3,8 +3,6 @@ import { Sidebar } from "./Sidebar";
 import { WindowChrome } from "./WindowChrome";
 import { runtime } from "@/runtime";
 import { ReleaseNotesProvider } from "@/components/release-notes/ReleaseNotesController";
-import { useTheme } from "@/hooks/useTheme";
-import { isPlainBased } from "@/themes";
 import { OnboardingHost } from "@/components/onboarding/OnboardingHost";
 
 /**
@@ -15,9 +13,6 @@ import { OnboardingHost } from "@/components/onboarding/OnboardingHost";
  */
 const FLUSH_ROUTES = ["/subscriptions/:id"];
 
-/** 只在经典 / Win2000 画风下通栏的路由: 这两种画风用改版前的通栏实时路由页, 手绘版是卡片 */
-const PLAIN_FLUSH_ROUTES = ["/live-routing"];
-
 /**
  * 与某条 FLUSH_ROUTES 模式同形、但刻意保留默认 padding 的路由。优先级高于 FLUSH_ROUTES。
  * `/subscriptions/:id` 会把字面量 `new` 当成 id 匹配上, 而新建向导是线性表单, 不通栏。
@@ -26,11 +21,9 @@ const FLUSH_EXCEPTIONS = ["/subscriptions/new"];
 
 export function AppShell() {
   const { pathname } = useLocation();
-  const { art } = useTheme();
-  const routes = isPlainBased(art) ? [...FLUSH_ROUTES, ...PLAIN_FLUSH_ROUTES] : FLUSH_ROUTES;
   const flush =
     !FLUSH_EXCEPTIONS.includes(pathname) &&
-    routes.some((pattern) => matchPath(pattern, pathname) !== null);
+    FLUSH_ROUTES.some((pattern) => matchPath(pattern, pathname) !== null);
   return (
     <ReleaseNotesProvider>
       <div className="app">
