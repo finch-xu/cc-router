@@ -71,6 +71,114 @@ pub struct OverallStatsDto {
     pub total_tool_use_count: i64,
     /// 至少发起一次工具调用的请求数; 前端算占比时分母用 success_count
     pub tool_use_request_count: i64,
+    /// 等长的上一周期 (7 天 → 再往前 7 天; 今天 → 昨天 0 点到昨天此刻)。AllTime 没有。
+    pub previous: Option<PeriodTotalsDto>,
+}
+
+/// 「较上一周期」用的精简汇总。字段名与 [`OverallStatsDto`] 同名同义。
+#[derive(Debug, Serialize, PartialEq)]
+pub struct PeriodTotalsDto {
+    pub total_requests: i64,
+    pub success_count: i64,
+    pub avg_duration_ms: Option<f64>,
+    pub total_input_tokens: i64,
+    pub total_output_tokens: i64,
+    pub total_cache_creation_tokens: i64,
+    pub total_cache_read_tokens: i64,
+    pub tool_use_request_count: i64,
+}
+
+impl StatsRange {
+    /// 上一周期的本地日 key 区间 `[since, until)`; Today / AllTime 不走聚合表。
+    fn previous_days(self, now: i64) -> Option<(String, String)> {
+        let n = match self {
+            Self::Last7Days => 7,
+            Self::Last30Days => 30,
+            Self::Last90Days => 90,
+            Self::Today | Self::AllTime => return None,
+        };
+        Some((local_days_ago_key(now, 2 * n - 1), local_days_ago_key(now, n - 1)))
+    }
+}
+
+/// 聚合表上 `[since_day, until_day)` 的汇总。
+pub(crate) async fn daily_totals_between(
+    pool: &sqlx::SqlitePool,
+    since_day: &str,
+    until_day: &str,
+) -> Result<PeriodTotalsDto, sqlx::Error> {
+    let r = sqlx::query(
+        "SELECT COALESCE(SUM(request_count), 0) AS n,
+                COALESCE(SUM(success_count), 0) AS ok,
+                COALESCE(SUM(input_tokens), 0) AS i,
+                COALESCE(SUM(output_tokens), 0) AS o,
+                COALESCE(SUM(cache_creation_tokens), 0) AS cw,
+                COALESCE(SUM(cache_read_tokens), 0) AS cr,
+                COALESCE(SUM(total_duration_ms_sum), 0) AS ds,
+                COALESCE(SUM(total_duration_ms_count), 0) AS dc,
+                COALESCE(SUM(tool_use_request_count), 0) AS t
+         FROM request_stats_daily WHERE day >= ? AND day < ?",
+    )
+    .bind(since_day)
+    .bind(until_day)
+    .fetch_one(pool)
+    .await?;
+    totals_from_row(&r)
+}
+
+/// `requests` 原始表上 `[since_ms, until_ms)` 的汇总 (「今天」对比「昨天同一时段」用)。
+pub(crate) async fn raw_totals_between(
+    pool: &sqlx::SqlitePool,
+    since_ms: i64,
+    until_ms: i64,
+) -> Result<PeriodTotalsDto, sqlx::Error> {
+    let r = sqlx::query(
+        "SELECT COUNT(*) AS n,
+                COALESCE(SUM(status = 'success'), 0) AS ok,
+                COALESCE(SUM(upstream_input_tokens), 0) AS i,
+                COALESCE(SUM(upstream_output_tokens), 0) AS o,
+                COALESCE(SUM(upstream_cache_creation), 0) AS cw,
+                COALESCE(SUM(upstream_cache_read), 0) AS cr,
+                COALESCE(SUM(total_latency_ms), 0) AS ds,
+                COUNT(total_latency_ms) AS dc,
+                COALESCE(SUM(tool_use_count > 0), 0) AS t
+         FROM requests WHERE timestamp >= ? AND timestamp < ?",
+    )
+    .bind(since_ms)
+    .bind(until_ms)
+    .fetch_one(pool)
+    .await?;
+    totals_from_row(&r)
+}
+
+fn totals_from_row(r: &sqlx::sqlite::SqliteRow) -> Result<PeriodTotalsDto, sqlx::Error> {
+    Ok(PeriodTotalsDto {
+        total_requests: r.try_get("n")?,
+        success_count: r.try_get("ok")?,
+        avg_duration_ms: avg(r.try_get("ds")?, r.try_get("dc")?),
+        total_input_tokens: r.try_get("i")?,
+        total_output_tokens: r.try_get("o")?,
+        total_cache_creation_tokens: r.try_get("cw")?,
+        total_cache_read_tokens: r.try_get("cr")?,
+        tool_use_request_count: r.try_get("t")?,
+    })
+}
+
+async fn previous_totals(
+    pool: &sqlx::SqlitePool,
+    range: StatsRange,
+    now: i64,
+) -> Result<Option<PeriodTotalsDto>, sqlx::Error> {
+    if range == StatsRange::Today {
+        let start = local_days_ago_start_ms(now, 1);
+        let today_start = local_days_ago_start_ms(now, 0);
+        // 昨天 0 点 → 昨天的「此刻」(按经过的时长算, DST 当天差一小时可以接受)
+        return raw_totals_between(pool, start, start + (now - today_start)).await.map(Some);
+    }
+    match range.previous_days(now) {
+        Some((since, until)) => daily_totals_between(pool, &since, &until).await.map(Some),
+        None => Ok(None),
+    }
 }
 
 #[tauri::command]
@@ -151,6 +259,7 @@ pub async fn get_overall_stats(
         total_cache_read_tokens: row.try_get("total_cache_read_tokens")?,
         total_tool_use_count: row.try_get("total_tool_use_count")?,
         tool_use_request_count: row.try_get("tool_use_request_count")?,
+        previous: previous_totals(&state.db, range, now_ms()).await?,
     })
 }
 
@@ -480,6 +589,173 @@ pub async fn get_tool_breakdown(
         .map_err(Into::into)
 }
 
+#[derive(Debug, Serialize, Default, Clone, Copy, PartialEq)]
+pub struct ActivityBucketDto {
+    pub requests: i64,
+    pub failures: i64,
+}
+
+/// 订阅列表的「近 24 小时」: 每个订阅 24 个整点桶 (最旧在前, 最后一格是当前这个小时)。
+#[derive(Debug, Serialize, PartialEq)]
+pub struct SubscriptionActivityDto {
+    pub subscription_id: String,
+    pub buckets: Vec<ActivityBucketDto>,
+    pub requests: i64,
+    pub failures: i64,
+}
+
+pub(crate) const ACTIVITY_HOURS: i64 = 24;
+const HOUR_MS: i64 = 3_600_000;
+
+pub(crate) async fn query_subscription_activity(
+    pool: &sqlx::SqlitePool,
+    now: i64,
+) -> Result<Vec<SubscriptionActivityDto>, sqlx::Error> {
+    // 按 UTC 整点切桶: 只有半小时时区会与本地整点错开, 对「近 24 小时」的形状无影响
+    let start = (now.div_euclid(HOUR_MS) - (ACTIVITY_HOURS - 1)) * HOUR_MS;
+    let rows = sqlx::query(
+        "SELECT subscription_id, (timestamp - ?) / 3600000 AS b,
+                COUNT(*) AS n, COALESCE(SUM(status != 'success'), 0) AS f
+         FROM requests WHERE timestamp >= ?
+         GROUP BY subscription_id, b",
+    )
+    .bind(start)
+    .bind(start)
+    .fetch_all(pool)
+    .await?;
+    let mut out: Vec<SubscriptionActivityDto> = Vec::new();
+    for r in rows {
+        let id: String = r.try_get("subscription_id")?;
+        let b: i64 = r.try_get("b")?;
+        // 时钟回拨写进来的「未来」行落不进任何桶
+        if !(0..ACTIVITY_HOURS).contains(&b) {
+            continue;
+        }
+        let (n, f): (i64, i64) = (r.try_get("n")?, r.try_get("f")?);
+        let pos = match out.iter().position(|a| a.subscription_id == id) {
+            Some(p) => p,
+            None => {
+                out.push(SubscriptionActivityDto {
+                    subscription_id: id,
+                    buckets: vec![ActivityBucketDto::default(); ACTIVITY_HOURS as usize],
+                    requests: 0,
+                    failures: 0,
+                });
+                out.len() - 1
+            }
+        };
+        let a = &mut out[pos];
+        a.buckets[b as usize] = ActivityBucketDto { requests: n, failures: f };
+        a.requests += n;
+        a.failures += f;
+    }
+    Ok(out)
+}
+
+#[tauri::command]
+pub async fn get_subscription_activity(
+    state: State<'_, AppState>,
+) -> AppResult<Vec<SubscriptionActivityDto>> {
+    query_subscription_activity(&state.db, now_ms()).await.map_err(Into::into)
+}
+
+#[derive(Debug, Serialize, PartialEq)]
+pub struct PurposeCountDto {
+    /// `requests.purpose_kind`; None = 迁移 030 之前写入的行 (没有用途)
+    pub kind: Option<String>,
+    pub count: i64,
+    /// 其中由指纹推断 (`purpose_guessed = 1`) 的条数
+    pub guessed: i64,
+}
+
+#[derive(Debug, Serialize, PartialEq)]
+pub struct ClientMixDto {
+    /// `requests.client_tool`; None = 未识别
+    pub client_tool: Option<String>,
+    pub requests: i64,
+    /// input + output (不含缓存两项, 同热力图口径)
+    pub tokens: i64,
+}
+
+/// 统计页里只能从 `requests` 原始表算的几组分布 (受日志保留期限制)。
+#[derive(Debug, Serialize, PartialEq)]
+pub struct RequestMixDto {
+    /// 原始表里落在范围内的请求数; 前端与聚合表的 total_requests 比, 得出覆盖率
+    pub covered_requests: i64,
+    pub purposes: Vec<PurposeCountDto>,
+    pub clients: Vec<ClientMixDto>,
+    /// 成功请求总耗时分桶, 上界 (ms, 不含) 见 [`LATENCY_EDGES_MS`], 最后一格是「更久」
+    pub latency_buckets: Vec<i64>,
+}
+
+pub const LATENCY_EDGES_MS: [i64; 5] = [2_000, 5_000, 10_000, 30_000, 60_000];
+
+pub(crate) async fn query_request_mix(
+    pool: &sqlx::SqlitePool,
+    since_ms: i64,
+) -> Result<RequestMixDto, sqlx::Error> {
+    let covered_requests: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM requests WHERE timestamp >= ?")
+        .bind(since_ms)
+        .fetch_one(pool)
+        .await?;
+
+    let purposes = sqlx::query(
+        "SELECT purpose_kind AS k, COUNT(*) AS n, COALESCE(SUM(purpose_guessed = 1), 0) AS g
+         FROM requests WHERE timestamp >= ?
+         GROUP BY purpose_kind ORDER BY n DESC",
+    )
+    .bind(since_ms)
+    .fetch_all(pool)
+    .await?
+    .iter()
+    .map(|r| Ok(PurposeCountDto { kind: r.try_get("k")?, count: r.try_get("n")?, guessed: r.try_get("g")? }))
+    .collect::<Result<Vec<_>, sqlx::Error>>()?;
+
+    let clients = sqlx::query(
+        "SELECT client_tool AS c, COUNT(*) AS n,
+                COALESCE(SUM(upstream_input_tokens), 0) + COALESCE(SUM(upstream_output_tokens), 0) AS t
+         FROM requests WHERE timestamp >= ?
+         GROUP BY client_tool ORDER BY t DESC, n DESC",
+    )
+    .bind(since_ms)
+    .fetch_all(pool)
+    .await?
+    .iter()
+    .map(|r| Ok(ClientMixDto { client_tool: r.try_get("c")?, requests: r.try_get("n")?, tokens: r.try_get("t")? }))
+    .collect::<Result<Vec<_>, sqlx::Error>>()?;
+
+    let [e0, e1, e2, e3, e4] = LATENCY_EDGES_MS;
+    let r = sqlx::query(
+        "SELECT COALESCE(SUM(total_latency_ms < ?), 0) AS b0,
+                COALESCE(SUM(total_latency_ms >= ? AND total_latency_ms < ?), 0) AS b1,
+                COALESCE(SUM(total_latency_ms >= ? AND total_latency_ms < ?), 0) AS b2,
+                COALESCE(SUM(total_latency_ms >= ? AND total_latency_ms < ?), 0) AS b3,
+                COALESCE(SUM(total_latency_ms >= ? AND total_latency_ms < ?), 0) AS b4,
+                COALESCE(SUM(total_latency_ms >= ?), 0) AS b5
+         FROM requests
+         WHERE timestamp >= ? AND status = 'success' AND total_latency_ms IS NOT NULL",
+    )
+    .bind(e0)
+    .bind(e0).bind(e1)
+    .bind(e1).bind(e2)
+    .bind(e2).bind(e3)
+    .bind(e3).bind(e4)
+    .bind(e4)
+    .bind(since_ms)
+    .fetch_one(pool)
+    .await?;
+    let latency_buckets = (0..6)
+        .map(|i| r.try_get::<i64, _>(format!("b{i}").as_str()))
+        .collect::<Result<Vec<_>, _>>()?;
+
+    Ok(RequestMixDto { covered_requests, purposes, clients, latency_buckets })
+}
+
+#[tauri::command]
+pub async fn get_request_mix(state: State<'_, AppState>, range: StatsRange) -> AppResult<RequestMixDto> {
+    query_request_mix(&state.db, range.since_ms()).await.map_err(Into::into)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -520,5 +796,72 @@ mod tests {
         let all = query_tool_breakdown(&pool, "", 2).await.unwrap();
         assert_eq!(all.len(), 2, "limit 生效");
         assert_eq!(all[0].call_count, 100);
+    }
+    #[allow(clippy::too_many_arguments)]
+    async fn insert_req(pool: &SqlitePool, id: &str, ts: i64, sub: &str, status: &str, latency: Option<i64>,
+        tokens: (i64, i64), purpose: Option<(&str, bool)>, client: Option<&str>) {
+        sqlx::query(
+            "INSERT INTO requests (id, timestamp, virtual_model_name, subscription_id, provider_id, endpoint_id,
+                real_model_name, is_streaming, status, total_latency_ms, upstream_input_tokens, upstream_output_tokens,
+                purpose_kind, purpose_guessed, client_tool, tool_use_count)
+             VALUES (?, ?, 'model-opus', ?, 'p', 'e', 'm', 1, ?, ?, ?, ?, ?, ?, ?, 1)",
+        )
+        .bind(id).bind(ts).bind(sub).bind(status).bind(latency).bind(tokens.0).bind(tokens.1)
+        .bind(purpose.map(|p| p.0)).bind(purpose.map(|p| p.1 as i64)).bind(client)
+        .execute(pool).await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn subscription_activity_buckets_last_24_hours() {
+        let pool = fresh_pool().await;
+        let now = 1_800_000_000_000_i64 + 1_234_567; // 不在整点
+        let hour = 3_600_000;
+        insert_req(&pool, "a", now - 10, "s1", "success", None, (0, 0), None, None).await;
+        insert_req(&pool, "b", now - 20, "s1", "error", None, (0, 0), None, None).await;
+        insert_req(&pool, "c", now - 5 * hour, "s1", "success", None, (0, 0), None, None).await;
+        insert_req(&pool, "d", now - 2 * hour, "s2", "timeout", None, (0, 0), None, None).await;
+        insert_req(&pool, "old", now - 30 * hour, "s1", "success", None, (0, 0), None, None).await;
+        let mut rows = query_subscription_activity(&pool, now).await.unwrap();
+        rows.sort_by(|a, b| a.subscription_id.cmp(&b.subscription_id));
+        assert_eq!(rows.len(), 2);
+        let s1 = &rows[0];
+        assert_eq!(s1.buckets.len(), 24);
+        assert_eq!(s1.buckets[23], ActivityBucketDto { requests: 2, failures: 1 }, "当前小时在最后一格");
+        assert_eq!(s1.buckets[18].requests, 1);
+        assert_eq!((s1.requests, s1.failures), (3, 1), "30 小时前的不计");
+        assert_eq!(rows[1].buckets[21], ActivityBucketDto { requests: 1, failures: 1 }, "timeout 也算失败");
+    }
+
+    #[tokio::test]
+    async fn request_mix_groups_purpose_client_and_latency() {
+        let pool = fresh_pool().await;
+        let now = now_ms();
+        insert_req(&pool, "1", now, "s", "success", Some(1_500), (10, 5), Some(("main", false)), Some("claude_code")).await;
+        insert_req(&pool, "2", now, "s", "success", Some(7_000), (1, 1), Some(("agent", true)), Some("claude_code")).await;
+        insert_req(&pool, "3", now, "s", "success", Some(90_000), (100, 0), Some(("agent", true)), Some("codex")).await;
+        insert_req(&pool, "4", now, "s", "error", Some(500), (0, 0), None, None).await;
+        insert_req(&pool, "old", 1_000, "s", "success", Some(1), (0, 0), Some(("main", false)), None).await;
+        let mix = query_request_mix(&pool, now - 60_000).await.unwrap();
+        assert_eq!(mix.covered_requests, 4);
+        assert_eq!(mix.purposes[0], PurposeCountDto { kind: Some("agent".into()), count: 2, guessed: 2 });
+        assert!(mix.purposes.iter().any(|p| p.kind.is_none() && p.count == 1), "迁移前的行 = 无用途");
+        assert_eq!(mix.clients[0], ClientMixDto { client_tool: Some("codex".into()), requests: 1, tokens: 100 });
+        assert_eq!(mix.latency_buckets, vec![1, 0, 1, 0, 0, 1], "失败请求不进耗时分布");
+    }
+
+    #[tokio::test]
+    async fn previous_period_uses_equal_length_window() {
+        let pool = fresh_pool().await;
+        let now = now_ms();
+        for (back, n) in [(0u32, 5i64), (6, 1), (7, 2), (13, 3), (14, 100)] {
+            sqlx::query("INSERT INTO request_stats_daily (day, virtual_model_name, subscription_id, provider_id, request_count, success_count) VALUES (?, 'v', 's', 'p', ?, ?)")
+                .bind(local_days_ago_key(now, back)).bind(n).bind(n).execute(&pool).await.unwrap();
+        }
+        let prev = previous_totals(&pool, StatsRange::Last7Days, now).await.unwrap().unwrap();
+        assert_eq!(prev.total_requests, 5, "前 7 天 = 往前第 7..=13 天");
+        assert!(previous_totals(&pool, StatsRange::AllTime, now).await.unwrap().is_none());
+        insert_req(&pool, "y", local_days_ago_start_ms(now, 1) + 1, "s", "success", Some(100), (0, 0), None, None).await;
+        let y = previous_totals(&pool, StatsRange::Today, now).await.unwrap().unwrap();
+        assert_eq!((y.total_requests, y.tool_use_request_count), (1, 1));
     }
 }

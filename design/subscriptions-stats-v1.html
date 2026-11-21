@@ -1,0 +1,1093 @@
+<!doctype html>
+<html lang="zh-CN" data-mode="light" data-accent="coral">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>订阅管理与数据统计 v1 设计稿</title>
+<style>
+/* ============================================================
+ * 订阅管理 + 数据统计 v1 —— 沿用实时路由 v1 / 请求日志 v1 的语言
+ *   订阅管理: 表格 → 「订阅行」。一行回答三个问题: 现在能不能用 / 被谁用 / 用了多少。
+ *     · 顶部一条状态总览 (可调度 x / y + 今日量 + 最紧的限额)
+ *     · 需要人处理的订阅单独置顶, 每条带原因与一键修复入口
+ *     · 行内可展开: 槽位 (此刻生效的模型 / effort / 分时段) · 四周期限额 · 连接信息
+ *   数据统计: 一个页级时间范围, 一张主卡 (KPI + 可切换的趋势图) 讲完「多少 / 好不好 / 快不快」,
+ *     下面按「钱花在哪 → 谁在用 → 用来干什么」排; 全年热力图挪到最后, 明确写「不受时间范围影响」。
+ *     每个分布条都能点进请求日志 (带同口径筛选), 与实时路由 → 请求日志的跳转一致。
+ * 设计令牌与 design/quiet-theme-v6.html、design/live-routing-v1.html 一致。
+ * ============================================================ */
+:root {
+  --sidebar:#f3f2f0; --bg:#fbfbfa; --card:#ffffff; --well:#f3f2ef; --well-2:#e9e7e3;
+  --hair: rgb(41 37 36 / 8%);
+  --ink:#1c1917; --ink-2:#44403c; --ink-3:#78716c; --ink-4:#a8a29e;
+  --accent:#d4553a; --accent-2:#b9442b; --accent-soft:#fcede7; --accent-ring: rgb(212 85 58 / 20%);
+  --ok:#16a34a; --ok-soft:#e7f6ec; --warn:#c97a00; --warn-soft:#fdf2d9; --err:#d93a2f; --err-soft:#fdeceb; --idle:#a8a29e;
+  --sh-pill: 0 0 0 1px rgb(41 37 36 / 6%), 0 1px 2px rgb(41 37 36 / 6%);
+  --sh-card: 0 0 0 1px rgb(41 37 36 / 5%), 0 1px 2px rgb(41 37 36 / 4%), 0 6px 18px -8px rgb(41 37 36 / 12%);
+  --sh-hero: 0 0 0 1px rgb(41 37 36 / 5%), 0 2px 4px rgb(41 37 36 / 4%), 0 18px 44px -16px rgb(41 37 36 / 20%);
+  --r-lg:16px;
+  --font: Inter, -apple-system, BlinkMacSystemFont, "Segoe UI Variable Text", "Segoe UI", Roboto, "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", "Noto Sans SC", system-ui, sans-serif;
+  --mono: "JetBrains Mono", ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+  --ease: cubic-bezier(.2,.7,.2,1);
+  /* token 四段: 同一色相由浅到深 = 越「贵」越深; 输出用墨色区分方向 */
+  --tk-cr: color-mix(in srgb, var(--accent) 16%, var(--card));
+  --tk-cw: color-mix(in srgb, var(--accent) 42%, var(--card));
+  --tk-in: var(--accent);
+  --tk-out: var(--ink-2);
+}
+:root[data-accent="blue"] { --accent:#2459e0; --accent-2:#1b47b8; --accent-soft:#ebf0fd; --accent-ring: rgb(36 89 224 / 20%); }
+:root[data-mode="dark"] {
+  --sidebar:#131211; --bg:#1a1918; --card:#242220; --well:#1e1d1b; --well-2:#2e2b29;
+  --hair: rgb(255 255 255 / 7%);
+  --ink:#f5f4f2; --ink-2:#d6d3d1; --ink-3:#a29c97; --ink-4:#6d6864;
+  --accent:#ea7353; --accent-2:#f29a80; --accent-soft: rgb(234 115 83 / 14%); --accent-ring: rgb(234 115 83 / 28%);
+  --ok:#34c46e; --ok-soft: rgb(52 196 110 / 13%); --warn:#e8a530; --warn-soft: rgb(232 165 48 / 14%); --err:#f0645a; --err-soft: rgb(240 100 90 / 14%);
+  --sh-pill: 0 0 0 1px rgb(255 255 255 / 7%), 0 1px 2px rgb(0 0 0 / 40%);
+  --sh-card: 0 0 0 1px rgb(255 255 255 / 6%), 0 8px 22px -10px rgb(0 0 0 / 60%);
+  --sh-hero: 0 0 0 1px rgb(255 255 255 / 7%), 0 22px 50px -18px rgb(0 0 0 / 75%);
+}
+:root[data-mode="dark"][data-accent="blue"] { --accent:#5b8cff; --accent-2:#8fb0ff; --accent-soft: rgb(91 140 255 / 14%); --accent-ring: rgb(91 140 255 / 28%); }
+
+* { box-sizing: border-box; }
+html { background: #e7e5e2; }
+:root[data-mode="dark"] { background: #0c0b0b; }
+body { margin: 0; font: 13.5px/1.55 var(--font); color: var(--ink); -webkit-font-smoothing: antialiased; background: inherit; }
+button { font: inherit; color: inherit; cursor: pointer; border: 0; background: none; }
+.mono { font-family: var(--mono); font-size: .93em; letter-spacing: -.01em; }
+.num { font-variant-numeric: tabular-nums; }
+svg.i { width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-width: 1.7; stroke-linecap: round; stroke-linejoin: round; flex: none; }
+
+/* ---------- 文档外壳 / 窗口 / 侧栏 (同 v6) ---------- */
+.doc { max-width: 1500px; margin: 0 auto; padding: 28px 24px 60px; }
+.doc-head { display: flex; gap: 24px; align-items: flex-end; justify-content: space-between; flex-wrap: wrap; margin-bottom: 20px; }
+.doc-head h1 { font-size: 20px; margin: 0 0 4px; letter-spacing: -.01em; }
+.doc-head p { margin: 0; color: var(--ink-3); max-width: 820px; }
+.doc-ctrl { display: flex; gap: 8px; flex-wrap: wrap; }
+.window.tall { height: auto; }
+.window { display: grid; grid-template-columns: 236px 1fr; height: 1020px; border-radius: 14px; overflow: hidden; background: var(--bg);
+  box-shadow: 0 0 0 1px rgb(0 0 0 / 10%), 0 30px 80px -30px rgb(0 0 0 / 35%); }
+.sidebar { background: var(--sidebar); display: flex; flex-direction: column; padding: 40px 12px 12px; gap: 2px; min-height: 0; overflow: auto; }
+.lights { position: absolute; margin: -28px 0 0 6px; display: flex; gap: 8px; }
+.lights i { width: 12px; height: 12px; border-radius: 50%; background: #ff5f57; } .lights i:nth-child(2){background:#febc2e} .lights i:nth-child(3){background:#28c840}
+.brand { display: flex; align-items: center; gap: 10px; padding: 6px 8px 16px; }
+.brand img { width: 30px; height: 30px; border-radius: 8px; }
+.brand b { display: block; font-size: 14px; letter-spacing: -.01em; }
+.brand small { display: block; color: var(--ink-3); font-size: 11.5px; margin-top: -1px; }
+.nav-label { font-size: 11px; color: var(--ink-4); padding: 14px 10px 4px; letter-spacing: .02em; }
+.nav-item { display: flex; align-items: center; gap: 10px; width: 100%; padding: 7px 10px; border-radius: 9px; color: var(--ink-2); text-align: left; }
+.nav-item svg { color: var(--ink-3); }
+.nav-item.active { background: var(--card); color: var(--ink); font-weight: 550; box-shadow: var(--sh-pill); }
+.nav-item.active svg { color: var(--accent); }
+.nav-item .end { margin-left: auto; font-size: 11.5px; color: var(--ink-4); font-variant-numeric: tabular-nums; }
+.nav-item .live-n { margin-left: auto; min-width: 18px; height: 18px; padding: 0 5px; border-radius: 9px; background: var(--accent-soft); color: var(--accent); font-size: 11px; font-weight: 650; display: grid; place-items: center; font-variant-numeric: tabular-nums; }
+.side-foot { margin-top: auto; display: flex; flex-direction: column; gap: 8px; padding-top: 12px; }
+.proxy-card { background: var(--card); border-radius: 12px; padding: 10px 12px; box-shadow: var(--sh-pill); }
+.proxy-card .t { display: flex; align-items: center; gap: 8px; font-weight: 550; font-size: 12.5px; }
+.proxy-card .a { margin-top: 4px; color: var(--ink-3); font-size: 11.5px; }
+.side-tools { display: flex; align-items: center; gap: 2px; padding: 0 2px; }
+.side-tools .ver { margin-left: auto; font-size: 11.5px; color: var(--ink-4); }
+.icon-btn { width: 30px; height: 30px; border-radius: 8px; display: grid; place-items: center; color: var(--ink-3); }
+.icon-btn:hover { background: rgb(41 37 36 / 6%); color: var(--ink); }
+
+/* ---------- 通用件 ---------- */
+.dot { width: 7px; height: 7px; border-radius: 50%; background: var(--idle); display: inline-block; flex: none; }
+.dot.ok { background: var(--ok); } .dot.warn { background: var(--warn); } .dot.err { background: var(--err); } .dot.acc { background: var(--accent); }
+.dot.pulse { box-shadow: 0 0 0 0 color-mix(in srgb, var(--ok) 50%, transparent); animation: pulse 2s infinite; }
+@keyframes pulse { 70% { box-shadow: 0 0 0 6px transparent; } 100% { box-shadow: 0 0 0 0 transparent; } }
+.pill { display: inline-flex; align-items: center; gap: 6px; height: 22px; padding: 0 9px; border-radius: 11px; font-size: 12px; font-weight: 500; white-space: nowrap; }
+.pill.ok { color: var(--ink-3); padding-left: 0; }
+.pill.warn { background: var(--warn-soft); color: var(--warn); }
+.pill.err { background: var(--err-soft); color: var(--err); }
+.pill.mute { background: var(--well); color: var(--ink-3); }
+.pill .dot { width: 6px; height: 6px; }
+.pill.warn .dot { background: var(--warn); } .pill.err .dot { background: var(--err); }
+.btn { display: inline-flex; align-items: center; gap: 6px; height: 30px; padding: 0 12px; border-radius: 9px; font-weight: 500; white-space: nowrap; }
+.btn svg.i { width: 15px; height: 15px; }
+.btn.soft { background: var(--card); box-shadow: var(--sh-pill); }
+.btn.soft:hover { background: var(--well); }
+.btn.soft.on { background: var(--accent-soft); color: var(--accent); box-shadow: none; }
+.btn.sm { height: 24px; padding: 0 8px; font-size: 12px; border-radius: 7px; }
+.seg { display: inline-flex; padding: 3px; gap: 2px; background: var(--well); border-radius: 10px; }
+.seg button { height: 26px; padding: 0 11px; border-radius: 7px; color: var(--ink-3); font-size: 12.5px; font-weight: 500; white-space: nowrap; }
+.seg button:hover { color: var(--ink); }
+.seg button.on { background: var(--card); color: var(--ink); box-shadow: var(--sh-pill); }
+.plogo { width: 26px; height: 26px; border-radius: 8px; display: grid; place-items: center; font-weight: 700; font-size: 12px; color: #fff; flex: none; }
+.plogo.sm { width: 18px; height: 18px; border-radius: 5px; font-size: 9.5px; }
+.card { background: var(--card); border-radius: var(--r-lg); box-shadow: var(--sh-card); }
+.hero { background: var(--card); border-radius: 20px; box-shadow: var(--sh-hero); }
+
+
+/* ---------- 页面骨架 (同实时路由 v1) ---------- */
+.main { min-width: 0; min-height: 0; overflow: auto; }
+.page { max-width: 1180px; margin: 0 auto; padding: 32px 36px 56px; }
+.ph { display: flex; align-items: center; gap: 14px; margin-bottom: 18px; flex-wrap: wrap; }
+.ph h1 { font-size: 22px; font-weight: 650; letter-spacing: -.015em; margin: 0; }
+.ph .sub { color: var(--ink-3); font-size: 13px; margin-top: 2px; }
+.ph .actions { margin-left: auto; display: flex; gap: 8px; align-items: center; }
+.btn.primary { background: var(--accent); color: #fff; }
+.btn.primary:hover { background: var(--accent-2); }
+:root[data-mode="dark"] .btn.primary { color: #1a0c08; }
+.btn.ghost { color: var(--ink-3); } .btn.ghost:hover { background: var(--well); color: var(--ink); }
+.view { display: none; } .view.on { display: block; }
+.sec-card { padding: 18px 20px 16px; min-width: 0; }
+.sec-head { display: flex; align-items: center; gap: 10px; margin-bottom: 14px; flex-wrap: wrap; }
+.sec-head h2 { font-size: 14.5px; font-weight: 620; margin: 0; }
+.sec-head .note { color: var(--ink-4); font-size: 12px; }
+.sec-head .end { margin-left: auto; display: flex; gap: 8px; align-items: center; }
+.link { color: var(--ink-3); font-size: 12px; display: inline-flex; align-items: center; gap: 4px; }
+.link:hover { color: var(--accent); }
+.link svg.i { width: 13px; height: 13px; }
+.chip { height: 28px; padding: 0 11px; border-radius: 14px; display: inline-flex; align-items: center; gap: 6px; color: var(--ink-3); font-weight: 500; font-size: 12.5px; white-space: nowrap; }
+.chip b { font-weight: 600; color: var(--ink-4); font-variant-numeric: tabular-nums; }
+.chip:hover { background: var(--well); }
+.chip.on { background: var(--card); color: var(--ink); box-shadow: var(--sh-pill); }
+.chip.on b { color: var(--ink-3); }
+.chip.err, .chip.err b { color: var(--err); }
+.chip.warn, .chip.warn b { color: var(--warn); }
+.bar-gap { width: 1px; height: 18px; background: var(--well-2); margin: 0 4px; }
+.search { display: flex; align-items: center; gap: 7px; height: 30px; padding: 0 10px; border-radius: 9px; background: var(--card); box-shadow: var(--sh-pill); color: var(--ink-4); min-width: 200px; }
+.search input { border: 0; outline: 0; background: none; font: inherit; color: var(--ink); width: 100%; }
+.search svg.i { width: 14px; height: 14px; }
+.tag { display: inline-flex; align-items: center; height: 18px; padding: 0 6px; border-radius: 5px; font-size: 10.5px; font-weight: 560; background: var(--well); color: var(--ink-3); white-space: nowrap; }
+.tag.acc { background: var(--accent-soft); color: var(--accent); }
+.tag.line { background: transparent; box-shadow: inset 0 0 0 1px var(--well-2); }
+.tag.warn { background: var(--warn-soft); color: var(--warn); }
+.tip { position: fixed; z-index: 50; pointer-events: none; min-width: 180px; padding: 10px 12px; border-radius: 12px; background: var(--card); box-shadow: var(--sh-hero); font-size: 12px; opacity: 0; transform: translateY(4px); transition: opacity .12s, transform .12s var(--ease); }
+.tip.on { opacity: 1; transform: none; }
+.tip b { display: block; font-size: 12.5px; margin-bottom: 6px; }
+.tip .r { display: flex; justify-content: space-between; gap: 18px; color: var(--ink-3); align-items: center; }
+.tip .r i { width: 8px; height: 8px; border-radius: 2px; display: inline-block; margin-right: 6px; }
+.tip .r span:last-child { color: var(--ink); font-variant-numeric: tabular-nums; font-weight: 550; }
+
+/* ============================================================
+ * 订阅管理
+ * ============================================================ */
+.sum { display: grid; grid-template-columns: 1.35fr 1fr 1fr 1.15fr; padding: 6px 8px; }
+.sum .kpi { padding: 16px 18px 14px; min-width: 0; }
+.sum .kpi + .kpi { box-shadow: inset 1px 0 0 var(--hair); }
+.kpi .l { font-size: 12px; color: var(--ink-3); display: flex; align-items: center; gap: 6px; white-space: nowrap; }
+.kpi .v { font-size: 26px; font-weight: 650; letter-spacing: -.02em; line-height: 1.2; margin-top: 3px; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.kpi .v small { font-size: 13px; color: var(--ink-4); font-weight: 500; margin-left: 3px; letter-spacing: 0; }
+.kpi .s { font-size: 11.5px; color: var(--ink-4); margin-top: 1px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.kpi svg.spark { display: block; width: 100%; height: 26px; margin-top: 6px; overflow: visible; }
+svg.spark path.a { fill: color-mix(in srgb, var(--accent) 12%, transparent); stroke: none; }
+svg.spark path.l { fill: none; stroke: var(--accent); stroke-width: 1.5; stroke-linejoin: round; }
+/* 可调度: 一格一个订阅, 颜色 = 状态 */
+.cells { display: flex; gap: 3px; margin-top: 10px; }
+.cells i { flex: 1; height: 8px; border-radius: 3px; background: var(--ok); max-width: 34px; }
+.cells i.cool { background: var(--warn); } .cells i.err { background: var(--err); } .cells i.off { background: var(--well-2); }
+.cells-key { display: flex; gap: 12px; margin-top: 7px; font-size: 11px; color: var(--ink-4); }
+.cells-key span { display: inline-flex; align-items: center; gap: 5px; }
+.cells-key i { width: 7px; height: 7px; border-radius: 2px; }
+.tight .who { display: flex; align-items: center; gap: 8px; margin-top: 6px; font-size: 12.5px; font-weight: 560; }
+.qbar { flex: 1; height: 5px; border-radius: 3px; background: var(--well-2); overflow: hidden; }
+.qbar i { display: block; height: 100%; border-radius: 3px; background: var(--ok); }
+.qbar i.hi { background: var(--warn); } .qbar i.full { background: var(--err); }
+
+/* 需要处理 */
+.attn { margin-top: 16px; padding: 6px; }
+.attn-head { display: flex; align-items: center; gap: 8px; padding: 10px 12px 6px; font-size: 12.5px; font-weight: 600; }
+.attn-head .n { color: var(--err); font-variant-numeric: tabular-nums; }
+.attn-head .note { margin-left: auto; font-weight: 400; color: var(--ink-4); font-size: 12px; }
+.fix { display: grid; grid-template-columns: 26px minmax(0, 1fr) auto; gap: 12px; align-items: center; padding: 9px 12px; border-radius: 11px; }
+.fix + .fix { box-shadow: inset 0 1px 0 var(--hair); }
+.fix:hover { background: var(--well); box-shadow: none; }
+.fix:hover + .fix { box-shadow: none; }
+.fix .t { min-width: 0; }
+.fix .t b { font-weight: 560; font-size: 13px; }
+.fix .t .why { font-size: 12px; color: var(--ink-3); margin-top: 1px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.fix .t .why em { font-style: normal; font-weight: 560; }
+.fix.err .why em { color: var(--err); } .fix.warn .why em { color: var(--warn); }
+.fix .acts { display: flex; gap: 6px; }
+
+/* 工具条 */
+.toolbar { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; margin: 22px 0 10px; }
+.toolbar .end { margin-left: auto; display: flex; gap: 8px; align-items: center; }
+
+/* 订阅行 */
+.list { padding: 6px; }
+.list-head, .srow { display: grid; grid-template-columns: 118px minmax(0, 1.5fr) minmax(0, 1fr) 176px 150px 76px; gap: 14px; align-items: center; }
+.list-head { padding: 8px 12px 6px; font-size: 11px; color: var(--ink-4); letter-spacing: .02em; }
+.srow { padding: 10px 12px; border-radius: 11px; cursor: pointer; position: relative; }
+.srow-wrap + .srow-wrap .srow { box-shadow: inset 0 1px 0 var(--hair); }
+.srow:hover, .srow-wrap.open .srow { background: var(--well); box-shadow: none !important; }
+.srow-wrap:hover + .srow-wrap .srow, .srow-wrap.open + .srow-wrap .srow { box-shadow: none; }
+.srow-wrap.off .srow > :not(.st):not(.acts) { opacity: .5; }
+.st { display: flex; align-items: center; gap: 7px; font-size: 12px; font-weight: 550; white-space: nowrap; color: var(--ink-3); }
+.st.ok { color: var(--ink-2); }
+.st.cool { color: var(--warn); } .st.err { color: var(--err); } .st.full { color: var(--warn); } .st.off { color: var(--ink-4); }
+.st small { font-weight: 450; font-variant-numeric: tabular-nums; }
+.cool-ring { width: 16px; height: 16px; flex: none; }
+.cool-ring circle { fill: none; stroke-width: 2.5; }
+.cool-ring .bg { stroke: color-mix(in srgb, var(--warn) 25%, transparent); }
+.cool-ring .fg { stroke: var(--warn); stroke-linecap: round; transform: rotate(-90deg); transform-origin: center; transition: stroke-dasharray 1s linear; }
+.who { display: flex; align-items: center; gap: 10px; min-width: 0; }
+.who .t { min-width: 0; line-height: 1.3; }
+.who .l1 { display: flex; align-items: center; gap: 6px; min-width: 0; }
+.who .l1 b { font-weight: 580; font-size: 13px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.who .l2 { font-size: 11.5px; color: var(--ink-3); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; margin-top: 1px; }
+.who .l2 .mono { color: var(--ink-4); font-size: 10.5px; }
+.uses { display: flex; flex-wrap: wrap; gap: 4px; min-width: 0; }
+.vmc { display: inline-flex; align-items: center; gap: 4px; height: 20px; padding: 0 6px; border-radius: 6px; font-family: var(--mono); font-size: 11px; font-weight: 600; background: var(--well); color: var(--ink-2); letter-spacing: -.02em; white-space: nowrap; }
+.srow:hover .vmc, .srow-wrap.open .vmc { background: var(--card); }
+.vmc em { font-style: normal; font-weight: 500; color: var(--ink-4); font-size: 10px; }
+.vmc.first em { color: var(--accent); }
+.uses .none { font-size: 11.5px; color: var(--ink-4); }
+.today { min-width: 0; }
+.bars { display: flex; align-items: flex-end; gap: 1.5px; height: 22px; }
+.bars i { flex: 1; border-radius: 1.5px 1.5px 1px 1px; background: color-mix(in srgb, var(--accent) 55%, var(--card)); min-height: 2px; }
+.bars i.z { background: var(--well-2); } .bars i.x { background: var(--err); }
+.today .n { display: flex; justify-content: space-between; font-size: 11.5px; color: var(--ink-3); margin-top: 4px; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.today .n b { color: var(--ink); font-weight: 600; }
+.today .n .bad { color: var(--err); }
+.lim { min-width: 0; font-size: 11.5px; color: var(--ink-3); }
+.lim .r1 { display: flex; justify-content: space-between; gap: 8px; margin-bottom: 5px; white-space: nowrap; font-variant-numeric: tabular-nums; }
+.lim .r1 b { color: var(--ink); font-weight: 600; }
+.lim .r1 b.hi { color: var(--warn); } .lim .r1 b.full { color: var(--err); }
+.lim .bal { display: flex; justify-content: space-between; margin-top: 5px; white-space: nowrap; }
+.lim .bal b { font-weight: 600; color: var(--ink-2); font-variant-numeric: tabular-nums; }
+.lim .bal b.low { color: var(--warn); }
+.lim .muted { color: var(--ink-4); }
+.acts { display: flex; align-items: center; justify-content: flex-end; gap: 4px; }
+.tg { width: 30px; height: 18px; border-radius: 9px; background: var(--well-2); position: relative; flex: none; transition: background .15s var(--ease); }
+.tg::after { content: ""; position: absolute; top: 2px; left: 2px; width: 14px; height: 14px; border-radius: 50%; background: var(--card); box-shadow: 0 1px 2px rgb(0 0 0 / 20%); transition: transform .15s var(--ease); }
+.tg.on { background: var(--ok); } .tg.on::after { transform: translateX(12px); }
+.chev { width: 24px; height: 24px; border-radius: 7px; display: grid; place-items: center; color: var(--ink-4); transition: transform .15s var(--ease); }
+.chev svg.i { width: 14px; height: 14px; }
+.srow-wrap.open .chev { transform: rotate(90deg); color: var(--ink-2); }
+
+/* 展开 */
+.more { display: none; margin: 2px 6px 10px 136px; padding: 14px 16px 12px; border-radius: 12px; background: var(--well); }
+.srow-wrap.open .more { display: block; animation: moreIn .18s var(--ease); }
+@keyframes moreIn { from { opacity: 0; transform: translateY(-4px); } }
+.more-grid { display: grid; grid-template-columns: 1.25fr 1fr 1fr; gap: 22px; }
+.more h4 { margin: 0 0 8px; font-size: 11px; font-weight: 560; color: var(--ink-4); letter-spacing: .02em; }
+.slots { display: grid; gap: 5px; }
+.slot { display: grid; grid-template-columns: 58px minmax(0, 1fr) auto; gap: 8px; align-items: center; font-size: 12px; }
+.slot .k { font-family: var(--mono); font-size: 11px; color: var(--ink-3); }
+.slot .m { font-family: var(--mono); font-size: 11.5px; color: var(--ink); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.slot .m.empty { color: var(--ink-4); font-family: var(--font); }
+.slot .x { display: flex; gap: 4px; }
+.slot .tag { background: var(--card); }
+.qrows { display: grid; gap: 8px; }
+.qrow .r1 { display: flex; justify-content: space-between; font-size: 11.5px; color: var(--ink-3); margin-bottom: 4px; font-variant-numeric: tabular-nums; }
+.qrow .r1 b { color: var(--ink); font-weight: 560; }
+.seg4 { display: flex; height: 5px; border-radius: 3px; background: var(--card); overflow: hidden; }
+.seg4 i { display: block; height: 100%; }
+.seg4 i + i { box-shadow: inset 1px 0 0 var(--well); }
+.q-key { display: flex; gap: 10px; font-size: 10.5px; color: var(--ink-4); margin-top: 2px; flex-wrap: wrap; }
+.q-key span { display: inline-flex; align-items: center; gap: 4px; }
+.q-key i { width: 7px; height: 7px; border-radius: 2px; }
+.kv { display: grid; grid-template-columns: 72px minmax(0, 1fr); gap: 5px 10px; font-size: 12px; }
+.kv dt { color: var(--ink-4); }
+.kv dd { margin: 0; color: var(--ink-2); min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.kv dd.mono { font-size: 11px; }
+.kv dd.err { color: var(--err); white-space: normal; }
+.more-foot { display: flex; gap: 6px; margin-top: 14px; padding-top: 12px; box-shadow: inset 0 1px 0 var(--hair); align-items: center; }
+.more-foot .btn.soft { background: var(--card); }
+.more-foot .end { margin-left: auto; }
+.list-empty { padding: 30px; text-align: center; color: var(--ink-4); font-size: 12.5px; }
+.add-row { display: flex; align-items: center; justify-content: center; gap: 8px; margin: 6px; height: 44px; border-radius: 11px; border: 1.5px dashed var(--well-2); color: var(--ink-3); font-weight: 500; }
+.add-row:hover { background: var(--well); color: var(--ink); }
+
+/* ============================================================
+ * 数据统计
+ * ============================================================ */
+.skpis { display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); padding: 6px 8px 0; }
+.skpis .kpi { padding: 16px 16px 14px; min-width: 0; }
+.skpis .kpi + .kpi { box-shadow: inset 1px 0 0 var(--hair); }
+.skpis .kpi .v { font-size: 23px; }
+.dl { display: inline-flex; align-items: center; gap: 2px; font-size: 11px; font-weight: 600; font-variant-numeric: tabular-nums; margin-left: 6px; }
+.dl.up { color: var(--ok); } .dl.down { color: var(--err); } .dl.flat { color: var(--ink-4); }
+.dl.up.bad { color: var(--err); } .dl.down.good { color: var(--ok); }
+.kpi.focus .v { color: var(--accent); }
+.chart-area { padding: 6px 22px 18px; }
+.chart-bar { display: flex; align-items: center; gap: 12px; padding: 14px 0 8px; box-shadow: inset 0 1px 0 var(--hair); flex-wrap: wrap; }
+.legend { display: flex; gap: 14px; margin-left: auto; font-size: 11.5px; color: var(--ink-3); flex-wrap: wrap; }
+.legend span { display: inline-flex; align-items: center; gap: 6px; }
+.legend i { width: 9px; height: 9px; border-radius: 3px; }
+.legend i.ln { height: 0; width: 14px; border-top: 2px solid; border-radius: 0; }
+.chart { position: relative; }
+.chart svg { display: block; width: 100%; height: 220px; overflow: visible; }
+.chart .grid line { stroke: var(--hair); }
+.chart .grid text, .chart .ax text { fill: var(--ink-4); font-size: 10.5px; font-family: var(--font); }
+.chart rect.hov { fill: var(--ink); opacity: 0; }
+.chart rect.hov:hover { opacity: .04; }
+.chart .bar-g rect { transition: opacity .15s; }
+.chart.anim .bar-g { animation: rise .35s var(--ease); transform-origin: bottom; transform-box: fill-box; }
+@keyframes rise { from { opacity: .3; transform: scaleY(.6); } }
+
+.s-grid { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 16px; margin-top: 16px; }
+.s-grid.w { grid-template-columns: minmax(0, 1.55fr) minmax(0, 1fr); }
+.mt { margin-top: 16px; }
+/* Token 构成 */
+.tk-top { display: flex; align-items: flex-end; gap: 22px; flex-wrap: wrap; }
+.tk-total .v { font-size: 28px; font-weight: 650; letter-spacing: -.02em; line-height: 1.1; font-variant-numeric: tabular-nums; }
+.tk-total .v small { font-size: 13px; color: var(--ink-4); font-weight: 500; margin-left: 4px; }
+.tk-total .s { font-size: 12px; color: var(--ink-3); margin-top: 4px; }
+.hit { display: flex; align-items: center; gap: 10px; margin-left: auto; }
+.hit svg { width: 42px; height: 42px; }
+.hit .ring-bg { fill: none; stroke: var(--well-2); stroke-width: 5; }
+.hit .ring-fg { fill: none; stroke: var(--accent); stroke-width: 5; stroke-linecap: round; transform: rotate(-90deg); transform-origin: center; transition: stroke-dasharray .6s var(--ease); }
+.hit b { font-size: 16px; font-weight: 650; font-variant-numeric: tabular-nums; display: block; line-height: 1.15; }
+.hit small { font-size: 11.5px; color: var(--ink-3); }
+.stack { display: flex; height: 10px; border-radius: 5px; overflow: hidden; background: var(--well); }
+.stack i { display: block; height: 100%; transition: width .5s var(--ease); }
+.stack i + i { box-shadow: inset 1px 0 0 var(--card); }
+.stack.big { height: 14px; border-radius: 7px; margin-top: 16px; }
+.tk-parts { display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; margin-top: 10px; }
+.tk-part { font-size: 11.5px; color: var(--ink-3); }
+.tk-part .k { display: flex; align-items: center; gap: 6px; }
+.tk-part .k i { width: 9px; height: 9px; border-radius: 3px; }
+.tk-part b { display: block; font-size: 14.5px; font-weight: 600; color: var(--ink); font-variant-numeric: tabular-nums; margin-top: 1px; }
+.tk-part small { color: var(--ink-4); }
+.by { display: grid; gap: 8px; margin-top: 18px; }
+.by-row { display: grid; grid-template-columns: 112px minmax(0, 1fr) 64px 48px; gap: 12px; align-items: center; font-size: 12px; padding: 3px 6px; margin: 0 -6px; border-radius: 8px; cursor: pointer; }
+.by-row:hover { background: var(--well); }
+.by-row .n { font-family: var(--mono); font-size: 11.5px; color: var(--ink-2); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.by-row .n.sans { font-family: var(--font); font-size: 12px; display: flex; align-items: center; gap: 7px; }
+.by-row .v { text-align: right; font-variant-numeric: tabular-nums; color: var(--ink-2); font-weight: 550; }
+.by-row .p { text-align: right; font-variant-numeric: tabular-nums; color: var(--ink-4); font-size: 11.5px; }
+.one { height: 8px; border-radius: 4px; background: var(--well); overflow: hidden; }
+.one i { display: block; height: 100%; border-radius: 4px; background: var(--accent); transition: width .5s var(--ease); }
+.one i.mute { background: color-mix(in srgb, var(--ink) 30%, var(--card)); }
+.sub-switch { margin-top: 18px; display: flex; align-items: center; gap: 10px; }
+.sub-switch .lbl { font-size: 12px; color: var(--ink-3); }
+/* 用途 */
+.ptag { display: inline-flex; align-items: center; gap: 5px; height: 20px; padding: 0 7px; border-radius: 6px; font-size: 11px; font-weight: 560; white-space: nowrap; background: var(--well); color: var(--ink-2); }
+.ptag svg.i { width: 11px; height: 11px; }
+.ptag.main { background: var(--accent-soft); color: var(--accent); }
+.ptag.agent { background: color-mix(in srgb, var(--ink) 9%, transparent); color: var(--ink); }
+.ptag.bg { background: transparent; color: var(--ink-3); box-shadow: inset 0 0 0 1px var(--well-2); }
+.by-row .gs { font-size: 10px; color: var(--warn); margin-left: 4px; }
+.cov { margin-top: 14px; font-size: 11.5px; color: var(--ink-4); display: flex; gap: 6px; align-items: flex-start; line-height: 1.5; }
+.cov svg.i { width: 13px; height: 13px; margin-top: 2px; }
+/* 订阅表现 */
+.perf-head, .perf { display: grid; grid-template-columns: minmax(0, 1.4fr) minmax(0, 1.3fr) 80px 104px 92px 72px 18px; gap: 14px; align-items: center; }
+.perf-head { padding: 0 10px 8px; font-size: 11px; color: var(--ink-4); }
+.perf-head .r, .perf .r { text-align: right; }
+.perf { padding: 9px 10px; border-radius: 11px; cursor: pointer; font-size: 12.5px; }
+.perf + .perf { box-shadow: inset 0 1px 0 var(--hair); }
+.perf:hover { background: var(--well); box-shadow: none; }
+.perf:hover + .perf { box-shadow: none; }
+.perf .nm { display: flex; align-items: center; gap: 9px; min-width: 0; }
+.perf .nm b { font-weight: 560; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.perf .share { display: flex; align-items: center; gap: 10px; }
+.perf .share .one { flex: 1; }
+.perf .share span { font-variant-numeric: tabular-nums; color: var(--ink-2); font-weight: 550; min-width: 54px; text-align: right; }
+.perf .r { font-variant-numeric: tabular-nums; color: var(--ink-2); white-space: nowrap; }
+.perf .r small { color: var(--ink-4); font-size: 11px; }
+.perf .r.bad { color: var(--err); font-weight: 600; }
+.perf .go { color: var(--ink-4); opacity: 0; } .perf:hover .go { opacity: 1; }
+.perf .go svg.i { width: 14px; height: 14px; }
+/* 工具 */
+.tools { display: grid; gap: 6px; }
+.tools .by-row { grid-template-columns: 120px minmax(0, 1fr) 58px; }
+/* 全年 */
+.year-top { display: flex; gap: 32px; flex-wrap: wrap; margin-bottom: 16px; }
+.year-top div { font-size: 11.5px; color: var(--ink-3); }
+.year-top b { display: block; font-size: 17px; font-weight: 620; color: var(--ink); font-variant-numeric: tabular-nums; }
+.heat-wrap { overflow-x: auto; padding-bottom: 4px; }
+.heat-wrap { --c: 15px; --g: 3px; }
+.heat-months { display: grid; grid-auto-flow: column; grid-auto-columns: calc(var(--c) + var(--g)); font-size: 10.5px; color: var(--ink-4); margin: 0 0 4px 26px; height: 14px; }
+.heat-months span { white-space: nowrap; overflow: visible; }
+.heat-body { display: flex; gap: 6px; }
+.heat-days { display: grid; grid-template-rows: repeat(7, var(--c)); gap: var(--g); line-height: var(--c); font-size: 10px; color: var(--ink-4); width: 20px; }
+.heat { display: grid; grid-auto-flow: column; grid-template-rows: repeat(7, var(--c)); grid-auto-columns: var(--c); gap: var(--g); }
+.heat i { width: var(--c); height: var(--c); border-radius: 4px; background: var(--well); }
+.heat i.l1 { background: color-mix(in srgb, var(--accent) 22%, var(--card)); }
+.heat i.l2 { background: color-mix(in srgb, var(--accent) 45%, var(--card)); }
+.heat i.l3 { background: color-mix(in srgb, var(--accent) 72%, var(--card)); }
+.heat i.l4 { background: var(--accent); }
+.heat i.fut { background: transparent; }
+.heat i:hover { outline: 1.5px solid var(--ink-2); outline-offset: 1px; }
+.heat-legend { display: flex; align-items: center; gap: 3px; justify-content: flex-end; color: var(--ink-4); font-size: 11px; margin-top: 10px; }
+.heat-legend i { width: 11px; height: 11px; border-radius: 3px; display: inline-block; }
+.scope-note { display: inline-flex; align-items: center; gap: 5px; height: 22px; padding: 0 8px; border-radius: 7px; background: var(--well); color: var(--ink-3); font-size: 11.5px; }
+
+/* ---------- 说明 ---------- */
+.notes { margin-top: 26px; display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px; color: var(--ink-2); font-size: 12.5px; }
+.notes .card { padding: 16px 18px; }
+.notes h3 { font-size: 13px; margin: 0 0 8px; }
+.notes ul { margin: 0; padding-left: 18px; }
+.notes li { margin: 3px 0; }
+.notes code { font-family: var(--mono); font-size: 11.5px; background: var(--well); padding: 1px 5px; border-radius: 5px; }
+
+@media (max-width: 900px) {
+  .window { grid-template-columns: 1fr; height: auto; }
+  .sidebar { display: none; }
+  .page { padding: 20px 16px 40px; }
+  .sum, .skpis { grid-template-columns: repeat(2, 1fr); }
+  .list-head { display: none; }
+  .srow { grid-template-columns: 1fr auto; }
+  .srow .uses, .srow .today, .srow .lim { grid-column: 1 / -1; }
+  .more { margin-left: 6px; } .more-grid, .s-grid, .s-grid.w, .notes { grid-template-columns: 1fr; }
+  .perf-head { display: none; } .perf { grid-template-columns: 1fr auto; }
+  .perf .share, .perf .r:not(:nth-child(3)) { display: none; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .dot.pulse, .chart.anim .bar-g, .srow-wrap.open .more { animation: none !important; }
+}
+</style>
+</head>
+<body>
+<svg width="0" height="0" style="position:absolute"><defs>
+  <symbol id="book" viewBox="0 0 24 24"><path d="M2 4h7a3 3 0 0 1 3 3v13a2 2 0 0 0-2-2H2zM22 4h-7a3 3 0 0 0-3 3v13a2 2 0 0 1 2-2h8z"/></symbol>
+  <symbol id="activity" viewBox="0 0 24 24"><path d="M22 12h-4l-3 9L9 3l-3 9H2"/></symbol>
+  <symbol id="layers" viewBox="0 0 24 24"><path d="m12 2 10 5-10 5L2 7z"/><path d="m2 17 10 5 10-5M2 12l10 5 10-5"/></symbol>
+  <symbol id="key" viewBox="0 0 24 24"><circle cx="7.5" cy="15.5" r="4.5"/><path d="m10.7 12.3 9.8-9.8M17 6l3 3M14 9l2 2"/></symbol>
+  <symbol id="scroll" viewBox="0 0 24 24"><path d="M15 12h-5M15 8h-5M19 17V5a2 2 0 0 0-2-2H4"/><path d="M8 21h12a2 2 0 0 0 2-2v-1a1 1 0 0 0-1-1H11a1 1 0 0 0-1 1v1a2 2 0 1 1-4 0V5a2 2 0 1 0-4 0v2a1 1 0 0 0 1 1h3"/></symbol>
+  <symbol id="i-chart" viewBox="0 0 24 24"><path d="M3 3v18h18"/><path d="M7 15v2M11 10v7M15 12v5M19 6v11"/></symbol>
+  <symbol id="receipt" viewBox="0 0 24 24"><path d="M4 2v20l2-1 2 1 2-1 2 1 2-1 2 1 2-1 2 1V2l-2 1-2-1-2 1-2-1-2 1-2-1-2 1z"/><path d="M16 8h-6a2 2 0 1 0 0 4h4a2 2 0 1 1 0 4H8M12 17.5v-11"/></symbol>
+  <symbol id="db" viewBox="0 0 24 24"><ellipse cx="12" cy="5" rx="9" ry="3"/><path d="M3 5v14a9 3 0 0 0 18 0V5M3 12a9 3 0 0 0 18 0"/></symbol>
+  <symbol id="gear" viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M12 2v3M12 19v3M4.2 4.2l2.1 2.1M17.7 17.7l2.1 2.1M2 12h3M19 12h3M4.2 19.8l2.1-2.1M17.7 6.3l2.1-2.1"/></symbol>
+  <symbol id="info" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><path d="M12 16v-4M12 8h.01"/></symbol>
+  <symbol id="sunmoon" viewBox="0 0 24 24"><path d="M12 8a2.8 2.8 0 0 0 4 4 4 4 0 1 1-4-4M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2"/></symbol>
+  <symbol id="term" viewBox="0 0 24 24"><path d="m4 17 6-6-6-6M12 19h8"/></symbol>
+  <symbol id="braces" viewBox="0 0 24 24"><path d="M8 3H7a2 2 0 0 0-2 2v5a2 2 0 0 1-2 2 2 2 0 0 1 2 2v5a2 2 0 0 0 2 2h1M16 21h1a2 2 0 0 0 2-2v-5a2 2 0 0 1 2-2 2 2 0 0 1-2-2V5a2 2 0 0 0-2-2h-1"/></symbol>
+  <symbol id="laptop" viewBox="0 0 24 24"><rect x="4" y="4" width="16" height="11" rx="2"/><path d="M2 20h20"/></symbol>
+  <symbol id="bubble" viewBox="0 0 24 24"><path d="M21 12a8 8 0 0 1-11.6 7.1L4 21l1.9-5.4A8 8 0 1 1 21 12z"/></symbol>
+  <symbol id="pause" viewBox="0 0 24 24"><path d="M9 5v14M15 5v14"/></symbol>
+  <symbol id="play" viewBox="0 0 24 24"><path d="m7 4 13 8-13 8z"/></symbol>
+  <symbol id="arrow" viewBox="0 0 24 24"><path d="M5 12h14M13 6l6 6-6 6"/></symbol>
+  <symbol id="zap" viewBox="0 0 24 24"><path d="M13 2 3 14h9l-1 8 10-12h-9z"/></symbol>
+  <symbol id="clock" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></symbol>
+  <symbol id="check" viewBox="0 0 24 24"><path d="M20 6 9 17l-5-5"/></symbol>
+  <symbol id="chat" viewBox="0 0 24 24"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></symbol>
+  <symbol id="bot" viewBox="0 0 24 24"><rect x="4" y="8" width="16" height="12" rx="3"/><path d="M12 8V4M9 13v2M15 13v2"/></symbol>
+  <symbol id="shield" viewBox="0 0 24 24"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/><path d="m9 12 2 2 4-4"/></symbol>
+  <symbol id="tag" viewBox="0 0 24 24"><path d="M20.6 13.4 13.4 20.6a2 2 0 0 1-2.8 0L3 13V3h10l7.6 7.6a2 2 0 0 1 0 2.8z"/><circle cx="7.5" cy="7.5" r="1"/></symbol>
+  <symbol id="compress" viewBox="0 0 24 24"><path d="M4 14h6v6M20 10h-6V4M14 10l7-7M3 21l7-7"/></symbol>
+  <symbol id="globe" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3a14 14 0 0 1 0 18M12 3a14 14 0 0 0 0 18"/></symbol>
+  <symbol id="q" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M9.1 9a3 3 0 0 1 5.8 1c0 2-3 3-3 3M12 17h.01"/></symbol>
+  <symbol id="coins" viewBox="0 0 24 24"><ellipse cx="9" cy="7" rx="6" ry="3"/><path d="M3 7v5c0 1.7 2.7 3 6 3s6-1.3 6-3V7"/><path d="M9 15v2c0 1.7 2.7 3 6 3s6-1.3 6-3v-5c0-1.7-2.7-3-6-3"/></symbol>
+  <symbol id="plus" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></symbol>
+  <symbol id="search" viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></symbol>
+  <symbol id="chev" viewBox="0 0 24 24"><path d="m9 6 6 6-6 6"/></symbol>
+  <symbol id="refresh" viewBox="0 0 24 24"><path d="M21 12a9 9 0 1 1-2.6-6.4L21 8M21 3v5h-5"/></symbol>
+  <symbol id="copy" viewBox="0 0 24 24"><rect x="9" y="9" width="12" height="12" rx="2"/><path d="M5 15V5a2 2 0 0 1 2-2h10"/></symbol>
+  <symbol id="plug" viewBox="0 0 24 24"><path d="M9 2v6M15 2v6M6 8h12v4a6 6 0 0 1-12 0zM12 18v4"/></symbol>
+  <symbol id="alert" viewBox="0 0 24 24"><path d="M10.3 3.9 1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0z"/><path d="M12 9v4M12 17h.01"/></symbol>
+  <symbol id="wallet" viewBox="0 0 24 24"><path d="M20 7V5a2 2 0 0 0-2-2H5a2 2 0 0 0 0 4h15v4M20 17v2a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5"/><path d="M22 11h-5a2 2 0 0 0 0 4h5z"/></symbol>
+  <symbol id="wrench" viewBox="0 0 24 24"><path d="M14.7 6.3a4 4 0 0 0 5 5L22 14l-8 8-2.3-2.3a4 4 0 0 0-5-5L2 10l8-8z"/></symbol>
+</defs></svg>
+
+<div class="doc">
+  <header class="doc-head">
+    <div>
+      <h1>订阅管理 · 数据统计 —— 重设计 v1</h1>
+      <p>沿用实时路由 v1 / 请求日志 v1 的设计语言：凹陷底 + 浮起卡片、行式列表、点开就地展开、分布条可直接跳进请求日志。订阅管理从「一张表」改成「现在能不能用 / 被谁用 / 用了多少」三问一行；数据统计收拢成一张主卡 + 三组分布，全年热力图挪到最后。页面数据为模拟。</p>
+    </div>
+    <div class="doc-ctrl">
+      <div class="seg" id="pageSeg"><button class="on" data-v="subs">订阅管理</button><button data-v="stats">数据统计</button></div>
+      <div class="seg" id="accSeg"><button class="on" data-v="coral">珊瑚</button><button data-v="blue">蓝</button></div>
+      <div class="seg" id="modeSeg"><button class="on" data-v="light">浅色</button><button data-v="dark">暗色</button></div>
+    </div>
+  </header>
+
+  <div class="window tall">
+    <aside class="sidebar">
+      <div class="lights"><i></i><i></i><i></i></div>
+      <div class="brand"><img src="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAIAAAACACAYAAADDPmHLAAAgeklEQVR42u1dXYwkV3U+99bP/O3szO7Oeu1dBxYbe3EwiYPACUgoUVDwAyKRTIRRQpSgKOYpQuKJ8JKHSBiIROSHKAovkQiKICE8hOTBBL+ECIITBRPbWMZZINjY+zs7Oz/d011V9+Y7595bXdPTNf/T093TbbWnt7uruuqec8/5zn9M+3xYayP+q5Qqwnum2bxXJcnDxtqH8fmD+Owe/D2ttZ7HXxo/6h9YKzLGLOHvItbqR/j7vFbqGZtlz+ipqctbrfuefm8/hMfTgKhCUbO+fgn/eBRX9AF8+FCUJFNdB5ApijGFd/DQUcSU3fBekWVNvPcs1vHr2piv6cnJl2TdjQEPKL1XRtg1A+AHNV8jHjn/O8uy92lrP6G0fkRFUUnsIs8Nv/K/oTy3qv4t40FJGtV3BrAdMWnDGkZxrANTWGwka8xTIP3nkyT5hqdLzH9AF3Nod8c/Eghv2+33FEp9Bhf2bvksz/nCc39O3V9i97ozfUDUMAMhFTxTyKbC0sY6jp1kyPNvQxR/UqXpt7ppdKAMgBMnOHFmlpZOF9PTT8ZJ8hEvmgq/u6NBEqOmaJES4qmKLLDlbavKv63/t+0hPXQ8hXvTIIAZpNtjhpB1h6qVdc+z7EtRo/FxPT+/GGh1IAxQ1TEmy96LZfgydv0CCB+4MRqgVSEVJ5Tdvkzmf59kPSXEhLgUIgYqM8F1SVR8TtrpXBZgNvfvR3LM+vQ7afrNv0uxtjSI8NUzggIjaEiDG7iTD+skebobo9U94u30vdcpRd5u/4mK409HbtdnIHwyYEvhJSRWI1umOHuVdDrt3868JlXkJCl2PPjWaVojTyWSwuC9ll+WmOI4ohtXn6Po/DIlJ0+K7j0w1XJwVkPkJXEGJljAy2+CVp/C+0900XB3DFA9ECf/a+icx/HX+l2f0MCZTzEuzMu0aBKvY75S2e28m0kHwhknBZj6IgV0h6hyTCzMUfB3InzOt4rzAZq785jiAAHmXhld9WKExEtllgafxuuL+PsxpuFWTBDXif2S+O32V0D8DzGH8feVGrAt4B95awkXC0spmiDb+DGEOu/m3BPbIQHYJl7bG09DI8QWBhDRzy/BSKA+awT+LC6WqLj1PL55jnIA3fjEBXwnOTJMINeoaqWBZrDopcHjoN18lKaPeSZQvdSBqrPxWedXdn4b/04HUAMyv0PCN6n9wp9RnL8m+lxTjmfb72wn2hXv3irxSz628h95wKhECgTjVcnXc+PkiC3adPvE++nM234fADM7EhNxF9igDSZIYZ19gSVBoOkmn0MvtM9fZJ3viZ8NLPGtN5NNm2JzgxK1gmcTAC9z4tzfnrJ+6wjYi/yxhexi2cl4zYRXwWUhgBCfFUzkAgDQUIRnmhS0cuUHhLVxpB8wy6BLGqRMO6ah4DcG8aDtlgzgbciM0b7XI3Y7oHh0Zn4CWqbEzifFOlqx0NduN5tcCG79E2jQEVYrzwgCZDomoTBLQPne34LzKT6f8JkRS4IxQAGMQPy7sDZUnA60FGDaMQ2ZlkxToa1zGG3GAB4o5Gzni6lHYZ0GUOeDQnnjKpxRt/EShGtdJ20Celcl4FPkzEDYMM7WB2NYPGW3C7ULBxblW4UneCFMI8oCuIBVh2MNvA+mm01XqLj+HcqmTlFhFKVzF9lZUDLWgEkBZR1YUUxT0PYSaLxYBYWq28uXtdt/y06ewTT1vM7GZbVf+CzFq/8t6BzsINLAqYPCoXVvEvL9O6eke896u8BhAOuJrStnN06028gxhVKlN5ulDvvp8zaYTU9Su53TyunH6M63vh84pD1wJmIFDzAoTNhZlKTp71W9hTqAPn6D3bue+GYwiV/VXevQyzlFMRPFi2Jx8jiHj9PtxtMudmKddX0gvt+xIuCs8wU43e8RoLLymWIGU8pLB4NdX+D3EoqAMxLdoLVbr9KgBziDici0ZRoLrX00MTCAM/ng2z/gSMrh3JAnnIhrOHnk8o0DdUpHFb9A5MFaAXHunTh8XDiLU/BexON9U1SgERMdx/F77DRySBJ84dUDO5cYdWhNQ/KwVRoHmmu/+y1H9Tiww779QfPr9waBSmz2zm52OzYAQAFxiirBSFWKaI4RiKgPoNEzA5+TdT0MP69qInEZi7Xp/QUOWGY4wshrY4YjxM00ZdoyjSWCq8VlEJXsyyFdGqIH70NB8oEASlXkljfjRAUEOGvK2Oomu9+rBScQlDtGVEDkX6sQYSolhvE+CGHCIXtUae2CPEjm4Hg+h3SHYfc7f3TixHspgkM8T5caTHlCiyOIJYJ16sDt6LhkFN75rE74c61jzxiJ9xvoEhxaYQqnNrQwRix4gIYn2ygSGjOtmeagvdwdZ/KwPe3j+UMiAnJnm1sv2i1VUH9Q91oYRMcTlc8S5+4NjCQ2vnVoX3v7n1VBEATaRwqNYyYDp5NIEHEcGe9lGiLJCRozrSV7q/QDcBrXUaW/7F8WeAYofOqMpmzlNmU3rpDiUDmYxEzO0fTZc86WZ4zgXcQiDVQwD52et+11alx5jRwPwBBUkzR57hxFEZuYSsxDd4yqd8oPuCCo0PyJmBM4kbz5kLdlhgbSavKmWcV0UwEIgoi0chOmfyzfa+Kfkwvn5DXb9gL4BNkrHySyJXA0OXb47UWI9lhWqoEAU3rmLBjAqwmPGVQAjsPHAwHsPMS0jzl7N4qiKW/762FhYQfwlIA25XIiymiZhG61188hfBYggtf9gejCECzOtXcWWS/2/Q7XOqGgD9zqGDl/CD27eMFQZR0rzteUpF2tH445dVsPge2/WfArb/eT9/L5zB8WYnAMWXEKOmAnjtDCOMDos4Dcgd4S8Nzh3MRankbOxQySeJNSl+rC8Pe0jyMOcEBoO5+A0J7z9odR/wvZxAGUOx0u+lwJmLPUiQUoUptuT6mO/g5Gj/WJHki/FcAnzKMqFoUwgHWuZ/E3GJEg8J2XzsNhwwFMe07wuGfYGMCZ/Nrv/NiZcuHyVfAUsi+fiWXKdLAyJzC4ib2DyHrTkJnJsEiHOtAcCzDORJTfK2MCJOcV6WE4TBzRsAJBpn3MFTtkh82UYameESe4WKlSiMWUs17fy24GcXTMUkI5f36I9kfOBHSMUDgfQeSieSLyzRrObQixE2clFE618Pn4uAi7331dCfNFlAxOStAuqo/4foo8O81RoXkn7tRQSYBWdJbWGrOwyqZAhCadmCLnpDEutatZRBSxZGAxzTu72RQLTgJCCecSJJ4LDOW3lyTsq5KUirV1WA0FtRKASMT7W7mlE+S8ivCZUzOLqLGOVPFkgjJEA83svEALU/RJhh4MmRRjHATS5pVP+hgyJAtbv41I3OLrEp0zaz+j+ZWvUGxXRDWbvKD1tYZwOTt9iuUlihtLguGY2dvTczT/xougPRYT9QNrL7+AZEdkAacpNZs4dmaOZhcgGInzBtqUTqWSN5Cmml6+do5m7vsozcydEqA4OTNPk9MnhhUMUjyMF82LnSDl+9SF+9wbxb3U+t4/wjmYC9E0dvLsqVQIpNMJ7OIG5StIG0ORR8G7uVDea+CSRCN4CpVxEUUof5o5NY/nSfyTvYSaisIBS04Fm5pdoHP3vo3KKAo7msxwEn9oGcAxAUiZ5S6Fu93wgKxwHjyIyUA0Tvt2JmHuHTlWQrguH5CPT10ySbEuhPQRYvl+DodSnE5RilUqwAwR1zw2G5S12mAyxWZUJWFkzAD9NwSVg/VROkNr0++gxavfk12cxm2an8l8jkDhgjgAgryjHQJUggHEZ8C1A0x4fDfScZkgwtKBQeRaK6al5ilKpk4i9bxJ+cR9AhA72ULD/YiJRqGmXtPM/X9A8d2PCjo3Ky9T8fpfQq8X3mmjuYbOZXoZU1YGkU//4vi+Zq8fB0kKn1SKc8YAejeuAedf+kM6c/Et8DDDLTwxie8aGpU2ByPBACzOUcWF8q158fbl8XnKXmXCG7HfrUTxvPcPu9xQ8OM4K0BxtBBJpUUwJUVMJE5l4JDZ02eBOQASo+kyj3BUHvGo3IijJXsFWZ+3UR+AfP7Yp4JDXGfQ98nEtGT55DDvJJ8Qeh7ynJLJSVf3x0oBIDDhz/lYOIUipJSz/nd4L3gHacwAg5olxOh8uR3Rs5cXaGp6QgDf2s0JWl08QzNwFkTxJBXxNE38eAJ8klM6OU2NW7PUXF0TQqdgkvTaDKW3ccJ8ltbtPD08MUHD6O89dgwQHsuNgr539Y2wz6eQut0GU9xNatpVfydA/Uz4qBmSQ6Ee1HnKIRHiRItrt7WYOXAJ5pmAGnkIup/mT4/iUo0mA3Ai5/QkHDexFWetA30gN1f7WlfulUL08/dY8udQGUx8qSLE6wmsCn/OuCFrrtLa6jKdoQu1lbljBhiwRwHd3lhbA71mvNUXkjeMTwtX1IAtr3xQQFK780Kyvti2j2ENrLdakh+Y5cVIiv7RZQAQcG7+FC0s3CENHlAgKzUB4sjhQBBbBNj2GZiECc+eQLbrpT0bvmNs8AlE4houTkzS9MyJ4cyYO24MILkAsO9mQLAHHngLtdbXxb4P2T3KZxAbiYTlPqvY2f/8PbEUXb8dJxnAMCZbF6BII9rfMB7FRotM3BZEPBM6lyhe4vL8jcvoN8EZxP487Hp+ap8vEMw8lgQIl7qavzJ3YIf2aK9OHiF3ccC8h/HoaQCgd7RQYwS/trwqDBGnrp5PwsJoX6gj7UV+4bO9jWskA0mA+jmY/y3J9GEmyNdXaTftodBHqXQRbzjKuMojW5iBihwOZTh4WyuAib+6QjevX5XXly+/TM89/5y4gyX6p0McwZmCjtjMOBFXzdCb77mH3vZL76AmgCRbD3fdfVHUwZZqQCKPKS1+619o9fvfpmhmFn0rWqUkMOtrFN1xN5179HFgk2RgvIkjagUUcPrM0szJOfk3I/7v/8/3N9xsIZ4/U+5WRv6MBVqNVbrz/N109s4LHdrmxbYYIEiJ7PprtPLcf6CX0JyPO/iWBZAArddfobnfeIxmz5yT9HPVrVaOQD3Eo9pwmQmMrhhw/06Q8qUfIXTLZmAh5V0+TUx32scxIbOs5YgppqDeVdRPIzkkmpohjWen2hhAk8vKGUxKH2Aqy86rBSYuxVz11Xc6kgwQmCCUbs/Nz9MdCwuSGi4iH+Au4RYv1qkLNE1whAYjsOdvxpt9ulQVu6la1mUOIVUSRSTEtN6gYvEa0akFpKitdSRMa11a3cQnT1eYpk8h9VHEAL0wATqfYGe3S/FvvQRwgNDtclf6bWhicmrXQR/xHSD76No/f5Fu/us/UDxzsouYSsLMEd7nZ4HcAscg+E3GIHie/M2P0p3veh+wQ7tS9DpWAft+sNnH6D5JJ3xRiOoqkbAbCLX/mn/b+z14FvO1ZcqXb3kCq9JyKOBuXnrt/+jOPjucjwUDBPNQkkN6kEdVnHzOVN/78rP+3zJeydZEFG9KaGFsEE1MjUHgYeOC7Ry6+wXi1pgdOoqqP+oTEe3YDBx+ScOVyXsV4EfgIBozwEFLmXRyb3W24pnM+x5yGjPAQUsAb2nssQPiWAIMc5q6WBxQAWoPe1iO2Afz7L1bxPhxoKOlDFzJvivl7iYAwBJoLy9S0WeX8FgC1KYY254jGrpfl4Suov/dBnq8a8IN3qr2ORszwNHkFifJnoEYdxHfW/aQa3gRWt+MJcBRDZ2Ck2b9lcuU37rueglwuTlnCPmZiGzmMdKXfAKEe610CIFbOY7FB9C68oowgfWNKdUuACCXnEvdYlH0jQnGDNDNAAgALX7zq3T7mW9SND3r/PnVTJ7u10Hc+3Q0jdIxlU74hhM7BxB8bHzylBP/fcwcigdZFIc6vnofuzrYiaHGdw7mlPHJGQnfyjWorg5lPa6gbFRnza4xQDhHpCNS1F+HYDywepjbvMVHkz/nGkUVfm6A2UARuwW72X2Gjuw4IygMf0TUDM0aV5//rrRtodDTn8O1iOUL0LIux1/5VG/lu4azHS6pWKHwEyLZIt4eSsCV7yMb5hyzvuVjgmiXYZE/fVnEeL/TtnSfegQNdkKIb7rQvvYqvf53T0qHj6pptQlYdS9G2f+/qmBtL3nd9bqj10WPx8meU8HtIY6hDuNsDoIJ+PYGFgPwxXFipWbf+oYgyXZaUh1Iufleia+qO1ltvB4bAF7dsXZnGUcHGR2NB9WlFnZ+icKH5MHhnCIkmRhXX+AGUEHcwsJIta5lXx5SZcexgMDpUanXh+HBBJ5JE/qL7/6Q/u2nN+jEROLyD41rVddsZ/TAmVn60197sFaAqXE+QGVBkZkrvXujiZ5MYOt0ue10Cz2KMTY3WgW9utKiU2hB186ysg9xG2LhzHpRlp/tOFnk2PoBtum+FUvWr6oEUVU5JcTtvP4vJu/gqVhTitby0mBElQPn8LoD3pS1vT0a5fibMQNsuRsYvNxuZbTOBRtc0FGx1TnrLwEBTqfxEdjVVqqOuNdQXpaVd0CrjvR+BoQfPwxQq2vRxvVz33mJ/v2VmzQzkTobXwIpilpYvPtPTdJnf/0X+hpVC49I+g1wyXns+xg6M5Qrj7hm0TW0t3UlTWMJ0PHGRb6/f+/FyqQfML6CYs+scO3iudiDdW2jlR/Z8ANm0CSOS3OQC1BjJjw7qQqzJW2Nb0h9zDGAcrO/4IfXHFWriYxxHZ/Lu2DzSpcWA8MC6Ql4BBMYWNe3EdNfhXria2LGZHUQoWNZG4y6nuf1Msm3sxuDwLCgXL1jatyeyjHAhsYQQdsqV/Orj8B9wSbfWxbmiHtMTQsGUdJnSHsocH5mst6NZWlPqWQjywBcaq1Qri2x+F5MIGVcjviZzMJTbqG9BLF9b0ylBJQ+eukC/fYDPyciX3vGDJ+zF7CV5XtwIg8zA2xr29rNvm52onGiRWHqU6jwTONYwFWYAaSDmVVOAev/jmoL+i9qgf3WVUcjJgGk6DLW2/K16rFQOpnwEb/eKmAV/X9uN1vYaa4tPHMEV/0yCDybTB9ZK5Y6Am97NWHi+agwABM/R1eMbOmqM+l8lK6sxC0KmegpHj8GR9zZ27jp3xyNa/74RXwn3xSVk8avkAzvPj9PZ2amaBLDIbWbh4tObw79L0xPEA1rMupIMABzMsRz65UXqfWf/yRFj0wctoNJ5vzBjAMD3Hrxh5j90qpE33xDZ95FPMaGcwG6FoWZpwUG+K1Ld4vTpeozCX+5+UMzK2jk694HXQWwQ4Q7bqI9Bjp0oTeP9aN+eS6fdOksxKVL3QOYZTpTfU8emejZBaa607S0UkNZxh7MyZFgAPbMcQOmWE+66CibdmymoWGztdRpj9KL0HZ71E0j2MhCjVRlkPKJlqZSmu1mr7lxbyPWe//gJoLZWoupKA5qwLtb+8O1AizP7ot8BAw/qV2DJhnjmvtJnaTGurpiAm+3o/SBDap0AzHjQ47ouMHMoVlzFF6zTzxEy8xIN2M+CBNyt98ZHEcQT97kTluYvEXSPcu1aoW7xHXoPKLeeMPMAEMBAkOBY2vpNl1/4UWKp13HLOnCFUb4GjeGbSz+q1ZA0XePYHyI08nJYlxrcQuzV9rWJXd6LGDCLGc9rk7f1Cyqzxkh8WG3S+GADj/JqK6A7xGVwowfh88AwZERz85x3NaFdcfm3g56BIxKMMjfRzy3IEkdZM2YwDtZMztCruAS4Qff/hAERgYBBI6MK1iFtilczCmdMTeW2G6L/3V0vExEP+hCjQYI9Hl902iZfvoOidNTqPIJ1bm+VTtVsnhClr/owrUVJHxmx4cJfIOJEcEASmL8yek76Y0f/5zM8OlU67jhTZ1e+V12L3sJkQzS+smLdOVvPnPMVMCIRQOZmBMYoLAJ3Vqqb4soLmOYjqfuqI8UjrIpMGo5gZLdu8uAiIxxZ/E/foxAUugudbg6Qr/4OCXsWAvD43nXenBLw2IXKzhGGEAdATl0fxIZdnMeu6Py8JFuONyHtS7x1sHoWns4sXGlRnZoc909q/3zyK6acWnYnkuMuu0+WGu3E7a2TohQndErZQzheKiBHZW0HUh3MGulta21SywBFgfS2yb1/vZYyX9bFH31PDLtUVBjfzSQ2ywUi6jjA/5Vn3+Rac8S4PmBZIAQRTwmQkCKoWzfqpl8sFY9j9Z16plBRFqSQmbMgAWDdhq0V91TJfyhdkcgoA+pAcoX1zwTo/7+GQDBJkKRUwjaWDUgLjguCpU+wDURQbWxK9zGdVRq646cAXBa26NYokcb8K7RHtv2KeVsaNPpV6fCRLhQF0H1I+gPW+0xAAStNUYGN3VRPBPrqanLeZY9ixt7l0/SjwYiPYpzCHRo87Sx3ZOSHkHWVxYoNxm8Qi/cmHTkrGOcjAc7cFayn+BZdhhRboB0p+ewomDgKM9YnN+Q1qBxfoebVNl0GueOpG+RCS3okd8QZesUc2VPT6vJNbizhy+MubM299d5lmkf+5v9Ov7/roHBAbw5fcn4JoHIC496w+W77qE3ffCPKOVR8fw9DjFbN3WjeO0ndOurf9Ub+YIAy7Nn6K4PPk6zs/O+JN31MOCqG+UnhltjK9Lc1y/h3O1XL9Pil5/seW6LLuXNNz1I9/3OH7vr4k7kaHYpY4PR+tbcvErXv/jnZDBFXBJeupfb9hFyOpq7WACcAV+DCfJp3Hg8MAmSXEoui5RtlAC8sNiFs3dcoHMX7+95eH5ijpa4UdSm9jJKooyTp87SG37+7XvaZwVK1m/FqZsPqDZeFxe/Ts2dovnTZz1+0Rv0lEFo/AZa39jmqmzCo9huTGPpzQCaCwOwSsCbLxXt9lM6SR6BbiiUXN1ge8xy9PgXq5lnA1RGuCgQh5tObOwaYDdlLXMHLxbHVu3YByu4pMjbvcfCWdcqNsfuztnFKs0q1IYZCEVzzWMaXT867HBrDwt0UItMlj0VTU6+xLQvr8Qo9flBAtviFClHxnSP7Og4TVzHkepTuQFPaos2kawutPbi3qen7fBJ23g9BTd4j+bGY31gy3i2sL1uuj/LW6U1+wEKWAEYk5N8A1bAt5lDmFMGok6uJhagRA20RU/3MlocmNP1uZX7mAewFZUEkPoSuPrNbHuzDauQvFXODz6s3c80ZlozzZn2vrGWY2tQ/pMD4ROwFUdQzYI7kGZrR7i7UrS6nWb3fptBytia0W/eQN3MX9ZJJjZtqYepxwwAzMKS7ZAscVWlcaB5YACWArFK02/BJPwSOIVdxNkRt8uoXehOAErVc1DdDlc+/36vxSrWN7VQvXxEaLgAS0GpOhUfOppSPePSwY+QYloyTZm2TGOhNWjenQ8gKxI1Gh+HmLiBAxLb975lFac4g6gaTyBfVsR1h7rO4aOojgoq4Ie9qoCABWxt75reWkdm4MR+WJXdU4v8PRLfMC2FpqBtldYbGAD9aQxzhp6fX8SbHy6bfPQxJKfZMROaSfBOgsnlRqn2GCmzj8piu8PWNCWWoJ3H43UvkMhMo1UXrtlbVsVu1IOnnfKE/jDTVmgMWvfMCMIHaHdrEpiDT8Mc/BQ4R/kxOIfe2ICvtbF8y+cBuOGNPSd32Q4R95o14drLb212yeQymHStxurG+9tml24WmkrwSM6j62x9xY/ya7AdY3LTrV1Ir5xpyLRkmgptQWPaKiUMX8jEXZymT2Ca9Re8Kmj34lf2nDVWbtHi1Vf3VevPx+aw3X/yg/+CWd9wZhN75Xq1ilP7zK5VrqX7VqNdra9NWL75Ol2H549fb1vKZoOTqtKqnv0BuDdmpCtofMntb8upID2khBHPYVEbBeV1uobraTZWfK8gu9WGajPtmIZMS7H5QVvaSVZw0P04wcfgIJrH3w+BizI3qSVsB2fyTMHrNjF1Yl9lTXxsAp1+/9t/1Q1Ptg7FW/Gbq55l1MYUe/cyioVR38LWmWQ5nblwj1wbv1ZbjrDtmIFF5szT0Ciar5PX58Klh6hYXXZmXo3kkd1vt16nO99wv2OW0k3eU+zzzk9hVfx9lKYfq9KUdpIUCiLgt4wzDdP0sSAJep2IFzNO0gPBANJJ1JtahkVmq9kbNXOHcHxWbGUy1YFDllyQLHonGcfW7k69SYPTvKeFIfEGeAFl8mnXDrelbyMrPY12y2lqtQwUNq7sfKadLznTTNNdZQV7UKhLSeAxQS8T8WCzgsPsYO1sZr5ZHcrMtUPZ0nTC1Eod5UfKhu+Xx5ZjY+P9uV352no8+bpMHe/ZSjjZX4v1z2C1mG3C2FtJn2DqBZ3PNKsQ3+ypMMQzAUt99hg+YTh3gOjLOPkCfsS4COkhxA2kuBS7BbpOtduOiJY69jf8/wXP+90C5Rs0quY+xFQ1u/i8zYabLbxHc0tUQgM+ff59L0Ws1/+q3USMorX1reHziGMVwaHkw8wKqiMy+a4Z03ttVTD1GO1D5z/NOp8lwlbE31FlkBcdhUeQT5ulpUv59PSTcZJ8hD/n4JHXm9HBxQFg50Nvmrf+Mq1iiDQ7V6TBKLqIR+grXGABT5x/k4xl2bBjlEPc8fQsxb/yCN268orsKlM41M/dSmI8Jy7cSxHtcj6PP3eCcbb2ne+lpWuvUTo14+YU4Dr43AbMevL8RZkQak3v68re/It06+rPEFmehBpbd8mv+ErKJu+Zu+SeaAc5IcFdz+5dZx3AgQc735t6CeiRHVApwoby5TiYEbbdfg/Chp+B3n63fMbo19q806t5f7YhqwCwr9fzumw+Hby7kf/NWmcNdn7uexNZ15FCzsnn2PLYHfgGOIbGiR6q4vSp/q07Nx+b8RBJEJ6TUVhaBNOPGYKHXsWqt0r14C5I3Vh7vCTxG7h32cPXTaMDZ4CgU5xgcD8C4+B9AAWfwOI+Ekay86Ljwkx1UIaXEmovxQs9K4doa6cKhZHydThjP/wp5676+ztdz2zwFG6VjqYrzTLKkLGTUrZD7GqpgOI0rnDNbp6SeYqjehzYCYTnP9uJ/AMrNKnoGLlYs75+Cf94FBf5AXz4EETTVDcxTXHkQUYamCrgSk6iLflRlRPRuhmUc/g4jYszeTiZQyOe7wkfMFpxSNVo2zNCCCiVUqLZvBeevIfhcHkYnz+Iz+7B39Nglvlxd/DtvapcrcVFG5y3z6nbnL3Lybucw7fVuu/l8f8GAylgLoYuYgAAAABJRU5ErkJggg==" alt=""><div><b>cc-router</b><small>多订阅路由</small></div></div>
+      <button class="nav-item"><svg class="i"><use href="#book"/></svg>接入指南</button>
+      <div class="nav-label">路由</div>
+      <button class="nav-item"><svg class="i"><use href="#activity"/></svg>实时路由</button>
+      <button class="nav-item"><svg class="i"><use href="#layers"/></svg>虚拟模型<span class="end">6</span></button>
+      <button class="nav-item" data-page="subs"><svg class="i"><use href="#key"/></svg>订阅管理<span class="end" id="navSubsN">10</span></button>
+      <div class="nav-label">观测</div>
+      <button class="nav-item"><svg class="i"><use href="#scroll"/></svg>请求日志</button>
+      <button class="nav-item" data-page="stats"><svg class="i"><use href="#i-chart"/></svg>数据统计</button>
+      <button class="nav-item"><svg class="i"><use href="#receipt"/></svg>用量小票</button>
+      <div class="nav-label">系统</div>
+      <button class="nav-item"><svg class="i"><use href="#gear"/></svg>设置</button>
+      <button class="nav-item"><svg class="i"><use href="#db"/></svg>备份与迁移</button>
+      <button class="nav-item"><svg class="i"><use href="#info"/></svg>关于</button>
+      <div class="side-foot">
+        <div class="proxy-card">
+          <div class="t"><span class="dot ok pulse"></span>代理运行中</div>
+          <div class="a mono">127.0.0.1:23456</div>
+        </div>
+        <div class="side-tools">
+          <button class="icon-btn" id="sideMode" title="明暗模式"><svg class="i"><use href="#sunmoon"/></svg></button>
+          <span class="ver mono">v6.8.0</span>
+        </div>
+      </div>
+    </aside>
+
+    <main class="main">
+      <!-- ======================= 订阅管理 ======================= -->
+      <div class="page view on" id="view-subs">
+        <div class="ph">
+          <div><h1>订阅管理</h1><div class="sub">每个 API Key / 账号一条。虚拟模型按顺序从这里挑选可调度的订阅。</div></div>
+          <div class="actions">
+            <button class="btn soft"><svg class="i"><use href="#refresh"/></svg>刷新余额</button>
+            <button class="btn primary"><svg class="i"><use href="#plus"/></svg>添加订阅</button>
+          </div>
+        </div>
+
+        <div class="hero sum">
+          <div class="kpi">
+            <div class="l">可调度</div>
+            <div class="v num" id="sDisp">—</div>
+            <div class="cells" id="sCells"></div>
+            <div class="cells-key"><span><i style="background:var(--ok)"></i>可用</span><span><i style="background:var(--warn)"></i>冷却 / 限额</span><span><i style="background:var(--err)"></i>故障</span><span><i style="background:var(--well-2)"></i>停用</span></div>
+          </div>
+          <div class="kpi">
+            <div class="l">今日请求</div>
+            <div class="v num">1,284</div>
+            <div class="s">成功 98.6% · 失败切换 23 次</div>
+            <svg class="spark" id="spReq" viewBox="0 0 200 26" preserveAspectRatio="none"></svg>
+          </div>
+          <div class="kpi">
+            <div class="l">今日 Token</div>
+            <div class="v num">46.2<small>M</small></div>
+            <div class="s">缓存命中 81%</div>
+            <svg class="spark" id="spTok" viewBox="0 0 200 26" preserveAspectRatio="none"></svg>
+          </div>
+          <div class="kpi tight">
+            <div class="l">最紧的限额</div>
+            <div class="v num" style="color:var(--warn)">82<small>%</small></div>
+            <div class="who"><span class="plogo sm" style="background:#10a37f">C</span>ChatGPT Codex · 周<div class="qbar"><i class="hi" style="width:82%"></i></div></div>
+            <div class="s" style="margin-top:4px">周一 00:00 重置 · 余额最低 MiniMax ¥4.10</div>
+          </div>
+        </div>
+
+        <div class="card attn" id="attn"></div>
+
+        <div class="toolbar">
+          <div id="fChips" style="display:flex;gap:4px;flex-wrap:wrap"></div>
+          <div class="end">
+            <label class="search"><svg class="i"><use href="#search"/></svg><input id="q" placeholder="搜索名称、厂商、模型"></label>
+            <div class="seg" id="sortSeg"><button class="on" data-v="def">默认</button><button data-v="use">今日用量</button><button data-v="name">名称</button></div>
+          </div>
+        </div>
+
+        <div class="card list">
+          <div class="list-head"><span>状态</span><span>订阅</span><span>用于</span><span>近 24 小时</span><span>限额 / 余额</span><span></span></div>
+          <div id="rows"></div>
+          <button class="add-row"><svg class="i"><use href="#plus"/></svg>添加订阅</button>
+        </div>
+
+        <div class="notes">
+          <div class="card"><h3>这一版改了什么</h3><ul>
+            <li>表格 → 订阅行。「状态」「被谁用」「用了多少」「还剩多少」一眼看完，<b>详情不用进二级页</b>，点行就地展开。</li>
+            <li>状态写人话：冷却中带倒计时圆环；认证失败 / 限额满 / 缺 Key 不再只是一个小 pill。</li>
+            <li>「需要处理」置顶：只列<b>要人动手</b>的（冷却会自愈，不进这里），每条一个直达按钮。</li>
+            <li>「用于」把 <code>used: 2</code> 换成虚拟模型名 + 在该模型里的顺位，<code>#1</code> 高亮 = 主力。</li>
+            <li>启停开关直接放在行尾；复制 / 测试连接 / 看请求日志收进展开区。</li>
+          </ul></div>
+          <div class="card"><h3>数据从哪来</h3><ul>
+            <li>状态、可调度、冷却到期、限额、余额、槽位、<code>slot_models_now</code>：现有 <code>SubscriptionDto</code>。</li>
+            <li>「用于」的顺位：<code>useVirtualModels()</code> 里各模型的有序订阅表，前端拼。</li>
+            <li>行内 24 小时柱：<b>需新增</b> <code>get_subscription_activity</code>（<code>requests</code> 表按订阅 × 小时聚合，24 格 × 成功/失败）。没有它时这一列退化为「今日 x 次 · 成功率」，取 <code>useBreakdown("today","subscription")</code>。</li>
+            <li>顶部今日请求 / Token / 缓存：<code>useOverallStats("today")</code>。</li>
+          </ul></div>
+          <div class="card"><h3>细节</h3><ul>
+            <li>排序「默认」= 需处理 → 可调度 → 冷却 → 停用，同组内按创建时间。</li>
+            <li>停用行整体降为 50% 不透明度，只有状态和开关保持清晰。</li>
+            <li>System One 订阅显示 <code>model-jev</code>，与对话订阅同列表；筛选里单独一个「System One」芯片。</li>
+            <li>窄屏（&lt; 900px）行改两行堆叠，展开区单栏。</li>
+          </ul></div>
+        </div>
+      </div>
+
+      <!-- ======================= 数据统计 ======================= -->
+      <div class="page view" id="view-stats">
+        <div class="ph">
+          <div><h1>数据统计</h1><div class="sub">按本地日历日聚合、永久保留，不受日志清理影响。</div></div>
+          <div class="actions">
+            <div class="seg" id="rangeSeg"><button data-v="today">今天</button><button class="on" data-v="7">7 天</button><button data-v="30">30 天</button><button data-v="90">90 天</button><button data-v="all">全部</button></div>
+            <button class="btn soft" title="刷新"><svg class="i"><use href="#refresh"/></svg></button>
+          </div>
+        </div>
+
+        <div class="hero">
+          <div class="skpis" id="sKpis"></div>
+          <div class="chart-area">
+            <div class="chart-bar">
+              <div class="seg" id="metricSeg"><button class="on" data-v="req">请求</button><button data-v="tok">Token</button><button data-v="lat">耗时</button></div>
+              <span class="note" style="color:var(--ink-4);font-size:12px" id="chartNote"></span>
+              <div class="legend" id="legend"></div>
+            </div>
+            <div class="chart" id="chart"></div>
+          </div>
+        </div>
+
+        <div class="s-grid w">
+          <div class="card sec-card">
+            <div class="sec-head"><h2>Token 去了哪里</h2><span class="note" id="tkNote"></span></div>
+            <div class="tk-top">
+              <div class="tk-total"><div class="v num" id="tkTotal">—</div><div class="s" id="tkSub">—</div></div>
+              <div class="hit"><svg viewBox="0 0 42 42"><circle class="ring-bg" cx="21" cy="21" r="17"/><circle class="ring-fg" id="hitRing" cx="21" cy="21" r="17" stroke-dasharray="0 200"/></svg><div><b id="hitV">—</b><small>缓存命中</small></div></div>
+            </div>
+            <div class="stack big" id="tkStack"></div>
+            <div class="tk-parts" id="tkParts"></div>
+            <div class="sub-switch"><span class="lbl">按</span><div class="seg" id="bySeg"><button class="on" data-v="vm">虚拟模型</button><button data-v="sub">订阅</button><button data-v="client">客户端</button></div></div>
+            <div class="by" id="tkBy"></div>
+          </div>
+          <div class="card sec-card">
+            <div class="sec-head"><h2>请求用途</h2><span class="note">点一行看这些请求</span></div>
+            <div class="by" id="purpose" style="margin-top:0"></div>
+            <div class="cov"><svg class="i"><use href="#info"/></svg><span id="covText">用途来自请求日志原始表。超出日志保留期（30 天）的请求没有用途，计入「未记录」。<span style="color:var(--warn)">推断</span> = 由提示词 / 工具集指纹判断。</span></div>
+          </div>
+        </div>
+
+        <div class="card sec-card mt">
+          <div class="sec-head"><h2>订阅表现</h2><span class="note">点一行进入请求日志（已带时间范围与订阅筛选）</span>
+            <div class="end"><div class="seg" id="perfSeg"><button class="on" data-v="req">按请求</button><button data-v="tok">按 Token</button><button data-v="err">按失败</button></div></div></div>
+          <div class="perf-head"><span>订阅</span><span>请求占比</span><span class="r">成功率</span><span class="r">平均 / P95</span><span class="r">Token</span><span class="r">工具调用</span><span></span></div>
+          <div id="perf"></div>
+        </div>
+
+        <div class="s-grid">
+          <div class="card sec-card">
+            <div class="sec-head"><h2>常用工具 Top 10</h2><span class="note">按调用次数，只记工具名</span></div>
+            <div class="tools" id="tools"></div>
+          </div>
+          <div class="card sec-card">
+            <div class="sec-head"><h2>耗时分布</h2><span class="note">成功请求，流式按首字</span></div>
+            <div class="by" id="latDist" style="margin-top:0"></div>
+            <div class="cov"><svg class="i"><use href="#info"/></svg><span>分桶来自 <code style="font-family:var(--mono);font-size:11px">requests</code> 原始表，范围受日志保留期限制；平均值 / P95 与主卡同口径。</span></div>
+          </div>
+        </div>
+
+        <div class="card sec-card mt">
+          <div class="sec-head"><h2>全年概览</h2><span class="scope-note"><svg class="i" style="width:12px;height:12px"><use href="#clock"/></svg>固定近 365 天，不受上方时间范围影响</span>
+            <div class="end"><div class="seg" id="yearSeg"><button class="on" data-v="tok">Token</button><button data-v="req">请求</button></div></div></div>
+          <div class="year-top" id="yearTop"></div>
+          <div class="heat-wrap">
+            <div class="heat-months" id="heatMonths"></div>
+            <div class="heat-body"><div class="heat-days"><span></span><span>一</span><span></span><span>三</span><span></span><span>五</span><span></span></div><div class="heat" id="heat"></div></div>
+          </div>
+          <div class="heat-legend">少 <i style="background:var(--well)"></i><i style="background:color-mix(in srgb,var(--accent) 22%,var(--card))"></i><i style="background:color-mix(in srgb,var(--accent) 45%,var(--card))"></i><i style="background:color-mix(in srgb,var(--accent) 72%,var(--card))"></i><i style="background:var(--accent)"></i> 多</div>
+        </div>
+
+        <div class="notes">
+          <div class="card"><h3>这一版改了什么</h3><ul>
+            <li>时间范围提到页头，<b>页面内一切（除全年）同口径</b>；以前它夹在热力图和 KPI 之间。</li>
+            <li>三张折线 / 柱图（请求 / Token / 耗时）合成主卡里一张图 + 切换；KPI 带「较上一周期」。</li>
+            <li>环图 → 横条（和实时路由的 Token 卡同一种画法），可切虚拟模型 / 订阅 / 客户端。</li>
+            <li>新增「请求用途」「耗时分布」；订阅表变成可点的行，直达请求日志。</li>
+            <li>全年热力图挪到最后，并明确标注不受时间范围影响。</li>
+          </ul></div>
+          <div class="card"><h3>数据从哪来</h3><ul>
+            <li>KPI / 趋势 / Token / 虚拟模型 / 订阅 / 工具 / 全年：现有 <code>useStatistics</code> 各 hook，不改。</li>
+            <li>较上一周期：<b>需扩展</b> <code>get_overall_stats</code> 返回 <code>previous</code>（同长度的前一段，日聚合表上多算一次）。「全部」不显示对比。</li>
+            <li>按客户端：<code>tool_stats_daily.client_tool</code> 已有；<b>需新增</b>按客户端的请求 / Token 聚合（或在 <code>request_stats_daily</code> 加维度）。</li>
+            <li>用途 / 耗时分布：<b>需新增</b>，查 <code>requests</code> 原始表（<code>purpose_kind</code> 已落库），受保留期限制，所以卡片底部写清覆盖范围。</li>
+          </ul></div>
+          <div class="card"><h3>细节</h3><ul>
+            <li>「今天」按小时 24 格；7 / 30 / 90 天按日；「全部」按周。</li>
+            <li>耗时图：柱 = 平均，线 = P95；失败在请求图里叠在柱顶，用错误色。</li>
+            <li>KPI 的涨跌颜色按「好坏」而不是按方向：耗时上升 / 失败率上升是红。</li>
+            <li>点任一分布行 → <code>/request-logs?range=…&amp;vm=…</code>，和实时路由跳转同一套 URL 参数（<code>lib/requestLogQuery.ts</code>）。</li>
+          </ul></div>
+        </div>
+      </div>
+    </main>
+  </div>
+</div>
+<div class="tip" id="tip"></div>
+
+<script>
+const $ = (s, r = document) => r.querySelector(s);
+const $$ = (s, r = document) => [...r.querySelectorAll(s)];
+const root = document.documentElement;
+const tip = $('#tip');
+let seed = 7;
+const rnd = () => (seed = (seed * 16807) % 2147483647) / 2147483647;
+const fmt = (n) => n.toLocaleString('en-US');
+const cmp = (n) => n >= 1e9 ? (n / 1e9).toFixed(2) + 'B' : n >= 1e6 ? (n / 1e6).toFixed(1) + 'M' : n >= 1e3 ? (n / 1e3).toFixed(1) + 'K' : String(Math.round(n));
+const showTip = (e, html) => { tip.innerHTML = html; tip.classList.add('on'); const x = Math.min(e.clientX + 14, innerWidth - tip.offsetWidth - 8); tip.style.left = x + 'px'; tip.style.top = (e.clientY + 14) + 'px'; };
+const hideTip = () => tip.classList.remove('on');
+
+/* ================= 页面切换 / 主题 ================= */
+function setPage(v) {
+  $$('.view').forEach(x => x.classList.toggle('on', x.id === 'view-' + v));
+  $$('#pageSeg button').forEach(b => b.classList.toggle('on', b.dataset.v === v));
+  $$('.nav-item[data-page]').forEach(b => b.classList.toggle('active', b.dataset.page === v));
+  $('.main').scrollTop = 0;
+  if (v === 'stats') renderStats(true);
+}
+$$('#pageSeg button').forEach(b => b.onclick = () => setPage(b.dataset.v));
+$$('.nav-item[data-page]').forEach(b => b.onclick = () => setPage(b.dataset.page));
+function setMode(v) { root.dataset.mode = v; $$('#modeSeg button').forEach(b => b.classList.toggle('on', b.dataset.v === v)); }
+$$('#modeSeg button').forEach(b => b.onclick = () => setMode(b.dataset.v));
+$('#sideMode').onclick = () => setMode(root.dataset.mode === 'dark' ? 'light' : 'dark');
+$$('#accSeg button').forEach(b => b.onclick = () => { root.dataset.accent = b.dataset.v; $$('#accSeg button').forEach(x => x.classList.toggle('on', x === b)); });
+
+/* ================= 订阅数据 ================= */
+const QSEG = [['cr', '缓存读', 'var(--tk-cr)'], ['cw', '缓存写', 'var(--tk-cw)'], ['in', '输入', 'var(--tk-in)'], ['out', '输出', 'var(--tk-out)']];
+const now = Date.now();
+const SUBS = [
+  { id: 'ant', name: 'Anthropic Max', prov: 'Anthropic', host: 'api.anthropic.com', L: 'A', color: '#c96f4f', state: 'ok', created: 1,
+    uses: [['opus', 1], ['fable', 1]], slots: { fable: 'claude-fable-5-2', opus: 'claude-opus-5-5', sonnet: 'claude-sonnet-5-5', haiku: 'claude-haiku-5-5' },
+    efforts: { opus: 'high' }, today: { n: 412, ok: .995, load: .8 }, quotas: {}, policy: 'Claude Code 预设', models: '12 个 · 2 小时前' },
+  { id: 'zp', name: 'GLM Coding Max', prov: '智谱 GLM', region: '中国版', host: 'open.bigmodel.cn/api/anthropic', L: 'Z', color: '#3a5bd9', state: 'ok', created: 2,
+    uses: [['opus', 2], ['sonnet', 1]], slots: { opus: 'glm-5', sonnet: 'glm-5', haiku: 'glm-4.7-air' }, sched: { sonnet: '22:00–08:00 → glm-4.7' },
+    today: { n: 356, ok: .99, load: .7 }, quotas: { daily: [31e6, 50e6], monthly: [402e6, 2e9] }, policy: '不转发', models: '9 个 · 昨天' },
+  { id: 'km', name: 'Kimi 国际版', prov: '月之暗面', region: '国际版', host: 'api.moonshot.ai/anthropic', L: 'K', color: '#1f1f1f', state: 'cool', cool: 47, coolTotal: 60, created: 3,
+    uses: [['sonnet', 2]], slots: { sonnet: 'kimi-k2.5', haiku: 'kimi-k2.5' }, today: { n: 118, ok: .86, load: .5, bad: .14 },
+    quotas: {}, err: '429 rate_limit_exceeded · 冷却 60 秒', policy: '不转发', models: '6 个 · 3 天前' },
+  { id: 'ds', name: 'DeepSeek', prov: 'DeepSeek', region: '中国版', host: 'api.deepseek.com/anthropic', L: 'D', color: '#4d6bfe', state: 'ok', created: 4,
+    uses: [['sonnet', 3], ['haiku', 1]], slots: { sonnet: 'deepseek-v4', haiku: 'deepseek-v4-flash' }, today: { n: 201, ok: .99, load: .6 },
+    quotas: { monthly: [310e6, 1e9] }, balance: ['¥86.40', 'ok'], policy: '不转发', models: '2 个 · 今天' },
+  { id: 'mm', name: 'MiniMax', prov: 'MiniMax', region: '国际版', host: 'api.minimax.io/anthropic', L: 'M', color: '#e2457b', state: 'ok', created: 5,
+    uses: [['haiku', 2], ['fallback', 2]], slots: { haiku: 'MiniMax-M2.5' }, fb: 'MiniMax-M2.5', today: { n: 74, ok: .97, load: .3 },
+    quotas: {}, balance: ['¥4.10', 'low'], policy: '不转发', models: '手动填写' },
+  { id: 'cx', name: 'ChatGPT Codex', prov: 'OpenAI Codex', host: 'chatgpt.com/backend-api/codex', L: 'C', color: '#10a37f', state: 'ok', oauth: true, created: 6,
+    uses: [['fallback', 1]], slots: {}, fb: 'gpt-5.5', today: { n: 96, ok: .98, load: .4 },
+    quotas: { weekly: [164e6, 200e6] }, policy: '—（翻译类）', models: '4 个 · 今天' },
+  { id: 'or', name: 'OpenRouter 备用', prov: 'OpenRouter', host: 'openrouter.ai/api', L: 'O', color: '#6467f2', state: 'err', created: 7,
+    uses: [['opus', 3]], slots: { opus: 'anthropic/claude-opus-5.5' }, today: { n: 9, ok: 0, load: .1, bad: 1 },
+    quotas: {}, err: '401 · 上游拒绝了 API Key（Invalid API key）· 3 分钟前', policy: '不转发', models: '320 个 · 5 天前' },
+  { id: 'na', name: '公司中转 new-api', prov: '自定义 · OpenAI Responses', custom: true, host: 'llm.example.internal/v1', L: 'N', color: '#78716c', state: 'full', created: 8,
+    uses: [['sonnet', 4]], slots: { sonnet: 'gpt-5.5' }, today: { n: 18, ok: 1, load: .2 },
+    quotas: { daily: [20e6, 20e6] }, policy: '—（翻译类）', models: '手动填写' },
+  { id: 'ts', name: 'TypeSafe', prov: 'TypeSafe · System One', host: 'api.typesafe.ai', L: 'T', color: '#0f766e', state: 'ok', jev: true, created: 9,
+    uses: [['jev', 1]], slots: {}, jevm: 'system-one-2', today: { n: 32, ok: 1, load: .2 }, quotas: {}, policy: '—', models: '示例模型' },
+  { id: 'qw', name: '百炼 Coding Plan', prov: '阿里云百炼', region: '中国版', host: 'coding.dashscope.aliyuncs.com/apps/anthropic', L: '百', color: '#ff6a00', state: 'off', created: 10,
+    uses: [], slots: { sonnet: 'qwen3-coder-plus' }, today: { n: 0, ok: 0, load: 0 }, quotas: {}, policy: '不转发', models: '8 个 · 2 周前' },
+];
+SUBS.forEach(s => { s.enabled = s.state !== 'off'; s.bars = Array.from({ length: 24 }, (_, h) => { const day = h >= 9 && h <= 23 ? 1 : .15; const v = s.today.load ? Math.max(0, (rnd() * .8 + .2) * day * s.today.load) : 0; return { v, bad: s.today.bad && rnd() < s.today.bad * (h > 18 ? 1.6 : .4) }; }); });
+const PERIOD = { daily: '日', weekly: '周', monthly: '月', total: '总' };
+const STATE = {
+  ok:   { cls: 'ok',   label: '可调度', dot: 'ok' },
+  cool: { cls: 'cool', label: '冷却中' },
+  err:  { cls: 'err',  label: '认证失败', dot: 'err' },
+  full: { cls: 'full', label: '限额已满', dot: 'warn' },
+  off:  { cls: 'off',  label: '已停用', dot: '' },
+};
+const ORDER = { err: 0, full: 1, ok: 2, cool: 3, off: 4 };
+const attnOf = (s) => s.state === 'err' ? { lv: 'err', icon: 'key', why: `<em>认证失败</em> · ${s.err}`, btn: '更新 Key' }
+  : s.state === 'full' ? { lv: 'warn', icon: 'alert', why: '<em>今日限额已用完</em> · 20M / 20M，明天 00:00 自动恢复，在此之前不参与调度', btn: '调整限额' }
+  : s.balance && s.balance[1] === 'low' ? { lv: 'warn', icon: 'wallet', why: `<em>余额偏低</em> · 剩 ${s.balance[0]}，按近 7 天用量约可用 2 天`, btn: '查看余额' }
+  : null;
+
+/* ---------- 顶部 ---------- */
+function spark(el, pts) {
+  const max = Math.max(...pts), w = 200, h = 26, st = w / (pts.length - 1);
+  const p = pts.map((v, i) => `${(i * st).toFixed(1)},${(h - 2 - (v / max) * (h - 4)).toFixed(1)}`);
+  el.innerHTML = `<path class="a" d="M0,${h} L${p.join(' L')} L${w},${h}Z"/><path class="l" d="M${p.join(' L')}"/>`;
+}
+function renderSum() {
+  const d = SUBS.filter(s => s.enabled && s.state === 'ok').length;
+  $('#sDisp').innerHTML = `${d}<small>/ ${SUBS.length}</small>`;
+  $('#sCells').innerHTML = [...SUBS].sort((a, b) => ORDER[a.state] - ORDER[b.state]).map(s => {
+    const c = !s.enabled ? 'off' : s.state === 'err' ? 'err' : s.state === 'ok' ? '' : 'cool';
+    return `<i class="${c}" title="${s.name} · ${STATE[s.enabled ? s.state : 'off'].label}"></i>`; }).join('');
+  const hours = Array.from({ length: 24 }, (_, h) => SUBS.reduce((a, s) => a + s.bars[h].v, 0));
+  spark($('#spReq'), hours); spark($('#spTok'), hours.map(v => v * (0.7 + rnd() * .6)));
+  const list = SUBS.filter(s => s.enabled).map(s => [s, attnOf(s)]).filter(x => x[1]);
+  $('#attn').style.display = list.length ? '' : 'none';
+  $('#attn').innerHTML = `<div class="attn-head"><svg class="i" style="color:var(--err)"><use href="#alert"/></svg>需要处理 <span class="n">${list.length}</span><span class="note">冷却中的订阅会自动恢复，不列在这里</span></div>` +
+    list.map(([s, a]) => `<div class="fix ${a.lv}"><span class="plogo" style="background:${s.color}">${s.L}</span>
+      <div class="t"><b>${s.name}</b><div class="why">${a.why}</div></div>
+      <div class="acts"><button class="btn sm soft" data-open="${s.id}">详情</button><button class="btn sm ${a.lv === 'err' ? 'primary' : 'soft'}">${a.btn}</button></div></div>`).join('');
+  $$('#attn [data-open]').forEach(b => b.onclick = () => openRow(b.dataset.open));
+}
+
+/* ---------- 筛选 ---------- */
+let filter = 'all', sort = 'def', query = '';
+const FILTERS = [
+  ['all', '全部', () => true],
+  ['ok', '可调度', s => s.enabled && s.state === 'ok'],
+  ['cool', '冷却中', s => s.enabled && s.state === 'cool', 'warn'],
+  ['attn', '需处理', s => s.enabled && !!attnOf(s), 'err'],
+  ['off', '已停用', s => !s.enabled],
+  ['|'],
+  ['jev', 'System One', s => s.jev],
+  ['custom', '自定义', s => s.custom],
+];
+function renderChips() {
+  $('#fChips').innerHTML = FILTERS.map(f => f[0] === '|' ? '<span class="bar-gap"></span>' :
+    `<button class="chip ${filter === f[0] ? 'on' : ''} ${f[3] && SUBS.some(f[2]) ? f[3] : ''}" data-f="${f[0]}">${f[1]} <b>${SUBS.filter(f[2]).length}</b></button>`).join('');
+  $$('#fChips .chip').forEach(b => b.onclick = () => { filter = b.dataset.f; renderChips(); renderRows(); });
+}
+$$('#sortSeg button').forEach(b => b.onclick = () => { sort = b.dataset.v; $$('#sortSeg button').forEach(x => x.classList.toggle('on', x === b)); renderRows(); });
+$('#q').oninput = (e) => { query = e.target.value.trim().toLowerCase(); renderRows(); };
+
+/* ---------- 行 ---------- */
+const open = new Set(['km']);
+function stCell(s) {
+  if (!s.enabled) return `<div class="st off"><span class="dot"></span>已停用</div>`;
+  if (s.state === 'cool') {
+    const c = 2 * Math.PI * 6, f = c * (s.cool / s.coolTotal);
+    return `<div class="st cool"><svg class="cool-ring" viewBox="0 0 16 16"><circle class="bg" cx="8" cy="8" r="6"/><circle class="fg" cx="8" cy="8" r="6" stroke-dasharray="${f.toFixed(1)} ${c.toFixed(1)}"/></svg>冷却 <small data-cool="${s.id}">${s.cool}s</small></div>`;
+  }
+  const st = STATE[s.state];
+  return `<div class="st ${st.cls}"><span class="dot ${st.dot}"></span>${st.label}</div>`;
+}
+function limCell(s) {
+  const q = Object.entries(s.quotas).map(([p, [u, l]]) => ({ p, u, l, r: u / l })).sort((a, b) => b.r - a.r)[0];
+  let h = '';
+  if (q) { const c = q.r >= 1 ? 'full' : q.r >= .8 ? 'hi' : ''; h += `<div class="r1"><span>${PERIOD[q.p]}限额</span><b class="${c}">${Math.round(q.r * 100)}%</b></div><div class="qbar"><i class="${c}" style="width:${Math.min(100, q.r * 100)}%"></i></div>`; }
+  if (s.balance) h += `<div class="bal"><span>余额</span><b class="${s.balance[1] === 'low' ? 'low' : ''}">${s.balance[0]}</b></div>`;
+  return h || '<span class="muted">不限额</span>';
+}
+function usesCell(s) {
+  if (!s.uses.length) return '<span class="none">未被虚拟模型使用</span>';
+  return s.uses.map(([vm, pos]) => `<span class="vmc ${pos === 1 ? 'first' : ''}" title="在 model-${vm} 中排第 ${pos}">${vm}<em>#${pos}</em></span>`).join('');
+}
+function moreHtml(s) {
+  const keys = s.jev ? [['jev', s.jevm]] : [['fable', s.slots.fable], ['opus', s.slots.opus], ['sonnet', s.slots.sonnet], ['haiku', s.slots.haiku], ['兜底', s.fb]];
+  const slots = keys.map(([k, m]) => `<div class="slot"><span class="k">${k}</span><span class="m ${m ? '' : 'empty'}">${m || (k === '兜底' ? '未配置 · 透传原始 model' : '—')}</span>
+    <span class="x">${s.efforts && s.efforts[k] ? `<span class="tag">effort ${s.efforts[k]}</span>` : ''}${s.sched && s.sched[k] ? `<span class="tag warn" title="${s.sched[k]}">分时段</span>` : ''}</span></div>`).join('');
+  const qs = Object.entries(s.quotas);
+  const quotas = qs.length ? `<div class="qrows">${qs.map(([p, [u, l]]) => {
+    const parts = [.62, .08, .2, .1].map(x => x * u);
+    return `<div class="qrow"><div class="r1"><span>${PERIOD[p]}</span><span><b>${cmp(u)}</b> / ${cmp(l)}</span></div><div class="seg4">${parts.map((v, i) => `<i style="width:${Math.min(100, v / l * 100)}%;background:${QSEG[i][2]}"></i>`).join('')}</div></div>`; }).join('')}
+    <div class="q-key">${QSEG.map(q => `<span><i style="background:${q[2]}"></i>${q[1]}</span>`).join('')}</div></div>`
+    : `<div style="font-size:12px;color:var(--ink-4)">未设置 token 限额。<button class="link" style="display:inline">设置限额</button></div>`;
+  const kv = [['端点', `<span class="mono">${s.host}</span>`, 'mono'], ['鉴权', s.oauth ? 'ChatGPT 账号（OAuth）' : 'API Key · 已保存'], ['请求头', s.policy], ['模型列表', s.models]];
+  if (s.balance) kv.push(['余额', `${s.balance[0]} · 10 分钟前`]);
+  if (s.err) kv.push(['最近错误', s.err, 'err']);
+  return `<div class="more"><div class="more-grid">
+    <div><h4>模型槽位 · 此刻生效</h4><div class="slots">${slots}</div></div>
+    <div><h4>Token 限额</h4>${quotas}</div>
+    <div><h4>连接</h4><dl class="kv">${kv.map(([k, v, c]) => `<dt>${k}</dt><dd class="${c || ''}">${v}</dd>`).join('')}</dl></div>
+  </div><div class="more-foot">
+    <button class="btn sm soft"><svg class="i"><use href="#plug"/></svg>测试连接</button>
+    ${s.oauth ? '' : '<button class="btn sm soft"><svg class="i"><use href="#copy"/></svg>复制为新订阅</button>'}
+    <button class="btn sm ghost">今日请求日志 <svg class="i"><use href="#arrow"/></svg></button>
+    <div class="end"><button class="btn sm primary">打开详情</button></div>
+  </div></div>`;
+}
+function renderRows() {
+  const f = FILTERS.find(x => x[0] === filter)[2];
+  let list = SUBS.filter(f).filter(s => !query || [s.name, s.prov, s.host, ...Object.values(s.slots), s.fb || ''].join(' ').toLowerCase().includes(query));
+  list.sort(sort === 'use' ? (a, b) => b.today.n - a.today.n : sort === 'name' ? (a, b) => a.name.localeCompare(b.name, 'zh') :
+    (a, b) => ORDER[a.enabled ? a.state : 'off'] - ORDER[b.enabled ? b.state : 'off'] || a.created - b.created);
+  if (!list.length) { $('#rows').innerHTML = '<div class="list-empty">没有符合条件的订阅</div>'; return; }
+  $('#rows').innerHTML = list.map(s => {
+    const max = Math.max(...s.bars.map(b => b.v), .01);
+    const bars = s.bars.map(b => `<i class="${b.v === 0 ? 'z' : b.bad ? 'x' : ''}" style="height:${b.v === 0 ? 2 : Math.max(3, b.v / max * 22)}px"></i>`).join('');
+    const tags = [s.region && `<span class="tag">${s.region}</span>`, s.custom && '<span class="tag line">自定义</span>', s.oauth && '<span class="tag line">OAuth</span>', s.jev && '<span class="tag acc">System One</span>'].filter(Boolean).join('');
+    return `<div class="srow-wrap ${open.has(s.id) ? 'open' : ''} ${s.enabled ? '' : 'off'}" data-id="${s.id}">
+      <div class="srow">
+        ${stCell(s)}
+        <div class="who"><span class="plogo" style="background:${s.color}">${s.L}</span><div class="t">
+          <div class="l1"><b>${s.name}</b>${tags}</div>
+          <div class="l2">${s.prov} · <span class="mono">${s.host.split('/')[0]}</span></div></div></div>
+        <div class="uses">${usesCell(s)}</div>
+        <div class="today"><div class="bars">${bars}</div><div class="n"><span><b>${fmt(s.today.n)}</b> 次</span>${s.today.n ? `<span class="${s.today.ok < .95 ? 'bad' : ''}">${(s.today.ok * 100).toFixed(1)}%</span>` : '<span>—</span>'}</div></div>
+        <div class="lim">${limCell(s)}</div>
+        <div class="acts"><button class="tg ${s.enabled ? 'on' : ''}" title="${s.enabled ? '停用' : '启用'}" data-tg="${s.id}"></button><span class="chev"><svg class="i"><use href="#chev"/></svg></span></div>
+      </div>${moreHtml(s)}</div>`;
+  }).join('');
+  $$('#rows .srow').forEach(r => r.onclick = (e) => {
+    if (e.target.closest('[data-tg]')) return;
+    const w = r.parentElement, id = w.dataset.id;
+    open.has(id) ? open.delete(id) : open.add(id); w.classList.toggle('open');
+  });
+  $$('#rows [data-tg]').forEach(b => b.onclick = () => {
+    const s = SUBS.find(x => x.id === b.dataset.tg); s.enabled = !s.enabled;
+    if (s.enabled && s.state === 'off') s.state = 'ok';
+    renderSum(); renderChips(); renderRows();
+  });
+}
+function openRow(id) {
+  filter = 'all'; renderChips(); open.add(id); renderRows();
+  const el = $(`.srow-wrap[data-id="${id}"]`); el && el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+}
+/* 冷却倒计时: 只更新文字与圆环, 不重画整行 */
+setInterval(() => {
+  SUBS.filter(s => s.state === 'cool').forEach(s => {
+    s.cool -= 1;
+    if (s.cool <= 0) { s.state = 'ok'; renderSum(); renderChips(); renderRows(); return; }
+    const t = $(`[data-cool="${s.id}"]`); if (!t) return;
+    t.textContent = s.cool + 's';
+    const c = 2 * Math.PI * 6; t.parentElement.querySelector('.fg').setAttribute('stroke-dasharray', `${(c * s.cool / s.coolTotal).toFixed(1)} ${c.toFixed(1)}`);
+  });
+}, 1000);
+
+/* ================= 数据统计 ================= */
+let range = '7', metric = 'req', byDim = 'vm', perfSort = 'req', yearMetric = 'tok';
+const RANGE = {
+  today: { n: 24, unit: 'h', label: '今天', prev: '较昨天同期' },
+  7: { n: 7, unit: 'd', label: '近 7 天', prev: '较前 7 天' },
+  30: { n: 30, unit: 'd', label: '近 30 天', prev: '较前 30 天' },
+  90: { n: 90, unit: 'd', label: '近 90 天', prev: '较前 90 天' },
+  all: { n: 46, unit: 'w', label: '全部', prev: null },
+};
+function series(r) {
+  seed = { today: 11, 7: 22, 30: 33, 90: 44, all: 55 }[r];
+  const R = RANGE[r]; const out = [];
+  const end = new Date(2026, 10, 21);
+  for (let i = 0; i < R.n; i++) {
+    let base, label, full;
+    if (R.unit === 'h') { base = i >= 9 && i <= 23 ? 70 + rnd() * 60 : 4 + rnd() * 10; if (i > 15) base *= 0.25; label = String(i).padStart(2, '0'); full = `今天 ${label}:00`; }
+    else if (R.unit === 'd') { const d = new Date(end); d.setDate(end.getDate() - (R.n - 1 - i)); const wk = d.getDay() === 0 || d.getDay() === 6; base = (wk ? 380 : 1150) * (0.65 + rnd() * .6) * (0.6 + .4 * i / R.n); label = `${d.getMonth() + 1}/${d.getDate()}`; full = `${d.getMonth() + 1} 月 ${d.getDate()} 日 周${'日一二三四五六'[d.getDay()]}`; }
+    else { const d = new Date(end); d.setDate(end.getDate() - (R.n - 1 - i) * 7); base = 5200 * (0.3 + .7 * i / R.n) * (0.75 + rnd() * .5); label = `${d.getMonth() + 1}/${d.getDate()}`; full = `${d.getFullYear()} 年 ${d.getMonth() + 1} 月 ${d.getDate()} 日那周`; }
+    const req = Math.round(base), fail = Math.round(req * (0.005 + rnd() * .025) + (rnd() < .08 ? req * .06 : 0));
+    const tok = req * (30000 + rnd() * 16000);
+    out.push({ label, full, req, fail, tok, cr: tok * .74, cw: tok * .07, in: tok * .12, out: tok * .07, avg: 6.2 + rnd() * 4.5, p95: 18 + rnd() * 14 });
+  }
+  return out;
+}
+function deltaHtml(v, goodUp = true) {
+  if (!RANGE[range].prev) return '';
+  const cls = Math.abs(v) < .5 ? 'flat' : v > 0 ? (goodUp ? 'up' : 'up bad') : (goodUp ? 'down' : 'down good');
+  return `<span class="dl ${cls}">${v > 0 ? '↑' : v < 0 ? '↓' : ''}${Math.abs(v).toFixed(Math.abs(v) < 10 ? 1 : 0)}%</span>`;
+}
+let S = [];
+function renderStats(anim) {
+  S = series(range);
+  const tot = S.reduce((a, b) => ({ req: a.req + b.req, fail: a.fail + b.fail, tok: a.tok + b.tok, cr: a.cr + b.cr, cw: a.cw + b.cw, in: a.in + b.in, out: a.out + b.out }), { req: 0, fail: 0, tok: 0, cr: 0, cw: 0, in: 0, out: 0 });
+  const avg = S.reduce((a, b) => a + b.avg * b.req, 0) / tot.req, p95 = Math.max(...S.map(b => b.p95)) * .9;
+  const ok = 1 - tot.fail / tot.req, hit = tot.cr / (tot.cr + tot.cw + tot.in);
+  const toolReq = Math.round(tot.req * .58);
+  const pts = (k) => S.map(b => b[k]);
+  const K = [
+    ['请求', fmt(tot.req), `${fmt(tot.fail)} 次失败`, deltaHtml(12.4), pts('req'), true],
+    ['成功率', (ok * 100).toFixed(1) + '<small>%</small>', '失败切换后最终成功 99.7%', deltaHtml(-.3), null],
+    ['平均耗时', avg.toFixed(1) + '<small>s</small>', `P95 ${p95.toFixed(1)} s`, deltaHtml(-6.2, false), null],
+    ['Token', cmp(tot.tok).replace(/([A-Z])$/, '<small>$1</small>'), `输入 ${cmp(tot.in)} · 输出 ${cmp(tot.out)}`, deltaHtml(18.9), pts('tok')],
+    ['缓存命中', (hit * 100).toFixed(0) + '<small>%</small>', `缓存读 ${cmp(tot.cr)}`, deltaHtml(2.1), null],
+    ['工具调用轮次', '58<small>%</small>', `${fmt(toolReq)} 次请求调用了工具`, deltaHtml(4.0), null],
+  ];
+  $('#sKpis').innerHTML = K.map(([l, v, s, d, sp, focus], i) => `<div class="kpi ${focus ? 'focus' : ''}"><div class="l">${l}${d}</div><div class="v num">${v}</div><div class="s">${s}</div>${sp ? `<svg class="spark" data-sp="${i}" viewBox="0 0 200 26" preserveAspectRatio="none"></svg>` : ''}</div>`).join('');
+  K.forEach(([, , , , sp], i) => sp && spark($(`[data-sp="${i}"]`), sp));
+  renderChart(anim);
+  // Token
+  $('#tkNote').textContent = RANGE[range].label;
+  $('#tkTotal').innerHTML = cmp(tot.tok).replace(/([A-Z])$/, '<small>$1</small>');
+  $('#tkSub').textContent = `平均每次请求 ${cmp(tot.tok / tot.req)}`;
+  $('#hitV').textContent = (hit * 100).toFixed(0) + '%';
+  $('#hitRing').setAttribute('stroke-dasharray', `${(2 * Math.PI * 17 * hit).toFixed(1)} 200`);
+  $('#tkStack').innerHTML = QSEG.map(q => `<i style="width:${tot[q[0]] / tot.tok * 100}%;background:${q[2]}"></i>`).join('');
+  $('#tkParts').innerHTML = QSEG.map(q => `<div class="tk-part"><div class="k"><i style="background:${q[2]}"></i>${q[1]}</div><b>${cmp(tot[q[0]])}</b><small>${(tot[q[0]] / tot.tok * 100).toFixed(0)}%</small></div>`).join('');
+  renderBy(tot.tok);
+  renderPurpose(tot.req);
+  renderPerf(tot);
+  renderTools(toolReq);
+  renderLat();
+  renderYear();
+}
+function renderChart(anim) {
+  const el = $('#chart'), W = 1000, H = 220, padL = 40, padB = 22, padT = 8, n = S.length;
+  const iw = W - padL, ih = H - padB - padT, step = iw / n, bw = Math.max(2, Math.min(36, step * .62));
+  let max, bars = '', line = '', legend = '';
+  const yv = (v) => padT + ih - v / max * ih;
+  if (metric === 'req') {
+    max = Math.max(...S.map(b => b.req)) * 1.12;
+    S.forEach((b, i) => { const x = padL + i * step + (step - bw) / 2; const okH = (b.req - b.fail) / max * ih, fH = b.fail / max * ih;
+      bars += `<g class="bar-g"><rect x="${x}" y="${padT + ih - okH}" width="${bw}" height="${okH}" rx="${Math.min(4, bw / 3)}" fill="var(--accent)"/>${b.fail ? `<rect x="${x}" y="${padT + ih - okH - fH - 1}" width="${bw}" height="${fH}" rx="1.5" fill="var(--err)"/>` : ''}</g>`; });
+    legend = `<span><i style="background:var(--accent)"></i>成功</span><span><i style="background:var(--err)"></i>失败</span>`;
+  } else if (metric === 'tok') {
+    max = Math.max(...S.map(b => b.tok)) * 1.12;
+    S.forEach((b, i) => { const x = padL + i * step + (step - bw) / 2; let y = padT + ih;
+      bars += '<g class="bar-g">' + QSEG.map((q, qi) => { const h = b[q[0]] / max * ih; y -= h; return `<rect x="${x}" y="${y}" width="${bw}" height="${Math.max(0, h - (qi < 3 ? .8 : 0))}" fill="${q[2]}" ${qi === 3 ? `rx="${Math.min(3, bw / 3)}"` : ''}/>`; }).join('') + '</g>'; });
+    legend = QSEG.map(q => `<span><i style="background:${q[2]}"></i>${q[1]}</span>`).join('');
+  } else {
+    max = Math.max(...S.map(b => b.p95)) * 1.12;
+    S.forEach((b, i) => { const x = padL + i * step + (step - bw) / 2; const h = b.avg / max * ih;
+      bars += `<g class="bar-g"><rect x="${x}" y="${padT + ih - h}" width="${bw}" height="${h}" rx="${Math.min(4, bw / 3)}" fill="color-mix(in srgb, var(--accent) 45%, var(--card))"/></g>`; });
+    line = `<path d="M${S.map((b, i) => `${(padL + i * step + step / 2).toFixed(1)},${yv(b.p95).toFixed(1)}`).join(' L')}" fill="none" stroke="var(--ink-2)" stroke-width="1.6" stroke-linejoin="round" vector-effect="non-scaling-stroke"/>`;
+    legend = `<span><i style="background:color-mix(in srgb, var(--accent) 45%, var(--card))"></i>平均</span><span><i class="ln" style="border-color:var(--ink-2)"></i>P95</span>`;
+  }
+  const fmtY = metric === 'tok' ? cmp : metric === 'lat' ? (v) => v.toFixed(0) + 's' : (v) => cmp(v);
+  const grid = [0, .25, .5, .75, 1].map(f => `<line x1="${padL}" x2="${W}" y1="${yv(max * f)}" y2="${yv(max * f)}"/><text x="${padL - 8}" y="${yv(max * f) + 3.5}" text-anchor="end">${f ? fmtY(max * f) : ''}</text>`).join('');
+  const every = Math.ceil(n / 12);
+  const ax = S.map((b, i) => (i % every === 0 || i === n - 1) && !(i !== n - 1 && n - 1 - i < every / 2) ? `<text x="${padL + i * step + step / 2}" y="${H - 5}" text-anchor="middle">${b.label}</text>` : '').join('');
+  const hov = S.map((b, i) => `<rect class="hov" data-i="${i}" x="${padL + i * step}" y="${padT}" width="${step}" height="${ih}"/>`).join('');
+  el.classList.toggle('anim', !!anim);
+  el.innerHTML = `<svg viewBox="0 0 ${W} ${H}" preserveAspectRatio="none"><g class="grid">${grid}</g>${bars}${line}<g class="ax">${ax}</g>${hov}</svg>`;
+  $('#legend').innerHTML = legend;
+  $('#chartNote').textContent = { h: '按小时', d: '按日', w: '按周' }[RANGE[range].unit];
+  $$('.hov', el).forEach(r => { r.onmousemove = (e) => { const b = S[+r.dataset.i];
+    const rows = metric === 'req' ? [['var(--accent)', '成功', fmt(b.req - b.fail)], ['var(--err)', '失败', fmt(b.fail)], ['transparent', '成功率', ((1 - b.fail / b.req) * 100).toFixed(1) + '%']]
+      : metric === 'tok' ? [...QSEG.map(q => [q[2], q[1], cmp(b[q[0]])]).reverse(), ['transparent', '合计', cmp(b.tok)]]
+      : [['color-mix(in srgb, var(--accent) 45%, var(--card))', '平均', b.avg.toFixed(1) + ' s'], ['var(--ink-2)', 'P95', b.p95.toFixed(1) + ' s']];
+    showTip(e, `<b>${b.full}</b>${rows.map(([c, k, v]) => `<div class="r"><span><i style="background:${c}"></i>${k}</span><span>${v}</span></div>`).join('')}`); };
+    r.onmouseleave = hideTip; });
+}
+const VMSHARE = [['model-sonnet', .41], ['model-opus', .29], ['model-haiku', .14], ['model-fallback', .09], ['model-fable', .05], ['model-jev', .02]];
+const SUBSHARE = [['Anthropic Max', .34, '#c96f4f', 'A'], ['GLM Coding Max', .27, '#3a5bd9', 'Z'], ['DeepSeek', .15, '#4d6bfe', 'D'], ['Kimi 国际版', .1, '#1f1f1f', 'K'], ['ChatGPT Codex', .08, '#10a37f', 'C'], ['MiniMax', .04, '#e2457b', 'M'], ['TypeSafe', .02, '#0f766e', 'T']];
+const CLIENTSHARE = [['Claude Code', .78, 'term'], ['Codex CLI', .14, 'braces'], ['OpenCode', .06, 'laptop'], ['其他客户端', .02, 'bubble']];
+function renderBy(total) {
+  const rows = byDim === 'vm' ? VMSHARE.map(([n, p]) => [`<span class="n">${n}</span>`, p])
+    : byDim === 'sub' ? SUBSHARE.map(([n, p, c, L]) => [`<span class="n sans"><span class="plogo sm" style="background:${c}">${L}</span>${n}</span>`, p])
+    : CLIENTSHARE.map(([n, p, ic]) => [`<span class="n sans"><svg class="i" style="width:13px;height:13px;color:var(--ink-3)"><use href="#${ic}"/></svg>${n}</span>`, p]);
+  $('#tkBy').innerHTML = rows.map(([n, p], i) => `<div class="by-row" title="在请求日志中查看">${n}<div class="one"><i class="${i > 3 ? 'mute' : ''}" style="width:${p / rows[0][1] * 100}%"></i></div><span class="v">${cmp(total * p)}</span><span class="p">${(p * 100).toFixed(0)}%</span></div>`).join('');
+}
+$$('#bySeg button').forEach(b => b.onclick = () => { byDim = b.dataset.v; $$('#bySeg button').forEach(x => x.classList.toggle('on', x === b)); renderBy(S.reduce((a, x) => a + x.tok, 0)); });
+const PURPOSE = [['main', '主对话', 'chat', .38], ['agent', '子 Agent', 'bot', .27, 1], ['bg', '上下文压缩', 'compress', .04], ['bg', '安全检查', 'shield', .12, 1], ['bg', '会话标题', 'tag', .07, 1], ['bg', '网页摘要', 'globe', .03, 1], ['bg', '后台 / 探测', 'zap', .04, 1], ['bg', '未识别', 'q', .02], ['none', '未记录', 'clock', 0]];
+function renderPurpose(total) {
+  const missing = range === '90' ? .58 : range === 'all' ? .81 : 0;
+  const rows = PURPOSE.map(p => [...p]); rows[rows.length - 1][3] = missing;
+  const scale = 1 - missing;
+  const max = Math.max(...rows.map((p, i) => i === rows.length - 1 ? p[3] : p[3] * scale));
+  $('#purpose').innerHTML = rows.filter(p => p[3] > 0).map((p, i, a) => { const share = p[0] === 'none' ? p[3] : p[3] * scale;
+    return `<div class="by-row" style="grid-template-columns:120px minmax(0,1fr) 58px 40px" title="在请求日志中查看"><span class="n sans"><span class="ptag ${p[0] === 'none' ? 'bg' : p[0]}"><svg class="i"><use href="#${p[2]}"/></svg>${p[1]}</span>${p[4] ? '<span class="gs">推断</span>' : ''}</span>
+      <div class="one"><i class="${p[0] === 'main' ? '' : 'mute'}" style="width:${share / max * 100}%;${p[0] === 'none' ? 'background:var(--well-2)' : ''}"></i></div><span class="v">${fmt(Math.round(total * share))}</span><span class="p">${(share * 100).toFixed(0)}%</span></div>`; }).join('');
+  $('#covText').innerHTML = missing ? `所选范围内 <b>${(missing * 100).toFixed(0)}%</b> 的请求已超出日志保留期（30 天），没有用途记录，计入「未记录」。<span style="color:var(--warn)">推断</span> = 由提示词 / 工具集指纹判断。`
+    : '用途来自请求日志原始表，所选范围全部在保留期内。<span style="color:var(--warn)">推断</span> = 由提示词 / 工具集指纹判断。';
+}
+const PERF = [
+  ['Anthropic Max', '#c96f4f', 'A', .34, .996, 7.8, 21, .36, .61],
+  ['GLM Coding Max', '#3a5bd9', 'Z', .27, .991, 6.1, 17, .25, .57],
+  ['DeepSeek', '#4d6bfe', 'D', .15, .993, 5.2, 14, .14, .55],
+  ['Kimi 国际版', '#1f1f1f', 'K', .1, .912, 8.9, 31, .09, .52],
+  ['ChatGPT Codex', '#10a37f', 'C', .08, .984, 11.2, 29, .1, .49],
+  ['MiniMax', '#e2457b', 'M', .04, .975, 4.8, 12, .03, .44],
+  ['TypeSafe', '#0f766e', 'T', .015, 1, 1.9, 3.1, .002, 0],
+  ['OpenRouter 备用', '#6467f2', 'O', .005, 0, .4, .9, 0, 0],
+];
+function renderPerf(tot) {
+  const rows = [...PERF].sort(perfSort === 'tok' ? (a, b) => b[7] - a[7] : perfSort === 'err' ? (a, b) => (1 - b[4]) * b[3] - (1 - a[4]) * a[3] : (a, b) => b[3] - a[3]);
+  const k = perfSort === 'tok' ? 7 : 3; const max = Math.max(...rows.map(r => r[k]));
+  $('#perf').innerHTML = rows.map(r => `<div class="perf"><div class="nm"><span class="plogo sm" style="background:${r[1]}">${r[2]}</span><b>${r[0]}</b></div>
+    <div class="share"><div class="one"><i class="${r[4] < .95 ? 'mute' : ''}" style="width:${r[k] / max * 100}%"></i></div><span>${perfSort === 'tok' ? cmp(tot.tok * r[7]) : fmt(Math.round(tot.req * r[3]))}</span></div>
+    <span class="r ${r[4] < .95 ? 'bad' : ''}">${(r[4] * 100).toFixed(1)}%</span>
+    <span class="r">${r[5].toFixed(1)}s <small>/ ${r[6].toFixed(0)}s</small></span>
+    <span class="r">${cmp(tot.tok * r[7])}</span>
+    <span class="r">${r[8] ? (r[8] * 100).toFixed(0) + '%' : '—'}</span>
+    <span class="go"><svg class="i"><use href="#chev"/></svg></span></div>`).join('');
+}
+$$('#perfSeg button').forEach(b => b.onclick = () => { perfSort = b.dataset.v; $$('#perfSeg button').forEach(x => x.classList.toggle('on', x === b)); renderStats(false); });
+const TOOLS = [['Bash', .24], ['Read', .21], ['Edit', .16], ['Grep', .1], ['Write', .07], ['Glob', .06], ['TodoWrite', .05], ['Agent', .04], ['WebFetch', .03], ['mcp__github__…', .02]];
+function renderTools(n) {
+  const calls = n * 3.4;
+  $('#tools').innerHTML = TOOLS.map(([t, p], i) => `<div class="by-row" title="在请求日志中查看"><span class="n">${t}</span><div class="one"><i class="${i > 2 ? 'mute' : ''}" style="width:${p / TOOLS[0][1] * 100}%"></i></div><span class="v">${fmt(Math.round(calls * p))}</span></div>`).join('');
+}
+const LAT = [['< 2 秒', .18], ['2 – 5 秒', .31], ['5 – 10 秒', .27], ['10 – 30 秒', .19], ['30 – 60 秒', .04], ['> 60 秒', .01]];
+function renderLat() {
+  $('#latDist').innerHTML = LAT.map(([t, p], i) => `<div class="by-row" style="grid-template-columns:86px minmax(0,1fr) 44px"><span class="n sans">${t}</span><div class="one"><i class="${i > 3 ? 'mute' : ''}" style="width:${p / .31 * 100}%;${i > 3 ? 'background:var(--warn)' : ''}"></i></div><span class="p">${(p * 100).toFixed(0)}%</span></div>`).join('');
+}
+$$('#rangeSeg button').forEach(b => b.onclick = () => { range = b.dataset.v; $$('#rangeSeg button').forEach(x => x.classList.toggle('on', x === b)); renderStats(true); });
+$$('#metricSeg button').forEach(b => b.onclick = () => { metric = b.dataset.v; $$('#metricSeg button').forEach(x => x.classList.toggle('on', x === b)); renderChart(true); });
+
+/* ---------- 全年 ---------- */
+let YEAR = null;
+function renderYear() {
+  if (!YEAR) {
+    seed = 99; const end = new Date(2026, 10, 21); const start = new Date(end); start.setDate(end.getDate() - 364);
+    start.setDate(start.getDate() - start.getDay());
+    YEAR = []; for (let d = new Date(start); d <= end; d.setDate(d.getDate() + 1)) {
+      const age = (end - d) / 864e5; const wk = d.getDay() === 0 || d.getDay() === 6; const active = age < 12 || (age < 300 && rnd() > (wk ? .55 : .12));
+      const req = active ? Math.round((wk ? 300 : 900) * (0.3 + rnd()) * (1.2 - age / 365)) : 0;
+      YEAR.push({ d: new Date(d), req, tok: req * (28000 + rnd() * 18000), inRange: age <= 364 });
+    }
+  }
+  const k = yearMetric, vals = YEAR.filter(x => x[k] > 0).map(x => x[k]).sort((a, b) => a - b);
+  const q = (p) => vals[Math.floor(vals.length * p)] || 1;
+  const th = [q(.25), q(.5), q(.8)];
+  $('#heat').innerHTML = YEAR.map((x, i) => { const v = x[k]; const l = !x.inRange ? 'fut' : v === 0 ? '' : v < th[0] ? 'l1' : v < th[1] ? 'l2' : v < th[2] ? 'l3' : 'l4'; return `<i class="${l}" data-i="${i}"></i>`; }).join('');
+  let months = '', last = -1;
+  for (let w = 0; w * 7 < YEAR.length; w++) { const m = YEAR[w * 7].d.getMonth(); months += `<span>${m !== last && w < YEAR.length / 7 - 2 ? (m + 1) + '月' : ''}</span>`; last = m; }
+  $('#heatMonths').innerHTML = months;
+  const act = YEAR.filter(x => x.req > 0); let best = 0, cur = 0; YEAR.forEach(x => { cur = x.req ? cur + 1 : 0; best = Math.max(best, cur); });
+  let streak = 0; for (let i = YEAR.length - 1; i >= 0 && YEAR[i].req; i--) streak++;
+  const peak = YEAR.reduce((a, b) => b[k] > a[k] ? b : a);
+  $('#yearTop').innerHTML = `<div>${k === 'tok' ? '全年 Token' : '全年请求'}<b>${k === 'tok' ? cmp(act.reduce((a, b) => a + b.tok, 0)) : fmt(act.reduce((a, b) => a + b.req, 0))}</b></div><div>活跃天数<b>${act.length}</b></div><div>最长连续<b>${best} 天</b></div><div>当前连续<b>${streak} 天</b></div><div>峰值日<b>${peak.d.getMonth() + 1}/${peak.d.getDate()} · ${k === 'tok' ? cmp(peak.tok) : fmt(peak.req)}</b></div>`;
+  $$('#heat i').forEach(c => { c.onmousemove = (e) => { const x = YEAR[+c.dataset.i]; if (!x.inRange) return; showTip(e, `<b>${x.d.getFullYear()} 年 ${x.d.getMonth() + 1} 月 ${x.d.getDate()} 日</b><div class="r"><span>请求</span><span>${fmt(x.req)}</span></div><div class="r"><span>Token</span><span>${cmp(x.tok)}</span></div>`); }; c.onmouseleave = hideTip; });
+}
+$$('#yearSeg button').forEach(b => b.onclick = () => { yearMetric = b.dataset.v; $$('#yearSeg button').forEach(x => x.classList.toggle('on', x === b)); renderYear(); });
+
+/* ================= 启动 ================= */
+renderSum(); renderChips(); renderRows();
+if (location.hash === '#stats') setPage('stats');
+</script>
+</body>
+</html>
