@@ -164,10 +164,13 @@ pub(crate) fn route_attempt_payload(
     payload
 }
 
-pub(crate) fn emit_attempt_started(state: &AppState, sub_id: Uuid, vm_name: VirtualModelName) {
-    let _ = state
-        .app_handle
-        .emit("route_attempt_started", route_attempt_payload(sub_id, vm_name, None));
+/// 开始事件额外带客户端与用途, 实时路由页据此让粒子从对应客户端出发、区分后台任务。
+/// 结束事件不带: 页面以 `live_request` (请求日志条目) 作为完成信号, 它有完整数据。
+pub(crate) fn emit_attempt_started(state: &AppState, sub_id: Uuid, vm_name: VirtualModelName, ctx: &ClientContext) {
+    let mut payload = route_attempt_payload(sub_id, vm_name, None);
+    payload["client_tool"] = ctx.info.tool.map_or(serde_json::Value::Null, Into::into);
+    payload["purpose"] = serde_json::to_value(ctx.tools.purpose.kind).unwrap_or_default();
+    let _ = state.app_handle.emit("route_attempt_started", payload);
 }
 
 pub(crate) fn emit_attempt_finished(state: &AppState, sub_id: Uuid, vm_name: VirtualModelName, success: bool) {
@@ -427,7 +430,7 @@ pub async fn dispatch(
                 expose_reasoning: yaml_expose_reasoning,
             };
 
-            emit_attempt_started(state, sub_id, vm_name.clone());
+            emit_attempt_started(state, sub_id, vm_name.clone(), ctx);
             let mut upstream_capture = crate::proxy::header_log::UpstreamHeaderCapture::default();
             let dispatch_res = oauth_dispatch::dispatch_oauth_attempt(
                 &state.http_client,
@@ -559,7 +562,7 @@ pub async fn dispatch(
             let effort_log = kiro_effort_log(&request_body);
             let mut kiro_body = request_body.clone();
             kiro_body["model"] = Value::String(real_model.clone());
-            emit_attempt_started(state, sub_id, vm_name.clone());
+            emit_attempt_started(state, sub_id, vm_name.clone(), ctx);
             let mut upstream_capture = crate::proxy::header_log::UpstreamHeaderCapture::default();
             let dispatch_res = oauth_dispatch::dispatch_kiro_attempt(
                 &state.http_client,
@@ -698,7 +701,7 @@ pub async fn dispatch(
                 include_thoughts: yaml_expose_reasoning,
             };
 
-            emit_attempt_started(state, sub_id, vm_name.clone());
+            emit_attempt_started(state, sub_id, vm_name.clone(), ctx);
             let mut upstream_capture = crate::proxy::header_log::UpstreamHeaderCapture::default();
             let dispatch_res = gemini_dispatch::dispatch_gemini_attempt(
                 &state.http_client,
@@ -847,7 +850,7 @@ pub async fn dispatch(
                 None
             };
 
-            emit_attempt_started(state, sub_id, vm_name.clone());
+            emit_attempt_started(state, sub_id, vm_name.clone(), ctx);
             let mut upstream_capture = crate::proxy::header_log::UpstreamHeaderCapture::default();
             let dispatch_res = gemini_interactions_dispatch::dispatch_gemini_interactions_attempt(
                 &state.http_client,
@@ -1001,7 +1004,7 @@ pub async fn dispatch(
                 dialect: detect_responses_dialect(&url, &real_model),
             };
 
-            emit_attempt_started(state, sub_id, vm_name.clone());
+            emit_attempt_started(state, sub_id, vm_name.clone(), ctx);
             let mut upstream_capture = crate::proxy::header_log::UpstreamHeaderCapture::default();
             let dispatch_res = openai_responses_dispatch::dispatch_openai_responses_attempt(
                 &state.http_client,
@@ -1147,7 +1150,7 @@ pub async fn dispatch(
                 expose_reasoning: yaml_expose_reasoning,
             };
 
-            emit_attempt_started(state, sub_id, vm_name.clone());
+            emit_attempt_started(state, sub_id, vm_name.clone(), ctx);
             let mut upstream_capture = crate::proxy::header_log::UpstreamHeaderCapture::default();
             let dispatch_res =
                 openai_chat_completions_dispatch::dispatch_openai_chat_completions_attempt(
@@ -1377,7 +1380,7 @@ pub async fn dispatch(
             "forwarding to upstream"
         );
 
-        emit_attempt_started(state, sub_id, vm_name.clone());
+        emit_attempt_started(state, sub_id, vm_name.clone(), ctx);
 
         let mut upstream_capture = crate::proxy::header_log::UpstreamHeaderCapture {
             request: crate::proxy::header_log::capture_tagged(

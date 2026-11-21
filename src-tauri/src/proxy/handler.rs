@@ -68,14 +68,16 @@ pub async fn messages(
     // 沿 dispatch 链透传给所有 RequestLogEntry.
     // 「记录请求头」开关每请求读一次, 入站头在这里脱敏序列化 (proxy/header_log.rs)。
     let log_headers = state.settings.read().await.log_request_headers;
+    let info = client_fingerprint::identify(&headers);
+    let client_tool = info.tool;
     let ctx = ClientContext {
-        info: client_fingerprint::identify(&headers),
+        info,
         ip: Some(peer.ip().to_string()),
         entry_kind: RequestEntryKind::Messages,
         http_version: Some(format_http_version(version)),
         session_key: session_key::extract(&headers, &parsed, RequestEntryKind::Messages),
         monitor_identity: None,
-        tools: tool_log::request_tool_shape(&parsed),
+        tools: tool_log::request_tool_shape(&parsed).with_purpose(&parsed, client_tool),
         request_headers_log: crate::proxy::header_log::serialize(&headers, log_headers),
         log_headers,
         upstream_request_headers_log: None,
@@ -194,15 +196,17 @@ pub async fn responses(
 
     // 「记录请求头」开关每请求读一次, 入站头在这里脱敏序列化 (proxy/header_log.rs)。
     let log_headers = state.settings.read().await.log_request_headers;
+    let info = client_fingerprint::identify(&headers);
+    let client_tool = info.tool;
     let ctx = ClientContext {
-        info: client_fingerprint::identify(&headers),
+        info,
         ip: Some(peer.ip().to_string()),
         entry_kind: RequestEntryKind::Responses,
         http_version: Some(format_http_version(version)),
         // 用翻译前的原始 parsed: request_to_anthropic 会丢 prompt_cache_key.
         session_key: session_key::extract(&headers, &parsed, RequestEntryKind::Responses),
         monitor_identity: None,
-        tools: tool_log::request_tool_shape(&anthropic_body),
+        tools: tool_log::request_tool_shape(&anthropic_body).with_purpose(&anthropic_body, client_tool),
         request_headers_log: crate::proxy::header_log::serialize(&headers, log_headers),
         log_headers,
         upstream_request_headers_log: None,
@@ -547,15 +551,17 @@ pub async fn chat_completions(
 
     // 「记录请求头」开关每请求读一次, 入站头在这里脱敏序列化 (proxy/header_log.rs)。
     let log_headers = state.settings.read().await.log_request_headers;
+    let info = client_fingerprint::identify(&headers);
+    let client_tool = info.tool;
     let ctx = ClientContext {
-        info: client_fingerprint::identify(&headers),
+        info,
         ip: Some(peer.ip().to_string()),
         entry_kind: RequestEntryKind::ChatCompletions,
         http_version: Some(format_http_version(version)),
         // 用翻译前的原始 parsed: 会话键分支读原始 `user` 字段.
         session_key: session_key::extract(&headers, &parsed, RequestEntryKind::ChatCompletions),
         monitor_identity: None,
-        tools: tool_log::request_tool_shape(&anthropic_body),
+        tools: tool_log::request_tool_shape(&anthropic_body).with_purpose(&anthropic_body, client_tool),
         request_headers_log: crate::proxy::header_log::serialize(&headers, log_headers),
         log_headers,
         upstream_request_headers_log: None,

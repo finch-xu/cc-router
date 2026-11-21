@@ -94,6 +94,7 @@ pub fn run() {
             info!(?app_data_dir, "cc-router starting");
 
             app.manage(session_monitor::Monitor::new(app_data_dir.clone()));
+            app.manage(observability::live_feed::LiveFeed::default());
             session_monitor::Monitor::start(app.handle().clone());
 
             // 窗口几何自适应 —— 必须先于 bootstrap: 几何计算是同步且极快的, 而
@@ -162,6 +163,7 @@ pub fn run() {
             commands::requests::export_requests_csv_text,
             commands::requests::list_supported_client_tools,
             commands::requests::get_client_activity,
+            observability::live_feed::get_live_requests,
             commands::statistics::get_overall_stats,
             commands::statistics::get_daily_series,
             commands::statistics::get_breakdown,

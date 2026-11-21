@@ -21,6 +21,16 @@ pub struct RequestToolShape {
     pub tools_offered_count: Option<u32>,
     /// **最后一条** user 消息里的 `tool_result` 块数; 没有 user 消息 → None
     pub tool_result_count: Option<u32>,
+    /// 这个请求在干什么 (实时路由页用, 不落库), 见 [`crate::proxy::purpose`]。
+    /// handler 构造 `ClientContext` 时用 [`RequestToolShape::with_purpose`] 补上。
+    pub purpose: crate::proxy::purpose::RequestPurpose,
+}
+
+impl RequestToolShape {
+    pub fn with_purpose(mut self, body: &Value, client_tool: Option<&str>) -> Self {
+        self.purpose = crate::proxy::purpose::classify(body, client_tool);
+        self
+    }
 }
 
 pub fn request_tool_shape(body: &Value) -> RequestToolShape {
@@ -50,7 +60,7 @@ pub fn request_tool_shape(body: &Value) -> RequestToolShape {
                 .unwrap_or(0)
         });
 
-    RequestToolShape { tools_offered_count, tool_result_count }
+    RequestToolShape { tools_offered_count, tool_result_count, purpose: Default::default() }
 }
 
 fn is_tool_block(block: &Value) -> bool {
@@ -147,6 +157,7 @@ impl ToolUseTally {
             } else {
                 Some(names_json_truncated(&self.names))
             },
+            purpose: req.purpose.clone(),
         }
     }
 }
@@ -176,6 +187,8 @@ pub struct ToolLogFields {
     pub tool_result_count: Option<u32>,
     pub tool_use_count: Option<u32>,
     pub tool_use_names: Option<String>,
+    /// 随请求侧形状带过来的用途; 只进 `live_request` 事件, flush_batch 不写库。
+    pub purpose: crate::proxy::purpose::RequestPurpose,
 }
 
 impl ToolLogFields {
@@ -187,6 +200,7 @@ impl ToolLogFields {
             tool_result_count: req.tool_result_count,
             tool_use_count: None,
             tool_use_names: None,
+            purpose: req.purpose.clone(),
         }
     }
 
@@ -235,11 +249,11 @@ mod tests {
     fn request_shape_handles_missing_and_malformed_fields() {
         assert_eq!(
             request_tool_shape(&json!({"messages": [{"role": "user", "content": "hi"}]})),
-            RequestToolShape { tools_offered_count: None, tool_result_count: Some(0) }
+            RequestToolShape { tools_offered_count: None, tool_result_count: Some(0), ..Default::default() }
         );
         assert_eq!(
             request_tool_shape(&json!({"tools": [], "messages": []})),
-            RequestToolShape { tools_offered_count: Some(0), tool_result_count: None }
+            RequestToolShape { tools_offered_count: Some(0), tool_result_count: None, ..Default::default() }
         );
         assert_eq!(
             request_tool_shape(&json!({"tools": "oops", "messages": "oops"})),
@@ -263,7 +277,7 @@ mod tests {
         t.observe_block(&json!({"type": "tool_use", "id": "c", "name": "Read", "input": {}}));
         t.observe_block(&json!({"type": "tool_use", "id": "d"})); // 缺 name → 计数但名为空串
         t.observe_stop_reason(Some("tool_use"));
-        let f = t.fields(&RequestToolShape { tools_offered_count: Some(5), tool_result_count: Some(0) });
+        let f = t.fields(&RequestToolShape { tools_offered_count: Some(5), tool_result_count: Some(0), ..Default::default() });
         assert_eq!(f.tool_use_count, Some(4));
         assert_eq!(f.tool_use_names.as_deref(), Some(r#"["Read","web_search","Read",""]"#));
         assert_eq!(f.stop_reason.as_deref(), Some("tool_use"));
@@ -373,7 +387,7 @@ mod tests {
 
     #[test]
     fn request_only_and_empty_fields() {
-        let req = RequestToolShape { tools_offered_count: Some(2), tool_result_count: Some(1) };
+        let req = RequestToolShape { tools_offered_count: Some(2), tool_result_count: Some(1), ..Default::default() };
         let f = ToolLogFields::request_only(&req);
         assert_eq!(f.tools_offered_count, Some(2));
         assert_eq!(f.tool_result_count, Some(1));
