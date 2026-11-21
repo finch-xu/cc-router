@@ -65,6 +65,8 @@ import type {
   UpdateVirtualModelInput,
   VirtualModelDto,
   VirtualModelName,
+  RequestMixDto,
+  SubscriptionActivityDto,
 } from "@/types";
 
 export const api = {
@@ -204,6 +206,10 @@ export const api = {
     invoke<HeatmapDayDto[]>("get_token_heatmap", { days }),
   getToolBreakdown: (range: StatsRange, limit: number) =>
     invoke<ToolBreakdownDto[]>("get_tool_breakdown", { range, limit }),
+  getSubscriptionActivity: () =>
+    invoke<SubscriptionActivityDto[]>("get_subscription_activity"),
+  getRequestMix: (range: StatsRange) =>
+    invoke<RequestMixDto>("get_request_mix", { range }),
 
   getReceiptSummary: (range: ReceiptRange) =>
     invoke<ReceiptDto>("get_receipt_summary", { range }),

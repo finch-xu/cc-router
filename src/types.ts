@@ -919,6 +919,43 @@ export interface OverallStatsDto {
   total_tool_use_count: number;
   /** 至少一次工具调用的请求数, 占比分母用 success_count */
   tool_use_request_count: number;
+  /** 等长的上一周期 (今天 → 昨天同一时段); all_time 没有 */
+  previous?: PeriodTotalsDto | null;
+}
+
+/** Rust `PeriodTotalsDto`: 「较上一周期」用的精简汇总, 字段与 OverallStatsDto 同名同义 */
+export interface PeriodTotalsDto {
+  total_requests: number;
+  success_count: number;
+  avg_duration_ms?: number | null;
+  total_input_tokens: number;
+  total_output_tokens: number;
+  total_cache_creation_tokens: number;
+  total_cache_read_tokens: number;
+  tool_use_request_count: number;
+}
+
+export interface ActivityBucketDto {
+  requests: number;
+  failures: number;
+}
+
+/** Rust `SubscriptionActivityDto`: 近 24 小时, 每小时一桶, 最旧在前 */
+export interface SubscriptionActivityDto {
+  subscription_id: string;
+  buckets: ActivityBucketDto[];
+  requests: number;
+  failures: number;
+}
+
+/** Rust `RequestMixDto`: 只能从 requests 原始表算的分布 (受日志保留期限制) */
+export interface RequestMixDto {
+  /** 原始表里落在范围内的请求数; 与聚合表 total_requests 比得出覆盖率 */
+  covered_requests: number;
+  purposes: { kind: PurposeKind | null; count: number; guessed: number }[];
+  clients: { client_tool: string | null; requests: number; tokens: number }[];
+  /** 成功请求总耗时: <2s / 2–5s / 5–10s / 10–30s / 30–60s / ≥60s */
+  latency_buckets: number[];
 }
 
 export interface DailySeriesPointDto {

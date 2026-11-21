@@ -410,6 +410,7 @@ fn overall_stats_match() {
         total_cache_read_tokens: 4000,
         total_tool_use_count: 7,
         tool_use_request_count: 5,
+        previous: None,
     };
     let view: dto::OverallStats = through_json(&real);
     assert_eq!((view.total_requests, view.success_rate_pct, view.total_tokens()), (1284, 98.6, 4321));
