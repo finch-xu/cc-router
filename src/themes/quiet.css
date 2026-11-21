@@ -403,14 +403,7 @@
 :where([data-theme="quiet"]) .table tr:hover td { background: var(--surface-3); }
 :where([data-theme="quiet"]) .table tr td:first-child { border-radius: 9px 0 0 9px; }
 :where([data-theme="quiet"]) .table tr td:last-child { border-radius: 0 9px 9px 0; }
-:where([data-theme="quiet"]) .card > .table,
-:where([data-theme="quiet"]) .card > .request-log-scroll { padding: 6px; }
-:where([data-theme="quiet"]) .request-log-table tr:has(.pill.err) td { background: color-mix(in srgb, var(--err-bg) 60%, transparent); }
-:where([data-theme="quiet"]) .request-log-table tr:has(.pill.warn) td { background: color-mix(in srgb, var(--q-warn-bg) 60%, transparent); }
-:where([data-theme="quiet"]) .request-log-table tr:has(.pill.err):hover td { background: var(--err-bg); }
-/* 连续的异常行拼成一整块底色, 不留圆角缺口 */
-:where([data-theme="quiet"]) .request-log-table tr:is(:has(.pill.err), :has(.pill.warn)) td { border-radius: 0; }
-:where([data-theme="quiet"]) .request-log-table tr:has(.pill.warn):hover td { background: var(--q-warn-bg); }
+:where([data-theme="quiet"]) .card > .table { padding: 6px; }
 :where([data-theme="quiet"]) .rd-table th,
 :where([data-theme="quiet"]) .rd-table td { border-bottom: none; }
 :where([data-theme="quiet"]) .rd-card { border: none; background: var(--surface-3); box-shadow: none; border-radius: 12px; }
