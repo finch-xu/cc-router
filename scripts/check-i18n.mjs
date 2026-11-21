@@ -5,6 +5,7 @@
 //   2. 繁中简体残留: zh-Hant.json 的值与 release-notes/*/zh-Hant.md
 //   3. zh-Hant.json 与 zh.json 键集合一致
 //   4. 发版说明的语言回退 (Task 4 追加)
+import { execFileSync } from "node:child_process";
 import { registerHooks } from "node:module";
 import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
 import { fileURLToPath, pathToFileURL } from "node:url";
@@ -112,10 +113,85 @@ check("内嵌说明: 繁中缺失回退简中", resolveLang("zh-Hant", v) === "z
 check("内嵌说明: 日文缺失回退英文", resolveLang("ja", v) === "en");
 
 // 旧版 app (6.4 及以前) 的解析器只认「中文 / English / 日本語」三个标签, 简中段改名会让它们的
-// 简中用户在更新页落到英文段 —— 生成器必须继续给简中段写「中文」。
-const releaseBody = readFileSync(`${ROOT}scripts/release-body.mjs`, "utf8");
-check("release-body.mjs 简中段标签必须是「中文」(旧版解析器只认它)", releaseBody.includes('["zh.md", "中文"]'));
+// 简中用户在更新页落到英文段 —— --plain 输出必须继续给简中段写「中文」。
+const releaseBodyScript = readFileSync(`${ROOT}scripts/release-body.mjs`, "utf8");
+check("release-body.mjs 简中段标签必须是「中文」(旧版解析器只认它)", releaseBodyScript.includes('["zh.md", "中文"]'));
 check("新解析器仍认「中文」", pickNotesLang("**中文**\n\n简中", "zh") === "简中");
+
+// 折叠格式 (GitHub Release 默认展示简体中文, 其余语言折叠在 <details> 中)
+const foldedBody = [
+  "# v6.8.0 · Test",
+  "",
+  "简中摘要",
+  "",
+  "## 新功能",
+  "- 条目",
+  "",
+  "---",
+  "",
+  "<details>",
+  "<summary><strong>繁體中文</strong></summary>",
+  "",
+  "繁中摘要",
+  "",
+  "</details>",
+  "",
+  "<details>",
+  "<summary><strong>English</strong></summary>",
+  "",
+  "EN summary",
+  "",
+  "</details>",
+].join("\n");
+check("折叠正文: 简中", pickNotesLang(foldedBody, "zh") === "简中摘要\n\n## 新功能\n- 条目", pickNotesLang(foldedBody, "zh"));
+check("折叠正文: 繁中", pickNotesLang(foldedBody, "zh-Hant") === "繁中摘要", pickNotesLang(foldedBody, "zh-Hant"));
+check("折叠正文: 英文", pickNotesLang(foldedBody, "en") === "EN summary", pickNotesLang(foldedBody, "en"));
+check("折叠正文: 日文回退英文", pickNotesLang(foldedBody, "ja") === "EN summary", pickNotesLang(foldedBody, "ja"));
+const nonLangDetails = "前文\n\n<details>\n<summary>Debug</summary>\n\nlog\n\n</details>";
+check("非语言折叠块原样返回", pickNotesLang(nonLangDetails, "zh") === nonLangDetails);
+
+// 端到端校验 release-body.mjs 两种输出模式 (取最新一个具备四语的版本目录)
+const sampleVer = existsSync(notesDir)
+  ? readdirSync(notesDir)
+      .filter((v) => ["zh.md", "zh-Hant.md", "en.md", "ja.md"].every((f) => isFile(`${notesDir}${v}/${f}`)))
+      .sort()
+      .at(-1)
+  : null;
+if (sampleVer) {
+  const ghOut = execFileSync(process.execPath, [`${ROOT}scripts/release-body.mjs`, `v${sampleVer}`], {
+    encoding: "utf8",
+  });
+  const plainOut = execFileSync(process.execPath, [`${ROOT}scripts/release-body.mjs`, "--plain", `v${sampleVer}`], {
+    encoding: "utf8",
+  });
+  const zhSrc = readFileSync(`${notesDir}${sampleVer}/zh.md`, "utf8").replace(/\r\n/g, "\n").trim();
+  const zhHantSrc = readFileSync(`${notesDir}${sampleVer}/zh-Hant.md`, "utf8").replace(/\r\n/g, "\n").trim();
+  const enSrc = readFileSync(`${notesDir}${sampleVer}/en.md`, "utf8").replace(/\r\n/g, "\n").trim();
+  const jaSrc = readFileSync(`${notesDir}${sampleVer}/ja.md`, "utf8").replace(/\r\n/g, "\n").trim();
+
+  check("GitHub 正文不应默认展开 <details open>", !/<details\b[^>]*\bopen\b/i.test(ghOut));
+  check("GitHub 正文包含简中且未折叠", ghOut.includes(zhSrc) && !ghOut.includes("<summary><strong>中文</strong></summary>"));
+  for (const label of ["繁體中文", "English", "日本語"]) {
+    check(
+      `GitHub 正文将「${label}」折叠且 </summary> 后有空行`,
+      ghOut.includes(`<details>\n<summary><strong>${label}</strong></summary>\n\n`),
+    );
+  }
+  check("GitHub 正文可被 pickNotesLang 提取四语", (
+    pickNotesLang(ghOut, "zh") === zhSrc
+    && pickNotesLang(ghOut, "zh-Hant") === zhHantSrc
+    && pickNotesLang(ghOut, "en") === enSrc
+    && pickNotesLang(ghOut, "ja") === jaSrc
+  ));
+  check("--plain 正文不含 <details>", !plainOut.includes("<details>"));
+  check("--plain 正文保留「**中文**」兼容旧版 app", plainOut.includes("\n\n---\n\n**中文**\n\n"));
+  check("--plain 正文可被 pickNotesLang 提取四语", (
+    pickNotesLang(plainOut, "zh") === zhSrc
+    && pickNotesLang(plainOut, "zh-Hant") === zhHantSrc
+    && pickNotesLang(plainOut, "en") === enSrc
+    && pickNotesLang(plainOut, "ja") === jaSrc
+  ));
+}
 
 if (failures.length) {
   console.error(`check-i18n: ${failures.length} 项失败\n- ${failures.join("\n- ")}`);

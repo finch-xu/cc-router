@@ -834,8 +834,8 @@ jobs:
       - name: List collected .sig files
         run: ls -la sigs
 
-      # Release 正文由 release-notes/ 生成 (维护者不再手写); 必须早于 Generate latest.json,
-      # 因为 generate-latest-json.mjs 读的是此刻 draft 的正文, latest.json.notes 才会一致。
+      # Release 正文由 release-notes/ 生成 (维护者不再手写): GitHub 页面默认展开简体中文、折叠其余语言;
+      # latest.json.notes 改用 --plain 生成平铺的多语分段, 兼容所有已安装旧版 app 的更新页解析器。
       - name: Write release body from release-notes/
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -851,7 +851,13 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           GH_REPO: ${{ github.repository }}
-        run: node scripts/generate-latest-json.mjs "$RELEASE_TAG" sigs latest.json
+        run: |
+          node scripts/release-body.mjs --plain "$RELEASE_TAG" > latest-notes.md
+          if [ -s latest-notes.md ]; then
+            node scripts/generate-latest-json.mjs "$RELEASE_TAG" sigs latest.json --notes-file latest-notes.md
+          else
+            node scripts/generate-latest-json.mjs "$RELEASE_TAG" sigs latest.json
+          fi
 
       - name: Upload latest.json to draft release
         uses: softprops/action-gh-release@v3.0.3

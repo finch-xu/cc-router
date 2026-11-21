@@ -35,6 +35,8 @@ const RULE_RE = /^ {0,3}([-*_])( *\1){2,} *$/;
 const HEADING_RE = /^ {0,3}(#{1,6})\s+(.*?)\s*#*\s*$/;
 const LIST_RE = /^(\s*)([-*+]|\d{1,9}[.)])\s+(.*)$/;
 const FENCE_RE = /^ {0,3}(```|~~~)/;
+const DETAILS_RE =
+  /<details(?:\s[^>]*)?>\s*<summary>([\s\S]*?)<\/summary>([\s\S]*?)<\/details>/gi;
 
 /** 多语正文只取界面语言那一段; 缺了按 notesFallback 回退; 认不出多语结构就原样返回 */
 export function pickNotesLang(body: string, want: NotesLang): string {
@@ -46,6 +48,35 @@ export function pickNotesLang(body: string, want: NotesLang): string {
     const label = lines[0]?.trim().match(/^\*\*(.+)\*\*$/)?.[1];
     const lang = label === undefined ? undefined : LABEL_LANG.get(label);
     if (lang && !byLang.has(lang)) byLang.set(lang, lines.slice(1).join("\n").trim());
+  }
+  // 同步兼容 GitHub Release 正文的折叠格式: 简中直接展开在前, 其余语言放在 <details><summary>...</summary> 中
+  if (byLang.size === 0) {
+    let firstLangIdx = -1;
+    for (const m of text.matchAll(DETAILS_RE)) {
+      const label = m[1].replace(/<[^>]+>/g, "").replace(/^\*\*|\*\*$/g, "").trim();
+      const lang = LABEL_LANG.get(label);
+      if (lang && !byLang.has(lang)) {
+        byLang.set(lang, m[2].trim());
+        if (firstLangIdx === -1 && m.index !== undefined) firstLangIdx = m.index;
+      }
+    }
+    if (firstLangIdx > 0 && !byLang.has("zh")) {
+      const prefix = text
+        .slice(0, firstLangIdx)
+        .trim()
+        .replace(/(?:\n[ \t]*---[ \t]*)+$/, "")
+        .trim();
+      const lines = prefix.split("\n");
+      let start = 0;
+      if (lines[start] && /^#\s+/.test(lines[start].trim())) start++;
+      while (start < lines.length && !lines[start].trim()) start++;
+      if (lines[start] && RULE_RE.test(lines[start])) start++;
+      while (start < lines.length && !lines[start].trim()) start++;
+      const leadLabel = lines[start]?.trim().match(/^\*\*(.+)\*\*$/)?.[1];
+      if (leadLabel !== undefined && LABEL_LANG.get(leadLabel) === "zh") start++;
+      const zhBody = lines.slice(start).join("\n").trim();
+      if (zhBody) byLang.set("zh", zhBody);
+    }
   }
   for (const l of notesFallback(want)) {
     const hit = byLang.get(l);

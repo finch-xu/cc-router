@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 // 用 release 里上传的 .sig 文件 + tag 拼出 Tauri updater 要求的 latest.json。
-// 用法: node scripts/generate-latest-json.mjs <tag> <sig-dir> <out-file>
+// 用法: node scripts/generate-latest-json.mjs <tag> <sig-dir> <out-file> [--notes-file <path>]
 // 环境变量:
 //   GH_TOKEN  - gh CLI 鉴权 (workflow 里通常是 secrets.GITHUB_TOKEN)
 //   GH_REPO   - owner/repo (用来拼下载 URL)
@@ -9,9 +9,24 @@ import { readFileSync, writeFileSync, readdirSync } from "node:fs";
 import { resolve } from "node:path";
 import { execFileSync } from "node:child_process";
 
-const [, , tag, sigDir, outFile] = process.argv;
+const rawArgs = process.argv.slice(2);
+let notesFile = null;
+const pos = [];
+for (let i = 0; i < rawArgs.length; i++) {
+  if (rawArgs[i] === "--notes-file") {
+    notesFile = rawArgs[++i] ?? null;
+    if (!notesFile) {
+      console.error("--notes-file 缺少文件路径");
+      process.exit(1);
+    }
+  } else {
+    pos.push(rawArgs[i]);
+  }
+}
+
+const [tag, sigDir, outFile] = pos;
 if (!tag || !sigDir || !outFile) {
-  console.error("用法: generate-latest-json.mjs <tag> <sig-dir> <out-file>");
+  console.error("用法: generate-latest-json.mjs <tag> <sig-dir> <out-file> [--notes-file <path>]");
   process.exit(1);
 }
 
@@ -24,15 +39,19 @@ if (!repo) {
 const version = tag.startsWith("v") ? tag.slice(1) : tag;
 
 let notes = "";
-try {
-  const out = execFileSync(
-    "gh",
-    ["release", "view", tag, "--repo", repo, "--json", "body", "--jq", ".body"],
-    { encoding: "utf8" },
-  );
-  notes = out.trim();
-} catch (e) {
-  console.warn("无法获取 release body, 使用空 notes:", e.message);
+if (notesFile) {
+  notes = readFileSync(notesFile, "utf8").trim();
+} else {
+  try {
+    const out = execFileSync(
+      "gh",
+      ["release", "view", tag, "--repo", repo, "--json", "body", "--jq", ".body"],
+      { encoding: "utf8" },
+    );
+    notes = out.trim();
+  } catch (e) {
+    console.warn("无法获取 release body, 使用空 notes:", e.message);
+  }
 }
 
 const files = readdirSync(sigDir);
