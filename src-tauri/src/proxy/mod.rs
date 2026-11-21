@@ -11,6 +11,7 @@ pub mod header_log;
 pub mod header_source;
 pub mod listeners;
 pub mod middleware;
+pub mod net_timing;
 pub mod oauth_dispatch;
 pub mod openai_chat_completions_dispatch;
 pub mod openai_responses_dispatch;

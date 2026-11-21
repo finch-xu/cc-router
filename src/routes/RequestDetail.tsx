@@ -29,6 +29,7 @@ import { useSubscriptions } from "@/hooks/useSubscriptions";
 import { useT, type TFunction } from "@/i18n";
 import { fmtNum, fmtRequestSeconds, fmtTime, fmtTokenSpeed } from "@/lib/format";
 import { isReturnedToClient } from "@/lib/headerSources";
+import { timingModel, type TimingSegKind } from "@/lib/requestTiming";
 import {
   cacheHitRatio,
   fmtClock,
@@ -315,6 +316,7 @@ export function RequestDetailPage() {
       `attempt: ${attemptIndex + 1} / ${attempts.length}`,
       `total_latency: ${fmtRequestSeconds(request.total_latency_ms)}`,
       `first_content: ${fmtRequestSeconds(request.first_content_ms)}`,
+      `network: ${netCopyText(request)}`,
       `output_speed: ${fmtTokenSpeed(request.output_tokens_per_second)}`,
       `tokens: input=${request.input_tokens ?? "—"} output=${request.output_tokens ?? "—"} cache_read=${request.cache_read_tokens ?? "—"} cache_write=${request.cache_creation_tokens ?? "—"}`,
       `stop_reason: ${request.stop_reason ?? "—"}`,
@@ -747,29 +749,74 @@ function AttemptNode(props: {
   );
 }
 
+function netCopyText(request: RequestLogDto): string {
+  const n = request.net;
+  if (n?.prep_ms == null) return "—";
+  const v = (x: number | null) => (x == null ? "—" : `${x}ms`);
+  const conn = n.conn_reused == null ? "unknown" : n.conn_reused ? "reused" : "new";
+  return `prep=${v(n.prep_ms)} dns=${v(n.dns_ms)} connect=${v(n.connect_ms)} headers=${v(n.headers_ms)} conn=${conn}${n.via_proxy ? " via_proxy" : ""} upstream_stream=${n.upstream_stream ?? "—"} remote=${n.remote_addr ?? "—"}`;
+}
+
+const SEG_LABEL: Record<TimingSegKind, string> = {
+  prep: "requestLogs.page.perf.seg.prep",
+  dns: "requestLogs.page.perf.seg.dns",
+  connect: "requestLogs.page.perf.seg.connect",
+  head: "requestLogs.page.perf.seg.head",
+  wait: "requestLogs.page.perf.seg.wait",
+  gen: "requestLogs.page.perf.seg.gen",
+  upstream: "requestLogs.page.perf.seg.upstream",
+  body: "requestLogs.page.perf.seg.body",
+  pending: "requestLogs.page.perf.seg.pending",
+  fail: "requestLogs.page.perf.seg.fail",
+  whole: "requestLogs.page.perf.seg.whole",
+};
+
+/** 一条耗时条: 网络各段 (本地 / DNS / 建连 / 上游响应头) + 模型 (等待首字 / 生成)。老记录退回两段。 */
 function TimingBar({ r, request, t }: { r: RequestSummary; request: RequestLogDto; t: TFunction }) {
-  const total = r.total_ms;
-  if (total == null || total <= 0) return <p className="rqd-note">{t("requestLogs.page.perf.noTiming")}</p>;
-  const ttft = r.ttft_ms != null ? Math.min(r.ttft_ms, total) : null;
-  const waitPct = ttft != null ? Math.max(4, Math.min(96, (ttft / total) * 100)) : 100;
+  const m = timingModel(r, request.net);
+  if (!m) return <p className="rqd-note">{t("requestLogs.page.perf.noTiming")}</p>;
+  const net = request.net;
+  const speed = request.output_tokens_per_second != null ? ` · ${fmtTokenSpeed(request.output_tokens_per_second)}` : "";
   return (
     <div className="rqd-timing">
       <div className="rqd-tbar">
-        <span className="wait" style={{ width: `${waitPct}%` }}>
-          {ttft != null ? t("requestLogs.page.perf.wait", { s: fmtMs(ttft) }) : t("requestLogs.page.perf.whole", { s: fmtMs(total) })}
-        </span>
-        {ttft != null && (
-          <span className="gen" style={{ width: `${100 - waitPct}%` }}>
-            {t("requestLogs.page.perf.gen", { s: fmtMs(total - ttft) })}
-            {request.output_tokens_per_second != null && ` · ${fmtTokenSpeed(request.output_tokens_per_second)}`}
-          </span>
-        )}
+        {m.segs.map((seg, i) => {
+          const label = `${t(SEG_LABEL[seg.kind])} ${fmtMs(seg.ms)}`;
+          const wide = seg.ms / m.total >= 0.14;
+          return (
+            <span key={i} className={`s-${seg.kind}${wide ? " lbl" : ""}`} style={{ flexGrow: seg.ms }} title={label}>
+              {wide && label + (seg.kind === "gen" ? speed : "")}
+            </span>
+          );
+        })}
       </div>
       <div className="rqd-tlegend">
         <span>0</span>
-        {ttft != null && <span>{t("requestLogs.page.perf.ttftMark", { s: fmtMs(ttft) })}</span>}
-        <span>{t("requestLogs.page.perf.endMark", { s: fmtMs(total) })}</span>
+        {m.firstContent != null && <span>{t("requestLogs.page.perf.ttftMark", { s: fmtMs(m.firstContent) })}</span>}
+        <span>{t("requestLogs.page.perf.endMark", { s: fmtMs(m.total) })}</span>
       </div>
+      {m.detailed && (
+        <>
+          <div className="rqd-tseg-list">
+            {m.segs.map((seg, i) => (
+              <div key={i}>
+                <small><i className={`s-${seg.kind}`} />{t(SEG_LABEL[seg.kind])}</small>
+                <b>{fmtMs(seg.ms)}</b>
+              </div>
+            ))}
+          </div>
+          <p className="rqd-tsum">
+            <span>{t("requestLogs.page.perf.network", { s: fmtMs(m.networkMs) })}</span>
+            {m.modelMs > 0 && <span>{t("requestLogs.page.perf.model", { s: fmtMs(m.modelMs) })}</span>}
+            {net.conn_reused != null && (
+              <span className="pill tag">{t(net.conn_reused ? "requestLogs.page.perf.reused" : "requestLogs.page.perf.newConn")}</span>
+            )}
+            {net.via_proxy && <span className="pill tag warn" title={t("requestLogs.page.perf.proxyHint")}>{t("requestLogs.page.perf.proxy")}</span>}
+            {net.remote_addr && <span className="rqd-tremote">{net.remote_addr}</span>}
+          </p>
+          <p className="rqd-note">{t(net.upstream_stream === false ? "requestLogs.page.perf.hintNonStream" : "requestLogs.page.perf.hintStream")}</p>
+        </>
+      )}
     </div>
   );
 }

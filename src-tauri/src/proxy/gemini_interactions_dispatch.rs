@@ -154,7 +154,8 @@ pub async fn dispatch_gemini_interactions_attempt(
     }
 
     capture.request = crate::proxy::header_log::capture_untagged(&headers, log_headers, &[api_key.as_str(), secret_raw]);
-    let send_result = upstream::send(http_client, &url, body_bytes, headers, true).await;
+    let (send_result, net) = upstream::send_timed(http_client, &url, body_bytes, headers, true).await;
+    capture.net = Some(net);
     let upstream_response = match send_result {
         Ok(r) => {
             capture.response = crate::proxy::header_log::serialize(r.headers(), log_headers);
@@ -464,6 +465,7 @@ fn finalize_streaming(
             upstream_effort: None,
             tool_calls: tool_tally.fields(&ctx.tools),
             headers: ctx.header_log(),
+            net: ctx.net_log(),
         };
         let _ = log_tx.try_send(entry);
     });
@@ -614,6 +616,7 @@ async fn collect_to_json_response(
         upstream_effort: None,
         tool_calls,
         headers: ctx.header_log(),
+        net: ctx.net_log(),
     };
     let _ = log_tx.try_send(entry);
 

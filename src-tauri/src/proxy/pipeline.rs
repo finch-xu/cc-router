@@ -454,7 +454,7 @@ pub async fn dispatch(
             )
             .await;
             // 本 attempt 的 ctx 带上采集到的上游两组头, 之后所有日志行都从它取。
-            let attempt_ctx = ctx.with_upstream_headers(upstream_capture, &source_hints, &client_headers);
+            let attempt_ctx = ctx.with_upstream_headers(upstream_capture, &source_hints, &client_headers, start);
             let ctx = &attempt_ctx;
 
             let total_ms = start.elapsed().as_millis() as u64;
@@ -544,6 +544,7 @@ pub async fn dispatch(
                         upstream_effort: None,
                         tool_calls: ToolLogFields::request_only(&ctx.tools),
                         headers: ctx.header_log(),
+                        net: ctx.net_log(),
                     };
                     let _ = state.request_log_tx.try_send(entry);
 
@@ -585,7 +586,7 @@ pub async fn dispatch(
             )
             .await;
             // 本 attempt 的 ctx 带上采集到的上游两组头, 之后所有日志行都从它取。
-            let attempt_ctx = ctx.with_upstream_headers(upstream_capture, &source_hints, &client_headers);
+            let attempt_ctx = ctx.with_upstream_headers(upstream_capture, &source_hints, &client_headers, start);
             let ctx = &attempt_ctx;
 
             let total_ms = start.elapsed().as_millis() as u64;
@@ -675,6 +676,7 @@ pub async fn dispatch(
                         upstream_effort: None,
                         tool_calls: ToolLogFields::request_only(&ctx.tools),
                         headers: ctx.header_log(),
+                        net: ctx.net_log(),
                     };
                     let _ = state.request_log_tx.try_send(entry);
 
@@ -727,7 +729,7 @@ pub async fn dispatch(
             )
             .await;
             // 本 attempt 的 ctx 带上采集到的上游两组头, 之后所有日志行都从它取。
-            let attempt_ctx = ctx.with_upstream_headers(upstream_capture, &source_hints, &client_headers);
+            let attempt_ctx = ctx.with_upstream_headers(upstream_capture, &source_hints, &client_headers, start);
             let ctx = &attempt_ctx;
 
             let total_ms = start.elapsed().as_millis() as u64;
@@ -817,6 +819,7 @@ pub async fn dispatch(
                         upstream_effort: None,
                         tool_calls: ToolLogFields::request_only(&ctx.tools),
                         headers: ctx.header_log(),
+                        net: ctx.net_log(),
                     };
                     let _ = state.request_log_tx.try_send(entry);
 
@@ -879,7 +882,7 @@ pub async fn dispatch(
             )
             .await;
             // 本 attempt 的 ctx 带上采集到的上游两组头, 之后所有日志行都从它取。
-            let attempt_ctx = ctx.with_upstream_headers(upstream_capture, &source_hints, &client_headers);
+            let attempt_ctx = ctx.with_upstream_headers(upstream_capture, &source_hints, &client_headers, start);
             let ctx = &attempt_ctx;
 
             let total_ms = start.elapsed().as_millis() as u64;
@@ -970,6 +973,7 @@ pub async fn dispatch(
                         upstream_effort: None,
                         tool_calls: ToolLogFields::request_only(&ctx.tools),
                         headers: ctx.header_log(),
+                        net: ctx.net_log(),
                     };
                     let _ = state.request_log_tx.try_send(entry);
 
@@ -1035,7 +1039,7 @@ pub async fn dispatch(
             )
             .await;
             // 本 attempt 的 ctx 带上采集到的上游两组头, 之后所有日志行都从它取。
-            let attempt_ctx = ctx.with_upstream_headers(upstream_capture, &source_hints, &client_headers);
+            let attempt_ctx = ctx.with_upstream_headers(upstream_capture, &source_hints, &client_headers, start);
             let ctx = &attempt_ctx;
 
             let total_ms = start.elapsed().as_millis() as u64;
@@ -1125,6 +1129,7 @@ pub async fn dispatch(
                         upstream_effort: None,
                         tool_calls: ToolLogFields::request_only(&ctx.tools),
                         headers: ctx.header_log(),
+                        net: ctx.net_log(),
                     };
                     let _ = state.request_log_tx.try_send(entry);
 
@@ -1183,7 +1188,7 @@ pub async fn dispatch(
             )
                 .await;
             // 本 attempt 的 ctx 带上采集到的上游两组头, 之后所有日志行都从它取。
-            let attempt_ctx = ctx.with_upstream_headers(upstream_capture, &source_hints, &client_headers);
+            let attempt_ctx = ctx.with_upstream_headers(upstream_capture, &source_hints, &client_headers, start);
             let ctx = &attempt_ctx;
 
             let total_ms = start.elapsed().as_millis() as u64;
@@ -1277,6 +1282,7 @@ pub async fn dispatch(
                         upstream_effort: None,
                         tool_calls: ToolLogFields::request_only(&ctx.tools),
                         headers: ctx.header_log(),
+                        net: ctx.net_log(),
                     };
                     let _ = state.request_log_tx.try_send(entry);
 
@@ -1403,8 +1409,9 @@ pub async fn dispatch(
                 &[api_key_raw.as_str()],
             ),
             response: None,
+            net: None,
         };
-        let upstream_result = upstream::send(
+        let (upstream_result, net) = upstream::send_timed(
             &state.http_client,
             &url,
             serialized_body,
@@ -1412,11 +1419,12 @@ pub async fn dispatch(
             is_streaming,
         )
         .await;
+        upstream_capture.net = Some(net);
         if let Ok(r) = &upstream_result {
             upstream_capture.response = crate::proxy::header_log::serialize(r.headers(), ctx.log_headers);
         }
         // 本 attempt 的 ctx 带上采集到的上游两组头, 之后所有日志行 (含流式 sse) 都从它取。
-        let attempt_ctx = ctx.with_upstream_headers(upstream_capture, &source_hints, &client_headers);
+        let attempt_ctx = ctx.with_upstream_headers(upstream_capture, &source_hints, &client_headers, start);
         let ctx = &attempt_ctx;
 
         let total_ms = start.elapsed().as_millis() as u64;
@@ -1533,6 +1541,7 @@ pub async fn dispatch(
                     upstream_effort: None,
                     tool_calls,
                     headers: ctx.header_log(),
+                    net: ctx.net_log(),
                 };
                 let _ = state.request_log_tx.try_send(entry);
 
@@ -1671,6 +1680,7 @@ pub async fn dispatch(
                             upstream_effort: None,
                             tool_calls: ToolLogFields::request_only(&ctx.tools),
                             headers: ctx.header_log(),
+                            net: ctx.net_log(),
                         };
                         let _ = state.request_log_tx.try_send(entry);
 
@@ -1725,6 +1735,7 @@ pub async fn dispatch(
                             upstream_effort: None,
                             tool_calls: ToolLogFields::request_only(&ctx.tools),
                             headers: ctx.header_log(),
+                            net: ctx.net_log(),
                         };
                         let _ = state.request_log_tx.try_send(entry);
                         retry_count += 1;
@@ -1862,6 +1873,7 @@ pub async fn dispatch(
                     upstream_effort: None,
                     tool_calls: ToolLogFields::request_only(&ctx.tools),
                     headers: ctx.header_log(),
+                    net: ctx.net_log(),
                 };
                 let _ = state.request_log_tx.try_send(entry);
 

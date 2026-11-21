@@ -237,7 +237,18 @@ export function RequestRow(props: RequestRowProps) {
       </div>
       <div className="mx">
         <div className="l1">{ok ? `${fmtTok(totalTokens(r))} tok` : (r.http_status ?? r.status)}</div>
-        <div className="l2">{ok ? t("live.feed.timing", { ttft: fmtMs(r.ttft_ms), total: fmtMs(r.total_ms) }) : fmtMs(r.total_ms)}</div>
+        <div className="l2" title={timingTitle(r, t)}>
+          {slowNetwork(r) ? (
+            <>
+              <span className="net">{t("live.feed.network", { s: fmtMs(r.network_ms) })}</span>
+              {` · ${fmtMs(r.total_ms)}`}
+            </>
+          ) : ok ? (
+            t("live.feed.timing", { ttft: fmtMs(r.ttft_ms), total: fmtMs(r.total_ms) })
+          ) : (
+            fmtMs(r.total_ms)
+          )}
+        </div>
       </div>
       {expanded && (
         <div className="more" onClick={(e) => e.stopPropagation()}>
@@ -297,4 +308,17 @@ export function PurposeChips<F extends string>(props: {
       ))}
     </div>
   );
+}
+
+/** 网络耗时超过这个值时, 行尾的「首字」换成高亮的「网络」(列宽放不下三项) */
+const SLOW_NETWORK_MS = 500;
+
+function slowNetwork(r: RequestSummary): boolean {
+  return r.network_ms != null && r.network_ms >= SLOW_NETWORK_MS;
+}
+
+function timingTitle(r: RequestSummary, t: TFunction): string {
+  const parts = [t("live.feed.timing", { ttft: fmtMs(r.ttft_ms), total: fmtMs(r.total_ms) })];
+  if (r.network_ms != null) parts.push(t("live.feed.network", { s: fmtMs(r.network_ms) }));
+  return parts.join(" · ");
 }

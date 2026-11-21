@@ -352,6 +352,7 @@ pub fn log_entry(
         upstream_effort: None,
         tool_calls: ToolLogFields::empty(),
         headers: ctx.header_log(),
+        net: ctx.net_log(),
     }
 }
 
@@ -384,8 +385,9 @@ impl AttemptSink for LiveSink<'_> {
                     &[api_key.as_str()],
                 ),
                 response: None,
+                net: None,
             };
-            let result = upstream::send(
+            let (result, net) = upstream::send_timed(
                 &self.state.http_client,
                 &c.outbound.url,
                 c.outbound.body.to_vec(),
@@ -393,6 +395,7 @@ impl AttemptSink for LiveSink<'_> {
                 false,
             )
             .await;
+            self.capture.net = Some(net);
             if let Ok(resp) = &result {
                 self.capture.response = crate::proxy::header_log::serialize(resp.headers(), self.ctx.log_headers);
             }
@@ -431,6 +434,7 @@ impl AttemptSink for LiveSink<'_> {
                 std::mem::take(&mut self.capture),
                 &hints,
                 &axum::http::HeaderMap::new(),
+                self.start,
             );
             let _ = self.state.request_log_tx.try_send(log_entry(c, r, retry_count, &attempt_ctx, latency));
         })

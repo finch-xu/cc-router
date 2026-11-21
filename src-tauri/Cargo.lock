@@ -826,6 +826,7 @@ dependencies = [
  "futures",
  "getrandom 0.4.3",
  "hyper",
+ "hyper-util",
  "if-addrs",
  "jsonschema",
  "once_cell",

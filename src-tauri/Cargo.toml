@@ -51,6 +51,8 @@ serde_yaml = "0.9.34"
 tokio = { version = "1.54.1", features = ["full"] }
 axum = { version = "0.8.9", features = ["http2", "macros"] }
 tower = "0.5.3"
+# 只为读连接的本地 / 对端地址 (HttpInfo) 做请求日志的网络耗时; 已是 reqwest 的传递依赖, 版本与之一致
+hyper-util = { version = "0.1.21", features = ["client-legacy", "tokio"] }
 hyper = { version = "1.12.0", features = ["full"] }
 bytes = "1.12.2"
 # 证书导出打包 (pem + crt); 与 tauri-plugin-updater 同版本, 不新增依赖副本

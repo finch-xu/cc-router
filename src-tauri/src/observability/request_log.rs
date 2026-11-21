@@ -174,6 +174,8 @@ pub struct RequestLogEntry {
     pub tool_calls: ToolLogFields,
     /// 三组请求头 (proxy/header_log.rs), 纯观测, 拿不到就是 None。
     pub headers: HeaderLogFields,
+    /// 网络耗时 (proxy/net_timing.rs), 纯观测。无 `Default`: 构造点照抄 `net: ctx.net_log()`。
+    pub net: crate::proxy::net_timing::NetTimingFields,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -452,9 +454,12 @@ pub(crate) async fn flush_batch(
                 stop_reason, tools_offered_count, tool_result_count, tool_use_count, tool_use_names,
                 client_request_headers, upstream_request_headers, upstream_response_headers,
                 purpose_kind, purpose_guessed, purpose_turn, purpose_step, purpose_prev_tools,
-                session_client, session_id, trace_id)
+                session_client, session_id, trace_id,
+                net_prep_ms, net_dns_ms, net_connect_ms, net_headers_ms,
+                net_conn_reused, net_via_proxy, net_remote_addr, net_upstream_stream)
              VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
-                     ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                     ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
+                     ?, ?, ?, ?, ?, ?, ?, ?)",
         )
         .bind(entry.id.to_string())
         .bind(entry.timestamp_ms)
@@ -503,6 +508,14 @@ pub(crate) async fn flush_batch(
         .bind(entry.monitor_session.as_ref().map(|(c, _)| c.name()))
         .bind(entry.monitor_session.map(|(_, id)| id))
         .bind(entry.trace_id)
+        .bind(entry.net.prep_ms.map(|v| v as i64))
+        .bind(entry.net.dns_ms.map(|v| v as i64))
+        .bind(entry.net.connect_ms.map(|v| v as i64))
+        .bind(entry.net.headers_ms.map(|v| v as i64))
+        .bind(entry.net.conn_reused.map(i64::from))
+        .bind(entry.net.via_proxy.map(i64::from))
+        .bind(entry.net.remote_addr)
+        .bind(entry.net.upstream_stream.map(i64::from))
         .execute(&mut *tx)
         .await;
         if let Err(e) = result {
@@ -693,6 +706,7 @@ mod tests {
             upstream_effort: None,
             tool_calls: crate::proxy::tool_log::ToolLogFields::empty(),
             headers: crate::proxy::header_log::HeaderLogFields::none(),
+            net: crate::proxy::net_timing::NetTimingFields::none(),
         }
     }
 
@@ -739,10 +753,23 @@ mod tests {
             step: Some(3),
             prev_tools: vec!["Grep".into(), "Glob".into()],
         };
+        entry.net = crate::proxy::net_timing::NetTimingFields {
+            prep_ms: Some(4),
+            dns_ms: Some(30),
+            connect_ms: Some(180),
+            headers_ms: Some(260),
+            conn_reused: Some(false),
+            via_proxy: Some(false),
+            remote_addr: Some("1.2.3.4:443".into()),
+            upstream_stream: Some(true),
+        };
+        let net = entry.net.clone();
         let live = from_entry(&entry, None);
+        assert_eq!(live.network_ms, Some(260));
         flush_batch(&pool, vec![entry], vec![]).await.unwrap();
         let sql = format!("SELECT {SUMMARY_COLUMNS} FROM requests");
         let row = sqlx::query(sqlx::AssertSqlSafe(sql.as_str())).fetch_one(&pool).await.unwrap();
+        assert_eq!(crate::proxy::net_timing::NetTimingFields::from_row(&row), net);
         let stored = from_row(&row, &Default::default());
         assert_eq!(serde_json::to_value(&stored).unwrap(), serde_json::to_value(&live).unwrap());
         assert_eq!(stored.purpose.as_ref().map(|p| p.kind), Some(PurposeKind::Agent));
