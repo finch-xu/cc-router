@@ -1,13 +1,9 @@
-//! 从请求 headers 识别客户端工具 (Claude Code / Claude Desktop / Codex CLI / Zed / Cursor /
-//! OpenCode / Anthropic SDK / cc-router 转发 / 未识别).
+//! 从入站请求头识别客户端工具、SDK、HTTP 库和浏览器。
 //!
 //! 设计:
 //! - 纯函数, 无 IO 无 async, 便于单测
-//! - 按优先级顺序匹配, 强信号 (`x-app`, `x-stainless-lang`) 优先于 UA substring
+//! - 专用客户端优先，其次是有品牌标记的 SDK、HTTP 库或运行时、脚本声明，最后是浏览器
 //! - 未识别时 `tool=None`, 仍保留原始 UA 供前端展示和日后规则升级
-//!
-//! 待实测验证: 当前规则基于公开资料和推测, 必须在本地起服务用真实工具发请求,
-//! 把抓到的 UA 沉淀进单测 fixture 防回归.
 //!
 //! `SUPPORTED_TOOLS` 中的取值必须和前端 `src/types.ts::ClientToolId` union 手工同步.
 
@@ -43,6 +39,78 @@ pub const SUPPORTED_TOOLS: &[&str] = &[
     "opencode",
     "anthropic-sdk-python",
     "anthropic-sdk-js",
+    "openai-sdk-python",
+    "openai-sdk-js",
+    "python-requests",
+    "python-httpx",
+    "axios",
+    "node-js",
+    "curl",
+    "browser",
+    "go-net-http",
+    "go-resty",
+    "rust-ureq",
+    "rust-reqwest",
+    "rust-hyper",
+    "python-urllib",
+    "python-aiohttp",
+    "bun",
+    "deno",
+    "java-http-client",
+    "okhttp",
+    "apache-http-client",
+    "powershell",
+    "guzzle",
+    "faraday",
+    "httpie",
+    "wget",
+    "script-go",
+    "script-rust",
+    "script-python",
+    "script-javascript",
+    "script-typescript",
+    "script-java",
+    "script-dotnet",
+    "script-php",
+    "script-ruby",
+];
+
+/// 成对登记分隔符 `/` 前的完整产品名和用于日志的客户端标签。
+const HTTP_PRODUCTS: &[(&str, &str)] = &[
+    ("python-requests", "python-requests"),
+    ("python-httpx", "python-httpx"),
+    ("python-urllib", "python-urllib"),
+    ("aiohttp", "python-aiohttp"),
+    ("axios", "axios"),
+    ("bun", "bun"),
+    ("deno", "deno"),
+    ("go-http-client", "go-net-http"),
+    ("go-resty", "go-resty"),
+    ("ureq", "rust-ureq"),
+    ("reqwest", "rust-reqwest"),
+    ("hyper", "rust-hyper"),
+    ("java-http-client", "java-http-client"),
+    ("okhttp", "okhttp"),
+    ("apache-httpclient", "apache-http-client"),
+    ("powershell", "powershell"),
+    ("windowspowershell", "powershell"),
+    ("guzzlehttp", "guzzle"),
+    ("httpie", "httpie"),
+    ("wget", "wget"),
+    ("curl", "curl"),
+];
+
+/// 客户端主动声明的语言。值只用于本地观测；转发策略已拒绝 `x-ccr-*`。
+const SCRIPT_LANGUAGES: &[(&str, &str)] = &[
+    ("go", "script-go"),
+    ("rust", "script-rust"),
+    ("python", "script-python"),
+    ("javascript", "script-javascript"),
+    ("typescript", "script-typescript"),
+    ("java", "script-java"),
+    ("dotnet", "script-dotnet"),
+    ("php", "script-php"),
+    ("ruby", "script-ruby"),
 ];
 
 /// 识别结果. `tool=None` 表示未识别 (前端展示 "unk").
@@ -183,16 +251,7 @@ pub fn identify(headers: &HeaderMap) -> ClientInfo {
     let user_agent = header_str(headers, "user-agent")
         .map(String::from)
         .map(truncate_ua);
-    let x_app = header_str(headers, "x-app").map(|s| s.to_ascii_lowercase());
-    let x_stainless_lang = header_str(headers, "x-stainless-lang").map(|s| s.to_ascii_lowercase());
-    let x_stainless_pkg_ver = header_str(headers, "x-stainless-package-version").map(String::from);
-
-    let (tool, version) = classify(
-        user_agent.as_deref(),
-        x_app.as_deref(),
-        x_stainless_lang.as_deref(),
-        x_stainless_pkg_ver.as_deref(),
-    );
+    let (tool, version) = classify(user_agent.as_deref(), headers);
 
     ClientInfo {
         tool,
@@ -205,19 +264,12 @@ fn header_str<'a>(headers: &'a HeaderMap, name: &str) -> Option<&'a str> {
     headers.get(name).and_then(|v| v.to_str().ok())
 }
 
-/// 把 UA / x-app / x-stainless-* 分类成 (tool, version).
-/// 抽成纯函数方便单测 (无须构造 HeaderMap).
-fn classify(
-    ua: Option<&str>,
-    x_app: Option<&str>,
-    x_stainless_lang: Option<&str>,
-    x_stainless_pkg_ver: Option<&str>,
-) -> (Option<&'static str>, Option<String>) {
-    let ua_lower = ua.map(|s| s.to_ascii_lowercase());
-    let ua_lower_ref = ua_lower.as_deref();
+/// 按入站请求头返回 (tool, version).
+fn classify(ua: Option<&str>, headers: &HeaderMap) -> (Option<&'static str>, Option<String>) {
+    let ua_lower = ua.unwrap_or_default().to_ascii_lowercase();
 
     // 1. x-app: cli → Claude Code (强信号, Anthropic Claude Code CLI 私有 header)
-    if matches!(x_app, Some("cli")) {
+    if header_str(headers, "x-app").is_some_and(|app| app.eq_ignore_ascii_case("cli")) {
         let ver = ua
             .and_then(|u| extract_version_after(u, "claude-cli/"))
             .or_else(|| ua.and_then(|u| extract_version_after(u, "claude-code/")));
@@ -225,35 +277,35 @@ fn classify(
     }
 
     // 2. UA 含 claude-cli/ → Claude Code (兜底, x-app 缺失场景)
-    if ua_lower_ref.is_some_and(|u| u.contains("claude-cli/")) {
+    if ua_lower.contains("claude-cli/") {
         let ver = ua.and_then(|u| extract_version_after(u, "claude-cli/"));
         return (Some("claude-code"), ver);
     }
-    if ua_lower_ref.is_some_and(|u| u.contains("claude-code/")) {
+    if ua_lower.contains("claude-code/") {
         let ver = ua.and_then(|u| extract_version_after(u, "claude-code/"));
         return (Some("claude-code"), ver);
     }
 
     // 3. cc-router 转发 (优先于 codex_cli_rs, 因为 cc-router 自己的 codex 上游 UA 同时含两者)
-    if ua_lower_ref.is_some_and(|u| u.contains("cc-router/")) {
+    if ua_lower.contains("cc-router/") {
         let ver = ua.and_then(|u| extract_version_after(u, "cc-router/"));
         return (Some("cc-router"), ver);
     }
 
     // 4. UA 含 codex_cli_rs/ → Codex CLI (OpenAI 官方 Rust CLI 旧 UA)
-    if ua_lower_ref.is_some_and(|u| u.contains("codex_cli_rs/")) {
+    if ua_lower.contains("codex_cli_rs/") {
         let ver = ua.and_then(|u| extract_version_after(u, "codex_cli_rs/"));
         return (Some("codex-cli"), ver);
     }
 
     // 4b. UA 含 codex-tui/ → Codex CLI 新 frontend (ghostty 引擎, 与 codex_cli_rs 同源)
-    if ua_lower_ref.is_some_and(|u| u.contains("codex-tui/")) {
+    if ua_lower.contains("codex-tui/") {
         let ver = ua.and_then(|u| extract_version_after(u, "codex-tui/"));
         return (Some("codex-cli"), ver);
     }
 
     // 4c. UA 含 "codex desktop/" → Codex Desktop 桌面客户端 (独立标识便于统计区分)
-    if ua_lower_ref.is_some_and(|u| u.contains("codex desktop/")) {
+    if ua_lower.contains("codex desktop/") {
         let ver = ua.and_then(|u| {
             extract_version_after(u, "Codex Desktop/")
                 .or_else(|| extract_version_after(u, "codex desktop/"))
@@ -262,7 +314,7 @@ fn classify(
     }
 
     // 5. Zed 编辑器
-    if ua_lower_ref.is_some_and(|u| u.contains("zed/") || u.starts_with("zed ")) {
+    if ua_lower.contains("zed/") || ua_lower.starts_with("zed ") {
         let ver = ua.and_then(|u| {
             extract_version_after(u, "Zed/").or_else(|| extract_version_after(u, "zed/"))
         });
@@ -270,7 +322,7 @@ fn classify(
     }
 
     // 6. OpenCode
-    if ua_lower_ref.is_some_and(|u| u.contains("opencode/")) {
+    if ua_lower.contains("opencode/") {
         let ver = ua.and_then(|u| {
             extract_version_after(u, "OpenCode/").or_else(|| extract_version_after(u, "opencode/"))
         });
@@ -278,7 +330,7 @@ fn classify(
     }
 
     // 7. Cursor 编辑器
-    if ua_lower_ref.is_some_and(|u| u.contains("cursor/")) {
+    if ua_lower.contains("cursor/") {
         let ver = ua.and_then(|u| {
             extract_version_after(u, "Cursor/").or_else(|| extract_version_after(u, "cursor/"))
         });
@@ -286,7 +338,7 @@ fn classify(
     }
 
     // 8. Claude Desktop (待实测确认; Desktop 当前未必走第三方 endpoint)
-    if ua_lower_ref.is_some_and(|u| u.contains("claude-desktop/") || u.contains("claude/")) {
+    if ua_lower.contains("claude-desktop/") || ua_lower.contains("claude/") {
         let ver = ua.and_then(|u| {
             extract_version_after(u, "Claude-Desktop/")
                 .or_else(|| extract_version_after(u, "claude-desktop/"))
@@ -295,35 +347,153 @@ fn classify(
         return (Some("claude-desktop"), ver);
     }
 
-    // 9. Anthropic SDK (按 stainless 语言判定)
-    if matches!(x_stainless_lang, Some("python")) {
-        return (
-            Some("anthropic-sdk-python"),
-            x_stainless_pkg_ver.map(String::from),
-        );
+    let product = ua_lower.split_ascii_whitespace().next().unwrap_or_default();
+    let mut ua_tokens = ua.unwrap_or_default().split_ascii_whitespace();
+    let original_product = ua_tokens.next().unwrap_or_default();
+
+    // 9. 厂商 SDK 的 UA 包含品牌和语言。Stainless 的语言头由多个厂商共用。
+    let sdk = match product {
+        "anthropic/python" | "asyncanthropic/python" => Some("anthropic-sdk-python"),
+        "anthropic/js" | "@anthropic-ai/sdk" => Some("anthropic-sdk-js"),
+        "openai/python" | "asyncopenai/python" => Some("openai-sdk-python"),
+        "openai/js" => Some("openai-sdk-js"),
+        _ if product.starts_with("@anthropic-ai/sdk/") => Some("anthropic-sdk-js"),
+        _ => None,
+    };
+    if let Some(tool) = sdk {
+        let version = header_str(headers, "x-stainless-package-version")
+            .and_then(parse_version)
+            .or_else(|| {
+                if product.starts_with("@anthropic-ai/sdk/") {
+                    parse_version(&original_product["@anthropic-ai/sdk/".len()..])
+                } else {
+                    ua_tokens.next().and_then(parse_version)
+                }
+            });
+        return (Some(tool), version);
     }
-    if matches!(x_stainless_lang, Some("js"))
-        || ua_lower_ref.is_some_and(|u| u.contains("@anthropic-ai/sdk"))
-    {
-        let ver = x_stainless_pkg_ver
-            .map(String::from)
-            .or_else(|| ua.and_then(|u| extract_version_after(u, "@anthropic-ai/sdk/")));
-        return (Some("anthropic-sdk-js"), ver);
+
+    if let Some((tool, version)) = ua.and_then(identify_http_product) {
+        return (Some(tool), version);
+    }
+
+    if let Some(tool) = declared_script(headers) {
+        return (Some(tool), None);
+    }
+
+    if is_browser(&ua_lower, headers) {
+        return (Some("browser"), None);
     }
 
     (None, None)
+}
+
+fn identify_http_product(ua: &str) -> Option<(&'static str, Option<String>)> {
+    let mut products = ua.split_ascii_whitespace();
+    let first = products.next()?;
+    if first.eq_ignore_ascii_case("faraday") {
+        // Faraday 默认发送 `Faraday v<version>`。
+        let version = products.next()?.strip_prefix(['v', 'V'])?;
+        return Some(("faraday", Some(parse_version(version)?)));
+    }
+
+    let (first_name, _) = first.split_once('/').unwrap_or((first, ""));
+    // aiohttp 和 PowerShell 的默认 UA 分别带 Python 和 Mozilla 前缀。
+    let product = if first_name.eq_ignore_ascii_case("python") {
+        products
+            .next()
+            .filter(|token| has_product_name(token, "aiohttp"))?
+    } else if first.eq_ignore_ascii_case("mozilla/5.0") {
+        products.find(|token| {
+            has_product_name(token, "powershell") || has_product_name(token, "windowspowershell")
+        })?
+    } else {
+        first
+    };
+
+    let (name, suffix) = product.split_once('/').unwrap_or((product, ""));
+    if name.eq_ignore_ascii_case("node") {
+        return Some(("node-js", parse_version(suffix)));
+    }
+    if name.eq_ignore_ascii_case("undici") {
+        // 这里的版本属于 HTTP 库。
+        return Some(("node-js", None));
+    }
+    if suffix.is_empty() {
+        return None;
+    }
+    let tool = HTTP_PRODUCTS
+        .iter()
+        .find_map(|&(product, tool)| name.eq_ignore_ascii_case(product).then_some(tool))?;
+    // Go-http-client 的后缀是 HTTP 版本。
+    let version = if tool == "go-net-http" {
+        None
+    } else {
+        parse_version(suffix)
+    };
+    Some((tool, version))
+}
+
+fn has_product_name(token: &str, name: &str) -> bool {
+    token
+        .split_once('/')
+        .is_some_and(|(product, _)| product.eq_ignore_ascii_case(name))
+}
+
+fn declared_script(headers: &HeaderMap) -> Option<&'static str> {
+    let values = headers.get_all("x-ccr-client");
+    let mut values = values.iter();
+    let value = values.next()?.to_str().ok()?.trim();
+    if values.next().is_some() {
+        return None;
+    }
+    SCRIPT_LANGUAGES
+        .iter()
+        .find_map(|&(language, tool)| value.eq_ignore_ascii_case(language).then_some(tool))
+}
+
+fn is_browser(ua: &str, headers: &HeaderMap) -> bool {
+    let has_client_hint =
+        header_str(headers, "sec-ch-ua").is_some_and(|value| value.trim_start().starts_with('"'));
+    // Node.js fetch 也会发 Sec-Fetch-Mode，所以同时要求浏览器的站点上下文。
+    let has_fetch_metadata = matches!(
+        header_str(headers, "sec-fetch-site"),
+        Some("same-origin" | "same-site" | "cross-site" | "none")
+    ) && matches!(
+        header_str(headers, "sec-fetch-mode"),
+        Some("cors" | "no-cors" | "same-origin" | "navigate" | "websocket")
+    );
+    has_client_hint
+        || has_fetch_metadata
+        || (ua.starts_with("mozilla/5.0 ")
+            && (ua.split_ascii_whitespace().any(|token| {
+                [
+                    "chrome/",
+                    "chromium/",
+                    "crios/",
+                    "headlesschrome/",
+                    "firefox/",
+                    "fxios/",
+                    "edgios/",
+                ]
+                .iter()
+                .any(|brand| token.starts_with(brand))
+            }) || (ua.contains(" version/") && ua.contains(" safari/"))))
 }
 
 /// 从 UA 字符串里找 `marker` 后紧跟的版本号 token (到第一个空格/分号/括号/逗号/制表符前为止).
 /// 返回值仅在看起来像版本号 (首字符是数字) 时才有效, 否则 None.
 fn extract_version_after(ua: &str, marker: &str) -> Option<String> {
     let idx = ua.find(marker)?;
-    let rest = &ua[idx + marker.len()..];
-    let end = rest
+    parse_version(&ua[idx + marker.len()..])
+}
+
+fn parse_version(value: &str) -> Option<String> {
+    let end = value
         .find(|c: char| c.is_whitespace() || matches!(c, ';' | '(' | ')' | ',' | '\t'))
-        .unwrap_or(rest.len());
-    let token = rest[..end].trim_end_matches('/');
-    if token.is_empty() || !token.chars().next().is_some_and(|c| c.is_ascii_digit()) {
+        .unwrap_or(value.len());
+    let token = value[..end].trim_end_matches('/');
+    if !token.starts_with(|c: char| c.is_ascii_digit()) {
         None
     } else {
         Some(token.to_string())
@@ -457,11 +627,201 @@ mod tests {
     }
 
     #[test]
-    fn unknown_random_curl() {
-        let info = identify(&h(&[("user-agent", "curl/7.81.0")]));
-        assert_eq!(info.tool, None);
-        assert_eq!(info.user_agent.as_deref(), Some("curl/7.81.0"));
+    fn recognizes_http_libraries_from_their_product_tokens() {
+        for (ua, tool, version) in [
+            ("python-requests/2.34.2", "python-requests", "2.34.2"),
+            ("python-httpx/0.28.1", "python-httpx", "0.28.1"),
+            ("axios/1.21.1", "axios", "1.21.1"),
+            ("curl/8.18.0", "curl", "8.18.0"),
+        ] {
+            let info = identify(&h(&[("user-agent", ua)]));
+            assert_eq!(info.tool, Some(tool), "{ua}");
+            assert_eq!(info.user_agent.as_deref(), Some(ua));
+            assert_eq!(info.version.as_deref(), Some(version), "{ua}");
+        }
+    }
+
+    #[test]
+    fn node_fetch_is_not_a_browser() {
+        let info = identify(&h(&[("user-agent", "node"), ("sec-fetch-mode", "cors")]));
+        assert_eq!(info.tool, Some("node-js"));
         assert_eq!(info.version, None);
+        let info = identify(&h(&[("user-agent", "undici")]));
+        assert_eq!(info.tool, Some("node-js"));
+        assert_eq!(info.version, None);
+    }
+
+    #[test]
+    fn recognizes_additional_script_clients() {
+        for (ua, tool, version) in [
+            ("Go-http-client/1.1", "go-net-http", None),
+            ("Go-http-client/2.0", "go-net-http", None),
+            (
+                "go-resty/2.17.2 (https://github.com/go-resty/resty)",
+                "go-resty",
+                Some("2.17.2"),
+            ),
+            ("ureq/3.5.2", "rust-ureq", Some("3.5.2")),
+            ("reqwest/0.13.5", "rust-reqwest", Some("0.13.5")),
+            ("hyper/1.7.0", "rust-hyper", Some("1.7.0")),
+            ("Python-urllib/3.14", "python-urllib", Some("3.14")),
+            (
+                "Python/3.14 aiohttp/3.14.5",
+                "python-aiohttp",
+                Some("3.14.5"),
+            ),
+            ("Bun/1.3.14", "bun", Some("1.3.14")),
+            ("Deno/2.9.6", "deno", Some("2.9.6")),
+            (
+                "Java-http-client/21.0.13.1",
+                "java-http-client",
+                Some("21.0.13.1"),
+            ),
+            ("okhttp/3.13.1", "okhttp", Some("3.13.1")),
+            (
+                "Apache-HttpClient/4.5.14 (Java/21.0.13.1)",
+                "apache-http-client",
+                Some("4.5.14"),
+            ),
+            (
+                "Mozilla/5.0 (Linux; Ubuntu 26.04.1 LTS; ) PowerShell/7.7.0",
+                "powershell",
+                Some("7.7.0"),
+            ),
+            (
+                "Mozilla/5.0 (Windows NT; Windows NT 6.1; en-US) WindowsPowerShell/3.0",
+                "powershell",
+                Some("3.0"),
+            ),
+            ("GuzzleHttp/7", "guzzle", Some("7")),
+            ("Faraday v2.14.1", "faraday", Some("2.14.1")),
+            ("HTTPie/3.2.4", "httpie", Some("3.2.4")),
+            ("Wget/1.25.0", "wget", Some("1.25.0")),
+        ] {
+            let info = identify(&h(&[("user-agent", ua)]));
+            assert_eq!(info.tool, Some(tool), "{ua}");
+            assert_eq!(info.version.as_deref(), version, "{ua}");
+            assert!(SUPPORTED_TOOLS.contains(&tool));
+        }
+    }
+
+    #[test]
+    fn accepts_only_supported_script_declarations() {
+        for (value, expected) in [
+            ("go", "script-go"),
+            (" Rust ", "script-rust"),
+            ("python", "script-python"),
+            ("javascript", "script-javascript"),
+            ("typescript", "script-typescript"),
+            ("java", "script-java"),
+            ("dotnet", "script-dotnet"),
+            ("php", "script-php"),
+            ("ruby", "script-ruby"),
+        ] {
+            let info = identify(&h(&[("x-ccr-client", value)]));
+            assert_eq!(info.tool, Some(expected), "{value}");
+            assert_eq!(info.version, None);
+            assert!(SUPPORTED_TOOLS.contains(&expected));
+        }
+        for value in ["", "my-job", "rust, go", "rust/1.0", "claude-code"] {
+            assert_eq!(identify(&h(&[("x-ccr-client", value)])).tool, None);
+        }
+        let mut duplicate = h(&[("x-ccr-client", "rust")]);
+        duplicate.append("x-ccr-client", "go".parse().unwrap());
+        assert_eq!(identify(&duplicate).tool, None);
+    }
+
+    #[test]
+    fn script_declaration_only_overrides_browser_fallback() {
+        for (ua, tool) in [
+            ("claude-code/2.3.1", "claude-code"),
+            ("OpenAI/JS 7.62.0", "openai-sdk-js"),
+            ("ureq/3.5.2", "rust-ureq"),
+            (
+                "Mozilla/5.0 (X11; Linux x86_64) Gecko/20100101 Firefox/132.0",
+                "script-rust",
+            ),
+        ] {
+            let info = identify(&h(&[("user-agent", ua), ("x-ccr-client", "rust")]));
+            assert_eq!(info.tool, Some(tool), "{ua}");
+        }
+    }
+
+    #[test]
+    fn recognizes_browser_metadata_and_legacy_user_agents() {
+        for headers in [
+            h(&[("sec-ch-ua", "\"HeadlessChrome\";v=\"159\", \"Not/A)Brand\";v=\"8\", \"Chromium\";v=\"159\"")]),
+            h(&[("sec-fetch-site", "same-origin"), ("sec-fetch-mode", "cors")]),
+            h(&[("user-agent", "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/159.0.8154.6 Safari/537.36")]),
+            h(&[("user-agent", "Mozilla/5.0 (X11; Linux x86_64) Gecko/20100101 Firefox/132.0")]),
+            h(&[("user-agent", "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.1 Safari/605.1.15")]),
+        ] {
+            let info = identify(&headers);
+            assert_eq!(info.tool, Some("browser"));
+            assert_eq!(info.version, None);
+        }
+    }
+
+    #[test]
+    fn branded_sdk_takes_precedence_over_generic_headers() {
+        for (ua, lang, tool, version) in [
+            (
+                "OpenAI/Python 3.57.0",
+                "python",
+                "openai-sdk-python",
+                "3.57.0",
+            ),
+            (
+                "AsyncOpenAI/Python 3.57.0",
+                "python",
+                "openai-sdk-python",
+                "3.57.0",
+            ),
+            ("OpenAI/JS 7.62.0", "js", "openai-sdk-js", "7.62.0"),
+            ("Anthropic/JS 1.12.0", "js", "anthropic-sdk-js", "1.12.0"),
+            (
+                "AsyncAnthropic/Python 2.12.0",
+                "python",
+                "anthropic-sdk-python",
+                "2.12.0",
+            ),
+        ] {
+            let info = identify(&h(&[
+                ("user-agent", ua),
+                ("x-stainless-lang", lang),
+                ("sec-fetch-site", "same-origin"),
+                ("sec-fetch-mode", "cors"),
+            ]));
+            assert_eq!(info.tool, Some(tool), "{ua}");
+            assert_eq!(info.version.as_deref(), Some(version), "{ua}");
+        }
+    }
+
+    #[test]
+    fn generic_signals_do_not_guess_the_client() {
+        for headers in [
+            h(&[("x-stainless-lang", "python")]),
+            h(&[("x-stainless-lang", "js")]),
+            h(&[("sec-fetch-mode", "cors")]),
+            h(&[("user-agent", "Mozilla/5.0 (compatible; MyCrawler/1.0)")]),
+            h(&[
+                ("user-agent", "my-curl/1.0"),
+                ("origin", "https://example.com"),
+            ]),
+        ] {
+            assert_eq!(identify(&headers).tool, None, "{headers:?}");
+        }
+    }
+
+    #[test]
+    fn known_app_takes_precedence_over_generic_signals() {
+        let info = identify(&h(&[
+            ("user-agent", "OpenAI/JS 7.62.0"),
+            ("x-app", "cli"),
+            ("sec-fetch-site", "same-origin"),
+            ("sec-fetch-mode", "cors"),
+        ]));
+        assert_eq!(info.tool, Some("claude-code"));
     }
 
     #[test]
@@ -518,7 +878,7 @@ mod tests {
         // 防呆: 若新增 classify 返回值忘记加进 SUPPORTED_TOOLS, 这条不会失败 (静态保证不了),
         // 但可以反向校验 SUPPORTED_TOOLS 里每个值至少有一个 fixture 能命中——靠人工或独立 lint 工具.
         // 这里仅断言常量数量, 改动时 force review.
-        assert_eq!(SUPPORTED_TOOLS.len(), 10);
+        assert_eq!(SUPPORTED_TOOLS.len(), 44);
     }
 
     #[test]
