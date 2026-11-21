@@ -6062,6 +6062,7 @@ fn base_log(id: &str, sub_id: &str, vm: &str, status: RequestStatus, ts: i64) ->
         tool_result_count: None,
         tool_use_count: None,
         tool_use_names: None,
+        net: Default::default(),
     }
 }
 

@@ -309,6 +309,10 @@ impl HeaderLogFields {
 pub struct UpstreamHeaderCapture {
     pub request: Option<OutboundCapture>,
     pub response: Option<String>,
+    /// Network timing of the send (`upstream::send_timed`). Rides along with the headers
+    /// because every send point already hands this struct to the attempt's log context.
+    /// Recorded even when header logging is off.
+    pub net: Option<crate::proxy::net_timing::NetTiming>,
 }
 
 #[cfg(test)]

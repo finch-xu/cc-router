@@ -894,6 +894,26 @@ export interface RequestLogDto {
   tool_use_names?: string | null;
   /** 与实时路由同形的摘要 (同一套口径) */
   summary: RequestSummary;
+  /** 网络耗时分段 (proxy/net_timing.rs); 老日志各字段为 null */
+  net: NetTiming;
+}
+
+/**
+ * 一次上游尝试的网络耗时 (proxy/net_timing.rs::NetTimingFields), 毫秒都相对本次尝试起点。
+ * dns_ms / connect_ms 只在本次新建连接时有值 (connect = TCP + TLS)。
+ */
+export interface NetTiming {
+  /** 起点 → 交给 HTTP 客户端 (鉴权 / OAuth 刷新 / 协议翻译) */
+  prep_ms: number | null;
+  dns_ms: number | null;
+  connect_ms: number | null;
+  /** 起点 → 收到上游响应头 */
+  headers_ms: number | null;
+  conn_reused: boolean | null;
+  via_proxy: boolean | null;
+  remote_addr: string | null;
+  /** 上游是否流式: 非流式上游要生成完才回响应头 */
+  upstream_stream: boolean | null;
 }
 
 /** get_request_detail: 一条请求 + 同一次入站请求的全部尝试 (按时间正序, 含本条) */
@@ -1201,6 +1221,8 @@ export interface RequestSummary {
   http_status: number | null;
   ttft_ms: number | null;
   total_ms: number | null;
+  /** 网络耗时小计 (NetTimingFields::network_ms); 老记录为 null */
+  network_ms: number | null;
   /** 未命中缓存的输入 (已按协议归一, 不含缓存读写) */
   input_tokens: number;
   output_tokens: number;

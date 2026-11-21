@@ -72,6 +72,8 @@ pub struct RequestLogDto {
     /// 与实时路由同形的摘要 (用途 / 会话 / 归一后的 token / 尝试归组), 列表行与实时事件行共用。
     /// 由 [`live_feed::from_row`] 生成, 口径与 `live_request` 事件完全一致。
     pub summary: RequestSummary,
+    /// 网络耗时分段 (proxy/net_timing.rs), 详情页耗时条用; 老日志各字段为 null。
+    pub net: crate::proxy::net_timing::NetTimingFields,
 }
 
 #[derive(Debug, Serialize)]
@@ -236,6 +238,7 @@ fn dto_from_row(r: &sqlx::sqlite::SqliteRow, auth: &HashMap<String, AuthType>) -
         tool_use_count: r.try_get("tool_use_count").ok(),
         tool_use_names: r.try_get("tool_use_names").ok(),
         summary: live_feed::from_row(r, auth),
+        net: crate::proxy::net_timing::NetTimingFields::from_row(r),
     }
 }
 

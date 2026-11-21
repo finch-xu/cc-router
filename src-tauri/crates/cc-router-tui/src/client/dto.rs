@@ -535,6 +535,28 @@ impl RequestStatus {
     }
 }
 
+/// 一次 attempt 的网络耗时 (后端 `proxy::net_timing::NetTimingFields`), 毫秒都相对 attempt 起点。
+/// `dns_ms` / `connect_ms` 只在新建连接时有值。
+#[derive(Debug, Clone, Default, Deserialize, PartialEq, Eq)]
+pub struct NetTiming {
+    #[serde(default)]
+    pub prep_ms: Option<i64>,
+    #[serde(default)]
+    pub dns_ms: Option<i64>,
+    #[serde(default)]
+    pub connect_ms: Option<i64>,
+    #[serde(default)]
+    pub headers_ms: Option<i64>,
+    #[serde(default)]
+    pub conn_reused: Option<bool>,
+    #[serde(default)]
+    pub via_proxy: Option<bool>,
+    #[serde(default)]
+    pub remote_addr: Option<String>,
+    #[serde(default)]
+    pub upstream_stream: Option<bool>,
+}
+
 /// `list_requests` 的一行。后端 `commands::requests::RequestLogDto` 的全部字段; `Option` 一律
 /// `#[serde(default)]`。
 #[derive(Debug, Clone, Deserialize, PartialEq, Eq)]
@@ -598,6 +620,9 @@ pub struct RequestLog {
     /// JSON 字符串数组 (可能以 `"…"` 结尾表示被截断), 原样保存, 由日志页解析。
     #[serde(default)]
     pub tool_use_names: Option<String>,
+    /// 网络耗时分段; 老版本后端没有这个字段 → 全 None。
+    #[serde(default)]
+    pub net: NetTiming,
 }
 
 #[derive(Debug, Clone, Deserialize, PartialEq, Eq)]

@@ -178,7 +178,8 @@ pub async fn dispatch_oauth_attempt(
 
     // 4. 发送 (强制 streaming 上游, 因为 ChatGPT 后端拒绝非流式)
     capture.request = crate::proxy::header_log::capture_untagged(&headers, log_headers, &[access_token.as_str()]);
-    let send_result = upstream::send(http_client, &url, body_bytes, headers, true).await;
+    let (send_result, net) = upstream::send_timed(http_client, &url, body_bytes, headers, true).await;
+    capture.net = Some(net);
 
     let upstream_response = match send_result {
         Ok(r) => {
@@ -531,6 +532,7 @@ fn finalize_streaming(
             upstream_effort: upstream_effort_echo,
             tool_calls: tool_tally.fields(&ctx.tools),
             headers: ctx.header_log(),
+            net: ctx.net_log(),
         };
         let _ = log_tx.try_send(entry);
     });
@@ -651,6 +653,7 @@ async fn collect_to_json_response(
             upstream_effort: upstream_effort_echo.clone(),
             tool_calls: ToolLogFields::request_only(&ctx.tools),
             headers: ctx.header_log(),
+            net: ctx.net_log(),
         };
         let _ = log_tx.try_send(entry);
         return (
@@ -739,6 +742,7 @@ async fn collect_to_json_response(
         upstream_effort: upstream_effort_echo.clone(),
         tool_calls,
         headers: ctx.header_log(),
+        net: ctx.net_log(),
     };
     let _ = log_tx.try_send(entry);
 
@@ -874,7 +878,8 @@ pub async fn dispatch_kiro_attempt(
 
     // 4. 发送 (Kiro 后端响应总是 Event Stream)
     capture.request = crate::proxy::header_log::capture_untagged(&headers, log_headers, &[access_token.as_str()]);
-    let send_result = upstream::send(http_client, &url, body_bytes, headers, true).await;
+    let (send_result, net) = upstream::send_timed(http_client, &url, body_bytes, headers, true).await;
+    capture.net = Some(net);
     let upstream_response = match send_result {
         Ok(r) => {
             capture.response = crate::proxy::header_log::serialize(r.headers(), log_headers);
@@ -1116,6 +1121,7 @@ fn finalize_kiro_streaming(
             upstream_effort: None,
             tool_calls: tool_tally.fields(&ctx.tools),
             headers: ctx.header_log(),
+            net: ctx.net_log(),
         };
         let _ = log_tx.try_send(entry);
     });
@@ -1242,6 +1248,7 @@ async fn collect_kiro_to_json_response(
         upstream_effort: None,
         tool_calls,
         headers: ctx.header_log(),
+        net: ctx.net_log(),
     };
     let _ = log_tx.try_send(entry);
 

@@ -284,6 +284,7 @@ mod tests {
             upstream_effort: None,
             tool_calls: crate::proxy::tool_log::ToolLogFields::empty(),
             headers: crate::proxy::header_log::HeaderLogFields::none(),
+            net: crate::proxy::net_timing::NetTimingFields::none(),
         }
     }
 

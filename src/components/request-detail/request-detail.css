@@ -86,10 +86,35 @@
 .rqd-note:first-child { margin-top: 0; }
 
 /* ---------- 耗时与 token ---------- */
+/* 一条耗时条: 网络段 (暖色) + 模型段 (等待灰 / 生成主色) + 失败段。--seg 同时给图例色点用 */
+.rqd-timing .s-prep { --seg: color-mix(in srgb, var(--ink-4) 32%, var(--surface)); }
+.rqd-timing .s-dns { --seg: color-mix(in srgb, var(--warn) 40%, var(--surface)); }
+.rqd-timing .s-connect { --seg: color-mix(in srgb, var(--warn) 62%, var(--surface)); }
+.rqd-timing .s-head,
+.rqd-timing .s-body { --seg: color-mix(in srgb, var(--warn) 24%, var(--surface)); }
+.rqd-timing .s-wait,
+.rqd-timing .s-pending,
+.rqd-timing .s-whole { --seg: var(--surface-3); }
+.rqd-timing .s-upstream { --seg: color-mix(in srgb, var(--accent) 10%, var(--surface)); }
+.rqd-timing .s-gen { --seg: color-mix(in srgb, var(--accent) 22%, var(--surface)); }
+.rqd-timing .s-fail { --seg: color-mix(in srgb, var(--err) 22%, var(--surface)); }
 .rqd-tbar { display: flex; height: 26px; border-radius: var(--r-md); overflow: hidden; background: var(--surface-3); font-size: 11.5px; }
-.rqd-tbar span { display: flex; align-items: center; padding: 0 8px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.rqd-tbar .wait { background: var(--surface-3); color: var(--ink-3); }
-.rqd-tbar .gen { background: color-mix(in srgb, var(--accent) 22%, var(--surface)); color: var(--ink); }
+/* flex-grow = 毫秒数; 再短的段也留 3px, 时长写在下面的图例里 */
+.rqd-tbar span {
+  display: flex; align-items: center; flex: 0 1 0; min-width: 3px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  background: var(--seg); color: var(--ink-3);
+}
+.rqd-tbar span + span { box-shadow: inset 1px 0 0 var(--surface); }
+.rqd-tbar span.lbl { padding: 0 8px; }
+.rqd-tbar .s-gen { color: var(--ink); }
+.rqd-tbar .s-fail { color: var(--err); }
+.rqd-tseg-list { display: grid; grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); gap: 8px; margin-top: 12px; }
+.rqd-tseg-list small { display: flex; align-items: center; gap: 6px; font-size: 11.5px; color: var(--ink-3); }
+.rqd-tseg-list small i { width: 9px; height: 9px; border-radius: 3px; flex: none; background: var(--seg); box-shadow: inset 0 0 0 1px var(--line); }
+.rqd-tseg-list b { font-weight: 600; font-variant-numeric: tabular-nums; color: var(--ink); }
+.rqd-tsum { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 14px; margin: 12px 0 0; font-size: 12.5px; color: var(--ink-2); }
+.rqd-tsum .pill.tag.warn { border-color: var(--warn); color: var(--warn); }
+.rqd-tremote { font-family: var(--font-mono); font-size: 11.5px; color: var(--ink-4); }
 .rqd-tlegend { display: flex; justify-content: space-between; margin-top: 5px; font-family: var(--font-mono); font-size: 11px; color: var(--ink-4); }
 .rqd-tok { margin-top: 16px; }
 .rqd-tok-bar { display: flex; height: 10px; border-radius: 5px; overflow: hidden; margin-bottom: 10px; gap: 1px; }

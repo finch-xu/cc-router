@@ -189,8 +189,8 @@ pub async fn dispatch_openai_responses_attempt(
 
     // 4. 发送请求
     capture.request = crate::proxy::header_log::capture_untagged(&headers, log_headers, &[api_key.as_str()]);
-    let send_result =
-        upstream::send(http_client, &url, body_bytes, headers, client_wants_streaming).await;
+    let (send_result, net) = upstream::send_timed(http_client, &url, body_bytes, headers, client_wants_streaming).await;
+    capture.net = Some(net);
     let upstream_response = match send_result {
         Ok(r) => {
             capture.response = crate::proxy::header_log::serialize(r.headers(), log_headers);
@@ -503,6 +503,7 @@ fn finalize_streaming(
             upstream_effort: upstream_effort_echo,
             tool_calls: tool_tally.fields(&ctx.tools),
             headers: ctx.header_log(),
+            net: ctx.net_log(),
         };
         let _ = log_tx.try_send(entry);
     });
@@ -651,6 +652,7 @@ fn finalize_non_streaming(
             upstream_effort: upstream_effort_echo.clone(),
             tool_calls,
             headers: ctx.header_log(),
+            net: ctx.net_log(),
         };
         let _ = log_tx.try_send(entry);
     });

@@ -62,6 +62,10 @@ pub fn build_client(idle: Duration) -> reqwest::Result<reqwest::Client> {
         .connect_timeout(Duration::from_secs(10))
         .read_timeout(idle)
         .user_agent(DEFAULT_USER_AGENT)
+        // Request-log network timing (proxy/net_timing.rs): same system resolver as reqwest's
+        // default, plus a timer around connect. Neither changes what goes over the wire.
+        .dns_resolver(std::sync::Arc::new(crate::proxy::net_timing::TimedResolver))
+        .connector_layer(crate::proxy::net_timing::TimedConnectLayer)
         .build()
 }
 
@@ -82,12 +86,46 @@ pub async fn send(
     headers: ReqHeaderMap,
     is_streaming: bool,
 ) -> Result<UpstreamResponse, UpstreamError> {
-    let resp = client
-        .post(url)
-        .headers(headers)
-        .body(body)
-        .send()
-        .await?;
+    send_inner(client, url, body, headers, is_streaming).await.0
+}
+
+/// [`send`] plus the attempt's network timing (DNS / connect / response head) for the
+/// request log. Every send point that writes a log row uses this and puts the timing into
+/// its `UpstreamHeaderCapture::net`.
+pub async fn send_timed(
+    client: &reqwest::Client,
+    url: &str,
+    body: Vec<u8>,
+    headers: ReqHeaderMap,
+    is_streaming: bool,
+) -> (Result<UpstreamResponse, UpstreamError>, crate::proxy::net_timing::NetTiming) {
+    crate::proxy::net_timing::measure(
+        url,
+        is_streaming,
+        send_inner(client, url, body, headers, is_streaming),
+    )
+    .await
+}
+
+async fn send_inner(
+    client: &reqwest::Client,
+    url: &str,
+    body: Vec<u8>,
+    headers: ReqHeaderMap,
+    is_streaming: bool,
+) -> (Result<UpstreamResponse, UpstreamError>, crate::proxy::net_timing::ResponseConn) {
+    let resp = match client.post(url).headers(headers).body(body).send().await {
+        Ok(r) => r,
+        Err(e) => return (Err(e.into()), Default::default()),
+    };
+    let conn = crate::proxy::net_timing::response_conn(&resp, std::time::Instant::now());
+    (read_response(resp, is_streaming).await, conn)
+}
+
+async fn read_response(
+    resp: reqwest::Response,
+    is_streaming: bool,
+) -> Result<UpstreamResponse, UpstreamError> {
 
     let status = StatusCode::from_u16(resp.status().as_u16())
         .unwrap_or(StatusCode::INTERNAL_SERVER_ERROR);

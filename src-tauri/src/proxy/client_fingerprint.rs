@@ -175,6 +175,9 @@ pub struct ClientContext {
     /// 发送后用 [`ClientContext::with_upstream_headers`] 生成本 attempt 的 ctx; 入口处恒为 None。
     pub upstream_request_headers_log: Option<String>,
     pub upstream_response_headers_log: Option<String>,
+    /// 当前 attempt 的网络耗时 (proxy/net_timing.rs), 随 [`ClientContext::with_upstream_headers`]
+    /// 一起生成; 入口处 / 未发送时为 None。
+    pub net_timing: Option<crate::proxy::net_timing::NetTimingFields>,
 }
 
 impl ClientContext {
@@ -220,20 +223,28 @@ impl ClientContext {
         Some((client, session_id(&id)?.to_owned()))
     }
 
-    /// 本 attempt 的 ctx: 带上刚采集到的上游两组头, 其余字段不变。
+    /// 本 attempt 的 ctx: 带上刚采集到的上游两组头与网络耗时, 其余字段不变。
+    /// `attempt_start` 是本 attempt 计时起点 (与 total_latency_ms 同一个), 网络各段相对它算。
     pub fn with_upstream_headers(
         &self,
         cap: crate::proxy::header_log::UpstreamHeaderCapture,
         hints: &crate::proxy::header_log::SourceHints,
         client_headers: &axum::http::HeaderMap,
+        attempt_start: std::time::Instant,
     ) -> Self {
         Self {
+            net_timing: cap.net.as_ref().map(|t| t.fields(attempt_start)),
             upstream_request_headers_log: cap
                 .request
                 .and_then(|c| crate::proxy::header_log::tag_capture(c, hints, client_headers)),
             upstream_response_headers_log: cap.response,
             ..self.clone()
         }
+    }
+
+    /// 请求日志行的网络耗时列; 本 attempt 没有发出请求时全为 None。
+    pub fn net_log(&self) -> crate::proxy::net_timing::NetTimingFields {
+        self.net_timing.clone().unwrap_or_else(crate::proxy::net_timing::NetTimingFields::none)
     }
 
     /// 请求日志行的三列请求头。

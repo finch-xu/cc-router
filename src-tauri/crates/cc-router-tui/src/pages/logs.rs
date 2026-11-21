@@ -613,6 +613,31 @@ pub fn detail_spec(item: &RequestLog, store: &Store, s: &Strings) -> DetailSpec 
         rows.push(DetailRow::Field { label: s.lg_d_http_version.to_string(), value: http_version.clone(), tone: Tone::Normal });
     }
 
+    let net = &item.net;
+    if net.prep_ms.is_some() {
+        rows.push(DetailRow::Section(s.lg_d_net.to_string()));
+        let ms = |v: Option<i64>| v.map(|v| duration(v.max(0))).unwrap_or_else(|| "—".to_string());
+        let mut conn = match net.conn_reused {
+            Some(true) => s.lg_d_net_reused.to_string(),
+            Some(false) => s.lg_d_net_new.to_string(),
+            None => "—".to_string(),
+        };
+        if net.via_proxy == Some(true) {
+            conn.push_str(" · ");
+            conn.push_str(s.lg_d_net_proxy);
+        }
+        rows.push(DetailRow::Field { label: s.lg_d_net_conn.to_string(), value: conn, tone: Tone::Normal });
+        rows.push(DetailRow::Field { label: s.lg_d_net_prep.to_string(), value: ms(net.prep_ms), tone: Tone::Normal });
+        if net.conn_reused == Some(false) {
+            rows.push(DetailRow::Field { label: s.lg_d_net_dns.to_string(), value: ms(net.dns_ms), tone: Tone::Normal });
+            rows.push(DetailRow::Field { label: s.lg_d_net_connect.to_string(), value: ms(net.connect_ms), tone: Tone::Normal });
+        }
+        rows.push(DetailRow::Field { label: s.lg_d_net_headers.to_string(), value: ms(net.headers_ms), tone: Tone::Normal });
+        if let Some(addr) = &net.remote_addr {
+            rows.push(DetailRow::Field { label: s.lg_d_net_remote.to_string(), value: addr.clone(), tone: Tone::Normal });
+        }
+    }
+
     if item.client_effort.is_some() || item.effective_effort.is_some() || item.effort_source.is_some() || item.upstream_effort.is_some() {
         rows.push(DetailRow::Section(s.lg_d_effort.to_string()));
         rows.push(DetailRow::Field {
@@ -880,6 +905,7 @@ mod tests {
             tool_result_count: None,
             tool_use_count: None,
             tool_use_names: None,
+            net: Default::default(),
         }
     }
 
@@ -918,6 +944,16 @@ mod tests {
             tool_result_count: Some(2),
             tool_use_count: Some(3),
             tool_use_names: Some(r#"["Read","Bash","Read","…"]"#.into()),
+            net: crate::client::dto::NetTiming {
+                prep_ms: Some(4),
+                dns_ms: Some(30),
+                connect_ms: Some(180),
+                headers_ms: Some(260),
+                conn_reused: Some(false),
+                via_proxy: Some(true),
+                remote_addr: Some("1.2.3.4:443".into()),
+                upstream_stream: Some(true),
+            },
         }
     }
 
@@ -938,7 +974,13 @@ mod tests {
         let full = detail_spec(&full_log(), &store, &ZH);
         let sections: Vec<&str> =
             full.rows.iter().filter_map(|r| if let DetailRow::Section(t) = r { Some(t.as_str()) } else { None }).collect();
-        assert_eq!(sections, vec![ZH.lg_d_basic, ZH.lg_d_effort, ZH.lg_d_tools, ZH.lg_d_error, ZH.lg_d_body], "{full:?}");
+        assert_eq!(sections, vec![ZH.lg_d_basic, ZH.lg_d_net, ZH.lg_d_effort, ZH.lg_d_tools, ZH.lg_d_error, ZH.lg_d_body], "{full:?}");
+        let field = |l: &str| {
+            full.rows.iter().find_map(|r| if let DetailRow::Field { label, value, .. } = r { (label == l).then(|| value.clone()) } else { None })
+        };
+        assert_eq!(field(ZH.lg_d_net_conn).as_deref(), Some("新建连接 · 经代理"));
+        assert_eq!(field(ZH.lg_d_net_connect).as_deref(), Some("180ms"));
+        assert_eq!(field(ZH.lg_d_net_remote).as_deref(), Some("1.2.3.4:443"));
 
         let effort_row = full
             .rows

@@ -48,6 +48,8 @@ pub struct RequestSummary {
     pub http_status: Option<u16>,
     pub ttft_ms: Option<u64>,
     pub total_ms: Option<u64>,
+    /// 网络耗时小计 (见 [`crate::proxy::net_timing::NetTimingFields::network_ms`]); 老记录为 None
+    pub network_ms: Option<u64>,
     /// 未命中缓存的输入 (各协议已归一: 不含缓存读写)
     pub input_tokens: u64,
     pub output_tokens: u64,
@@ -148,6 +150,7 @@ pub fn from_entry(entry: &RequestLogEntry, auth_type: Option<AuthType>) -> Reque
         http_status: entry.http_status,
         ttft_ms: entry.first_content_ms.or(entry.ttft_ms),
         total_ms: entry.total_latency_ms,
+        network_ms: entry.net.network_ms(),
         input_tokens: uncached_input(auth_type, raw_input, read, write),
         output_tokens: u64::from(entry.upstream_output_tokens.unwrap_or_default()),
         cache_read_tokens: read,
@@ -174,7 +177,9 @@ pub(crate) const SUMMARY_COLUMNS: &str = "id, timestamp, virtual_model_name, sub
     upstream_input_tokens, upstream_output_tokens, upstream_cache_creation, upstream_cache_read,
     client_tool, effective_effort, stop_reason, tool_use_names, tools_offered_count, retry_count,
     error_message, purpose_kind, purpose_guessed, purpose_turn, purpose_step, purpose_prev_tools,
-    session_client, session_id, trace_id";
+    session_client, session_id, trace_id,
+    net_prep_ms, net_dns_ms, net_connect_ms, net_headers_ms,
+    net_conn_reused, net_via_proxy, net_remote_addr, net_upstream_stream";
 
 /// 订阅 id → 鉴权类型, 用来按协议归一输入 token。
 pub(crate) async fn auth_types(state: &AppState) -> HashMap<String, AuthType> {
@@ -215,6 +220,7 @@ pub(crate) fn from_row(r: &sqlx::sqlite::SqliteRow, auth: &HashMap<String, AuthT
         http_status: opt_i64("http_status").and_then(|v| u16::try_from(v).ok()),
         ttft_ms: opt_i64("first_content_ms").or_else(|| opt_i64("ttft_ms")).map(|v| v.max(0) as u64),
         total_ms: opt_i64("total_latency_ms").map(|v| v.max(0) as u64),
+        network_ms: crate::proxy::net_timing::NetTimingFields::from_row(r).network_ms(),
         input_tokens: uncached_input(auth.get(&subscription_id).copied(), u("upstream_input_tokens"), read, write),
         output_tokens: u("upstream_output_tokens"),
         cache_read_tokens: read,
@@ -290,6 +296,7 @@ pub(crate) fn sample_summary(id: &str) -> RequestSummary {
         http_status: None,
         ttft_ms: None,
         total_ms: None,
+        network_ms: None,
         input_tokens: 0,
         output_tokens: 0,
         cache_read_tokens: 0,
@@ -323,6 +330,7 @@ mod tests {
             http_status: Some(200),
             ttft_ms: None,
             total_ms: None,
+            network_ms: None,
             input_tokens: 0,
             output_tokens: 0,
             cache_read_tokens: 0,

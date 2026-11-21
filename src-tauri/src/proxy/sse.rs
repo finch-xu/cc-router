@@ -245,6 +245,7 @@ pub fn stream_response(
             upstream_effort: None,
             tool_calls: tool_tally.fields(&ctx.tools),
             headers: ctx.header_log(),
+            net: ctx.net_log(),
         };
         let _ = log_tx.try_send(entry);
     });
