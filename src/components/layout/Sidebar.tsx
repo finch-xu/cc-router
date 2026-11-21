@@ -117,7 +117,6 @@ export function Sidebar() {
       dotTone: "ok",
       dotLabelKey: "sidebar.proxyRunning",
     },
-    ...(isTauriHost ? [{ to: "/agent-monitor", label: t("agentMonitor.title"), icon: "agent" as const }] : []),
     {
       to: "/virtual-models",
       label: t("sidebar.nav.virtualModels"),
@@ -125,6 +124,7 @@ export function Sidebar() {
       badge: String(vms.data?.length ?? 5),
     },
     { to: "/subscriptions", label: t("sidebar.nav.subscriptions"), icon: "subs", badge: subsCount > 0 ? String(subsCount) : undefined },
+    ...(isTauriHost ? [{ to: "/agent-monitor", label: t("agentMonitor.title"), icon: "agent" as const }] : []),
     { to: "/request-logs", label: t("sidebar.nav.requestLogs"), icon: "logs" },
     { to: "/statistics", label: t("sidebar.nav.statistics"), icon: "stats" },
     { to: "/receipts", label: t("sidebar.nav.receipts"), icon: "receipts" },
