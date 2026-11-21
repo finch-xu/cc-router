@@ -95,6 +95,8 @@ pub struct ClientContext {
     pub session_key: Option<String>,
     // Runtime telemetry identity has stricter rules than sticky routing.
     pub monitor_identity: Option<(crate::session_monitor::Client, String)>,
+    /// 一次入站请求一个, 所有 attempt 共用 (requests.trace_id), 用于把失败切换的尝试归组。
+    pub trace_id: Option<String>,
     /// 请求侧工具形状 (声明工具数 / 回传 tool_result 数), 对 Anthropic 形态 body 算一次。
     pub tools: crate::proxy::tool_log::RequestToolShape,
     /// 入站请求头, 已脱敏序列化 (proxy/header_log.rs); 关闭「记录请求头」时为 None。

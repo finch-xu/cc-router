@@ -144,8 +144,10 @@ pub struct RequestLogEntry {
     pub error_message: Option<String>,
     /// 仅错误路径填充, 截断至 4KB
     pub upstream_response_body: Option<String>,
-    /// Transient join key for the desktop session monitor. Never persisted by flush_batch.
+    /// 本机 Claude Code / Codex 会话 (client, session id)。落库为 session_client / session_id。
     pub monitor_session: Option<(crate::session_monitor::Client, String)>,
+    /// 同一次入站请求的所有 attempt 共用 (见 ClientContext::trace_id)。
+    pub trace_id: Option<String>,
     /// 客户端识别 (Claude Code / Zed / Codex CLI / ...), None 表示未识别 → 前端展示 "unk"
     pub client_tool: Option<&'static str>,
     /// 客户端原始 User-Agent (识别成功时也保留, 用于详情抽屉)
@@ -429,6 +431,13 @@ pub(crate) async fn flush_batch(
             }
         }
 
+        let purpose = &entry.tool_calls.purpose;
+        // 只有工具名; 序列化失败就不记 (纪律同 tool_use_names)
+        let prev_tools = (!purpose.prev_tools.is_empty())
+            .then(|| serde_json::to_string(&purpose.prev_tools).ok())
+            .flatten();
+        let purpose = purpose.clone();
+
         let result = sqlx::query(
             "INSERT INTO requests (id, timestamp, virtual_model_name, subscription_id,
                 provider_id, endpoint_id, real_model_name, response_model_name,
@@ -441,9 +450,11 @@ pub(crate) async fn flush_batch(
                 entry_kind, downstream_http_version,
                 client_effort, effective_effort, effort_source, upstream_effort,
                 stop_reason, tools_offered_count, tool_result_count, tool_use_count, tool_use_names,
-                client_request_headers, upstream_request_headers, upstream_response_headers)
+                client_request_headers, upstream_request_headers, upstream_response_headers,
+                purpose_kind, purpose_guessed, purpose_turn, purpose_step, purpose_prev_tools,
+                session_client, session_id, trace_id)
              VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
-                     ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                     ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
         )
         .bind(entry.id.to_string())
         .bind(entry.timestamp_ms)
@@ -484,6 +495,14 @@ pub(crate) async fn flush_batch(
         .bind(entry.headers.client_request)
         .bind(entry.headers.upstream_request)
         .bind(entry.headers.upstream_response)
+        .bind(purpose.kind.as_str())
+        .bind(purpose.guessed as i64)
+        .bind(purpose.turn.map(i64::from))
+        .bind(purpose.step.map(i64::from))
+        .bind(prev_tools)
+        .bind(entry.monitor_session.as_ref().map(|(c, _)| c.name()))
+        .bind(entry.monitor_session.map(|(_, id)| id))
+        .bind(entry.trace_id)
         .execute(&mut *tx)
         .await;
         if let Err(e) = result {
@@ -661,6 +680,7 @@ mod tests {
             error_message: None,
             upstream_response_body: None,
             monitor_session: None,
+            trace_id: None,
             client_tool: None,
             client_user_agent: None,
             client_version: None,
@@ -691,6 +711,62 @@ mod tests {
         let values: Vec<Option<i64>> = sqlx::query_scalar("SELECT first_content_ms FROM requests ORDER BY first_content_ms")
             .fetch_all(&pool).await.unwrap();
         assert_eq!(values, vec![None, Some(0), Some(850)]);
+    }
+
+    /// 实时路由 ⊂ 请求日志: 同一条 entry 经 live 事件 (from_entry) 与落库再读回 (from_row) 得到同一份摘要。
+    #[tokio::test]
+    async fn summary_from_entry_and_from_row_agree() {
+        use crate::observability::live_feed::{from_entry, from_row, SUMMARY_COLUMNS};
+        use crate::proxy::purpose::{PurposeKind, RequestPurpose};
+        let pool = fresh_pool().await;
+        let mut entry = make_entry(1234, VirtualModelName::Opus, Uuid::new_v4(), "p", RequestStatus::Error, Some(900), Some(50), None);
+        entry.http_status = Some(429);
+        entry.error_message = Some("rate limited".into());
+        entry.response_model_name = Some("resp-model".into());
+        entry.first_content_ms = Some(120);
+        entry.upstream_cache_read = Some(7);
+        entry.retry_count = 1;
+        entry.client_tool = Some("claude-code");
+        entry.effective_effort = Some("max".into());
+        entry.trace_id = Some("trace-1".into());
+        entry.monitor_session = Some((crate::session_monitor::Client::Claude, "sess-1".into()));
+        entry.tool_calls.tool_use_names = Some(r#"["Read","Read"]"#.into());
+        entry.tool_calls.tools_offered_count = Some(23);
+        entry.tool_calls.purpose = RequestPurpose {
+            kind: PurposeKind::Agent,
+            guessed: true,
+            turn: Some(2),
+            step: Some(3),
+            prev_tools: vec!["Grep".into(), "Glob".into()],
+        };
+        let live = from_entry(&entry, None);
+        flush_batch(&pool, vec![entry], vec![]).await.unwrap();
+        let sql = format!("SELECT {SUMMARY_COLUMNS} FROM requests");
+        let row = sqlx::query(sqlx::AssertSqlSafe(sql.as_str())).fetch_one(&pool).await.unwrap();
+        let stored = from_row(&row, &Default::default());
+        assert_eq!(serde_json::to_value(&stored).unwrap(), serde_json::to_value(&live).unwrap());
+        assert_eq!(stored.purpose.as_ref().map(|p| p.kind), Some(PurposeKind::Agent));
+        assert_eq!(stored.session.as_ref().map(|s| s.id.as_str()), Some("sess-1"));
+    }
+
+    /// 迁移 030 之前的老行: 用途 / 会话 / trace 都读成 None, 不报错。
+    #[tokio::test]
+    async fn summary_from_legacy_row_has_no_purpose() {
+        use crate::observability::live_feed::{from_row, SUMMARY_COLUMNS};
+        let pool = fresh_pool().await;
+        sqlx::query(
+            "INSERT INTO requests (id, timestamp, virtual_model_name, subscription_id, provider_id,
+             endpoint_id, real_model_name, is_streaming, status)
+             VALUES ('old', 1, 'sonnet', 's', 'p', 'e', 'm', 0, 'success')",
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+        let sql = format!("SELECT {SUMMARY_COLUMNS} FROM requests");
+        let row = sqlx::query(sqlx::AssertSqlSafe(sql.as_str())).fetch_one(&pool).await.unwrap();
+        let s = from_row(&row, &Default::default());
+        assert!(s.purpose.is_none() && s.session.is_none() && s.trace_id.is_none());
+        assert_eq!((s.model.as_str(), s.status), ("m", "success"));
     }
 
     /// 工具调用 5 列: 有值能读回; request_only 的 entry 响应侧三列为 NULL。

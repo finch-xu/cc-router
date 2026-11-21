@@ -1,0 +1,118 @@
+/* ============================================================
+ * 一条请求的行 (RequestRow): 实时路由的事件流与请求日志列表共用 (设计稿 design/request-logs-v1.html)。
+ * 只读各主题都有的 token, 圆角用 --r-md (win2k 下为 0)。
+ * ============================================================ */
+.rq-list { --rq-ease: cubic-bezier(0.2, 0.7, 0.2, 1); }
+.rq-bar { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; margin-bottom: 10px; }
+.rq-chip {
+  display: inline-flex; align-items: center; gap: 6px; height: 26px; padding: 0 10px;
+  border: 0; border-radius: 999px; background: transparent; cursor: pointer;
+  font-size: 12px; font-weight: 500; color: var(--ink-3); white-space: nowrap;
+}
+.rq-chip b { font-weight: 600; color: var(--ink-4); font-variant-numeric: tabular-nums; }
+.rq-chip:hover { background: var(--surface-3); }
+.rq-chip.on { background: var(--surface-3); color: var(--ink); box-shadow: inset 0 0 0 1px var(--line-2); }
+.rq-chip.err, .rq-chip.err b { color: var(--err); }
+.rq-chip .sd { width: 7px; height: 7px; border-radius: 50%; }
+.rq-gap { width: 1px; height: 16px; background: var(--line-2); margin: 0 4px; }
+
+.rq-list { display: flex; flex-direction: column; margin: 0 -8px; }
+.rq-row {
+  display: grid; grid-template-columns: 58px 100px minmax(0, 1fr) minmax(150px, 236px) 136px;
+  gap: 2px 14px; align-items: start; padding: 9px 8px; border-radius: var(--r-md); cursor: pointer;
+}
+.rq-row + .rq-row { box-shadow: inset 0 1px 0 var(--line); }
+.rq-row:hover, .rq-row.open { background: var(--surface-3); box-shadow: none; }
+.rq-row:hover + .rq-row, .rq-row.open + .rq-row { box-shadow: none; }
+.rq-row:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+.rq-row.new { animation: rq-row-in 0.5s var(--rq-ease); }
+@keyframes rq-row-in {
+  from { opacity: 0; transform: translateY(-6px); background: var(--accent-bg); }
+  60% { background: var(--accent-bg); }
+}
+.rq-row .tm { padding-top: 3px; font-family: var(--font-mono); font-size: 11px; color: var(--ink-4); font-variant-numeric: tabular-nums; }
+.rq-ptag {
+  justify-self: start; display: inline-flex; align-items: center; gap: 5px; height: 22px; padding: 0 8px;
+  border-radius: var(--r-sm); font-size: 11.5px; font-weight: 560; white-space: nowrap;
+  background: var(--surface-3); color: var(--ink-2);
+}
+.rq-ptag.main { background: var(--accent-bg); color: var(--accent-ink); }
+.rq-ptag.agent { background: color-mix(in srgb, var(--ink) 9%, transparent); color: var(--ink); }
+.rq-ptag.bg { background: transparent; color: var(--ink-3); box-shadow: inset 0 0 0 1px var(--line-2); }
+.rq-ptag.unknown { background: transparent; color: var(--ink-4); box-shadow: inset 0 0 0 1px var(--line); }
+.rq-row .what { min-width: 0; }
+.rq-row .what .l1 { display: flex; align-items: center; gap: 8px; min-width: 0; font-size: 13px; white-space: nowrap; }
+.rq-row .what .l1 b { font-weight: 560; color: var(--ink); overflow: hidden; text-overflow: ellipsis; }
+.rq-sess { flex: none; display: inline-flex; align-items: center; gap: 5px; font-size: 11.5px; color: var(--ink-3); }
+.rq-sess i { width: 7px; height: 7px; border-radius: 50%; }
+.rq-sess .mono { font-size: 10.5px; color: var(--ink-4); }
+.rq-row .l2 { margin-top: 2px; font-size: 12px; color: var(--ink-3); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.rq-tool { font-family: var(--font-mono); font-size: 11px; color: var(--ink-2); background: var(--surface-3); padding: 0 5px; border-radius: 4px; }
+.rq-row:hover .rq-tool, .rq-row.open .rq-tool { background: var(--surface); }
+.rq-times { margin-left: 2px; font-size: 11px; color: var(--ink-4); }
+.rq-arr { margin: 0 5px; color: var(--ink-4); }
+.rq-row .rt { min-width: 0; }
+.rq-row .rt .l1 { display: flex; align-items: center; gap: 6px; min-width: 0; font-size: 12.5px; white-space: nowrap; color: var(--ink-4); }
+.rq-row .rt .m { font-family: var(--font-mono); font-size: 11.5px; font-weight: 600; color: var(--ink); }
+.rq-row .rt .s { color: var(--ink-2); overflow: hidden; text-overflow: ellipsis; }
+.rq-row .rt .l2 { font-family: var(--font-mono); font-size: 11.5px; color: var(--ink-4); }
+.rq-row .rt .w { color: var(--warn); font-family: inherit; }
+.rq-row .rt .e { color: var(--err); }
+.rq-row .mx { text-align: right; white-space: nowrap; }
+.rq-row .mx .l1 { font-size: 12.5px; font-weight: 560; color: var(--ink); font-variant-numeric: tabular-nums; }
+.rq-row .mx .l2 { font-variant-numeric: tabular-nums; color: var(--ink-4); font-size: 11.5px; }
+.rq-row.err .mx .l1 { color: var(--err); }
+.rq-row .more {
+  grid-column: 3 / -1; margin-top: 8px; padding: 10px 12px; border-radius: var(--r-md); background: var(--surface);
+  display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 8px 18px; font-size: 12px; cursor: default;
+}
+.rq-row .more > div { min-width: 0; }
+.rq-row .more small { display: block; font-size: 11px; color: var(--ink-4); }
+.rq-row .more span { color: var(--ink-2); font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
+.rq-row .more .err-line { grid-column: 1 / -1; }
+.rq-row .more .err-line span { color: var(--err); }
+.rq-row .more .why { grid-column: 1 / -1; display: flex; gap: 8px; align-items: baseline; padding-top: 8px; box-shadow: inset 0 1px 0 var(--line); color: var(--ink-3); }
+.rq-row .more .why b { font-weight: 560; color: var(--ink-2); white-space: nowrap; }
+.rq-row .more .why .guess { color: var(--warn); font-size: 11px; white-space: nowrap; }
+
+/* 同一次请求里失败的尝试: 缩进挂在最终那次下面 (只在请求日志里出现) */
+.rq-row.attempt { padding-top: 4px; padding-bottom: 6px; }
+.rq-row.attempt + .rq-row, .rq-row + .rq-row.attempt { box-shadow: none; }
+.rq-row.attempt .rq-ptag { visibility: hidden; }
+.rq-row.attempt .what { padding-left: 12px; box-shadow: inset 2px 0 0 var(--line-2); }
+.rq-row.attempt .what .l1 { color: var(--ink-3); font-size: 12px; }
+.rq-row .tm small { display: block; font-size: 10.5px; color: var(--ink-4); }
+.rq-row.err .tm { color: var(--err); }
+.rq-ptag.legacy { background: transparent; color: var(--ink-4); box-shadow: inset 0 0 0 1px var(--line); font-weight: 500; }
+.rq-row .more .why .btn { margin-left: auto; }
+.rq-day { display: flex; align-items: center; gap: 8px; padding: 12px 8px 4px; font-size: 11.5px; color: var(--ink-4); }
+.rq-day::after { content: ""; flex: 1; height: 1px; background: var(--line); }
+.rq-empty { padding: 24px 8px; text-align: center; color: var(--ink-4); font-size: 12.5px; }
+
+/* ---------- 请求日志页 ---------- */
+.rq-actions { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.rq-actions .range-tabs { margin-bottom: 0; }
+.rq-actions .btn { display: inline-flex; align-items: center; gap: 6px; }
+.rq-card > .card-body { padding-top: var(--pad-card, 16px); }
+.rq-card .rq-bar { margin-bottom: 8px; }
+.rq-filters { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-bottom: 8px; }
+.rq-filter-pill { display: inline-flex; align-items: center; gap: 4px; }
+.rq-filter-pill button { display: inline-flex; padding: 0; margin-left: 2px; border: 0; background: none; color: inherit; cursor: pointer; }
+.rq-search {
+  flex: 1; min-width: 200px; display: flex; align-items: center; gap: 6px; height: 32px; padding: 0 10px;
+  border-radius: var(--r-md); background: var(--surface-3); color: var(--ink-4);
+}
+.rq-search input { flex: 1; min-width: 0; border: 0; outline: 0; background: transparent; color: var(--ink); font: inherit; font-size: 12.5px; }
+.rq-search:focus-within { box-shadow: inset 0 0 0 1px var(--accent); }
+.rq-search button { display: inline-flex; padding: 0; border: 0; background: none; color: var(--ink-4); cursor: pointer; }
+.rq-autorefresh { font-size: 11px; }
+
+@media (max-width: 1100px) {
+  .rq-row { grid-template-columns: 52px 96px minmax(0, 1fr) 136px; }
+  .rq-row .rt { grid-column: 3; grid-row: 2; }
+  .rq-row .more { grid-column: 1 / -1; grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .rq-row.new { animation: none !important; }
+}

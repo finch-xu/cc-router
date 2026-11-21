@@ -1,0 +1,137 @@
+/* ============================================================
+ * 请求详情整页 /request-logs/:id (设计稿 design/request-logs-v1.html ②)
+ * 四套主题共用: 只读各主题都有的 token, 卡片 / 按钮 / 标签复用全局 .card / .btn / .pill / .seg-tabs。
+ * 通栏页面 (AppShell FLUSH_ROUTES): 顶栏 .page-bar 常驻, 正文在 .page-flow 里滚动。
+ * ============================================================ */
+.rqd-col { width: 100%; max-width: 1180px; margin: 0 auto; }
+.page-bar .rqd-col { display: flex; align-items: center; gap: 10px; min-width: 0; }
+.page-bar .rqd-col h1 { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.rqd-back { display: inline-flex; align-items: center; gap: 4px; flex-shrink: 0; text-decoration: none; }
+.page-bar .page-bar-right .btn { display: inline-flex; align-items: center; gap: 4px; }
+.page-bar .page-bar-right .btn:disabled { opacity: 0.45; cursor: default; }
+
+.rqd-state { display: flex; align-items: center; gap: 12px; padding: 48px 0; color: var(--ink-3); justify-content: center; }
+
+.rqd-grid {
+  --rqd-tk-cr: color-mix(in srgb, var(--accent) 18%, var(--surface));
+  --rqd-tk-cw: color-mix(in srgb, var(--accent) 45%, var(--surface));
+  --rqd-tk-in: var(--accent);
+  --rqd-tk-out: var(--ink-2);
+  display: grid; grid-template-columns: minmax(0, 1fr) 168px; gap: 24px; align-items: start;
+}
+.rqd-main { display: flex; flex-direction: column; gap: 16px; min-width: 0; }
+.rqd-sec { scroll-margin-top: 16px; }
+.rqd-sec .card-head { flex-wrap: wrap; }
+.rqd-sec-action { margin-left: auto; }
+.rqd-two { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 16px; align-items: start; }
+
+/* ---------- 目录 ---------- */
+.rqd-toc { position: sticky; top: 0; display: flex; flex-direction: column; gap: 1px; font-size: 12.5px; }
+.rqd-toc small { padding: 2px 10px 6px; font-size: 11px; color: var(--ink-4); }
+.rqd-toc button {
+  display: flex; justify-content: space-between; gap: 8px; padding: 5px 10px; border: 0; border-radius: var(--r-md);
+  background: transparent; color: var(--ink-3); font: inherit; text-align: left; cursor: pointer;
+}
+.rqd-toc button:hover { color: var(--ink); }
+.rqd-toc button.on { background: var(--surface-3); color: var(--ink); font-weight: 560; }
+.rqd-toc b { font-weight: 500; color: var(--ink-4); font-variant-numeric: tabular-nums; }
+
+/* ---------- 概览 ---------- */
+.rqd-hero { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 20px; align-items: center; padding: 18px 20px; scroll-margin-top: 16px; }
+.rqd-hero-tags { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.rqd-story { margin-top: 8px; font-size: 14.5px; color: var(--ink); line-height: 1.6; }
+.rqd-story .rq-tool { font-size: 12px; }
+.rqd-meta { display: flex; align-items: center; gap: 14px; flex-wrap: wrap; margin-top: 8px; font-size: 12px; color: var(--ink-3); }
+.rqd-error { margin-top: 10px; color: var(--err); font-size: 12.5px; overflow-wrap: anywhere; }
+.rqd-guess { margin-left: 6px; padding: 0 6px; border-radius: 6px; font-size: 11px; color: var(--warn); background: color-mix(in srgb, var(--warn) 12%, transparent); }
+.rqd-stats { display: grid; grid-template-columns: repeat(4, auto); }
+.rqd-stats > div { padding: 2px 16px; min-width: 88px; }
+.rqd-stats > div + div { box-shadow: inset 1px 0 0 var(--line); }
+.rqd-stats small { display: block; font-size: 11.5px; color: var(--ink-3); white-space: nowrap; }
+.rqd-stats b { display: block; margin-top: 2px; font-size: 20px; font-weight: 650; letter-spacing: -0.02em; color: var(--ink); font-variant-numeric: tabular-nums; white-space: nowrap; }
+
+/* ---------- 路由 ---------- */
+.rqd-chain { display: flex; align-items: stretch; overflow-x: auto; padding: 2px 2px 6px; margin-bottom: 14px; }
+.rqd-node {
+  flex: none; min-width: 140px; padding: 9px 12px; border-radius: var(--r-md); background: var(--surface);
+  box-shadow: inset 0 0 0 1px var(--line); text-align: left; font: inherit; color: inherit;
+}
+.rqd-node small { display: block; margin-bottom: 2px; font-size: 11px; color: var(--ink-4); white-space: nowrap; }
+.rqd-node .n { display: flex; align-items: center; gap: 6px; font-weight: 600; white-space: nowrap; }
+.rqd-node .n.mono { font-family: var(--font-mono); font-size: 12.5px; }
+.rqd-node .d { margin-top: 2px; font-family: var(--font-mono); font-size: 11.5px; color: var(--ink-3); white-space: nowrap; }
+.rqd-node.attempt { cursor: pointer; }
+.rqd-node.attempt:hover:not(:disabled) { background: var(--surface-3); }
+.rqd-node.attempt:disabled { cursor: default; }
+.rqd-node.bad { background: var(--err-bg); box-shadow: none; }
+.rqd-node.bad .d { color: var(--err); }
+.rqd-node.cur { box-shadow: inset 0 0 0 1.5px var(--accent); }
+.rqd-arrow { flex: none; display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 0 6px; color: var(--ink-4); }
+.rqd-arrow.fo { color: var(--warn); }
+.rqd-arrow small { font-size: 10.5px; line-height: 1; margin-bottom: 2px; }
+.rqd-provider { display: inline-flex; align-items: center; gap: 6px; }
+
+/* ---------- 键值 ---------- */
+.rqd-kv { display: grid; gap: 7px; margin: 0; font-size: 12.5px; }
+.rqd-kv > div { display: grid; grid-template-columns: 112px minmax(0, 1fr); gap: 12px; align-items: baseline; }
+.rqd-kv + .rqd-kv { margin-top: 12px; padding-top: 12px; box-shadow: inset 0 1px 0 var(--line); }
+.rqd-kv dt { color: var(--ink-3); }
+.rqd-kv dd { margin: 0; min-width: 0; overflow-wrap: anywhere; color: var(--ink); }
+.rqd-chainline { display: inline-flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+.rqd-chainline .pill.tag.warn { border-color: var(--warn); color: var(--warn); }
+.rqd-counts { display: inline-flex; gap: 14px; flex-wrap: wrap; color: var(--ink-3); }
+.rqd-why { margin-top: 10px; padding: 9px 12px; border-radius: var(--r-md); background: var(--surface-3); font-size: 12.5px; color: var(--ink-2); }
+.rqd-why b { font-weight: 560; margin-right: 4px; }
+.rqd-note { margin: 10px 0 0; font-size: 12px; color: var(--ink-3); }
+.rqd-note:first-child { margin-top: 0; }
+
+/* ---------- 耗时与 token ---------- */
+.rqd-tbar { display: flex; height: 26px; border-radius: var(--r-md); overflow: hidden; background: var(--surface-3); font-size: 11.5px; }
+.rqd-tbar span { display: flex; align-items: center; padding: 0 8px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.rqd-tbar .wait { background: var(--surface-3); color: var(--ink-3); }
+.rqd-tbar .gen { background: color-mix(in srgb, var(--accent) 22%, var(--surface)); color: var(--ink); }
+.rqd-tlegend { display: flex; justify-content: space-between; margin-top: 5px; font-family: var(--font-mono); font-size: 11px; color: var(--ink-4); }
+.rqd-tok { margin-top: 16px; }
+.rqd-tok-bar { display: flex; height: 10px; border-radius: 5px; overflow: hidden; margin-bottom: 10px; gap: 1px; }
+.rqd-tok-bar i { display: block; min-width: 0; }
+.rqd-tok-list { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 8px; }
+.rqd-tok-list small { display: flex; align-items: center; gap: 6px; font-size: 11.5px; color: var(--ink-3); }
+.rqd-tok-list small i { width: 9px; height: 9px; border-radius: 3px; flex: none; }
+.rqd-tok-list b { font-weight: 600; font-variant-numeric: tabular-nums; color: var(--ink); }
+
+/* ---------- 同会话 ---------- */
+.rqd-slist { display: flex; flex-direction: column; margin: 0 -8px; }
+.rqd-srow {
+  display: grid; grid-template-columns: 58px 100px minmax(0, 1fr) auto; gap: 12px; align-items: center;
+  padding: 7px 8px; border: 0; border-radius: var(--r-md); background: transparent; font: inherit; font-size: 12.5px;
+  color: inherit; text-align: left; cursor: pointer;
+}
+.rqd-srow:hover { background: var(--surface-3); }
+.rqd-srow.cur { background: color-mix(in srgb, var(--accent) 10%, transparent); cursor: default; }
+.rqd-srow .tm { font-family: var(--font-mono); font-size: 11px; color: var(--ink-4); }
+.rqd-srow.err .tm, .rqd-srow.err .rt { color: var(--err); }
+.rqd-srow .what { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.rqd-srow .what b { font-weight: 560; }
+.rqd-srow .rt { white-space: nowrap; font-size: 12px; }
+
+/* ---------- 请求头 / 响应 ---------- */
+.rqd-htabs .seg-tabs { margin-bottom: 12px; }
+.rqd-tab-n { margin-left: 5px; font-weight: 500; color: var(--ink-4); font-variant-numeric: tabular-nums; }
+.rqd-pre {
+  margin: 0; max-height: 420px; overflow: auto; padding: 12px 14px; border-radius: var(--r-md); background: var(--surface-3);
+  font-size: 12px; line-height: 1.6; white-space: pre-wrap; overflow-wrap: anywhere;
+}
+.rqd-body-error { margin-bottom: 10px; font-size: 12.5px; overflow-wrap: anywhere; }
+
+@media (max-width: 1100px) {
+  .rqd-grid { grid-template-columns: minmax(0, 1fr); }
+  .rqd-toc { display: none; }
+  .rqd-two { grid-template-columns: minmax(0, 1fr); }
+  .rqd-hero { grid-template-columns: minmax(0, 1fr); }
+  .rqd-stats { grid-template-columns: repeat(2, minmax(0, 1fr)); row-gap: 10px; }
+  .rqd-stats > div:nth-child(3) { box-shadow: none; }
+  .rqd-tok-list { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+@media (max-width: 700px) {
+  .page-bar .page-bar-right .btn span, .rqd-back span { display: none; }
+}

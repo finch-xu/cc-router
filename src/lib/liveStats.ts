@@ -5,7 +5,7 @@
 import type { LucideIcon } from "lucide-react";
 import { Bot, Cog, Globe, HelpCircle, MessageSquare, Radio, ShieldCheck, Shrink, Tag } from "lucide-react";
 import { CLIENT_TOOLS_BY_ID } from "@/lib/clientTools";
-import type { ClientToolId, LiveRequest, PurposeKind } from "@/types";
+import type { ClientToolId, LiveRequest, PurposeKind, RequestPurpose } from "@/types";
 
 export const totalTokens = (r: LiveRequest) =>
   r.input_tokens + r.output_tokens + r.cache_read_tokens + r.cache_write_tokens;
@@ -92,6 +92,11 @@ export const PURPOSE_ORDER: PurposeKind[] = ["main", "agent", "compact", "guard"
 
 export const isBackground = (kind: PurposeKind) => PURPOSE_META[kind].tone === "bg";
 
+const UNRECORDED: RequestPurpose = { kind: "unknown", guessed: false, turn: null, step: null, prev_tools: [] };
+
+/** 老记录 (迁移 030 之前) 没有用途, 按「未识别」参与统计; 界面另用 `purpose === null` 区分显示 */
+export const purposeOf = (r: LiveRequest): RequestPurpose => r.purpose ?? UNRECORDED;
+
 /** 事件流顶部的用途筛选 */
 export type FeedFilter = "all" | "main" | "agent" | "bg" | "fail";
 
@@ -100,11 +105,11 @@ export function matchFilter(r: LiveRequest, f: FeedFilter): boolean {
     case "all":
       return true;
     case "main":
-      return r.purpose.kind === "main";
+      return purposeOf(r).kind === "main";
     case "agent":
-      return r.purpose.kind === "agent";
+      return purposeOf(r).kind === "agent";
     case "bg":
-      return isBackground(r.purpose.kind);
+      return isBackground(purposeOf(r).kind);
     case "fail":
       return !isOk(r);
   }

@@ -1,105 +1,153 @@
-import { useCustomVirtualModels } from "@/hooks/useVirtualModels";
-import { useEffect, useMemo, useState } from "react";
-import { useSearchParams } from "react-router";
-import { Download, RefreshCw, ScrollText, X } from "lucide-react";
+/**
+ * 请求日志列表 (设计稿 design/request-logs-v1.html ①)。
+ * 行组件与实时路由共用 (components/requests/RequestRow), 数据是同一份摘要 (`items[].summary`);
+ * 同一次入站请求里失败的尝试 (同 trace_id) 缩进挂在最终那次下面。
+ * 筛选与页码全在 URL 里 (lib/requestLogQuery.ts); 点一行进整页详情 /request-logs/:id。
+ */
+import { Fragment, useEffect, useMemo, useState } from "react";
+import { useNavigate, useSearchParams } from "react-router";
+import { keepPreviousData, useQuery } from "@tanstack/react-query";
+import { Download, RefreshCw, ScrollText, Search, X } from "lucide-react";
 import { api } from "@/api/tauri";
 import { runtime } from "@/runtime";
-import { ClientToolBadge } from "@/components/ClientToolBadge";
 import { EmptyState } from "@/components/EmptyState";
 import { Pagination } from "@/components/Pagination";
-import { ProviderLogo } from "@/components/ProviderLogo";
-import { RequestDetailDialog } from "@/components/RequestDetailDialog";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
-import { useRequests } from "@/hooks/useRequests";
+import { PurposeChips, RequestRow } from "@/components/requests/RequestRow";
+import { useLiveSessions } from "@/components/live/useLiveSessions";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { useCustomVirtualModels } from "@/hooks/useVirtualModels";
+import { REQUESTS_KEY } from "@/hooks/useRequests";
 import { useProviders } from "@/hooks/useProviders";
 import { useSubscriptions } from "@/hooks/useSubscriptions";
-import { useT } from "@/i18n";
-import { fmtNum, fmtTime, fmtRequestSeconds, fmtTokenSpeed } from "@/lib/format";
-import { VM_META } from "@/lib/virtualModels";
-import { customProviderLabel, providerIconId } from "@/lib/providerLabels";
+import { useT, type TFunction } from "@/i18n";
 import { CLIENT_TOOLS } from "@/lib/clientTools";
+import { localDayKey } from "@/lib/localDay";
+import {
+  hasNarrowing,
+  parseLogQuery,
+  PURPOSE_FILTERS,
+  RANGES,
+  toFilters,
+  toSearch,
+  type LogQuery,
+  type PurposeChip,
+} from "@/lib/requestLogQuery";
+import { VM_META } from "@/lib/virtualModels";
 import {
   CLIENT_TOOL_UNKNOWN_SENTINEL,
-  type RequestLogDto,
-  type RequestLogFilters,
-  type RequestStatus,
   type CustomVirtualModelName,
+  type RequestLogDto,
+  type RequestStatus,
 } from "@/types";
 
-const PAGE_SIZE = 10;
+const PAGE_SIZE = 50;
 const ALL = "__all__";
-const EMPTY_ITEMS: RequestLogDto[] = [];
+const STATUSES: RequestStatus[] = ["success", "timeout", "error"];
+const ZERO_COUNTS: Record<PurposeChip, number> = { all: 0, main: 0, agent: 0, bg: 0, fail: 0 };
 
-const STATUS_TONE: Record<RequestStatus, { tone: "ok" | "warn" | "err"; labelKey: string }> = {
-  success: { tone: "ok",   labelKey: "requestLogs.status.success" },
-  timeout: { tone: "warn", labelKey: "requestLogs.status.timeout" },
-  error:   { tone: "err",  labelKey: "requestLogs.status.error" },
-};
+/** 一条显示单元: 最终那次 + 挂在下面的失败尝试 (同 trace, 本页内) */
+interface Group {
+  head: RequestLogDto;
+  attempts: RequestLogDto[];
+}
+
+function groupByTrace(items: readonly RequestLogDto[]): Group[] {
+  const groups: Group[] = [];
+  const byTrace = new Map<string, Group>();
+  for (const it of items) {
+    const trace = it.summary.trace_id;
+    const g = trace ? byTrace.get(trace) : undefined;
+    if (g) {
+      g.attempts.push(it); // 列表是时间倒序: 先遇到的是最终那次
+      continue;
+    }
+    const ng: Group = { head: it, attempts: [] };
+    groups.push(ng);
+    if (trace) byTrace.set(trace, ng);
+  }
+  return groups;
+}
+
+const dayOf = (ts: number) => localDayKey(new Date(ts));
+
+function dayLabel(ts: number, t: TFunction): string {
+  const key = dayOf(ts);
+  const yesterday = new Date();
+  yesterday.setDate(yesterday.getDate() - 1);
+  // <html lang> 跟着界面语言走 (i18n/index.tsx), 日期格式与界面一致
+  const date = new Date(ts).toLocaleDateString(document.documentElement.lang || undefined, {
+    month: "long",
+    day: "numeric",
+    weekday: "short",
+  });
+  if (key === dayOf(Date.now())) return `${t("requestLogs.day.today")} · ${date}`;
+  if (key === localDayKey(yesterday)) return `${t("requestLogs.day.yesterday")} · ${date}`;
+  return date;
+}
 
 export function RequestLogsPage() {
   const { t } = useT();
   const [searchParams, setSearchParams] = useSearchParams();
-  const [page, setPage] = useState(1);
+  const query = useMemo(() => parseLogQuery(searchParams), [searchParams]);
   const customModels = useCustomVirtualModels();
-  const [vmFilter, setVmFilter] = useState<CustomVirtualModelName | undefined>();
-  const [providerFilter, setProviderFilter] = useState<string | undefined>();
-  const [statusFilter, setStatusFilter] = useState<RequestStatus | undefined>();
-  const [clientFilter, setClientFilter] = useState<string | undefined>();
-  const subscriptionFilter = searchParams.get("subscription_id") ?? undefined;
-  const [activeRequest, setActiveRequest] = useState<RequestLogDto | null>(null);
+  const subs = useSubscriptions();
+  const providers = useProviders();
+  const sessions = useLiveSessions();
+  const navigate = useNavigate();
+  // 详情页带着列表的筛选: 返回时原样恢复, 「上一条 / 下一条」也在同一份结果里走
+  const open = (id: string) => navigate(`/request-logs/${id}${searchParams.size ? `?${searchParams}` : ""}`);
   const [exporting, setExporting] = useState(false);
   const [exportMsg, setExportMsg] = useState<string | null>(null);
-  const subs = useSubscriptions();
-  const subFilterLabel = subscriptionFilter
-    ? subs.data?.find((s) => s.id === subscriptionFilter)?.display_name ?? subscriptionFilter
-    : undefined;
+  const [search, setSearch] = useState(query.q);
 
-  const filters = useMemo<RequestLogFilters | undefined>(() => {
-    if (!vmFilter && !providerFilter && !statusFilter && !clientFilter && !subscriptionFilter)
-      return undefined;
-    return {
-      virtual_model_name: vmFilter,
-      provider_id: providerFilter,
-      status: statusFilter,
-      client_tool: clientFilter,
-      subscription_id: subscriptionFilter,
-    };
-  }, [vmFilter, providerFilter, statusFilter, clientFilter, subscriptionFilter]);
-
-  const query = useRequests(page, PAGE_SIZE, filters);
-  const providers = useProviders();
-  const providerOf = (id: string) => providers.data?.find((p) => p.id === id);
-
-  const total = query.data?.total ?? 0;
-  const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE));
-  const items = query.data?.items ?? EMPTY_ITEMS;
-  const hasActiveFilter = !!filters;
-
+  // 「1 小时」按分钟滑动; 其余时间窗的起点只随日期变化
+  const [minute, setMinute] = useState(() => Math.floor(Date.now() / 60_000));
   useEffect(() => {
-    if (query.data && total > 0 && page > totalPages) setPage(totalPages);
-  }, [query.data, total, totalPages, page]);
+    const id = window.setInterval(() => setMinute(Math.floor(Date.now() / 60_000)), 15_000);
+    return () => window.clearInterval(id);
+  }, []);
+  const filters = useMemo(() => toFilters(query, minute * 60_000), [query, minute]);
+  const live = query.page === 1; // 只有第 1 页自动刷新 (与 TUI 同规则)
 
-  function clearFilters() {
-    setVmFilter(undefined);
-    setProviderFilter(undefined);
-    setStatusFilter(undefined);
-    setClientFilter(undefined);
-    setSearchParams({});
-    setPage(1);
-  }
+  const list = useQuery({
+    queryKey: [REQUESTS_KEY, "list", query.page, PAGE_SIZE, filters],
+    queryFn: () => api.listRequests(query.page, PAGE_SIZE, filters),
+    placeholderData: keepPreviousData,
+    refetchInterval: live ? 5_000 : false,
+  });
+  const facets = useQuery({
+    queryKey: [REQUESTS_KEY, "facets", filters],
+    queryFn: () => api.getRequestFacets(filters),
+    placeholderData: keepPreviousData,
+    refetchInterval: live ? 5_000 : false,
+  });
 
-  function clearSubFilter() {
-    const next = new URLSearchParams(searchParams);
-    next.delete("subscription_id");
-    setSearchParams(next);
-    setPage(1);
-  }
+  const update = (patch: Partial<LogQuery>, keepPage = false) => {
+    const next = { ...query, ...patch, page: keepPage ? (patch.page ?? query.page) : 1 };
+    setSearchParams(toSearch(next), { replace: true });
+  };
+
+  // 搜索框: 停止输入 300ms 后写进 URL
+  useEffect(() => setSearch(query.q), [query.q]);
+  useEffect(() => {
+    if (search === query.q) return;
+    const id = window.setTimeout(() => update({ q: search }), 300);
+    return () => window.clearTimeout(id);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [search]);
+
+  const total = list.data?.total ?? 0;
+  const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE));
+  useEffect(() => {
+    if (list.data && total > 0 && query.page > totalPages) update({ page: totalPages }, true);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [list.data, total, totalPages, query.page]);
+
+  const groups = useMemo(() => groupByTrace(list.data?.items ?? []), [list.data]);
+  const subsById = useMemo(() => new Map((subs.data ?? []).map((s) => [s.id, s])), [subs.data]);
+  const subName = (id: string) => subsById.get(id)?.display_name;
+  const narrowed = hasNarrowing(query);
+  const subFilterLabel = query.subscription ? (subName(query.subscription) ?? query.subscription) : null;
 
   async function exportCsv() {
     try {
@@ -130,301 +178,184 @@ export function RequestLogsPage() {
     }
   }
 
+  const sessionChips = (facets.data?.sessions ?? []).map((s) => ({
+    id: s.id,
+    label: sessions.get(s.id)?.project ?? s.id.slice(0, 8),
+  }));
+  // 当前选中的会话不在「最近 8 个」里时也要显示出来, 否则无法取消
+  if (query.session && !sessionChips.some((s) => s.id === query.session)) {
+    sessionChips.unshift({ id: query.session, label: sessions.get(query.session)?.project ?? query.session.slice(0, 8) });
+  }
+
+  let lastDay = "";
   return (
     <>
       <div className="page-actions">
         <div className="page-header" style={{ margin: 0 }}>
           <h1>{t("requestLogs.title")}</h1>
-          <div className="subtitle">{t("requestLogs.subtitle")}</div>
+          <div className="subtitle">
+            {t("requestLogs.subtitleRange", { range: t(`requestLogs.range.${query.range}`), total })}
+          </div>
         </div>
-        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-          {exportMsg && (
-            <span className="field-hint" style={{ fontSize: 11 }}>
-              {exportMsg}
-            </span>
-          )}
-          <button
-            className="btn"
-            onClick={() => void exportCsv()}
-            disabled={exporting}
-            type="button"
-          >
+        <div className="rq-actions">
+          {exportMsg && <span className="field-hint" style={{ fontSize: 11 }}>{exportMsg}</span>}
+          <div className="range-tabs" role="tablist" aria-label={t("requestLogs.rangeLabel")}>
+            {RANGES.map((r) => (
+              <button
+                key={r}
+                type="button"
+                role="tab"
+                aria-selected={query.range === r}
+                className={"range-tab" + (query.range === r ? " active" : "")}
+                onClick={() => update({ range: r })}
+              >
+                {t(`requestLogs.range.${r}`)}
+              </button>
+            ))}
+          </div>
+          <button className="btn sm" onClick={() => void exportCsv()} disabled={exporting} type="button">
             <Download size={12} />
-            {exporting
-              ? t("requestLogs.export.exporting")
-              : t("requestLogs.export.button")}
+            {exporting ? t("requestLogs.export.exporting") : t("requestLogs.export.button")}
           </button>
-          <button
-            className="btn"
-            onClick={() => query.refetch()}
-            disabled={query.isFetching}
-            type="button"
-          >
-            <RefreshCw size={12} className={query.isFetching ? "spin" : undefined} />
+          <button className="btn sm" onClick={() => void list.refetch()} disabled={list.isFetching} type="button">
+            <RefreshCw size={12} className={list.isFetching ? "spin" : undefined} />
             {t("requestLogs.refresh")}
           </button>
         </div>
       </div>
 
-      <div className="log-filters">
-        <Select
-          value={vmFilter ?? ALL}
-          onValueChange={(v) => {
-            setVmFilter(v === ALL ? undefined : (v as CustomVirtualModelName));
-            setPage(1);
-          }}
-        >
-          <SelectTrigger className="w-auto min-w-[140px]">
-            <SelectValue />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value={ALL}>{t("requestLogs.filter.allVm")}</SelectItem>
-            {[...Object.keys(VM_META), ...(customModels.data ?? []).map((model) => model.name)].map((name) => (
-              <SelectItem key={name} value={name}>
-                {name}
-              </SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
-
-        <Select
-          value={providerFilter ?? ALL}
-          onValueChange={(v) => {
-            setProviderFilter(v === ALL ? undefined : v);
-            setPage(1);
-          }}
-        >
-          <SelectTrigger className="w-auto min-w-[140px]">
-            <SelectValue />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value={ALL}>{t("requestLogs.filter.allProvider")}</SelectItem>
-            {providers.data?.map((p) => (
-              <SelectItem key={p.id} value={p.id}>
-                {p.display_name}
-              </SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
-
-        <Select
-          value={statusFilter ?? ALL}
-          onValueChange={(v) => {
-            setStatusFilter(v === ALL ? undefined : (v as RequestStatus));
-            setPage(1);
-          }}
-        >
-          <SelectTrigger className="w-auto min-w-[140px]">
-            <SelectValue />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value={ALL}>{t("requestLogs.filter.allStatus")}</SelectItem>
-            {(Object.keys(STATUS_TONE) as RequestStatus[]).map((s) => (
-              <SelectItem key={s} value={s}>
-                {t(STATUS_TONE[s].labelKey)}
-              </SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
-
-        <Select
-          value={clientFilter ?? ALL}
-          onValueChange={(v) => {
-            setClientFilter(v === ALL ? undefined : v);
-            setPage(1);
-          }}
-        >
-          <SelectTrigger className="w-auto min-w-[140px]">
-            <SelectValue />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value={ALL}>{t("requestLogs.filter.allClient")}</SelectItem>
-            {CLIENT_TOOLS.map((c) => (
-              <SelectItem key={c.id} value={c.id}>
-                {t(c.i18nKey)}
-              </SelectItem>
-            ))}
-            <SelectItem value={CLIENT_TOOL_UNKNOWN_SENTINEL}>
-              {t("requestLogs.filter.clientUnknown")}
-            </SelectItem>
-          </SelectContent>
-        </Select>
-
-        {subscriptionFilter && (
-          <span className="pill accent" style={{ display: "inline-flex", alignItems: "center", gap: 4 }}>
-            <span className="dot" />
-            {subFilterLabel}
-            <button
-              type="button"
-              onClick={clearSubFilter}
-              style={{ background: "none", border: "none", color: "inherit", cursor: "pointer", padding: 0, marginLeft: 2, display: "inline-flex" }}
-              aria-label="clear subscription filter"
-            >
-              <X size={12} />
-            </button>
-          </span>
-        )}
-
-        <span
-          className="mono"
-          style={{ marginLeft: "auto", fontSize: 12, color: "var(--ink-3)" }}
-        >
-          {total > 0
-            ? t("requestLogs.summaryFormat", { total, page, pages: totalPages })
-            : t("requestLogs.summaryEmpty")}
-        </span>
-      </div>
-
-      {query.isLoading && <div className="field-hint">{t("common.loading")}</div>}
-
-      {query.data && total === 0 && (
-        <EmptyState
-          icon={ScrollText}
-          message={
-            hasActiveFilter
-              ? t("requestLogs.empty.filtered")
-              : t("requestLogs.empty.none")
-          }
-          action={
-            hasActiveFilter ? (
-              <button className="btn sm" onClick={clearFilters} type="button">
-                {t("requestLogs.clearFilter")}
-              </button>
-            ) : undefined
-          }
-        />
-      )}
-
-      {items.length > 0 && (
-        <div className="card">
-          <div className="request-log-scroll" role="region" aria-label={t("logs.tab.requests")} tabIndex={0}>
-            <table className="table request-log-table">
-              <thead>
-                <tr>
-                  <th style={{ width: 110 }}>{t("requestLogs.col.time")}</th>
-                  <th style={{ width: 120 }}>{t("requestLogs.col.status")}</th>
-                  <th style={{ width: 105 }}>{t("requestLogs.col.client")}</th>
-                  <th style={{ width: 95 }}>{t("requestLogs.col.virtualModel")}</th>
-                  <th style={{ width: 170 }}>{t("requestLogs.col.realModel")}</th>
-                  <th style={{ width: 170 }}>{t("requestLogs.col.responseModel")}</th>
-                  <th style={{ width: 110 }}>{t("requestLogs.col.provider")}</th>
-                  <th style={{ width: 70, textAlign: "right" }}>{t("requestLogs.col.tokensIn")}</th>
-                  <th style={{ width: 70, textAlign: "right" }}>{t("requestLogs.col.tokensOut")}</th>
-                  <th style={{ width: 110, textAlign: "right" }} title={t("requestLogs.speedHint")}>{t("requestLogs.col.speed")}</th>
-                  <th style={{ width: 95, textAlign: "right" }} title={t("requestLogs.firstContentHint")}>{t("requestLogs.col.firstContent")}</th>
-                  <th style={{ width: 80, textAlign: "right" }}>{t("requestLogs.col.latency")}</th>
-                </tr>
-              </thead>
-              <tbody>
-                {items.map((row) => {
-                  const latencyText = fmtRequestSeconds(row.total_latency_ms);
-                  const inputTokensText = fmtNum(row.input_tokens);
-                  const outputTokensText = fmtNum(row.output_tokens);
-                  const provider = providerOf(row.provider_id);
-                  const providerLabel = provider?.display_name ?? customProviderLabel(row.provider_id, t) ?? row.provider_id;
-                  const status = STATUS_TONE[row.status];
-                  const isError = row.status !== "success";
-                  return (
-                    <tr
-                      key={row.id}
-                      onClick={() => setActiveRequest(row)}
-                      style={{ cursor: "pointer" }}
-                    >
-                      <td className="mono muted">{fmtTime(row.timestamp)}</td>
-                      <td>
-                        <div style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: 4 }}>
-                          <span className={`pill ${status.tone}`}>
-                            <span className="dot" />
-                            {t(status.labelKey)}
-                          </span>
-                          {isError && row.http_status != null && (
-                            <span className="pill tag mono">{row.http_status}</span>
-                          )}
-                          {row.is_streaming && (
-                            <span className="pill tag mono" title={t("requestLogs.sse")}>
-                              SSE
-                            </span>
-                          )}
-                          {row.tool_use_count != null && row.tool_use_count > 0 && (
-                            <span
-                              className="pill tag mono"
-                              title={t("requestLogs.col.toolsHint", { count: row.tool_use_count })}
-                            >
-                              🔧 {row.tool_use_count}
-                            </span>
-                          )}
-                        </div>
-                      </td>
-                      <td>
-                        <ClientToolBadge
-                          toolId={row.client_tool}
-                          userAgent={row.client_user_agent}
-                        />
-                      </td>
-                      <td className="mono">
-                        <span className="request-log-name" title={row.virtual_model_name}>{row.virtual_model_name}</span>
-                      </td>
-                      <td className="mono strong">
-                        <span className="request-log-name" title={row.real_model_name}>{row.real_model_name}</span>
-                      </td>
-                      <td className="mono muted">
-                        <span className="request-log-name" title={row.response_model_name}>{row.response_model_name ?? "—"}</span>
-                      </td>
-                      <td>
-                        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                          <ProviderLogo
-                            iconId={provider?.icon ?? providerIconId(row.provider_id)}
-                            size={18}
-                            iconSize={12}
-                          />
-                          <span className="request-log-name" title={providerLabel} style={{ fontSize: 12.5 }}>
-                            {providerLabel}
-                          </span>
-                        </div>
-                      </td>
-                      <td className="mono tnum muted" title={inputTokensText} style={{ textAlign: "right" }}>
-                        {inputTokensText}
-                      </td>
-                      <td className="mono tnum strong" title={outputTokensText} style={{ textAlign: "right" }}>
-                        {outputTokensText}
-                      </td>
-                      <td className="mono tnum" style={{ textAlign: "right" }}>{fmtTokenSpeed(row.output_tokens_per_second)}</td>
-                      <td className="mono tnum" style={{ textAlign: "right" }}>{fmtRequestSeconds(row.first_content_ms)}</td>
-                      <td className="mono tnum" title={latencyText} style={{ textAlign: "right" }}>
-                        {latencyText}
-                      </td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
+      <section className="card rq-card">
+        <div className="card-body">
+          <PurposeChips
+            filters={PURPOSE_FILTERS}
+            value={query.purpose}
+            counts={facets.data?.purpose ?? ZERO_COUNTS}
+            onChange={(purpose) => update({ purpose })}
+            sessions={sessionChips}
+            session={query.session}
+            onSession={(session) => update({ session })}
+            t={t}
+          />
+          <div className="rq-filters">
+            <Select value={query.vm ?? ALL} onValueChange={(v) => update({ vm: v === ALL ? null : (v as CustomVirtualModelName) })}>
+              <SelectTrigger className="w-auto min-w-[130px]"><SelectValue /></SelectTrigger>
+              <SelectContent>
+                <SelectItem value={ALL}>{t("requestLogs.filter.allVm")}</SelectItem>
+                {[...Object.keys(VM_META), ...(customModels.data ?? []).map((m) => m.name)].map((name) => (
+                  <SelectItem key={name} value={name}>{name}</SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+            <Select value={query.provider ?? ALL} onValueChange={(v) => update({ provider: v === ALL ? null : v })}>
+              <SelectTrigger className="w-auto min-w-[130px]"><SelectValue /></SelectTrigger>
+              <SelectContent>
+                <SelectItem value={ALL}>{t("requestLogs.filter.allProvider")}</SelectItem>
+                {providers.data?.map((p) => <SelectItem key={p.id} value={p.id}>{p.display_name}</SelectItem>)}
+              </SelectContent>
+            </Select>
+            <Select value={query.status ?? ALL} onValueChange={(v) => update({ status: v === ALL ? null : (v as RequestStatus) })}>
+              <SelectTrigger className="w-auto min-w-[120px]"><SelectValue /></SelectTrigger>
+              <SelectContent>
+                <SelectItem value={ALL}>{t("requestLogs.filter.allStatus")}</SelectItem>
+                {STATUSES.map((s) => <SelectItem key={s} value={s}>{t(`requestLogs.status.${s}`)}</SelectItem>)}
+              </SelectContent>
+            </Select>
+            <Select value={query.client ?? ALL} onValueChange={(v) => update({ client: v === ALL ? null : v })}>
+              <SelectTrigger className="w-auto min-w-[130px]"><SelectValue /></SelectTrigger>
+              <SelectContent>
+                <SelectItem value={ALL}>{t("requestLogs.filter.allClient")}</SelectItem>
+                {CLIENT_TOOLS.map((c) => <SelectItem key={c.id} value={c.id}>{t(c.i18nKey)}</SelectItem>)}
+                <SelectItem value={CLIENT_TOOL_UNKNOWN_SENTINEL}>{t("requestLogs.filter.clientUnknown")}</SelectItem>
+              </SelectContent>
+            </Select>
+            {subFilterLabel && (
+              <span className="pill accent rq-filter-pill">
+                <span className="dot" />
+                {subFilterLabel}
+                <button type="button" onClick={() => update({ subscription: null })} aria-label={t("requestLogs.clearFilter")}>
+                  <X size={12} />
+                </button>
+              </span>
+            )}
+            <label className="rq-search">
+              <Search size={13} />
+              <input
+                value={search}
+                onChange={(e) => setSearch(e.target.value)}
+                placeholder={t("requestLogs.searchPlaceholder")}
+                aria-label={t("requestLogs.searchPlaceholder")}
+              />
+              {search && (
+                <button type="button" onClick={() => setSearch("")} aria-label={t("requestLogs.clearFilter")}>
+                  <X size={12} />
+                </button>
+              )}
+            </label>
           </div>
+
+          {list.isLoading && <div className="field-hint">{t("common.loading")}</div>}
+          {list.data && total === 0 && (
+            <EmptyState
+              icon={ScrollText}
+              message={narrowed || query.range !== "all" ? t("requestLogs.empty.filtered") : t("requestLogs.empty.none")}
+              action={
+                narrowed ? (
+                  <button className="btn sm" onClick={() => setSearchParams(toSearch({ ...parseLogQuery(new URLSearchParams()), range: query.range }))} type="button">
+                    {t("requestLogs.clearFilter")}
+                  </button>
+                ) : undefined
+              }
+            />
+          )}
+          {groups.length > 0 && (
+            <div className="rq-list">
+              {groups.map(({ head, attempts }) => {
+                const day = dayOf(head.timestamp);
+                const sep = day !== lastDay ? <div className="rq-day">{dayLabel(head.timestamp, t)}</div> : null;
+                lastDay = day;
+                // 失败的尝试按时间正序排在最终那次下面; 「改走」= 下一次尝试的订阅
+                const chain = [...attempts].reverse();
+                const order = [...chain, head];
+                const total = head.summary.retry_count + 1;
+                return (
+                  <Fragment key={head.id}>
+                    {sep}
+                    <RequestRow
+                      r={head.summary}
+                      sub={subsById.get(head.subscription_id)}
+                      session={head.summary.session ? sessions.get(head.summary.session.id) : undefined}
+                      mode="link"
+                      onActivate={() => open(head.id)}
+                      t={t}
+                    />
+                    {chain.map((a, i) => (
+                      <RequestRow
+                        key={a.id}
+                        r={a.summary}
+                        sub={subsById.get(a.subscription_id)}
+                        session={undefined}
+                        next={subName(order[i + 1].subscription_id)}
+                        attempt={{ index: a.summary.retry_count + 1, total: Math.max(total, a.summary.retry_count + 1) }}
+                        mode="link"
+                        onActivate={() => open(a.id)}
+                        t={t}
+                      />
+                    ))}
+                  </Fragment>
+                );
+              })}
+            </div>
+          )}
+
+          <Pagination
+            total={total}
+            page={query.page}
+            totalPages={totalPages}
+            onChange={(page) => update({ page }, true)}
+            trailing={live && total > 0 ? <span className="field-hint rq-autorefresh">{t("requestLogs.autoRefresh")}</span> : undefined}
+          />
         </div>
-      )}
-
-      <Pagination
-        total={total}
-        page={page}
-        totalPages={totalPages}
-        onChange={setPage}
-        trailing={
-          hasActiveFilter ? (
-            <button
-              className="btn sm"
-              onClick={clearFilters}
-              type="button"
-              style={{ marginRight: "auto" }}
-            >
-              {t("requestLogs.clearFilter")}
-            </button>
-          ) : undefined
-        }
-      />
-
-      <RequestDetailDialog
-        request={activeRequest}
-        onClose={() => setActiveRequest(null)}
-      />
+      </section>
     </>
   );
 }

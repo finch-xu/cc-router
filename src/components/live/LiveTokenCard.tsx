@@ -15,6 +15,7 @@ import {
   isOk,
   median,
   partsTotal,
+  purposeOf,
   sumTokens,
   type TokenParts,
 } from "@/lib/liveStats";
@@ -72,7 +73,7 @@ export function LiveTokenCard({ rows, now, windowMs, windowLabel }: Props) {
     const m = new Map<string, LiveRequest[]>();
     for (const r of rows) {
       const k =
-        by === "purpose" ? r.purpose.kind : by === "vm" ? r.virtual_model : by === "sub" ? r.subscription_id : clientKey(r.client_tool);
+        by === "purpose" ? purposeOf(r).kind : by === "vm" ? r.virtual_model : by === "sub" ? r.subscription_id : clientKey(r.client_tool);
       m.set(k, [...(m.get(k) ?? []), r]);
     }
     return [...m.entries()]

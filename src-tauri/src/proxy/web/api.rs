@@ -160,12 +160,16 @@ web_commands! {
     update_virtual_model(name: String, input: UpdateVirtualModelInput) => commands::virtual_models::update_virtual_model(st, args.name, args.input).await,
     // request logs
     get_request_headers(id: String) => commands::requests::get_request_headers(st, args.id).await,
+    get_request_detail(id: String) => commands::requests::get_request_detail(st, args.id).await,
+    list_session_requests(session_id: String, around_ms: i64, radius: Option<u32>) => commands::requests::list_session_requests(st, args.session_id, args.around_ms, args.radius).await,
+    get_request_facets(filters: Option<RequestLogFilters>) => commands::requests::get_request_facets(st, args.filters).await,
+    get_request_neighbors(id: String, filters: Option<RequestLogFilters>) => commands::requests::get_request_neighbors(st, args.id, args.filters).await,
     list_requests(page: u32, page_size: u32, filters: Option<RequestLogFilters>) => commands::requests::list_requests(st, args.page, args.page_size, args.filters).await,
     export_requests_csv(path: String, filters: Option<RequestLogFilters>) => commands::requests::export_requests_csv(st, args.path, args.filters).await,
     export_requests_csv_text(filters: Option<RequestLogFilters>) => commands::requests::export_requests_csv_text(st, args.filters).await,
     list_supported_client_tools() => commands::requests::list_supported_client_tools().await,
     get_client_activity() => commands::requests::get_client_activity(st).await,
-    get_live_requests(since_ms: Option<i64>) => crate::observability::live_feed::get_live_requests(app, args.since_ms).await,
+    get_live_requests(since_ms: Option<i64>) => crate::observability::live_feed::get_live_requests(app, st, args.since_ms).await,
     // statistics / receipts / events
     get_overall_stats(range: StatsRange) => commands::statistics::get_overall_stats(st, args.range).await,
     get_daily_series(range: StatsRange) => commands::statistics::get_daily_series(st, args.range).await,

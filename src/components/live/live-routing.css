@@ -179,79 +179,6 @@
 .lv-tip .r { display: flex; justify-content: space-between; gap: 16px; color: var(--ink-3); }
 .lv-tip .r span:last-child { color: var(--ink); font-weight: 550; font-variant-numeric: tabular-nums; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
-/* ---------- 实时事件 ---------- */
-.lv-feed-bar { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; margin-bottom: 10px; }
-.lv-chip {
-  display: inline-flex; align-items: center; gap: 6px; height: 26px; padding: 0 10px;
-  border: 0; border-radius: 999px; background: transparent; cursor: pointer;
-  font-size: 12px; font-weight: 500; color: var(--ink-3); white-space: nowrap;
-}
-.lv-chip b { font-weight: 600; color: var(--ink-4); font-variant-numeric: tabular-nums; }
-.lv-chip:hover { background: var(--surface-3); }
-.lv-chip.on { background: var(--surface-3); color: var(--ink); box-shadow: inset 0 0 0 1px var(--line-2); }
-.lv-chip.err, .lv-chip.err b { color: var(--err); }
-.lv-chip .sd { width: 7px; height: 7px; border-radius: 50%; }
-.lv-gap { width: 1px; height: 16px; background: var(--line-2); margin: 0 4px; }
-
-.lv-feed { display: flex; flex-direction: column; margin: 0 -8px; }
-.lv-ev {
-  display: grid; grid-template-columns: 58px 100px minmax(0, 1fr) minmax(150px, 236px) 136px;
-  gap: 2px 14px; align-items: start; padding: 9px 8px; border-radius: var(--r-md); cursor: pointer;
-}
-.lv-ev + .lv-ev { box-shadow: inset 0 1px 0 var(--line); }
-.lv-ev:hover, .lv-ev.open { background: var(--surface-3); box-shadow: none; }
-.lv-ev:hover + .lv-ev, .lv-ev.open + .lv-ev { box-shadow: none; }
-.lv-ev:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
-.lv-ev.new { animation: lv-ev-in 0.5s var(--lv-ease); }
-@keyframes lv-ev-in {
-  from { opacity: 0; transform: translateY(-6px); background: var(--accent-bg); }
-  60% { background: var(--accent-bg); }
-}
-.lv-ev .tm { padding-top: 3px; font-family: var(--font-mono); font-size: 11px; color: var(--ink-4); font-variant-numeric: tabular-nums; }
-.lv-ptag {
-  justify-self: start; display: inline-flex; align-items: center; gap: 5px; height: 22px; padding: 0 8px;
-  border-radius: var(--r-sm); font-size: 11.5px; font-weight: 560; white-space: nowrap;
-  background: var(--surface-3); color: var(--ink-2);
-}
-.lv-ptag.main { background: var(--accent-bg); color: var(--accent-ink); }
-.lv-ptag.agent { background: color-mix(in srgb, var(--ink) 9%, transparent); color: var(--ink); }
-.lv-ptag.bg { background: transparent; color: var(--ink-3); box-shadow: inset 0 0 0 1px var(--line-2); }
-.lv-ptag.unknown { background: transparent; color: var(--ink-4); box-shadow: inset 0 0 0 1px var(--line); }
-.lv-ev .what { min-width: 0; }
-.lv-ev .what .l1 { display: flex; align-items: center; gap: 8px; min-width: 0; font-size: 13px; white-space: nowrap; }
-.lv-ev .what .l1 b { font-weight: 560; color: var(--ink); overflow: hidden; text-overflow: ellipsis; }
-.lv-sess { flex: none; display: inline-flex; align-items: center; gap: 5px; font-size: 11.5px; color: var(--ink-3); }
-.lv-sess i { width: 7px; height: 7px; border-radius: 50%; }
-.lv-sess .mono { font-size: 10.5px; color: var(--ink-4); }
-.lv-ev .l2 { margin-top: 2px; font-size: 12px; color: var(--ink-3); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.lv-tool { font-family: var(--font-mono); font-size: 11px; color: var(--ink-2); background: var(--surface-3); padding: 0 5px; border-radius: 4px; }
-.lv-ev:hover .lv-tool, .lv-ev.open .lv-tool { background: var(--surface); }
-.lv-times { margin-left: 2px; font-size: 11px; color: var(--ink-4); }
-.lv-arr { margin: 0 5px; color: var(--ink-4); }
-.lv-ev .rt { min-width: 0; }
-.lv-ev .rt .l1 { display: flex; align-items: center; gap: 6px; min-width: 0; font-size: 12.5px; white-space: nowrap; color: var(--ink-4); }
-.lv-ev .rt .m { font-family: var(--font-mono); font-size: 11.5px; font-weight: 600; color: var(--ink); }
-.lv-ev .rt .s { color: var(--ink-2); overflow: hidden; text-overflow: ellipsis; }
-.lv-ev .rt .l2 { font-family: var(--font-mono); font-size: 11.5px; color: var(--ink-4); }
-.lv-ev .rt .w { color: var(--warn); font-family: inherit; }
-.lv-ev .rt .e { color: var(--err); }
-.lv-ev .mx { text-align: right; white-space: nowrap; }
-.lv-ev .mx .l1 { font-size: 12.5px; font-weight: 560; color: var(--ink); font-variant-numeric: tabular-nums; }
-.lv-ev .mx .l2 { font-variant-numeric: tabular-nums; color: var(--ink-4); font-size: 11.5px; }
-.lv-ev.err .mx .l1 { color: var(--err); }
-.lv-ev .more {
-  grid-column: 3 / -1; margin-top: 8px; padding: 10px 12px; border-radius: var(--r-md); background: var(--surface);
-  display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 8px 18px; font-size: 12px; cursor: default;
-}
-.lv-ev .more > div { min-width: 0; }
-.lv-ev .more small { display: block; font-size: 11px; color: var(--ink-4); }
-.lv-ev .more span { color: var(--ink-2); font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
-.lv-ev .more .err-line { grid-column: 1 / -1; }
-.lv-ev .more .err-line span { color: var(--err); }
-.lv-ev .more .why { grid-column: 1 / -1; display: flex; gap: 8px; align-items: baseline; padding-top: 8px; box-shadow: inset 0 1px 0 var(--line); color: var(--ink-3); }
-.lv-ev .more .why b { font-weight: 560; color: var(--ink-2); white-space: nowrap; }
-.lv-ev .more .why .guess { color: var(--warn); font-size: 11px; white-space: nowrap; }
-
 /* ---------- Token ---------- */
 .lv-tk-grid { display: grid; grid-template-columns: minmax(0, 1.7fr) minmax(0, 1fr); gap: 32px; }
 .lv-tk-top { display: flex; align-items: flex-end; gap: 24px; flex-wrap: wrap; }
@@ -322,11 +249,8 @@
   .lv-kpis { grid-template-columns: repeat(3, minmax(0, 1fr)); }
   .lv-kpi:nth-child(4) { box-shadow: none; }
   .lv-tk-grid { grid-template-columns: 1fr; }
-  .lv-ev { grid-template-columns: 52px 96px minmax(0, 1fr) 136px; }
-  .lv-ev .rt { grid-column: 3; grid-row: 2; }
-  .lv-ev .more { grid-column: 1 / -1; grid-template-columns: repeat(2, minmax(0, 1fr)); }
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .lv-live-tag .lv-live-dot, .lv-inflight-dots i, .lv-ev.new, .lv-pop, .lv-node.flash-ok, .lv-node.flash-err { animation: none !important; }
+  .lv-live-tag .lv-live-dot, .lv-inflight-dots i, .lv-pop, .lv-node.flash-ok, .lv-node.flash-err { animation: none !important; }
 }

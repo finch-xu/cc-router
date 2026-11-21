@@ -232,6 +232,7 @@ pub fn stream_response(
             error_message: error_message.clone(),
             upstream_response_body: None,
             monitor_session: ctx.monitor_session(),
+            trace_id: ctx.trace_id.clone(),
             client_tool: ctx.info.tool,
             client_user_agent: ctx.info.user_agent.clone(),
             client_version: ctx.info.version.clone(),

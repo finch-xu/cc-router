@@ -1,4 +1,4 @@
-//! 「这个请求在干什么」—— 实时路由页的事件流用 (不落库, 只随 `live_request` 事件下发)。
+//! 「这个请求在干什么」—— 实时路由页与请求日志共用 (requests.purpose_* 五列, migration 030)。
 //!
 //! 只看 Anthropic 形态的请求体 (chat / responses 入口在入站翻译之后算), 不碰 hooks:
 //! - 轮次 / 步数 / 上一步工具名: 任何客户端都能从 `messages` 推出来, 是确定值;
@@ -34,6 +34,32 @@ pub enum PurposeKind {
     /// 无法判断 (非 Claude Code / Codex 客户端)
     #[default]
     Unknown,
+}
+
+impl PurposeKind {
+    pub const ALL: [Self; 9] = [
+        Self::Main, Self::Agent, Self::Compact, Self::Guard, Self::Title,
+        Self::Fetch, Self::Probe, Self::Background, Self::Unknown,
+    ];
+
+    /// 落库值, 与 serde 的 snake_case 相同。
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Main => "main",
+            Self::Agent => "agent",
+            Self::Compact => "compact",
+            Self::Guard => "guard",
+            Self::Title => "title",
+            Self::Fetch => "fetch",
+            Self::Probe => "probe",
+            Self::Background => "background",
+            Self::Unknown => "unknown",
+        }
+    }
+
+    pub fn parse(s: &str) -> Option<Self> {
+        Self::ALL.into_iter().find(|k| k.as_str() == s)
+    }
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize)]
