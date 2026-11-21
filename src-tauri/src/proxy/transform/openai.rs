@@ -103,6 +103,9 @@ pub struct OpenAiResponsesExtras {
     /// 上游方言 (默认 OpenAI 官方)。DeepSeek `/v1/responses` 走
     /// [`ResponsesTransformConfig::deepseek_responses`], 由 [`detect_responses_dialect`] 识别。
     pub dialect: ResponsesDialect,
+    /// 会话级缓存亲和键 (≤64 ASCII 字符), 仅对 OpenaiOfficial 方言注入 `prompt_cache_key`.
+    /// DeepSeek 方言不注入, 避免非标准字段触发上游报错.
+    pub prompt_cache_key: Option<String>,
 }
 
 impl OpenAiResponsesExtras {
@@ -139,6 +142,11 @@ pub fn anthropic_to_openai_responses(
     let mut out = responses_common::build_responses_body(body, &config)?;
     if let Some(effort) = extras.reasoning_effort {
         out["reasoning"] = json!({ "effort": effort.as_str() });
+    }
+    if matches!(extras.dialect, ResponsesDialect::OpenaiOfficial) {
+        if let Some(key) = extras.prompt_cache_key.as_deref().filter(|s| !s.is_empty()) {
+            out["prompt_cache_key"] = json!(key);
+        }
     }
     Ok(out)
 }
@@ -378,6 +386,7 @@ mod tests {
             reasoning_effort: Some(ReasoningEffort::High),
             expose_reasoning: false,
             dialect: Default::default(),
+            prompt_cache_key: None,
         };
         let out = anthropic_to_openai_responses(&body, &extras).unwrap();
         assert_eq!(out["reasoning"]["effort"], json!("high"));
@@ -393,9 +402,11 @@ mod tests {
             reasoning_effort: None,
             expose_reasoning: true,
             dialect: Default::default(),
+            prompt_cache_key: Some("sess-uuid-123".into()),
         };
         let out = anthropic_to_openai_responses(&body, &extras).unwrap();
         assert_eq!(out["include"], json!(["reasoning.encrypted_content"]));
+        assert_eq!(out["prompt_cache_key"], json!("sess-uuid-123"));
     }
 
     #[test]
@@ -783,10 +794,13 @@ mod tests {
             reasoning_effort: None,
             expose_reasoning: true,
             dialect: ResponsesDialect::Deepseek,
+            prompt_cache_key: Some("should-not-be-injected".into()),
         };
         let out = anthropic_to_openai_responses(&body, &extras).unwrap();
         // deepseek 文档: include 不支持 → 即使 expose_reasoning=true 也不注入
         assert!(out.get("include").is_none());
+        // deepseek 方言不注入 OpenAI 专属 prompt_cache_key
+        assert!(out.get("prompt_cache_key").is_none());
         // 宽松侧与 openai 一致: max_tokens 映射
         assert_eq!(out["max_output_tokens"], json!(100));
     }

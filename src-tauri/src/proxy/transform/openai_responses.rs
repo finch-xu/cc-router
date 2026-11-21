@@ -33,6 +33,9 @@ pub struct CodexExtras {
     pub reasoning_effort: Option<ReasoningEffort>,
     /// 控制 emit_reasoning + roundtrip_reasoning. 来自 yaml `expose_reasoning` 字段。
     pub expose_reasoning: bool,
+    /// 会话级缓存亲和键 (由 `session_key::derive_prompt_cache_key` 推导, ≤64 ASCII 字符)。
+    /// 注入 body.prompt_cache_key 并由 dispatch 层同步为 `session_id` header, 提升多轮缓存命中率。
+    pub prompt_cache_key: Option<String>,
 }
 
 /// 把 Anthropic Messages 请求体转成 OpenAI Responses 请求体 (codex 路径, chatgpt 反代专用).
@@ -45,6 +48,9 @@ pub fn anthropic_to_responses(body: &Value, extras: &CodexExtras) -> AppResult<V
     if let Some(effort) = extras.reasoning_effort {
         out["reasoning"] = json!({ "effort": effort.as_str() });
     }
+    if let Some(key) = extras.prompt_cache_key.as_deref().filter(|s| !s.is_empty()) {
+        out["prompt_cache_key"] = json!(key);
+    }
     Ok(out)
 }
 
@@ -56,6 +62,23 @@ pub fn anthropic_to_responses(body: &Value, extras: &CodexExtras) -> AppResult<V
 mod tests {
     use super::*;
     use serde_json::json;
+
+    #[test]
+    fn request_injects_prompt_cache_key_when_present() {
+        let body = json!({
+            "model": "gpt-5.5",
+            "messages": [{"role": "user", "content": "hi"}],
+        });
+        let extras = CodexExtras {
+            prompt_cache_key: Some("thread-abc-123".into()),
+            ..Default::default()
+        };
+        let out = anthropic_to_responses(&body, &extras).unwrap();
+        assert_eq!(out["prompt_cache_key"], json!("thread-abc-123"));
+
+        let out_none = anthropic_to_responses(&body, &CodexExtras::default()).unwrap();
+        assert!(out_none.get("prompt_cache_key").is_none());
+    }
 
     #[test]
     fn request_drops_max_tokens_and_forces_stream() {

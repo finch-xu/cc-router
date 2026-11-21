@@ -316,6 +316,24 @@ pub async fn insert_on(conn: &mut SqliteConnection, sub: &SubscriptionRow) -> Ap
     Ok(())
 }
 
+/// 读取单条订阅当前持久化的 OAuth 元数据 (用于 refresh_token 轮换时保留既有 account_id / email).
+pub async fn get_oauth_metadata(pool: &SqlitePool, id: &Uuid) -> AppResult<Option<OAuthMetadata>> {
+    let row: Option<(String,)> =
+        sqlx::query_as("SELECT oauth_metadata FROM subscriptions WHERE id = ?")
+            .bind(id.to_string())
+            .fetch_optional(pool)
+            .await?;
+    let Some((json_str,)) = row else {
+        return Ok(None);
+    };
+    if json_str.trim().is_empty() {
+        return Ok(None);
+    }
+    let meta: OAuthMetadata = serde_json::from_str(&json_str)
+        .map_err(|e| AppError::internal(format!("oauth_metadata JSON 解析失败: {e}")))?;
+    Ok(Some(meta))
+}
+
 /// 更新订阅的 OAuth 元数据 (例如 refresh_token 被服务端旋转后落盘新值).
 /// 同时清掉 is_auth_failed 与 last_error_message, 类比 update_api_key 的行为.
 pub async fn update_oauth_metadata(

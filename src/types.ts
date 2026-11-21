@@ -71,6 +71,16 @@ export interface CreateKiroSubscriptionInput {
 }
 
 /**
+ * 浏览器 OAuth PKCE 启动结果, 对应 Rust 侧 oauth::chatgpt::BrowserFlowStart.
+ */
+export interface BrowserFlowStart {
+  flow_id: string;
+  authorize_url: string;
+  /** 秒 */
+  expires_in: number;
+}
+
+/**
  * Device Code 启动结果, 对应 Rust 侧 oauth::chatgpt::DeviceFlowStart.
  */
 export interface DeviceFlowStart {

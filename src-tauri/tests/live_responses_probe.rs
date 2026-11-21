@@ -40,6 +40,7 @@ async fn dispatch(body: Value, streaming: bool) -> Result<OpenaiResponsesPayload
             reasoning_effort: None,
             expose_reasoning: true,
             dialect: Default::default(),
+            prompt_cache_key: None,
         },
         &mut cc_router_lib::proxy::header_log::UpstreamHeaderCapture::default(),
         false,

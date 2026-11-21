@@ -18,6 +18,7 @@ export interface CodexSnapshot {
 /**
  * 生成完整的 config.toml 推荐内容 (含注释).
  * 注意 base_url 后缀必须是 `/v1`, Codex 会在此基础上拼 `/responses` 走 OpenAI Responses 协议.
+ * 显式声明 `supports_websockets = false`, 避免 Codex 尝试 wss:// 多次重试超时后再回退 HTTP/SSE.
  *
  * `comment` 是文件头注释 (按界面语言, 由调用方经 i18n 传入), 每行自动加 `# `.
  */
@@ -33,6 +34,7 @@ name = "cc-router"
 base_url = "${snap.baseUrl}/v1"
 wire_api = "responses"
 env_key = "OPENAI_API_KEY"
+supports_websockets = false
 
 [profiles.cc-router]
 model_provider = "cc-router"

@@ -270,6 +270,7 @@ pub async fn probe_subscription(
             let extras = CodexExtras {
                 reasoning_effort: resolve_reasoning_effort(&body, forced_effort.as_deref(), default_effort.as_deref()),
                 expose_reasoning: expose,
+                prompt_cache_key: None,
             };
             let res = dispatch_oauth_attempt(
                 &state.probe_client,
@@ -375,6 +376,7 @@ pub async fn probe_subscription(
                 expose_reasoning: expose,
                 // 与 pipeline 真实 dispatch 同一方言判定 (探测必须复用真实 dispatch 行为)
                 dialect: detect_responses_dialect(&row.messages_url(), model),
+                prompt_cache_key: None,
             };
             let res = dispatch_openai_responses_attempt(
                 &state.probe_client,

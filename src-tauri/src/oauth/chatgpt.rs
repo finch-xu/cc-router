@@ -1,29 +1,43 @@
-//! ChatGPT Plus/Pro OAuth 管理 (复刻自 cc-switch `codex_oauth_auth.rs`).
+//! ChatGPT Plus/Pro OAuth 管理 (复刻自 cc-switch `codex_oauth_auth.rs`, 补充标准浏览器 PKCE 登录).
 //!
 //! ## 设计要点
+//! - **双登录方式**:
+//!   - 首选: 浏览器 OAuth 2.0 PKCE + 本地回环回调 (`http://localhost:1455/auth/callback`),
+//!     与官方 Codex CLI 桌面端一致, 不依赖账号安全设置里的「设备码授权」开关。
+//!   - 备选: Device Code (`auth.openai.com/codex/device`), 适用于 1455 端口被占用或无本地浏览器环境。
+//!   两种方式完成后都将 `PolledTokens` 写入同一个 `completed` 缓存, 统一由 `create_chatgpt_oauth_subscription` 消费。
 //! - **每个订阅一份 refresh_token**: 持久化在 `subscriptions.oauth_metadata` 列;
 //!   access_token 仅放进程内存, 重启后下一次请求时再 refresh 拿一次。
 //! - **60s 提前刷新**: id_token JWT 的 `exp` 减 60s 视为「该刷新了」。
 //! - **per-subscription 互斥锁**: 高并发请求同一订阅时, 只允许一条线 refresh,
 //!   其他人在锁外 double-check 缓存。
 //! - **refresh_token rotation**: OpenAI 偶尔会下发新的 refresh_token,
-//!   收到后写回 SQLite (`store::update_oauth_metadata`).
+//!   收到后合并保留原有 account_id/email 写回 SQLite (`store::update_oauth_metadata`),
+//!   并同步到内存 `rotated_refresh_tokens` 避免内存态 runtime 沿用失效旧 token。
 //!
 //! ## 与 ~/.codex/auth.json 的关系
-//! cc-router 不读 / 不写 ~/.codex/auth.json. 用户在 cc-router UI 内独立完成 Device Code 登录,
+//! cc-router 不读 / 不写 ~/.codex/auth.json. 用户在 cc-router UI 内独立完成 OAuth 登录,
 //! 凭据存在 cc-router 自己的 SQLite 里。这是「方案 A: 完全隔离」, 见 plan.md。
 
 use std::collections::HashMap;
+use std::net::{Ipv4Addr, SocketAddr};
 use std::sync::{Arc, OnceLock};
 use std::time::Duration;
 
+use axum::extract::Query;
+use axum::http::StatusCode;
+use axum::response::{Html, IntoResponse};
+use axum::routing::get;
+use axum::Router;
 use base64::engine::general_purpose::URL_SAFE_NO_PAD;
 use base64::Engine as _;
 use chrono::Utc;
 use reqwest::Client;
 use serde::{Deserialize, Serialize};
+use sha2::{Digest, Sha256};
 use sqlx::SqlitePool;
-use tokio::sync::{Mutex, RwLock};
+use tokio::net::TcpListener;
+use tokio::sync::{oneshot, Mutex, RwLock};
 use tracing::{info, warn};
 use uuid::Uuid;
 
@@ -34,11 +48,18 @@ use crate::subscription::store;
 /// 与 cc-switch / codex-rs 实测一致, 可直接打 ChatGPT 后端 (chatgpt.com/backend-api/codex).
 const CHATGPT_CLIENT_ID: &str = "app_EMoamEEZ73f0CkXaXp7hrann";
 
+const OAUTH_AUTHORIZE_URL: &str = "https://auth.openai.com/oauth/authorize";
 const DEVICE_CODE_URL: &str = "https://auth.openai.com/api/accounts/deviceauth/usercode";
 const DEVICE_POLL_URL: &str = "https://auth.openai.com/api/accounts/deviceauth/token";
 const OAUTH_TOKEN_URL: &str = "https://auth.openai.com/oauth/token";
 const DEVICE_VERIFICATION_URI: &str = "https://auth.openai.com/codex/device";
 const DEVICE_REDIRECT_URI: &str = "https://auth.openai.com/deviceauth/callback";
+/// 与官方 Codex CLI 保持一致的本地 OAuth PKCE 回调端口与路径 (OpenAI 仅白名单该 redirect_uri).
+pub const PKCE_CALLBACK_PORT: u16 = 1455;
+const PKCE_CALLBACK_PATH: &str = "/auth/callback";
+const PKCE_REDIRECT_URI: &str = "http://localhost:1455/auth/callback";
+const PKCE_SCOPE: &str = "openid profile email offline_access";
+const PKCE_FLOW_TTL_SECS: u64 = 600;
 
 /// 仿官方 codex_cli_rs 的 originator HTTP header 值.
 /// OpenAI 风控会校验这个 header, 缺失或值不匹配时更可能触发手机号验证 / 二次确认.
@@ -95,6 +116,8 @@ pub enum OAuthError {
     NoCredentials(Uuid),
     #[error("数据库错误: {0}")]
     Storage(String),
+    #[error("本地回调端口 {0} 已被占用")]
+    CallbackPortInUse(u16),
 }
 
 impl From<reqwest::Error> for OAuthError {
@@ -156,6 +179,16 @@ pub struct DeviceFlowStart {
     pub device_code: String,
     pub user_code: String,
     pub verification_uri: String,
+    /// 秒
+    pub expires_in: u64,
+}
+
+/// 暴露给前端的浏览器 PKCE 登录启动结果.
+#[derive(Debug, Clone, Serialize)]
+pub struct BrowserFlowStart {
+    /// 与 OAuth state 一致; 授权成功后也作为 completed 缓存键传给 create_chatgpt_oauth_subscription.
+    pub flow_id: String,
+    pub authorize_url: String,
     /// 秒
     pub expires_in: u64,
 }
@@ -246,6 +279,23 @@ struct PendingDevice {
     expires_at_ms: i64,
 }
 
+/// 进行中 / 已完成的浏览器 OAuth PKCE 登录 (同时只能有一个, 因回调端口固定为 1455).
+struct ActiveBrowserFlow {
+    flow_id: String,
+    code_verifier: String,
+    /// Unix ms
+    expires_at_ms: i64,
+    status: BrowserFlowStatus,
+    /// 触发后优雅停掉 1455 本地回调 listener.
+    shutdown: Option<oneshot::Sender<()>>,
+}
+
+enum BrowserFlowStatus {
+    Pending,
+    Completed(ChatGptAccount),
+    Failed(String),
+}
+
 /// 用户完成授权后, 后端把整套 token 缓存 10min 等前端调 create_subscription.
 /// 这样 refresh_token 不会走前端.
 const COMPLETED_POLL_TTL_MS: i64 = 10 * 60 * 1000;
@@ -256,11 +306,16 @@ pub struct ChatGptOAuthManager {
     http: Client,
     /// subscription_id -> 缓存的 access_token
     cache: Arc<RwLock<HashMap<Uuid, CachedToken>>>,
+    /// subscription_id -> 最近一次 rotation 拿到的最新 refresh_token.
+    /// 避免调用方 (pipeline / ping / models / usage) 从内存 SubscriptionRuntime 读到旧 refresh_token.
+    rotated_refresh_tokens: Arc<RwLock<HashMap<Uuid, String>>>,
     /// subscription_id -> 互斥锁, 同一订阅同一时刻只允许一个 refresh
     locks: Arc<RwLock<HashMap<Uuid, Arc<Mutex<()>>>>>,
     /// device_auth_id -> 进行中的 device flow
     pending: Arc<RwLock<HashMap<String, PendingDevice>>>,
-    /// device_auth_id -> 已经完成授权的 token 集合, 等前端调 consume_completed_poll 落盘.
+    /// 当前活跃的浏览器 PKCE 登录流程 (监听 127.0.0.1:1455).
+    browser_flow: Arc<RwLock<Option<ActiveBrowserFlow>>>,
+    /// device_auth_id 或 pkce flow_id -> 已经完成授权的 token 集合, 等前端调 consume_completed_poll 落盘.
     /// 这样 refresh_token 永远不暴露给前端 JS context.
     completed: Arc<RwLock<HashMap<String, (PolledTokens, i64)>>>,
 }
@@ -284,10 +339,140 @@ impl ChatGptOAuthManager {
             pool,
             http,
             cache: Arc::new(RwLock::new(HashMap::new())),
+            rotated_refresh_tokens: Arc::new(RwLock::new(HashMap::new())),
             locks: Arc::new(RwLock::new(HashMap::new())),
             pending: Arc::new(RwLock::new(HashMap::new())),
+            browser_flow: Arc::new(RwLock::new(None)),
             completed: Arc::new(RwLock::new(HashMap::new())),
         }
+    }
+
+    /// 启动浏览器 OAuth 2.0 PKCE 登录流程 (首选):
+    /// 1. 释放上一轮未结束的 1455 监听
+    /// 2. 绑定 127.0.0.1:1455 接收 `/auth/callback`
+    /// 3. 返回授权页 URL, 前端打开浏览器后轮询 `poll_browser_flow`
+    pub async fn start_browser_flow(&self) -> Result<BrowserFlowStart, OAuthError> {
+        let had_previous = self.stop_active_browser_listener().await;
+
+        let listener = bind_pkce_callback_listener(PKCE_CALLBACK_PORT, had_previous).await?;
+
+        let code_verifier = random_base64url(32)?;
+        let code_challenge = pkce_s256_challenge(&code_verifier);
+        let flow_id = random_base64url(24)?;
+        let authorize_url = build_pkce_authorize_url(&code_challenge, &flow_id)?;
+        let expires_at_ms = Utc::now().timestamp_millis() + (PKCE_FLOW_TTL_SECS as i64) * 1000;
+
+        let (shutdown_tx, shutdown_rx) = oneshot::channel::<()>();
+        {
+            let mut slot = self.browser_flow.write().await;
+            *slot = Some(ActiveBrowserFlow {
+                flow_id: flow_id.clone(),
+                code_verifier,
+                expires_at_ms,
+                status: BrowserFlowStatus::Pending,
+                shutdown: Some(shutdown_tx),
+            });
+        }
+
+        let http = self.http.clone();
+        let browser_flow = self.browser_flow.clone();
+        let completed = self.completed.clone();
+        let expected_flow_id = flow_id.clone();
+
+        tokio::spawn(async move {
+            let app = Router::new().route(
+                PKCE_CALLBACK_PATH,
+                get(move |Query(params): Query<HashMap<String, String>>| {
+                    let http = http.clone();
+                    let browser_flow = browser_flow.clone();
+                    let completed = completed.clone();
+                    let expected_flow_id = expected_flow_id.clone();
+                    async move {
+                        handle_pkce_callback(
+                            http,
+                            browser_flow,
+                            completed,
+                            expected_flow_id,
+                            params,
+                        )
+                        .await
+                    }
+                }),
+            );
+
+            let serve = axum::serve(listener, app).with_graceful_shutdown(async move {
+                tokio::select! {
+                    _ = shutdown_rx => {}
+                    _ = tokio::time::sleep(Duration::from_secs(PKCE_FLOW_TTL_SECS)) => {}
+                }
+            });
+            if let Err(e) = serve.await {
+                warn!(?e, "ChatGPT PKCE 本地回调服务退出异常");
+            }
+        });
+
+        Ok(BrowserFlowStart {
+            flow_id,
+            authorize_url,
+            expires_in: PKCE_FLOW_TTL_SECS,
+        })
+    }
+
+    /// 轮询浏览器 PKCE 登录结果.
+    pub async fn poll_browser_flow(
+        &self,
+        flow_id: &str,
+    ) -> Result<Option<ChatGptAccount>, OAuthError> {
+        let mut slot = self.browser_flow.write().await;
+        let Some(active) = slot.as_mut() else {
+            return Err(OAuthError::PendingDeviceNotFound);
+        };
+        if active.flow_id != flow_id {
+            return Err(OAuthError::PendingDeviceNotFound);
+        }
+        match &active.status {
+            BrowserFlowStatus::Completed(account) => Ok(Some(account.clone())),
+            BrowserFlowStatus::Failed(msg) => Err(OAuthError::UpstreamError(msg.clone())),
+            BrowserFlowStatus::Pending => {
+                if active.expires_at_ms <= Utc::now().timestamp_millis() {
+                    if let Some(tx) = active.shutdown.take() {
+                        let _ = tx.send(());
+                    }
+                    *slot = None;
+                    Err(OAuthError::DeviceCodeExpired)
+                } else {
+                    Ok(None)
+                }
+            }
+        }
+    }
+
+    /// 取消进行中的浏览器 PKCE 登录并立即释放 1455 端口.
+    pub async fn cancel_browser_flow(&self, flow_id: Option<&str>) {
+        let mut slot = self.browser_flow.write().await;
+        let should_clear = match (slot.as_ref(), flow_id) {
+            (Some(_), None) => true,
+            (Some(active), Some(id)) => active.flow_id == id,
+            (None, _) => false,
+        };
+        if should_clear {
+            if let Some(mut active) = slot.take() {
+                if let Some(tx) = active.shutdown.take() {
+                    let _ = tx.send(());
+                }
+            }
+        }
+    }
+
+    async fn stop_active_browser_listener(&self) -> bool {
+        let mut slot = self.browser_flow.write().await;
+        if let Some(mut prev) = slot.take() {
+            if let Some(tx) = prev.shutdown.take() {
+                let _ = tx.send(());
+                return true;
+            }
+        }
+        false
     }
 
     /// 启动 Device Code 流程. 前端拿到 user_code + verification_uri 后,
@@ -464,26 +649,45 @@ impl ChatGptOAuthManager {
             }
         }
 
-        // 4. refresh
+        // 4. refresh (若此前本进程已发生过 rotation, 优先用内存记录的最新 refresh_token)
+        let effective_refresh_token = {
+            let rotated = self.rotated_refresh_tokens.read().await;
+            rotated
+                .get(&sub_id)
+                .cloned()
+                .unwrap_or_else(|| refresh_token.to_string())
+        };
         info!(%sub_id, "refreshing ChatGPT access_token");
-        let new_tokens = self.refresh_with_token(refresh_token).await?;
+        let new_tokens = self.refresh_with_token(&effective_refresh_token).await?;
         let (account_id, email, exp) = extract_account_and_email(&new_tokens);
         let expires_at_ms = compute_expires_at_ms(exp, new_tokens.expires_in);
 
-        // 4a. refresh_token rotation: 落盘.
+        // 4a. refresh_token rotation: 合并保留原有 account_id / email 后落盘,
+        //     防止 refresh 响应未返回 id_token 时把 account_id 覆写成空串.
         if let Some(new_rt) = new_tokens.refresh_token.as_deref() {
-            if new_rt != refresh_token {
+            if !new_rt.is_empty() && new_rt != effective_refresh_token {
                 info!(%sub_id, "refresh_token rotated, persisting");
-                let metadata = OAuthMetadata {
-                    account_id: account_id.unwrap_or_default(),
-                    email,
-                    refresh_token: new_rt.to_string(),
-                    authenticated_at: Utc::now().timestamp_millis(),
-                    kiro: None,
+                let existing = match store::get_oauth_metadata(&self.pool, &sub_id).await {
+                    Ok(meta) => meta,
+                    Err(e) => {
+                        warn!(%sub_id, error=?e, "读取现有 oauth_metadata 失败");
+                        None
+                    }
                 };
+                let metadata = merge_rotated_metadata(
+                    existing.as_ref(),
+                    new_rt,
+                    account_id,
+                    email,
+                    Utc::now().timestamp_millis(),
+                );
                 if let Err(e) = store::update_oauth_metadata(&self.pool, &sub_id, &metadata).await {
                     warn!(%sub_id, error=?e, "落盘新 refresh_token 失败");
                 }
+                self.rotated_refresh_tokens
+                    .write()
+                    .await
+                    .insert(sub_id, new_rt.to_string());
             }
         }
 
@@ -503,6 +707,7 @@ impl ChatGptOAuthManager {
     /// 主动撤销内存缓存 (前端点 disconnect 时调).
     pub async fn forget(&self, sub_id: Uuid) {
         self.cache.write().await.remove(&sub_id);
+        self.rotated_refresh_tokens.write().await.remove(&sub_id);
         self.locks.write().await.remove(&sub_id);
     }
 
@@ -513,24 +718,13 @@ impl ChatGptOAuthManager {
         code: &str,
         code_verifier: &str,
     ) -> Result<OAuthTokenResp, OAuthError> {
-        let resp = self
-            .http
-            .post(OAUTH_TOKEN_URL)
-            .form(&[
-                ("grant_type", "authorization_code"),
-                ("code", code),
-                ("redirect_uri", DEVICE_REDIRECT_URI),
-                ("client_id", CHATGPT_CLIENT_ID),
-                ("code_verifier", code_verifier),
-            ])
-            .send()
-            .await?;
-        let status = resp.status();
-        if !status.is_success() {
-            let text = resp.text().await.unwrap_or_default();
-            return Err(OAuthError::UpstreamError(format!("code 换 token 失败: {status} {text}")));
-        }
-        Ok(resp.json().await?)
+        exchange_code_for_token_with_redirect(
+            &self.http,
+            code,
+            code_verifier,
+            DEVICE_REDIRECT_URI,
+        )
+        .await
     }
 
     async fn refresh_with_token(
@@ -582,6 +776,307 @@ fn compute_expires_at_ms(exp_seconds: Option<i64>, expires_in_seconds: Option<i6
         return now + secs * 1000;
     }
     now + FALLBACK_ACCESS_TOKEN_TTL_MS
+}
+
+/// 合并 refresh_token 轮换后的 OAuthMetadata: 新响应缺少 account_id / email 时保留既有值,
+/// 避免把已保存的 `ChatGPT-Account-Id` 覆写成空串导致后续请求全部报错。
+fn merge_rotated_metadata(
+    existing: Option<&OAuthMetadata>,
+    new_refresh_token: &str,
+    new_account_id: Option<String>,
+    new_email: Option<String>,
+    now_ms: i64,
+) -> OAuthMetadata {
+    let account_id = new_account_id
+        .filter(|s| !s.is_empty())
+        .or_else(|| existing.map(|m| m.account_id.clone()).filter(|s| !s.is_empty()))
+        .unwrap_or_default();
+    let email = new_email
+        .filter(|s| !s.is_empty())
+        .or_else(|| existing.and_then(|m| m.email.clone()));
+    let kiro = existing.and_then(|m| m.kiro.clone());
+    OAuthMetadata {
+        account_id,
+        email,
+        refresh_token: new_refresh_token.to_string(),
+        authenticated_at: now_ms,
+        kiro,
+    }
+}
+
+async fn exchange_code_for_token_with_redirect(
+    http: &Client,
+    code: &str,
+    code_verifier: &str,
+    redirect_uri: &str,
+) -> Result<OAuthTokenResp, OAuthError> {
+    let resp = http
+        .post(OAUTH_TOKEN_URL)
+        .form(&[
+            ("grant_type", "authorization_code"),
+            ("code", code),
+            ("redirect_uri", redirect_uri),
+            ("client_id", CHATGPT_CLIENT_ID),
+            ("code_verifier", code_verifier),
+        ])
+        .send()
+        .await?;
+    let status = resp.status();
+    if !status.is_success() {
+        let text = resp.text().await.unwrap_or_default();
+        return Err(OAuthError::UpstreamError(format!("code 换 token 失败: {status} {text}")));
+    }
+    Ok(resp.json().await?)
+}
+
+fn random_base64url(num_bytes: usize) -> Result<String, OAuthError> {
+    let mut buf = vec![0u8; num_bytes];
+    getrandom::fill(&mut buf)
+        .map_err(|e| OAuthError::UpstreamError(format!("随机数生成失败: {e}")))?;
+    Ok(URL_SAFE_NO_PAD.encode(&buf))
+}
+
+fn pkce_s256_challenge(verifier: &str) -> String {
+    let digest = Sha256::digest(verifier.as_bytes());
+    URL_SAFE_NO_PAD.encode(digest)
+}
+
+fn build_pkce_authorize_url(code_challenge: &str, state: &str) -> Result<String, OAuthError> {
+    let url = reqwest::Url::parse_with_params(
+        OAUTH_AUTHORIZE_URL,
+        &[
+            ("response_type", "code"),
+            ("client_id", CHATGPT_CLIENT_ID),
+            ("redirect_uri", PKCE_REDIRECT_URI),
+            ("scope", PKCE_SCOPE),
+            ("code_challenge", code_challenge),
+            ("code_challenge_method", "S256"),
+            ("id_token_add_organizations", "true"),
+            ("codex_cli_simplified_flow", "true"),
+            ("state", state),
+            ("originator", CODEX_ORIGINATOR),
+        ],
+    )
+    .map_err(|e| OAuthError::Parse(format!("构造授权 URL 失败: {e}")))?;
+    Ok(url.into())
+}
+
+async fn bind_pkce_callback_listener(
+    port: u16,
+    wait_previous_release: bool,
+) -> Result<TcpListener, OAuthError> {
+    let addr = SocketAddr::from((Ipv4Addr::LOCALHOST, port));
+    let attempts = if wait_previous_release { 10 } else { 1 };
+    for attempt in 0..attempts {
+        match TcpListener::bind(addr).await {
+            Ok(l) => return Ok(l),
+            Err(e) if e.kind() == std::io::ErrorKind::AddrInUse => {
+                if attempt + 1 < attempts {
+                    tokio::time::sleep(Duration::from_millis(25)).await;
+                    continue;
+                }
+                return Err(OAuthError::CallbackPortInUse(port));
+            }
+            Err(e) => {
+                return Err(OAuthError::Network(format!(
+                    "绑定本地回调端口 {port} 失败: {e}"
+                )));
+            }
+        }
+    }
+    Err(OAuthError::CallbackPortInUse(port))
+}
+
+fn callback_html(ok: bool, title: &str, detail: &str) -> Html<String> {
+    let color = if ok { "#16a34a" } else { "#dc2626" };
+    let icon = if ok { "&#10003;" } else { "&#10007;" };
+    let esc = |s: &str| {
+        s.replace('&', "&amp;")
+            .replace('<', "&lt;")
+            .replace('>', "&gt;")
+            .replace('"', "&quot;")
+    };
+    Html(format!(
+        r#"<!doctype html><html lang="en"><head><meta charset="utf-8"><title>{title}</title>
+<style>body{{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;display:flex;align-items:center;justify-content:center;min-height:100vh;margin:0;background:#0f172a;color:#e2e8f0}}
+.card{{max-width:440px;padding:32px;border-radius:12px;background:#1e293b;border:1px solid #334155;text-align:center}}
+.icon{{font-size:36px;color:{color};margin-bottom:12px}}h1{{font-size:18px;margin:0 0 8px}}p{{font-size:13px;color:#94a3b8;line-height:1.6;margin:0}}</style></head>
+<body><div class="card"><div class="icon">{icon}</div><h1>{title}</h1><p>{detail}</p></div></body></html>"#,
+        title = esc(title),
+        detail = esc(detail),
+    ))
+}
+
+async fn handle_pkce_callback(
+    http: Client,
+    browser_flow: Arc<RwLock<Option<ActiveBrowserFlow>>>,
+    completed: Arc<RwLock<HashMap<String, (PolledTokens, i64)>>>,
+    expected_flow_id: String,
+    params: HashMap<String, String>,
+) -> impl IntoResponse {
+    // 1. 校验 state 防止 CSRF 或过期回调误触
+    let state = params.get("state").map(String::as_str).unwrap_or("");
+    if state != expected_flow_id {
+        return (
+            StatusCode::BAD_REQUEST,
+            callback_html(
+                false,
+                "Invalid authorization state",
+                "State mismatch. Please close this tab and restart sign-in from cc-router.",
+            ),
+        );
+    }
+
+    // 2. 上游返回错误 (如用户取消授权)
+    if let Some(err) = params.get("error") {
+        let desc = params
+            .get("error_description")
+            .filter(|s| !s.is_empty())
+            .cloned()
+            .unwrap_or_else(|| err.clone());
+        let mut slot = browser_flow.write().await;
+        if let Some(active) = slot.as_mut().filter(|a| a.flow_id == expected_flow_id) {
+            active.status = BrowserFlowStatus::Failed(desc.clone());
+            if let Some(tx) = active.shutdown.take() {
+                let _ = tx.send(());
+            }
+        }
+        return (
+            StatusCode::BAD_REQUEST,
+            callback_html(false, "Authorization failed", &desc),
+        );
+    }
+
+    let Some(code) = params.get("code").filter(|s| !s.is_empty()).cloned() else {
+        return (
+            StatusCode::BAD_REQUEST,
+            callback_html(
+                false,
+                "Missing authorization code",
+                "No authorization code was returned. Please retry from cc-router.",
+            ),
+        );
+    };
+
+    // 3. 短锁取出 code_verifier (绝不持锁跨越网络请求)
+    let code_verifier = {
+        let slot = browser_flow.read().await;
+        match slot.as_ref() {
+            Some(active)
+                if active.flow_id == expected_flow_id
+                    && matches!(active.status, BrowserFlowStatus::Pending) =>
+            {
+                active.code_verifier.clone()
+            }
+            _ => {
+                return (
+                    StatusCode::BAD_REQUEST,
+                    callback_html(
+                        false,
+                        "Authorization session expired",
+                        "This sign-in session is no longer active. Please restart from cc-router.",
+                    ),
+                );
+            }
+        }
+    };
+
+    // 4. code 换 token
+    let token_res = exchange_code_for_token_with_redirect(
+        &http,
+        &code,
+        &code_verifier,
+        PKCE_REDIRECT_URI,
+    )
+    .await;
+
+    let token = match token_res {
+        Ok(t) => t,
+        Err(e) => {
+            let msg = e.to_string();
+            let mut slot = browser_flow.write().await;
+            if let Some(active) = slot.as_mut().filter(|a| a.flow_id == expected_flow_id) {
+                active.status = BrowserFlowStatus::Failed(msg.clone());
+                if let Some(tx) = active.shutdown.take() {
+                    let _ = tx.send(());
+                }
+            }
+            return (
+                StatusCode::BAD_GATEWAY,
+                callback_html(false, "Token exchange failed", &msg),
+            );
+        }
+    };
+
+    let (account_id, email, exp) = extract_account_and_email(&token);
+    let Some(account_id) = account_id.filter(|s| !s.is_empty()) else {
+        let msg = "id_token 中找不到 chatgpt_account_id, 当前账号可能不是 ChatGPT Plus/Pro".to_string();
+        let mut slot = browser_flow.write().await;
+        if let Some(active) = slot.as_mut().filter(|a| a.flow_id == expected_flow_id) {
+            active.status = BrowserFlowStatus::Failed(msg.clone());
+            if let Some(tx) = active.shutdown.take() {
+                let _ = tx.send(());
+            }
+        }
+        return (
+            StatusCode::BAD_REQUEST,
+            callback_html(false, "Account unavailable", &msg),
+        );
+    };
+    let Some(refresh_token) = token.refresh_token.clone().filter(|s| !s.is_empty()) else {
+        let msg = "OAuth 响应缺少 refresh_token".to_string();
+        let mut slot = browser_flow.write().await;
+        if let Some(active) = slot.as_mut().filter(|a| a.flow_id == expected_flow_id) {
+            active.status = BrowserFlowStatus::Failed(msg.clone());
+            if let Some(tx) = active.shutdown.take() {
+                let _ = tx.send(());
+            }
+        }
+        return (
+            StatusCode::BAD_REQUEST,
+            callback_html(false, "Missing refresh token", &msg),
+        );
+    };
+
+    let now_ms = Utc::now().timestamp_millis();
+    let expires_at_ms = compute_expires_at_ms(exp, token.expires_in);
+    let polled = PolledTokens {
+        access_token: token.access_token,
+        refresh_token,
+        account_id: account_id.clone(),
+        email: email.clone(),
+        authenticated_at_ms: now_ms,
+        access_token_expires_at_ms: expires_at_ms,
+    };
+    let public = ChatGptAccount {
+        account_id,
+        email,
+        authenticated_at: now_ms,
+    };
+
+    {
+        let mut done = completed.write().await;
+        done.retain(|_, (_, expires)| *expires > now_ms);
+        done.insert(expected_flow_id.clone(), (polled, now_ms + COMPLETED_POLL_TTL_MS));
+    }
+    {
+        let mut slot = browser_flow.write().await;
+        if let Some(active) = slot.as_mut().filter(|a| a.flow_id == expected_flow_id) {
+            active.status = BrowserFlowStatus::Completed(public);
+            if let Some(tx) = active.shutdown.take() {
+                let _ = tx.send(());
+            }
+        }
+    }
+
+    (
+        StatusCode::OK,
+        callback_html(
+            true,
+            "Connected to cc-router",
+            "Authorization complete. You can close this tab and return to cc-router.",
+        ),
+    )
 }
 
 #[cfg(test)]
@@ -695,5 +1190,68 @@ mod tests {
         assert_eq!(acc.as_deref(), Some("acc-X"));
         assert_eq!(email.as_deref(), Some("x@y.com"));
         assert!(exp.is_some());
+    }
+
+    #[test]
+    fn merge_rotated_metadata_preserves_existing_account_and_email_when_missing() {
+        let existing = OAuthMetadata {
+            account_id: "acct-keep".into(),
+            email: Some("keep@example.com".into()),
+            refresh_token: "old-rt".into(),
+            authenticated_at: 100,
+            kiro: None,
+        };
+        let merged = merge_rotated_metadata(Some(&existing), "new-rt", None, None, 200);
+        assert_eq!(merged.account_id, "acct-keep");
+        assert_eq!(merged.email.as_deref(), Some("keep@example.com"));
+        assert_eq!(merged.refresh_token, "new-rt");
+        assert_eq!(merged.authenticated_at, 200);
+
+        // 新响应返回空字符串时同样不覆盖既有值
+        let merged_empty = merge_rotated_metadata(
+            Some(&existing),
+            "new-rt-2",
+            Some(String::new()),
+            Some(String::new()),
+            300,
+        );
+        assert_eq!(merged_empty.account_id, "acct-keep");
+        assert_eq!(merged_empty.email.as_deref(), Some("keep@example.com"));
+
+        // 新响应带非空值时更新
+        let merged_updated = merge_rotated_metadata(
+            Some(&existing),
+            "new-rt-3",
+            Some("acct-new".into()),
+            Some("new@example.com".into()),
+            400,
+        );
+        assert_eq!(merged_updated.account_id, "acct-new");
+        assert_eq!(merged_updated.email.as_deref(), Some("new@example.com"));
+    }
+
+    #[test]
+    fn pkce_challenge_matches_rfc7636_and_authorize_url_has_required_params() {
+        // RFC 7636 Appendix B test vector
+        let verifier = "dBjftJeZ4CVP-mB92K27uhbUJU1p1r_wW1gFWFOEjXk";
+        assert_eq!(
+            pkce_s256_challenge(verifier),
+            "E9Melhoa2OwvFrEMTJguCHaoeK1t8URWbuGJSstw-cM"
+        );
+
+        let url_str = build_pkce_authorize_url("chal_123", "state_abc").unwrap();
+        let parsed = reqwest::Url::parse(&url_str).unwrap();
+        assert_eq!(parsed.origin().ascii_serialization(), "https://auth.openai.com");
+        assert_eq!(parsed.path(), "/oauth/authorize");
+        let qs: HashMap<String, String> = parsed.query_pairs().into_owned().collect();
+        assert_eq!(qs.get("response_type").map(String::as_str), Some("code"));
+        assert_eq!(qs.get("client_id").map(String::as_str), Some(CHATGPT_CLIENT_ID));
+        assert_eq!(qs.get("redirect_uri").map(String::as_str), Some(PKCE_REDIRECT_URI));
+        assert_eq!(qs.get("code_challenge").map(String::as_str), Some("chal_123"));
+        assert_eq!(qs.get("code_challenge_method").map(String::as_str), Some("S256"));
+        assert_eq!(qs.get("state").map(String::as_str), Some("state_abc"));
+        assert_eq!(qs.get("codex_cli_simplified_flow").map(String::as_str), Some("true"));
+        assert_eq!(qs.get("id_token_add_organizations").map(String::as_str), Some("true"));
+        assert_eq!(qs.get("originator").map(String::as_str), Some(CODEX_ORIGINATOR));
     }
 }

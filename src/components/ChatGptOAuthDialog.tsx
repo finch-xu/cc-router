@@ -10,85 +10,159 @@ import { errorText } from "@/lib/errorText";
 interface Props {
   open: boolean;
   onClose: () => void;
-  /** 授权成功时回传 device_code + account, 父组件保留 device_code 在「保存订阅」时用. */
+  /** 授权成功时回传 authKey (PKCE flow_id 或 device_code) + account, 父组件在「保存订阅」时回传后端消费. */
   onSuccess: (deviceCode: string, account: ChatGptAccount) => void;
 }
 
-const POLL_INTERVAL_MS = 2500;
+type AuthMethod = "browser" | "device";
+type Phase = "idle" | "starting" | "waiting" | "completed" | "error";
+
+const BROWSER_POLL_INTERVAL_MS = 1500;
+const DEVICE_POLL_INTERVAL_MS = 2500;
 
 export function ChatGptOAuthDialog({ open, onClose, onSuccess }: Props) {
   const { t } = useT();
-  const [phase, setPhase] = useState<"idle" | "starting" | "waiting" | "completed" | "error">("idle");
-  const [deviceCode, setDeviceCode] = useState<string>("");
+  const [method, setMethod] = useState<AuthMethod>("browser");
+  const [phase, setPhase] = useState<Phase>("idle");
+  const [authKey, setAuthKey] = useState<string>("");
   const [userCode, setUserCode] = useState<string>("");
-  const [verifyUrl, setVerifyUrl] = useState<string>("");
+  const [openUrl, setOpenUrl] = useState<string>("");
   const [errorMsg, setErrorMsg] = useState<string>("");
   const [copied, setCopied] = useState(false);
-  const pollTimer = useRef<number | null>(null);
+  const [attemptSeq, setAttemptSeq] = useState(0);
 
-  // 启动 Device Code 流程: open=true 时跑一次, 关闭时清状态.
+  // 防止快速切换 Tab / 重试时旧请求回写覆盖新状态
+  const runIdRef = useRef(0);
+  // 记录当前活跃的浏览器 PKCE flow_id, 关闭弹窗或切到设备码时释放本地 1455 端口
+  const activeBrowserFlowRef = useRef<string | null>(null);
+  const completedRef = useRef(false);
+
+  // 关闭弹窗时重置状态并释放 1455 监听
   useEffect(() => {
     if (!open) {
+      runIdRef.current += 1;
+      if (activeBrowserFlowRef.current && !completedRef.current) {
+        api.cancelChatGptBrowserFlow(activeBrowserFlowRef.current).catch(() => {});
+      }
+      activeBrowserFlowRef.current = null;
+      completedRef.current = false;
+      setMethod("browser");
       setPhase("idle");
-      setDeviceCode("");
+      setAuthKey("");
       setUserCode("");
-      setVerifyUrl("");
+      setOpenUrl("");
       setErrorMsg("");
       setCopied(false);
-      if (pollTimer.current !== null) {
-        window.clearInterval(pollTimer.current);
-        pollTimer.current = null;
-      }
-      return;
     }
-
-    setPhase("starting");
-    api
-      .startChatGptDeviceFlow()
-      .then((res) => {
-        setDeviceCode(res.device_code);
-        setUserCode(res.user_code);
-        setVerifyUrl(res.verification_uri);
-        setPhase("waiting");
-        // 启动后立即开浏览器
-        runtime.openExternal(res.verification_uri).catch(() => {});
-      })
-      .catch((e) => {
-        setErrorMsg(errorText(e));
-        setPhase("error");
-      });
   }, [open]);
 
-  // 轮询: phase=waiting 时启动 setInterval
+  // 组件卸载时兜底释放 1455 端口
   useEffect(() => {
-    if (phase !== "waiting" || !deviceCode) return;
+    return () => {
+      if (activeBrowserFlowRef.current && !completedRef.current) {
+        api.cancelChatGptBrowserFlow(activeBrowserFlowRef.current).catch(() => {});
+      }
+    };
+  }, []);
+
+  // 启动对应登录流程 (open=true, 或切换 method / 点击重试时触发)
+  useEffect(() => {
+    if (!open) return;
+
+    const myRunId = ++runIdRef.current;
+    completedRef.current = false;
+    setPhase("starting");
+    setAuthKey("");
+    setUserCode("");
+    setOpenUrl("");
+    setErrorMsg("");
+    setCopied(false);
+
+    if (method === "browser") {
+      api
+        .startChatGptBrowserFlow()
+        .then((res) => {
+          if (runIdRef.current !== myRunId) {
+            api.cancelChatGptBrowserFlow(res.flow_id).catch(() => {});
+            return;
+          }
+          activeBrowserFlowRef.current = res.flow_id;
+          setAuthKey(res.flow_id);
+          setOpenUrl(res.authorize_url);
+          setPhase("waiting");
+          runtime.openExternal(res.authorize_url).catch(() => {});
+        })
+        .catch((e) => {
+          if (runIdRef.current !== myRunId) return;
+          setErrorMsg(errorText(e));
+          setPhase("error");
+        });
+    } else {
+      // 切到设备码前先释放可能存在的 1455 监听
+      if (activeBrowserFlowRef.current) {
+        api.cancelChatGptBrowserFlow(activeBrowserFlowRef.current).catch(() => {});
+        activeBrowserFlowRef.current = null;
+      }
+      api
+        .startChatGptDeviceFlow()
+        .then((res) => {
+          if (runIdRef.current !== myRunId) return;
+          setAuthKey(res.device_code);
+          setUserCode(res.user_code);
+          setOpenUrl(res.verification_uri);
+          setPhase("waiting");
+          runtime.openExternal(res.verification_uri).catch(() => {});
+        })
+        .catch((e) => {
+          if (runIdRef.current !== myRunId) return;
+          setErrorMsg(errorText(e));
+          setPhase("error");
+        });
+    }
+  }, [open, method, attemptSeq]);
+
+  // 轮询授权结果
+  useEffect(() => {
+    if (!open || phase !== "waiting" || !authKey) return;
 
     let stopped = false;
+    const intervalMs = method === "browser" ? BROWSER_POLL_INTERVAL_MS : DEVICE_POLL_INTERVAL_MS;
     const poll = async () => {
       try {
-        const account = await api.pollChatGptDeviceCode(deviceCode);
+        const account =
+          method === "browser"
+            ? await api.pollChatGptBrowserFlow(authKey)
+            : await api.pollChatGptDeviceCode(authKey);
         if (stopped) return;
         if (account) {
+          completedRef.current = true;
+          activeBrowserFlowRef.current = null;
           setPhase("completed");
-          onSuccess(deviceCode, account);
+          onSuccess(authKey, account);
         }
       } catch (e) {
         if (stopped) return;
+        if (method === "browser") {
+          activeBrowserFlowRef.current = null;
+        }
         setErrorMsg(errorText(e));
         setPhase("error");
       }
     };
-    // 2.5s 后开始第一次, 之后每 2.5s 一次. 立即跑一次会过快, 还没人去授权.
-    const id = window.setInterval(poll, POLL_INTERVAL_MS);
-    pollTimer.current = id;
 
+    const id = window.setInterval(poll, intervalMs);
     return () => {
       stopped = true;
       window.clearInterval(id);
     };
-  }, [phase, deviceCode, onSuccess]);
+  }, [open, phase, authKey, method, onSuccess]);
 
   if (!open) return null;
+
+  function switchMethod(next: AuthMethod) {
+    if (next === method) return;
+    setMethod(next);
+  }
 
   return (
     <div
@@ -109,7 +183,7 @@ export function ChatGptOAuthDialog({ open, onClose, onSuccess }: Props) {
         style={{ width: 460, maxWidth: "90vw", padding: 24 }}
         onClick={(e) => e.stopPropagation()}
       >
-        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 16 }}>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 14 }}>
           <div>
             <h3 style={{ margin: 0, fontSize: 16 }}>{t("oauth.chatgpt.title")}</h3>
             <div style={{ fontSize: 12, color: "var(--ink-3)", marginTop: 4 }}>
@@ -124,6 +198,35 @@ export function ChatGptOAuthDialog({ open, onClose, onSuccess }: Props) {
             aria-label={t("common.close")}
           >
             <X size={14} />
+          </button>
+        </div>
+
+        <div
+          style={{
+            display: "flex",
+            gap: 6,
+            padding: 3,
+            background: "var(--surface-2)",
+            border: "1px solid var(--line)",
+            borderRadius: 6,
+            marginBottom: 14,
+          }}
+        >
+          <button
+            type="button"
+            className={`btn sm ${method === "browser" ? "primary" : "bare"}`}
+            style={{ flex: 1, justifyContent: "center" }}
+            onClick={() => switchMethod("browser")}
+          >
+            {t("oauth.chatgpt.tabBrowser")}
+          </button>
+          <button
+            type="button"
+            className={`btn sm ${method === "device" ? "primary" : "bare"}`}
+            style={{ flex: 1, justifyContent: "center" }}
+            onClick={() => switchMethod("device")}
+          >
+            {t("oauth.chatgpt.tabDevice")}
           </button>
         </div>
 
@@ -148,10 +251,56 @@ export function ChatGptOAuthDialog({ open, onClose, onSuccess }: Props) {
           </div>
         )}
 
-        {phase === "waiting" && (
+        {phase === "waiting" && method === "browser" && (
           <>
-            <div style={{ marginBottom: 16, color: "var(--ink-3)", fontSize: 13 }}>
+            <div style={{ marginBottom: 16, color: "var(--ink-3)", fontSize: 13, lineHeight: 1.6 }}>
+              {t("oauth.chatgpt.browserInstructions")}
+            </div>
+
+            <button
+              type="button"
+              className="btn"
+              style={{ width: "100%", marginBottom: 12 }}
+              onClick={() => runtime.openExternal(openUrl).catch(() => {})}
+            >
+              <ExternalLink size={12} /> {t("oauth.chatgpt.openBrowser")}
+            </button>
+
+            <div
+              style={{
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+                gap: 8,
+                fontSize: 12,
+                color: "var(--ink-3)",
+                marginBottom: 10,
+              }}
+            >
+              <LoaderCircle size={12} className="spin" />
+              {t("oauth.chatgpt.browserWaiting")}
+            </div>
+
+            <div style={{ textAlign: "center" }}>
+              <button
+                type="button"
+                className="btn bare sm"
+                style={{ fontSize: 11.5, color: "var(--ink-3)" }}
+                onClick={() => switchMethod("device")}
+              >
+                {t("oauth.chatgpt.switchToDevice")}
+              </button>
+            </div>
+          </>
+        )}
+
+        {phase === "waiting" && method === "device" && (
+          <>
+            <div style={{ marginBottom: 12, color: "var(--ink-3)", fontSize: 13, lineHeight: 1.55 }}>
               {t("oauth.chatgpt.instructions")}
+            </div>
+            <div style={{ marginBottom: 14, color: "var(--ink-4)", fontSize: 11.5, lineHeight: 1.5 }}>
+              {t("oauth.chatgpt.deviceHint")}
             </div>
 
             <div
@@ -200,7 +349,7 @@ export function ChatGptOAuthDialog({ open, onClose, onSuccess }: Props) {
               type="button"
               className="btn"
               style={{ width: "100%", marginBottom: 12 }}
-              onClick={() => runtime.openExternal(verifyUrl).catch(() => {})}
+              onClick={() => runtime.openExternal(openUrl).catch(() => {})}
             >
               <ExternalLink size={12} /> {t("oauth.chatgpt.openBrowser")}
             </button>
@@ -228,9 +377,29 @@ export function ChatGptOAuthDialog({ open, onClose, onSuccess }: Props) {
         )}
 
         {phase === "error" && (
-          <div className="alert err" style={{ marginBottom: 12 }}>
-            {errorMsg || t("oauth.chatgpt.failed")}
-          </div>
+          <>
+            <div className="alert err" style={{ marginBottom: 12 }}>
+              {errorMsg || t("oauth.chatgpt.failed")}
+            </div>
+            <div style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>
+              {method === "browser" && (
+                <button
+                  type="button"
+                  className="btn sm"
+                  onClick={() => switchMethod("device")}
+                >
+                  {t("oauth.chatgpt.switchToDevice")}
+                </button>
+              )}
+              <button
+                type="button"
+                className="btn primary sm"
+                onClick={() => setAttemptSeq((n) => n + 1)}
+              >
+                {t("oauth.chatgpt.retry")}
+              </button>
+            </div>
+          </>
         )}
       </div>
     </div>

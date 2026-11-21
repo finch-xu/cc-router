@@ -138,6 +138,9 @@ web_commands! {
     get_host_clock() => commands::subscriptions::get_host_clock().await,
     reset_total_quota_usage(id: String) => commands::subscriptions::reset_total_quota_usage(st, args.id).await,
     // ChatGPT OAuth
+    start_chatgpt_browser_flow() => commands::oauth::start_chatgpt_browser_flow(st).await,
+    poll_chatgpt_browser_flow(flow_id: String) => commands::oauth::poll_chatgpt_browser_flow(st, args.flow_id).await,
+    cancel_chatgpt_browser_flow(flow_id: Option<String>) => commands::oauth::cancel_chatgpt_browser_flow(st, args.flow_id).await,
     start_chatgpt_device_flow() => commands::oauth::start_chatgpt_device_flow(st).await,
     poll_chatgpt_device_code(device_code: String) => commands::oauth::poll_chatgpt_device_code(st, args.device_code).await,
     create_chatgpt_oauth_subscription(input: CreateChatGptOAuthSubscriptionInput) => commands::oauth::create_chatgpt_oauth_subscription(st, args.input).await,

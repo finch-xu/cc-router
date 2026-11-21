@@ -20,6 +20,30 @@ use sha2::{Digest, Sha256};
 use crate::proxy::client_fingerprint::RequestEntryKind;
 
 pub const MAX_KEY_BYTES: usize = 256;
+/// OpenAI Responses API `prompt_cache_key` 上限 (64 字符).
+pub const MAX_PROMPT_CACHE_KEY_LEN: usize = 64;
+
+/// 把 `extract()` 得到的内部会话键规范化为可安全发往 OpenAI Responses / ChatGPT Codex
+/// 后端的 `prompt_cache_key` (同时用作 Codex 的 `session_id` header):
+/// - `pck:` / `sid:` / `hdr:` 前缀下若原始值非空、≤ 64 字符且均为可见非空白 ASCII, 直接复用原始 ID
+///   (保留 Codex CLI / Claude Code 原生 UUID);
+/// - 其余情况 (超长 `meta:` JSON、含空白/非 ASCII、或 `msg:` 等) 经 SHA-256 归一化为
+///   36 字符稳定键 `ccr_<32-hex>`, 既满足 64 字符上限也不泄露原始 metadata 文本.
+pub fn derive_prompt_cache_key(session_key: &str) -> String {
+    for prefix in ["pck:", "sid:", "hdr:"] {
+        if let Some(raw) = session_key.strip_prefix(prefix) {
+            if !raw.is_empty()
+                && raw.len() <= MAX_PROMPT_CACHE_KEY_LEN
+                && raw.bytes().all(|b| b.is_ascii_graphic())
+            {
+                return raw.to_string();
+            }
+        }
+    }
+    let digest = Sha256::digest(session_key.as_bytes());
+    let hex: String = digest.iter().map(|b| format!("{b:02x}")).collect();
+    format!("ccr_{}", &hex[..32])
+}
 
 pub fn extract(headers: &HeaderMap, body: &Value, entry_kind: RequestEntryKind) -> Option<String> {
     if matches!(entry_kind, RequestEntryKind::SystemOne) {
@@ -108,6 +132,29 @@ mod tests {
         let h = hm(&[("x-claude-code-session-id", "sess-1")]);
         let body = json!({"metadata": {"user_id": "user_x_account_y_session_z"}});
         assert_eq!(extract(&h, &body, RequestEntryKind::Messages).as_deref(), Some("hdr:sess-1"));
+    }
+
+    #[test]
+    fn derive_prompt_cache_key_preserves_safe_ids_and_hashes_long_or_opaque_keys() {
+        assert_eq!(derive_prompt_cache_key("hdr:550e8400-e29b-41d4-a716-446655440000"), "550e8400-e29b-41d4-a716-446655440000");
+        assert_eq!(derive_prompt_cache_key("pck:thread-1"), "thread-1");
+        assert_eq!(derive_prompt_cache_key("sid:codex-sess"), "codex-sess");
+
+        // metadata JSON / 超长值 / 含空白 → 归一化为定长 36 字符 ccr_<32-hex>
+        let meta = "meta:{\"device_id\":\"d\",\"account_uuid\":\"a\",\"session_id\":\"s\"}";
+        let derived = derive_prompt_cache_key(meta);
+        assert!(derived.starts_with("ccr_"));
+        assert_eq!(derived.len(), 36);
+        assert_eq!(derived, derive_prompt_cache_key(meta));
+        assert_ne!(derived, derive_prompt_cache_key("meta:{\"session_id\":\"other\"}"));
+
+        let too_long = format!("hdr:{}", "a".repeat(65));
+        let derived_long = derive_prompt_cache_key(&too_long);
+        assert!(derived_long.len() <= MAX_PROMPT_CACHE_KEY_LEN);
+        assert!(derived_long.starts_with("ccr_"));
+
+        let with_space = "hdr:bad id";
+        assert!(derive_prompt_cache_key(with_space).starts_with("ccr_"));
     }
 
     #[test]

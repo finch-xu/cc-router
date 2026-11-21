@@ -715,6 +715,7 @@ mod tests {
                 reasoning_effort: None,
                 expose_reasoning: true,
                 dialect: Default::default(),
+                prompt_cache_key: None,
             },
             &mut crate::proxy::header_log::UpstreamHeaderCapture::default(), // 本测试不关心采集
             false,
@@ -726,7 +727,7 @@ mod tests {
     }
 
     fn responses_extras() -> OpenAiResponsesExtras {
-        OpenAiResponsesExtras { reasoning_effort: None, expose_reasoning: true, dialect: Default::default() }
+        OpenAiResponsesExtras { reasoning_effort: None, expose_reasoning: true, dialect: Default::default(), prompt_cache_key: None }
     }
 
     fn hi_body() -> serde_json::Value {
@@ -842,6 +843,7 @@ mod tests {
                 reasoning_effort: None,
                 expose_reasoning: true,
                 dialect: Default::default(),
+                prompt_cache_key: None,
             },
             &mut crate::proxy::header_log::UpstreamHeaderCapture::default(), // 本测试不关心采集
             false,
@@ -899,6 +901,7 @@ mod tests {
                 reasoning_effort: None,
                 expose_reasoning: true,
                 dialect: Default::default(),
+                prompt_cache_key: None,
             },
             &mut crate::proxy::header_log::UpstreamHeaderCapture::default(), // 本测试不关心采集
             false,

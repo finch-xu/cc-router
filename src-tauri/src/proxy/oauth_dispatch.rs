@@ -168,6 +168,13 @@ pub async fn dispatch_oauth_attempt(
         ReqHeaderName::from_static("originator"),
         ReqHeaderValue::from_static(CODEX_ORIGINATOR),
     );
+    // 同步 session_id header 与 body.prompt_cache_key: ChatGPT Codex 后端按 session_id 头做
+    // KV cache 粘性路由, 缺失会导致多轮对话频繁 cache miss.
+    if let Some(cache_key) = extras.prompt_cache_key.as_deref().filter(|s| !s.is_empty()) {
+        if let Ok(val) = ReqHeaderValue::from_str(cache_key) {
+            headers.insert(ReqHeaderName::from_static("session_id"), val);
+        }
+    }
 
     // 4. 发送 (强制 streaming 上游, 因为 ChatGPT 后端拒绝非流式)
     capture.request = crate::proxy::header_log::capture_untagged(&headers, log_headers, &[access_token.as_str()]);

@@ -18,8 +18,8 @@ use uuid::Uuid;
 
 use crate::error::{AppError, AppResult};
 use crate::oauth::chatgpt::{
-    build_codex_ua, ChatGptAccount, DeviceFlowStart, OAuthError, CHATGPT_ACCOUNT_ID_HEADER,
-    CODEX_ORIGINATOR,
+    build_codex_ua, BrowserFlowStart, ChatGptAccount, DeviceFlowStart, OAuthError,
+    CHATGPT_ACCOUNT_ID_HEADER, CODEX_ORIGINATOR,
 };
 use crate::oauth::kiro::{KiroAccount, KiroDeviceFlowStart, KiroImportPreview};
 use crate::provider::model::{AuthType, EndpointProtocol, SystemoneWire};
@@ -37,7 +37,7 @@ fn map_oauth_err(e: OAuthError) -> AppError {
     match e {
         OAuthError::Storage(msg) => AppError::internal(msg),
         OAuthError::PendingDeviceNotFound => {
-            AppError::BadRequest("device_code 不存在或已过期, 请重新发起登录".into())
+            AppError::BadRequest("登录会话不存在或已过期, 请重新发起登录".into())
         }
         OAuthError::DeviceCodeExpired => {
             AppError::BadRequest("登录链接已过期, 请重新发起".into())
@@ -45,9 +45,50 @@ fn map_oauth_err(e: OAuthError) -> AppError {
         OAuthError::RefreshTokenInvalid => {
             AppError::BadRequest("ChatGPT 登录已失效, 请重新登录".into())
         }
+        OAuthError::CallbackPortInUse(port) => AppError::BadRequest(format!(
+            "本地回调端口 {port} 已被占用 (例如另一个 Codex 登录流程正在运行), 请关闭后重试或切换为设备码登录"
+        )),
         // 其他都按通用上游错误处理
         other => AppError::internal(other.to_string()),
     }
+}
+
+/// 启动浏览器 OAuth 2.0 PKCE 登录 (首选): 绑定本地 1455 回调端口并返回授权页 URL.
+#[tauri::command]
+pub async fn start_chatgpt_browser_flow(
+    state: State<'_, AppState>,
+) -> AppResult<BrowserFlowStart> {
+    state
+        .chatgpt_oauth
+        .start_browser_flow()
+        .await
+        .map_err(map_oauth_err)
+}
+
+/// 轮询浏览器 PKCE 登录状态. 返回 Some(account) 表示授权完成且 token 已缓存; None 表示等待回调.
+#[tauri::command]
+pub async fn poll_chatgpt_browser_flow(
+    state: State<'_, AppState>,
+    flow_id: String,
+) -> AppResult<Option<ChatGptAccount>> {
+    state
+        .chatgpt_oauth
+        .poll_browser_flow(&flow_id)
+        .await
+        .map_err(map_oauth_err)
+}
+
+/// 取消进行中的浏览器 PKCE 登录并释放 1455 本地回调端口 (关弹窗或切到设备码登录时调).
+#[tauri::command]
+pub async fn cancel_chatgpt_browser_flow(
+    state: State<'_, AppState>,
+    flow_id: Option<String>,
+) -> AppResult<()> {
+    state
+        .chatgpt_oauth
+        .cancel_browser_flow(flow_id.as_deref())
+        .await;
+    Ok(())
 }
 
 #[tauri::command]

@@ -428,6 +428,10 @@ pub async fn dispatch(
                     yaml_default_effort.as_deref(),
                 ),
                 expose_reasoning: yaml_expose_reasoning,
+                prompt_cache_key: ctx
+                    .session_key
+                    .as_deref()
+                    .map(crate::proxy::session_key::derive_prompt_cache_key),
             };
 
             emit_attempt_started(state, sub_id, vm_name.clone(), ctx);
@@ -1006,6 +1010,10 @@ pub async fn dispatch(
                 // DeepSeek /v1/responses 走独立方言 (明文 reasoning + placeholder 注入),
                 // 由订阅 URL / 真实模型名识别 —— custom-openai 无 yaml 可挂配置
                 dialect: detect_responses_dialect(&url, &real_model),
+                prompt_cache_key: ctx
+                    .session_key
+                    .as_deref()
+                    .map(crate::proxy::session_key::derive_prompt_cache_key),
             };
 
             emit_attempt_started(state, sub_id, vm_name.clone(), ctx);

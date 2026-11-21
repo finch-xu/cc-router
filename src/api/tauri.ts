@@ -9,6 +9,7 @@ import type {
   AuthHeaderFormat,
   BreakdownBy,
   BreakdownDto,
+  BrowserFlowStart,
   ChatGptAccount,
   ClaudeCodeInspectResult,
   ClaudeCodeReadResult,
@@ -104,6 +105,12 @@ export const api = {
   getHostClock: () => invoke<HostClockDto>("get_host_clock"),
 
   // ChatGPT OAuth (Phase 1, OpenAI Codex provider)
+  startChatGptBrowserFlow: () =>
+    invoke<BrowserFlowStart>("start_chatgpt_browser_flow"),
+  pollChatGptBrowserFlow: (flowId: string) =>
+    invoke<ChatGptAccount | null>("poll_chatgpt_browser_flow", { flowId }),
+  cancelChatGptBrowserFlow: (flowId?: string) =>
+    invoke<void>("cancel_chatgpt_browser_flow", { flowId: flowId ?? null }),
   startChatGptDeviceFlow: () =>
     invoke<DeviceFlowStart>("start_chatgpt_device_flow"),
   pollChatGptDeviceCode: (deviceCode: string) =>
