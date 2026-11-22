@@ -227,6 +227,7 @@ export function PluginsPage() {
                   <div className="pg-row-main">
                     <div className="pg-title">
                       <b>{localized(manifestText(p.manifest, "name"), locale) || p.id}</b>
+                      {p.source.kind === "community" && <span className="src-tag">{t("plugins.source.community")}</span>}
                       {inUse && <span className="pg-badge acc">{t("plugins.badge.current")}</span>}
                       {revoked && <span className="pg-badge err">{t("plugins.badge.revoked")}</span>}
                     </div>

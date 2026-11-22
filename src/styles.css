@@ -3874,3 +3874,18 @@ html:not([data-platform="macos"]) .main.flush > .page-bar { height: calc(52px + 
 .agent-monitor-menu { z-index: 50; padding: 4px; border: 1px solid var(--line); border-radius: 7px; background: var(--surface); box-shadow: 0 3px 12px #0002; }
 .agent-monitor-menu [role="menuitem"] { padding: 6px 10px; color: var(--err); border-radius: 4px; cursor: pointer; outline: none; }
 .agent-monitor-menu [data-highlighted] { background: var(--surface-2); }
+
+/* 插件来源小标签: 设置页插件主题、小票页主题选择、插件页已安装列表共用 */
+.src-tag {
+  display: inline-block;
+  margin-left: 5px;
+  padding: 0 5px;
+  border-radius: 5px;
+  font-size: 10px;
+  font-weight: 600;
+  line-height: 1.6;
+  vertical-align: 1px;
+  background: var(--accent-bg);
+  color: var(--accent-ink);
+  white-space: nowrap;
+}

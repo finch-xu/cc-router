@@ -31,7 +31,7 @@ import { FrMarketSlip } from "./themes/FrMarketSlip";
 import { PharmacySlip } from "./themes/PharmacySlip";
 import { DinerCheckSlip } from "./themes/DinerCheckSlip";
 import { CarLabelSlip } from "./themes/CarLabelSlip";
-import type { ThemeSlipProps } from "./themes/shared";
+import { SlipFormatContext, type ThemeSlipProps } from "./themes/shared";
 import { PluginSlip } from "./PluginSlip";
 import { usePluginReceipt } from "@/plugins/receipt/apply";
 import { errorText } from "@/lib/errorText";
@@ -67,12 +67,23 @@ export function receiptPluginIdOf(theme: ReceiptTheme): string | null {
 }
 
 /** 第三方小票: 读插件 → 校验 → 渲染; 读不到时给一句说明, 不让整页报错 */
-const PluginReceiptHost = forwardRef<HTMLDivElement, { pluginId: string; dto: ReceiptDto; port: number }>(
-  function PluginReceiptHost({ pluginId, dto, port }, ref) {
+const PluginReceiptHost = forwardRef<HTMLDivElement, { pluginId: string; dto: ReceiptDto; port: number; options: ReceiptDisplayOptions }>(
+  function PluginReceiptHost({ pluginId, dto, port, options }, ref) {
     const { t } = useT();
     const q = usePluginReceipt(pluginId);
     const ctx = useMemo(() => ({ port, version: VERSION, deletedLabel: t("receipts.slip.deletedSub") }), [port, t]);
-    if (q.data) return <PluginSlip ref={ref} pluginId={pluginId} receipt={q.data.receipt} css={q.data.css} dto={dto} ctx={ctx} />;
+    // 右侧显示设置同样作用于插件小票 (品牌 logo 除外)
+    const pluginOptions = useMemo(
+      () => ({
+        compact: options.compactTokens,
+        showCache: options.showCacheTokens,
+        showRequests: options.showRequestCounts,
+        groupMode: options.groupMode,
+        code: options.footerCodeStyle,
+      }),
+      [options.compactTokens, options.showCacheTokens, options.showRequestCounts, options.groupMode, options.footerCodeStyle],
+    );
+    if (q.data) return <PluginSlip ref={ref} pluginId={pluginId} receipt={q.data.receipt} css={q.data.css} dto={dto} ctx={ctx} options={pluginOptions} />;
     return (
       <div ref={ref} style={{ width: 360, padding: 20, fontSize: 12, color: "var(--ink-3)" }}>
         {q.isError ? t("receipts.plugin.failed", { error: errorText(q.error) }) : t("common.loading")}
@@ -118,7 +129,7 @@ export interface ReceiptDisplayOptions {
   compactTokens: boolean;
   /** 小票主体聚合视图模式; 默认 virtual_model 保持原行为 */
   groupMode: ReceiptGroupMode;
-  /** 底部识别码样式; 默认 qr 保持原行为 */
+  /** 底部识别码样式; 默认条形码 (二维码分享到部分平台会被屏蔽); 插件小票的 <ccr-qr> 也跟随它 */
   footerCodeStyle: ReceiptFooterCodeStyle;
 }
 
@@ -206,7 +217,7 @@ export const ReceiptSlip = forwardRef<HTMLDivElement, Props>(function ReceiptSli
 
   const pluginId = receiptPluginIdOf(options.theme);
   if (pluginId) {
-    return <PluginReceiptHost ref={ref} pluginId={pluginId} dto={dto} port={settings.data?.proxy_port ?? 23456} />;
+    return <PluginReceiptHost ref={ref} pluginId={pluginId} dto={dto} port={settings.data?.proxy_port ?? 23456} options={options} />;
   }
 
   if (!isClassicTheme(options.theme)) {
@@ -217,7 +228,10 @@ export const ReceiptSlip = forwardRef<HTMLDivElement, Props>(function ReceiptSli
     const Slip = THEME_SLIPS[options.theme as keyof typeof THEME_SLIPS];
     return (
       <div ref={ref} style={{ width: 360 }}>
-        <Slip dto={dto} port={port} sched={sched} />
+        {/* 主题小票只跟随两项不牵动版式的设置: 紧凑 token、底部识别码 */}
+        <SlipFormatContext.Provider value={{ compact: options.compactTokens, code: options.footerCodeStyle }}>
+          <Slip dto={dto} port={port} sched={sched} />
+        </SlipFormatContext.Provider>
       </div>
     );
   }

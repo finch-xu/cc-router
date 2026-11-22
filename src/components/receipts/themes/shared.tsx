@@ -1,4 +1,6 @@
-import type { CSSProperties, ReactNode } from "react";
+import { createContext, useContext, type CSSProperties, type ReactNode } from "react";
+import { QRCodeSVG } from "qrcode.react";
+import { BarcodeSVG } from "../BarcodeSVG";
 import type { ReceiptDto, ReceiptSubItemDto, ReceiptTotalsDto } from "@/types";
 import { fmtCompact } from "@/lib/format";
 import { version as VERSION } from "../../../../package.json";
@@ -48,6 +50,31 @@ export function utcParts(ms: number): UtcParts {
 }
 
 // ===== 数字格式化 (德/法用逗号小数与本地千分位) =====
+
+/**
+ * 小票页右侧对主题小票也生效的两项设置: 紧凑 token、底部识别码。
+ * 其余设置 (聚合视图 / 缓存行 / 请求数 / 品牌 logo) 牵动版式, 内置主题是逐款设计的固定排版, 不跟随。
+ */
+export interface SlipFormat {
+  compact: boolean;
+  code: "qr" | "barcode";
+}
+export const SlipFormatContext = createContext<SlipFormat>({ compact: true, code: "barcode" });
+
+/** token 数字格式化: 跟随「紧凑 token」设置; de / fr 用逗号小数与本地千分位 */
+export function useTok(style: "en" | "de" | "fr" = "en"): (n: number) => string {
+  const { compact } = useContext(SlipFormatContext);
+  if (compact) return style === "en" ? fmtCompact : (n) => fmtCompact(n).replace(".", ",");
+  const locale = style === "de" ? "de-DE" : style === "fr" ? "fr-FR" : "en-US";
+  return (n) => n.toLocaleString(locale);
+}
+
+/** 底部识别码: 跟随「底部识别码」设置 (默认条形码; 二维码分享到部分平台会被屏蔽) */
+export function FooterCode({ value, height, fgColor, bgColor }: { value: string; height: number; fgColor: string; bgColor: string }) {
+  const { code } = useContext(SlipFormatContext);
+  if (code === "qr") return <QRCodeSVG value={value} size={Math.max(64, height * 2)} fgColor={fgColor} bgColor={bgColor} level="M" />;
+  return <BarcodeSVG value={value} height={height} fgColor={fgColor} bgColor={bgColor} />;
+}
 
 export const fmtTokEn = fmtCompact;
 export const fmtTokDe = (n: number) => fmtCompact(n).replace(".", ",");

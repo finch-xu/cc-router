@@ -1,5 +1,4 @@
 import { Fragment } from "react";
-import { BarcodeSVG } from "../BarcodeSVG";
 import {
   Between,
   BetweenEllipsis,
@@ -8,7 +7,6 @@ import {
   VERSION,
   ZigzagPaper,
   fmtCountDe,
-  fmtTokDe,
   hasCache,
   pct,
   pseudoSignature,
@@ -17,6 +15,8 @@ import {
   utcParts,
   vmDisplay,
   type ThemeSlipProps,
+  useTok,
+  FooterCode,
 } from "./shared";
 
 const INK = "#111111";
@@ -27,6 +27,7 @@ const KLASSEN = ["A", "B", "C", "D", "E", "F"];
 
 /** C · 德国折扣超市: 高密度排版 + Klassen 表 (税级字母=虚拟模型) + TSE 签名行。 */
 export function DeDiscountSlip({ dto, port }: ThemeSlipProps) {
+  const tok = useTok("de");
   const issued = utcParts(dto.generated_at_ms);
   const start = utcParts(dto.range_start_ms);
   const end = utcParts(dto.range_end_ms);
@@ -68,7 +69,7 @@ export function DeDiscountSlip({ dto, port }: ThemeSlipProps) {
           <div key={`${sub.subscription_id}|${sub.real_model_name}`} style={{ marginTop: 4 }}>
             <BetweenEllipsis
               left={sub.real_model_name}
-              right={`${fmtTokDe(totalTokensOf(sub.totals))} ${KLASSEN[idx] ?? "?"}`}
+              right={`${tok(totalTokensOf(sub.totals))} ${KLASSEN[idx] ?? "?"}`}
               leftStyle={{ fontWeight: 500 }}
               style={{ fontWeight: 500 }}
             />
@@ -86,12 +87,12 @@ export function DeDiscountSlip({ dto, port }: ThemeSlipProps) {
               {fmtCountDe(sub.totals.request_count)}x
             </div>
             <div style={{ fontSize: 10, color: MUTED, paddingLeft: 8 }}>
-              Ein {fmtTokDe(sub.totals.input_tokens)}&nbsp;&nbsp;Aus{" "}
-              {fmtTokDe(sub.totals.output_tokens)}
+              Ein {tok(sub.totals.input_tokens)}&nbsp;&nbsp;Aus{" "}
+              {tok(sub.totals.output_tokens)}
               {hasCache(sub.totals) && (
                 <>
-                  &nbsp;&nbsp;C+ {fmtTokDe(sub.totals.cache_creation_tokens)}&nbsp;&nbsp;C-{" "}
-                  {fmtTokDe(sub.totals.cache_read_tokens)}
+                  &nbsp;&nbsp;C+ {tok(sub.totals.cache_creation_tokens)}&nbsp;&nbsp;C-{" "}
+                  {tok(sub.totals.cache_read_tokens)}
                 </>
               )}
             </div>
@@ -103,7 +104,7 @@ export function DeDiscountSlip({ dto, port }: ThemeSlipProps) {
 
       <Between
         left={<span style={{ fontSize: 14, letterSpacing: 1 }}>SUMME</span>}
-        right={<span style={{ fontSize: 18 }}>{fmtTokDe(grand)}</span>}
+        right={<span style={{ fontSize: 18 }}>{tok(grand)}</span>}
         style={{ fontWeight: 700, alignItems: "baseline" }}
       />
       <Between
@@ -112,11 +113,11 @@ export function DeDiscountSlip({ dto, port }: ThemeSlipProps) {
         style={{ fontSize: 10, color: SOFT, marginTop: 2 }}
       />
       <div style={{ fontSize: 10, color: SOFT }}>
-        Eingabe {fmtTokDe(g.input_tokens)} &#183; Ausgabe {fmtTokDe(g.output_tokens)}
+        Eingabe {tok(g.input_tokens)} &#183; Ausgabe {tok(g.output_tokens)}
       </div>
       <div style={{ fontSize: 10, color: SOFT }}>
-        Cache-Schreiben {fmtTokDe(g.cache_creation_tokens)} &#183; Cache-Lesen{" "}
-        {fmtTokDe(g.cache_read_tokens)}
+        Cache-Schreiben {tok(g.cache_creation_tokens)} &#183; Cache-Lesen{" "}
+        {tok(g.cache_read_tokens)}
       </div>
 
       <div style={{ borderTop: "1px dashed #999999", margin: "8px 0" }} />
@@ -137,14 +138,14 @@ export function DeDiscountSlip({ dto, port }: ThemeSlipProps) {
           <Fragment key={item.virtual_model_name}>
             <span>{KLASSEN[idx] ?? "?"}</span>
             <span>{vmDisplay(item.virtual_model_name)}</span>
-            <span style={{ textAlign: "right" }}>{fmtTokDe(totalTokensOf(item.subtotal))}</span>
+            <span style={{ textAlign: "right" }}>{tok(totalTokensOf(item.subtotal))}</span>
             <span style={{ textAlign: "right" }}>{dePct(totalTokensOf(item.subtotal))}</span>
           </Fragment>
         ))}
         <span style={{ borderTop: "1px solid #cccccc", paddingTop: 2 }} />
         <span style={{ borderTop: "1px solid #cccccc", paddingTop: 2 }}>GESAMT</span>
         <span style={{ borderTop: "1px solid #cccccc", paddingTop: 2, textAlign: "right" }}>
-          {fmtTokDe(grand)}
+          {tok(grand)}
         </span>
         <span style={{ borderTop: "1px solid #cccccc", paddingTop: 2, textAlign: "right" }}>
           {grand > 0 ? "100,0%" : "0,0%"}
@@ -182,7 +183,7 @@ export function DeDiscountSlip({ dto, port }: ThemeSlipProps) {
       </div>
 
       <div style={{ display: "flex", justifyContent: "center", marginTop: 10 }}>
-        <BarcodeSVG value={SITE_URL} height={36} fgColor={INK} bgColor="#ffffff" />
+        <FooterCode value={SITE_URL} height={36} fgColor={INK} bgColor="#ffffff" />
       </div>
 
       <div style={{ textAlign: "center", fontSize: 9, color: MUTED, marginTop: 8, letterSpacing: 0.5 }}>

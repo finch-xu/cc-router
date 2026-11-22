@@ -239,6 +239,17 @@ if (vt.theme) {
     for (const want of ["No. 5A7C0E21", "MODEL-OPUS", "claude-opus-4-7", "sold out", "(deleted)", "46.52M", "711", "v9.9.9", "<ccr-qr size=\"72\">"]) {
       check(`小票范例渲染包含 ${want}`, html.includes(want));
     }
+    // 跟随小票页的显示设置: 按订阅分组 / 不显示请求数 / 全写数字 / 关掉缓存
+    const { DEFAULT_RECEIPT_OPTIONS } = await import(`${SRC}plugins/receipt/fields.ts`);
+    const ctx = { port: 23456, version: "9.9.9", deletedLabel: "(deleted)" };
+    const bySub = renderTemplate(vr.receipt.nodes, receiptData(sampleReceiptDto(), ctx, { ...DEFAULT_RECEIPT_OPTIONS, groupMode: "subscription", showRequests: false, compact: false, showCache: false }));
+    check("设置: 按订阅分组", bySub.includes("Anthropic Main") && !bySub.includes("MODEL-OPUS"));
+    check("设置: 隐藏请求数", !bySub.includes("loaves sold") && !bySub.includes("× 388"));
+    check("设置: 全写数字", bySub.includes("46,522,000"));
+    check("设置: 关掉缓存行", !bySub.includes("cache write"));
+    const totalsOnly = renderTemplate(vr.receipt.nodes, receiptData(sampleReceiptDto(), ctx, { ...DEFAULT_RECEIPT_OPTIONS, groupMode: "totals_only" }));
+    check("设置: 只看合计", totalsOnly.includes("BY SUBSCRIPTION") && totalsOnly.includes("BY MODEL") && !totalsOnly.includes(" / </span>"));
+    check("默认: 分组按虚拟模型且带分隔", html.includes("Anthropic / Anthropic Main"));
     check("小票范例渲染结果仍过 HTML 白名单", validateTemplateHtml(html).length === 0, JSON.stringify(validateTemplateHtml(html).slice(0, 3)));
   }
   const vrBad = validateReceipt({ receiptApi: 1, template: "t.html", fonts: { "Bad;Name": "f.woff2" } }, ["t.html"], { "t.html": "<div>{{receipt.nope}}</div>" });

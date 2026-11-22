@@ -4,7 +4,7 @@ import { QRCodeSVG } from "qrcode.react";
 import JsBarcode from "jsbarcode";
 import logoUrl from "@/assets/logo.png";
 import { scopedCss } from "@/plugins/receipt/css";
-import { receiptData, type ReceiptContext } from "@/plugins/receipt/fields";
+import { DEFAULT_RECEIPT_OPTIONS, receiptData, type ReceiptContext, type ReceiptOptions } from "@/plugins/receipt/fields";
 import { escapeHtml, renderTemplate } from "@/plugins/receipt/template";
 import type { CompiledReceipt } from "@/plugins/receipt/validate";
 import type { ReceiptDto } from "@/types";
@@ -48,14 +48,20 @@ function logoImg(size: number): string {
   return `<img data-receipt-logo="" src="${escapeHtml(logoUrl)}" width="${size}" height="${size}" alt="cc-router" />`;
 }
 
-/** 把模板渲染结果里的 <ccr-*> 换成真实内容 (属性已在安装时校验为范围内的整数) */
-function expandCcr(html: string): string {
+/**
+ * 把模板渲染结果里的 <ccr-*> 换成真实内容 (属性已在安装时校验为范围内的整数)。
+ * <ccr-qr> 跟随小票页的「底部识别码」设置: 选了条形码就画条形码 (二维码分享到部分平台会被屏蔽)。
+ */
+function expandCcr(html: string, code: ReceiptOptions["code"]): string {
   return html.replace(/<ccr-(qr|barcode|logo)\b([^>]*?)\/?>(?:\s*<\/ccr-\1>)?/g, (_m, kind: string, attrs: string) => {
     const num = (name: string, dflt: number) => {
       const m = new RegExp(`${name}\\s*=\\s*["']?(\\d+)`).exec(attrs);
       return m ? Number(m[1]) : dflt;
     };
-    if (kind === "qr") return qrSvg(num("size", 80));
+    if (kind === "qr") {
+      const size = num("size", 80);
+      return code === "qr" ? qrSvg(size) : barcodeSvg(Math.min(80, Math.max(24, Math.round(size / 2))));
+    }
     if (kind === "barcode") return barcodeSvg(num("height", 36));
     return logoImg(num("size", 32));
   });
@@ -67,9 +73,12 @@ function expandCcr(html: string): string {
  */
 export const PluginSlip = forwardRef<
   HTMLDivElement,
-  { pluginId: string; receipt: CompiledReceipt; css: string; dto: ReceiptDto; ctx: ReceiptContext }
->(function PluginSlip({ pluginId, receipt, css, dto, ctx }, ref) {
-  const html = useMemo(() => expandCcr(renderTemplate(receipt.nodes, receiptData(dto, ctx))), [receipt, dto, ctx]);
+  { pluginId: string; receipt: CompiledReceipt; css: string; dto: ReceiptDto; ctx: ReceiptContext; options?: ReceiptOptions }
+>(function PluginSlip({ pluginId, receipt, css, dto, ctx, options = DEFAULT_RECEIPT_OPTIONS }, ref) {
+  const html = useMemo(
+    () => expandCcr(renderTemplate(receipt.nodes, receiptData(dto, ctx, options)), options.code),
+    [receipt, dto, ctx, options],
+  );
   return (
     <div
       ref={ref}

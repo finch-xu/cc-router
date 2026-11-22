@@ -29,21 +29,52 @@ function stamp(ms: number) {
   return { Y, YY: Y.slice(2), M, D, h, m, s, date: `${Y}-${M}-${D}`, time: `${h}:${m}`, weekday: ["SUN", "MON", "TUE", "WED", "THU", "FRI", "SAT"][d.getUTCDay()] };
 }
 
-function totals(t: ReceiptTotalsDto) {
-  const tokens = t.input_tokens + t.output_tokens + t.cache_creation_tokens + t.cache_read_tokens;
+/** 小票页右侧的显示设置, 插件小票同样跟随 (品牌 logo 除外: 插件里没有图片) */
+export type ReceiptGroupMode = "virtual_model" | "subscription" | "totals_only";
+export interface ReceiptOptions {
+  /** 默认数字字段用 K/M 紧凑写法; 关掉则与 *Full 相同 */
+  compact: boolean;
+  /** 关掉时 hasCache 恒为 false (模板里用 {{#if hasCache}} 包住缓存行即可自动隐藏) */
+  showCache: boolean;
+  showRequests: boolean;
+  groupMode: ReceiptGroupMode;
+  /** <ccr-qr> 实际画成什么: 二维码在部分平台分享时会被屏蔽, 默认条形码 */
+  code: "qr" | "barcode";
+}
+export const DEFAULT_RECEIPT_OPTIONS: ReceiptOptions = {
+  compact: true,
+  showCache: true,
+  showRequests: true,
+  groupMode: "virtual_model",
+  code: "barcode",
+};
+
+const ZERO: ReceiptTotalsDto = { request_count: 0, input_tokens: 0, output_tokens: 0, cache_creation_tokens: 0, cache_read_tokens: 0 };
+const add = (a: ReceiptTotalsDto, b: ReceiptTotalsDto): ReceiptTotalsDto => ({
+  request_count: a.request_count + b.request_count,
+  input_tokens: a.input_tokens + b.input_tokens,
+  output_tokens: a.output_tokens + b.output_tokens,
+  cache_creation_tokens: a.cache_creation_tokens + b.cache_creation_tokens,
+  cache_read_tokens: a.cache_read_tokens + b.cache_read_tokens,
+});
+const sumTokens = (t: ReceiptTotalsDto) => t.input_tokens + t.output_tokens + t.cache_creation_tokens + t.cache_read_tokens;
+
+function totals(t: ReceiptTotalsDto, o: ReceiptOptions = DEFAULT_RECEIPT_OPTIONS) {
+  const tokens = sumTokens(t);
+  const num = o.compact ? compact : full;
   return {
     requests: full(t.request_count),
-    input: compact(t.input_tokens),
-    output: compact(t.output_tokens),
-    cacheWrite: compact(t.cache_creation_tokens),
-    cacheRead: compact(t.cache_read_tokens),
-    tokens: compact(tokens),
+    input: num(t.input_tokens),
+    output: num(t.output_tokens),
+    cacheWrite: num(t.cache_creation_tokens),
+    cacheRead: num(t.cache_read_tokens),
+    tokens: num(tokens),
     inputFull: full(t.input_tokens),
     outputFull: full(t.output_tokens),
     cacheWriteFull: full(t.cache_creation_tokens),
     cacheReadFull: full(t.cache_read_tokens),
     tokensFull: full(tokens),
-    hasCache: t.cache_creation_tokens > 0 || t.cache_read_tokens > 0,
+    hasCache: o.showCache && (t.cache_creation_tokens > 0 || t.cache_read_tokens > 0),
   };
 }
 
@@ -54,7 +85,57 @@ export interface ReceiptContext {
   deletedLabel: string;
 }
 
-export function receiptData(dto: ReceiptDto, ctx: ReceiptContext) {
+type Line = { model: string; provider: string; subscription: string; deleted: boolean; t: ReceiptTotalsDto };
+type Group = { key: string; name: string; lines: Line[]; subtotal: ReceiptTotalsDto };
+
+/** 按聚合方式分组。名字段缺省为空字符串 (按订阅合计的行没有模型名, 按模型合计的行没有订阅名) */
+function groupsOf(dto: ReceiptDto, ctx: ReceiptContext, mode: ReceiptGroupMode): Group[] {
+  const subs = dto.items.flatMap((it) => it.sub_items);
+  const subName = (s: (typeof subs)[number]) => s.subscription_display_name ?? ctx.deletedLabel;
+  const byTokens = <T extends { t: ReceiptTotalsDto }>(a: T, b: T) => sumTokens(b.t) - sumTokens(a.t);
+  if (mode === "virtual_model") {
+    return dto.items.map((it) => ({
+      key: it.virtual_model_name,
+      name: it.virtual_model_name.toUpperCase(),
+      subtotal: it.subtotal,
+      lines: it.sub_items.map((s) => ({ model: s.real_model_name, provider: s.provider_display_name, subscription: subName(s), deleted: s.subscription_display_name == null, t: s.totals })),
+    }));
+  }
+  if (mode === "subscription") {
+    const map = new Map<string, Group & { models: Map<string, Line> }>();
+    for (const s of subs) {
+      let g = map.get(s.subscription_id);
+      if (!g) {
+        g = { key: s.subscription_id, name: subName(s), lines: [], subtotal: ZERO, models: new Map() };
+        map.set(s.subscription_id, g);
+      }
+      g.subtotal = add(g.subtotal, s.totals);
+      const l = g.models.get(s.real_model_name);
+      if (l) l.t = add(l.t, s.totals);
+      else g.models.set(s.real_model_name, { model: s.real_model_name, provider: s.provider_display_name, subscription: subName(s), deleted: s.subscription_display_name == null, t: s.totals });
+    }
+    return [...map.values()]
+      .map(({ models, ...g }) => ({ ...g, lines: [...models.values()].sort(byTokens) }))
+      .sort((a, b) => sumTokens(b.subtotal) - sumTokens(a.subtotal));
+  }
+  const bySub = new Map<string, Line>();
+  const byModel = new Map<string, Line>();
+  for (const s of subs) {
+    const a = bySub.get(s.subscription_id);
+    if (a) a.t = add(a.t, s.totals);
+    else bySub.set(s.subscription_id, { model: "", provider: s.provider_display_name, subscription: subName(s), deleted: s.subscription_display_name == null, t: s.totals });
+    const b = byModel.get(s.real_model_name);
+    if (b) b.t = add(b.t, s.totals);
+    else byModel.set(s.real_model_name, { model: s.real_model_name, provider: "", subscription: "", deleted: false, t: s.totals });
+  }
+  const total = subs.reduce((acc, s) => add(acc, s.totals), ZERO);
+  return [
+    { key: "by-subscription", name: "BY SUBSCRIPTION", lines: [...bySub.values()].sort(byTokens), subtotal: total },
+    { key: "by-model", name: "BY MODEL", lines: [...byModel.values()].sort(byTokens), subtotal: total },
+  ];
+}
+
+export function receiptData(dto: ReceiptDto, ctx: ReceiptContext, opts: ReceiptOptions = DEFAULT_RECEIPT_OPTIONS) {
   return {
     receipt: {
       no: dto.slip_no,
@@ -66,20 +147,23 @@ export function receiptData(dto: ReceiptDto, ctx: ReceiptContext) {
       port: String(ctx.port),
       site: "ccrouter.app",
     },
-    total: totals(dto.grand_total),
-    groups: dto.items.map((it) => ({
-      key: it.virtual_model_name,
-      name: it.virtual_model_name.toUpperCase(),
-      empty: it.sub_items.length === 0,
-      multi: it.sub_items.length > 1,
-      subtotal: totals(it.subtotal),
-      lines: it.sub_items.map((s) => ({
-        model: s.real_model_name,
-        provider: s.provider_display_name,
-        subscription: s.subscription_display_name ?? ctx.deletedLabel,
-        deleted: s.subscription_display_name == null,
-        ...totals(s.totals),
-      })),
+    options: {
+      compact: opts.compact,
+      showCache: opts.showCache,
+      showRequests: opts.showRequests,
+      groupMode: opts.groupMode,
+      byVirtualModel: opts.groupMode === "virtual_model",
+      bySubscription: opts.groupMode === "subscription",
+      totalsOnly: opts.groupMode === "totals_only",
+    },
+    total: totals(dto.grand_total, opts),
+    groups: groupsOf(dto, ctx, opts.groupMode).map((g) => ({
+      key: g.key,
+      name: g.name,
+      empty: g.lines.length === 0,
+      multi: g.lines.length > 1,
+      subtotal: totals(g.subtotal, opts),
+      lines: g.lines.map(({ t, ...l }) => ({ ...l, ...totals(t, opts) })),
     })),
   };
 }
@@ -93,6 +177,7 @@ export const FIELD_PATHS: { top: string[]; group: string[]; line: string[] } = {
     "receipt", "receipt.no", "receipt.range", "receipt.version", "receipt.port", "receipt.site",
     ...["issued", "start", "end"].flatMap((k) => [`receipt.${k}`, ...STAMP_KEYS.map((s) => `receipt.${k}.${s}`)]),
     "total", ...TOTAL_KEYS.map((k) => `total.${k}`),
+    "options", ...["compact", "showCache", "showRequests", "groupMode", "byVirtualModel", "bySubscription", "totalsOnly"].map((k) => `options.${k}`),
     "groups",
   ],
   group: ["key", "name", "empty", "multi", "subtotal", ...TOTAL_KEYS.map((k) => `subtotal.${k}`), "lines"],

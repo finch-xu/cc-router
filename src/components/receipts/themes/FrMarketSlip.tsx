@@ -1,4 +1,3 @@
-import { BarcodeSVG } from "../BarcodeSVG";
 import type { ReceiptVirtualModelItemDto } from "@/types";
 import {
   Between,
@@ -8,12 +7,13 @@ import {
   VERSION,
   ZigzagPaper,
   fmtCountFr,
-  fmtTokFr,
   hasCache,
   subLabel,
   totalTokensOf,
   utcParts,
   type ThemeSlipProps,
+  useTok,
+  FooterCode,
 } from "./shared";
 
 const INK = "#23418f";
@@ -27,6 +27,7 @@ function vmFr(name: string): string {
 
 /** D · 法国超级市场: 奶油纸 + 蓝墨 + 衬线店名 + 积分卡 (1 pt = 1M tokens)。 */
 export function FrMarketSlip({ dto, port }: ThemeSlipProps) {
+  const tok = useTok("fr");
   const issued = utcParts(dto.generated_at_ms);
   const start = utcParts(dto.range_start_ms);
   const end = utcParts(dto.range_end_ms);
@@ -80,7 +81,7 @@ export function FrMarketSlip({ dto, port }: ThemeSlipProps) {
 
       <Between
         left={<span style={{ fontSize: 14, letterSpacing: 2 }}>TOTAL</span>}
-        right={<span style={{ fontSize: 19 }}>{fmtTokFr(totalTokensOf(g))}</span>}
+        right={<span style={{ fontSize: 19 }}>{tok(totalTokensOf(g))}</span>}
         style={{ fontWeight: 700, alignItems: "baseline" }}
       />
       <Between
@@ -89,11 +90,11 @@ export function FrMarketSlip({ dto, port }: ThemeSlipProps) {
         style={{ fontSize: 10, opacity: 0.85, marginTop: 2 }}
       />
       <div style={{ fontSize: 10, opacity: 0.75, marginTop: 3 }}>
-        dont entr&#233;e {fmtTokFr(g.input_tokens)} &#183; sortie {fmtTokFr(g.output_tokens)}
+        dont entr&#233;e {tok(g.input_tokens)} &#183; sortie {tok(g.output_tokens)}
       </div>
       <div style={{ fontSize: 10, opacity: 0.75 }}>
-        dont cache &#233;crit {fmtTokFr(g.cache_creation_tokens)} &#183; lu{" "}
-        {fmtTokFr(g.cache_read_tokens)}
+        dont cache &#233;crit {tok(g.cache_creation_tokens)} &#183; lu{" "}
+        {tok(g.cache_read_tokens)}
       </div>
 
       <div style={{ border: `1px dashed ${INK}`, borderRadius: 2, padding: "8px 10px", marginTop: 10 }}>
@@ -117,7 +118,7 @@ export function FrMarketSlip({ dto, port }: ThemeSlipProps) {
       </div>
 
       <div style={{ display: "flex", justifyContent: "center", marginTop: 10 }}>
-        <BarcodeSVG value={SITE_URL} height={36} fgColor={INK} bgColor={PAPER} />
+        <FooterCode value={SITE_URL} height={36} fgColor={INK} bgColor={PAPER} />
       </div>
 
       <div style={{ textAlign: "center", fontSize: 9, opacity: 0.7, marginTop: 8, letterSpacing: 0.5 }}>
@@ -128,12 +129,13 @@ export function FrMarketSlip({ dto, port }: ThemeSlipProps) {
 }
 
 function VmBlock({ item }: { item: ReceiptVirtualModelItemDto }) {
+  const tok = useTok("fr");
   const isEmpty = item.sub_items.length === 0;
   return (
     <div style={{ marginTop: 8 }}>
       <Between
         left={vmFr(item.virtual_model_name)}
-        right={fmtTokFr(totalTokensOf(item.subtotal))}
+        right={tok(totalTokensOf(item.subtotal))}
         style={{ fontWeight: 700 }}
       />
       {isEmpty ? (
@@ -145,7 +147,7 @@ function VmBlock({ item }: { item: ReceiptVirtualModelItemDto }) {
           <div key={`${sub.subscription_id}|${sub.real_model_name}`} style={{ marginTop: 2 }}>
             <BetweenEllipsis
               left={sub.real_model_name}
-              right={fmtTokFr(totalTokensOf(sub.totals))}
+              right={tok(totalTokensOf(sub.totals))}
               style={{ paddingLeft: 10 }}
             />
             <div
@@ -162,13 +164,13 @@ function VmBlock({ item }: { item: ReceiptVirtualModelItemDto }) {
               {fmtCountFr(sub.totals.request_count)} art.
             </div>
             <div style={{ paddingLeft: 20, fontSize: 10, opacity: 0.85 }}>
-              entr&#233;e {fmtTokFr(sub.totals.input_tokens)} &#183; sortie{" "}
-              {fmtTokFr(sub.totals.output_tokens)}
+              entr&#233;e {tok(sub.totals.input_tokens)} &#183; sortie{" "}
+              {tok(sub.totals.output_tokens)}
             </div>
             {hasCache(sub.totals) && (
               <div style={{ paddingLeft: 20, fontSize: 10, opacity: 0.85 }}>
-                cache &#233;crit {fmtTokFr(sub.totals.cache_creation_tokens)} &#183; lu{" "}
-                {fmtTokFr(sub.totals.cache_read_tokens)}
+                cache &#233;crit {tok(sub.totals.cache_creation_tokens)} &#183; lu{" "}
+                {tok(sub.totals.cache_read_tokens)}
               </div>
             )}
           </div>

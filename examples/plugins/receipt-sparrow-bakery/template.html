@@ -17,7 +17,7 @@
     {{else}}
     {{#each lines}}
     <div class="row item"><span class="name">{{model}}</span><span>{{tokens}}</span></div>
-    <div class="row detail"><span class="name">{{provider}} / {{subscription}}</span><span>× {{requests}}</span></div>
+    <div class="row detail"><span class="name">{{provider}}{{#if provider}}{{#if subscription}} / {{/if}}{{/if}}{{subscription}}</span>{{#if options.showRequests}}<span>× {{requests}}</span>{{/if}}</div>
     {{/each}}
     {{/if}}
   </section>
@@ -32,7 +32,9 @@
   <div class="row"><span>day-old (cache read)</span><span>{{total.cacheRead}}</span></div>
   {{/if}}
   <div class="row grand"><span>TOTAL</span><span>{{total.tokens}}</span></div>
+  {{#if options.showRequests}}
   <div class="row"><span>loaves sold</span><span>{{total.requests}}</span></div>
+  {{/if}}
 
   <footer>
     <ccr-qr size="72"></ccr-qr>

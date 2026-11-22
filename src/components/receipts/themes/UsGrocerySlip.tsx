@@ -1,4 +1,3 @@
-import { BarcodeSVG } from "../BarcodeSVG";
 import type { ReceiptVirtualModelItemDto } from "@/types";
 import {
   Between,
@@ -7,13 +6,14 @@ import {
   VERSION,
   ZigzagPaper,
   fmtCountEn,
-  fmtTokEn,
   hasCache,
   subLabel,
   totalTokensOf,
   utcParts,
   vmDisplay,
   type ThemeSlipProps,
+  useTok,
+  FooterCode,
 } from "./shared";
 
 const INK = "#141414";
@@ -23,6 +23,7 @@ const STARS = "* * * * * * * * * * * * * * * * * *";
 
 /** B · 美国大卖场: 全大写 + 星号分隔 + CACHE SAVINGS 省钱框。 */
 export function UsGrocerySlip({ dto, port }: ThemeSlipProps) {
+  const tok = useTok("en");
   const issued = utcParts(dto.generated_at_ms);
   const start = utcParts(dto.range_start_ms);
   const end = utcParts(dto.range_end_ms);
@@ -65,15 +66,15 @@ export function UsGrocerySlip({ dto, port }: ThemeSlipProps) {
 
       <div style={{ borderTop: "1px dashed #888888", margin: "8px 0" }} />
 
-      <Between left="SUBTOTAL" right={fmtTokEn(totalTokensOf(g))} style={{ fontSize: 12 }} />
-      <Between left={<span>&nbsp;IN</span>} right={fmtTokEn(g.input_tokens)} style={{ fontSize: 11, color: MUTED }} />
-      <Between left={<span>&nbsp;OUT</span>} right={fmtTokEn(g.output_tokens)} style={{ fontSize: 11, color: MUTED }} />
-      <Between left={<span>&nbsp;CACHE-W</span>} right={fmtTokEn(g.cache_creation_tokens)} style={{ fontSize: 11, color: MUTED }} />
-      <Between left={<span>&nbsp;CACHE-R</span>} right={fmtTokEn(g.cache_read_tokens)} style={{ fontSize: 11, color: MUTED }} />
+      <Between left="SUBTOTAL" right={tok(totalTokensOf(g))} style={{ fontSize: 12 }} />
+      <Between left={<span>&nbsp;IN</span>} right={tok(g.input_tokens)} style={{ fontSize: 11, color: MUTED }} />
+      <Between left={<span>&nbsp;OUT</span>} right={tok(g.output_tokens)} style={{ fontSize: 11, color: MUTED }} />
+      <Between left={<span>&nbsp;CACHE-W</span>} right={tok(g.cache_creation_tokens)} style={{ fontSize: 11, color: MUTED }} />
+      <Between left={<span>&nbsp;CACHE-R</span>} right={tok(g.cache_read_tokens)} style={{ fontSize: 11, color: MUTED }} />
 
       <Between
         left={<span style={{ fontSize: 16, letterSpacing: 2 }}>TOTAL</span>}
-        right={<span style={{ fontSize: 20 }}>{fmtTokEn(totalTokensOf(g))}</span>}
+        right={<span style={{ fontSize: 20 }}>{tok(totalTokensOf(g))}</span>}
         style={{ fontWeight: 700, marginTop: 6, alignItems: "baseline" }}
       />
       <Between left="# ITEMS SOLD" right={fmtCountEn(g.request_count)} style={{ fontSize: 11, marginTop: 2 }} />
@@ -84,7 +85,7 @@ export function UsGrocerySlip({ dto, port }: ThemeSlipProps) {
         <div style={{ fontWeight: 700, fontSize: 13, letterSpacing: 2 }}>CACHE SAVINGS</div>
         <div style={{ fontSize: 11, marginTop: 3 }}>YOU SAVED</div>
         <div style={{ fontWeight: 700, fontSize: 22, letterSpacing: 1 }}>
-          {fmtTokEn(g.cache_read_tokens)}
+          {tok(g.cache_read_tokens)}
         </div>
         <div style={{ fontSize: 10, color: MUTED }}>CACHE-READ TOKENS THIS PERIOD</div>
       </div>
@@ -94,7 +95,7 @@ export function UsGrocerySlip({ dto, port }: ThemeSlipProps) {
       </div>
 
       <div style={{ display: "flex", justifyContent: "center", marginTop: 6 }}>
-        <BarcodeSVG value={SITE_URL} height={36} fgColor={INK} bgColor={PAPER} />
+        <FooterCode value={SITE_URL} height={36} fgColor={INK} bgColor={PAPER} />
       </div>
 
       <div style={{ textAlign: "center", marginTop: 10 }}>
@@ -111,6 +112,7 @@ export function UsGrocerySlip({ dto, port }: ThemeSlipProps) {
 }
 
 function VmBlock({ item }: { item: ReceiptVirtualModelItemDto }) {
+  const tok = useTok("en");
   const isEmpty = item.sub_items.length === 0;
   return (
     <div style={{ marginTop: 6 }}>
@@ -123,7 +125,7 @@ function VmBlock({ item }: { item: ReceiptVirtualModelItemDto }) {
             <div key={`${sub.subscription_id}|${sub.real_model_name}`}>
               <BetweenEllipsis
                 left={<span>&nbsp;{sub.real_model_name.toUpperCase()}</span>}
-                right={`${fmtTokEn(totalTokensOf(sub.totals))} T`}
+                right={`${tok(totalTokensOf(sub.totals))} T`}
               />
               <div
                 style={{
@@ -139,12 +141,12 @@ function VmBlock({ item }: { item: ReceiptVirtualModelItemDto }) {
                 {fmtCountEn(sub.totals.request_count)}
               </div>
               <div style={{ fontSize: 10, color: MUTED }}>
-                &nbsp;&nbsp;IN {fmtTokEn(sub.totals.input_tokens)}&nbsp;&nbsp;OUT{" "}
-                {fmtTokEn(sub.totals.output_tokens)}
+                &nbsp;&nbsp;IN {tok(sub.totals.input_tokens)}&nbsp;&nbsp;OUT{" "}
+                {tok(sub.totals.output_tokens)}
                 {hasCache(sub.totals) && (
                   <>
-                    &nbsp;&nbsp;CW {fmtTokEn(sub.totals.cache_creation_tokens)}&nbsp;&nbsp;CR{" "}
-                    {fmtTokEn(sub.totals.cache_read_tokens)}
+                    &nbsp;&nbsp;CW {tok(sub.totals.cache_creation_tokens)}&nbsp;&nbsp;CR{" "}
+                    {tok(sub.totals.cache_read_tokens)}
                   </>
                 )}
               </div>
@@ -153,7 +155,7 @@ function VmBlock({ item }: { item: ReceiptVirtualModelItemDto }) {
           {item.sub_items.length > 1 && (
             <Between
               left={<span>&nbsp;GROUP SUBTOTAL</span>}
-              right={fmtTokEn(totalTokensOf(item.subtotal))}
+              right={tok(totalTokensOf(item.subtotal))}
               style={{ fontSize: 10, color: MUTED }}
             />
           )}
