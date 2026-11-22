@@ -594,6 +594,17 @@ html:not([data-platform="macos"]) .main.flush > .page-bar { height: calc(52px + 
   min-width: 0;
   line-height: 1.35;
 }
+.nav-label-logo {
+  display: flex;
+  align-items: center;
+}
+.nav-bakery-logo {
+  display: block;
+  height: 20px;
+  width: auto;
+  max-width: 100%;
+  transform: translateY(1px);
+}
 .nav-item:hover { background: var(--surface); border-color: var(--line-2); color: var(--ink); }
 .nav-item:hover .nav-icon { transform: rotate(-6deg); }
 .nav-item.active {

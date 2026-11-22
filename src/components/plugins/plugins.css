@@ -4,6 +4,24 @@
  * ============================================================ */
 
 .pg-page { display: flex; flex-direction: column; gap: 16px; }
+.pg-hero { padding: 18px 20px 14px; display: flex; flex-direction: column; gap: 14px; }
+.pg-hero-top { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; flex-wrap: wrap; }
+.pg-hero-brand { flex: 1; min-width: 240px; display: flex; flex-direction: column; gap: 8px; }
+.pg-hero-title-row { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+.pg-hero-h1 { margin: 0; line-height: 0; color: var(--accent); flex: none; }
+.pg-hero-logo { display: block; height: 34px; width: auto; max-width: 100%; }
+.pg-hero-kicker { font-size: 12.5px; font-weight: 600; color: var(--ink-2); letter-spacing: 0.01em; }
+.pg-hero-desc { margin: 0; font-size: 13px; line-height: 1.55; color: var(--ink-3); max-width: 680px; }
+.pg-hero-create {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+  padding-top: 12px;
+  border-top: 1px solid var(--line);
+}
+.pg-hero-create-text { font-size: 12.5px; color: var(--ink-3); line-height: 1.5; }
 .pg-actions { display: flex; gap: 8px; flex-wrap: wrap; }
 .pg-toolbar { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
 .pg-toolbar .input { max-width: 260px; }

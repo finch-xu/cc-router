@@ -31,6 +31,7 @@ import { useUpdater } from "@/hooks/useUpdater";
 import { useT } from "@/i18n";
 import { isTauriHost, runtime, webLogout, webSession } from "@/runtime";
 import { LogoMark } from "@/components/sketch/LogoMark";
+import { SparrowBakeryLogo } from "@/components/plugins/SparrowBakeryLogo";
 import { SidebarIcon, type SidebarIconName } from "@/components/sketch/SidebarIcon";
 import { useReleaseNotesDialog } from "@/components/release-notes/ReleaseNotesController";
 import { useOnboardingState } from "@/components/onboarding/useOnboardingState";
@@ -78,6 +79,10 @@ interface NavItem {
   to: string;
   label: string;
   icon: SidebarIconName;
+  /** 可选自定义标签内容 (如 Sparrow Bakery 字标 Logo)，无障碍名仍由 label 承担 */
+  labelNode?: ReactNode;
+  /** 悬停提示文案 */
+  title?: string;
   badge?: string | (() => string | null);
   dot?: boolean;
   /** 点的语义: 默认 err(红, 有更新) / ok(绿, 代理在跑) */
@@ -130,7 +135,13 @@ export function Sidebar() {
     { to: "/request-logs", label: t("sidebar.nav.requestLogs"), icon: "logs" },
     { to: "/statistics", label: t("sidebar.nav.statistics"), icon: "stats" },
     { to: "/receipts", label: t("sidebar.nav.receipts"), icon: "receipts" },
-    { to: "/plugins", label: t("sidebar.nav.plugins"), icon: "plugins" },
+    {
+      to: "/plugins",
+      label: t("sidebar.nav.pluginsTitle"),
+      title: t("sidebar.nav.pluginsTitle"),
+      labelNode: <SparrowBakeryLogo className="nav-bakery-logo" />,
+      icon: "plugins",
+    },
     {
       to: "/updates",
       label: t("sidebar.nav.updates"),
@@ -172,11 +183,21 @@ export function Sidebar() {
               to={it.to}
               className={({ isActive }) => cn("nav-item", (it.active ?? isActive) && "active")}
               aria-current={it.active === false ? false : undefined}
+              title={it.title}
             >
               <span className="nav-icon">
                 <NavIcon name={it.icon} art={art} />
               </span>
-              <span className="nav-label">{it.label}</span>
+              <span className={cn("nav-label", it.labelNode && "nav-label-logo")}>
+                {it.labelNode ? (
+                  <>
+                    {it.labelNode}
+                    <span className="sr-only">{it.label}</span>
+                  </>
+                ) : (
+                  it.label
+                )}
+              </span>
               {badge && <span className="badge mono">{badge}</span>}
               {!badge && it.dot && (
                 <NavDot

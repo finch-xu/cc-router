@@ -320,6 +320,7 @@ html:not([data-platform="macos"]):where([data-art~="win2k"]) .window-title {
 :where([data-art~="win2k"]) .nav-item:focus-visible { outline: 1px dotted var(--w-text); outline-offset: -1px; }
 :where([data-art~="win2k"]) .nav-item .nav-icon,
 :where([data-art~="win2k"]) .nav-item.active .nav-icon { color: inherit; }
+:where([data-art~="win2k"]) .nav-bakery-logo { height: 16px; }
 :where([data-art~="win2k"]) .nav-item .badge,
 :where([data-art~="win2k"]) .nav-item.active .badge {
   padding: 0;

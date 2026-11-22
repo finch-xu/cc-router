@@ -1,11 +1,13 @@
 import { useMemo, useState } from "react";
 import { ExternalLink, FolderOpen, Link2, Palette, Puzzle, Receipt } from "lucide-react";
+import Github from "@lobehub/icons/es/Github";
 import { useNavigate } from "react-router";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { EmptyState } from "@/components/EmptyState";
 import { Spinner } from "@/components/Spinner";
 import { InstallDialog } from "@/components/plugins/InstallDialog";
 import { LinkDialog } from "@/components/plugins/LinkDialog";
+import { SparrowBakeryLogo } from "@/components/plugins/SparrowBakeryLogo";
 import { fmtBytes, sourceText } from "@/components/plugins/format";
 import "@/components/plugins/plugins.css";
 import { api } from "@/api/tauri";
@@ -108,22 +110,40 @@ export function PluginsPage() {
 
   return (
     <div className="pg-page">
-      <div className="page-actions">
-        <div className="page-header" style={{ marginBottom: 0 }}>
-          <h1>{t("plugins.title")}</h1>
-          <div className="subtitle">{t("plugins.subtitle")}</div>
-        </div>
-        {isDesktop && (
-          <div className="pg-actions">
-            <button className="btn" type="button" onClick={fromFolder} disabled={busyId !== null}>
-              {busyId === "__folder__" ? <Spinner /> : <FolderOpen size={13} />} {t("plugins.action.fromFolder")}
-            </button>
-            <button className="btn primary" type="button" onClick={() => setLinkOpen(true)}>
-              <Link2 size={13} /> {t("plugins.action.fromLink")}
-            </button>
+      <section className="card pg-hero">
+        <div className="pg-hero-top">
+          <div className="pg-hero-brand">
+            <div className="pg-hero-title-row">
+              <h1 className="pg-hero-h1">
+                <SparrowBakeryLogo className="pg-hero-logo" />
+                <span className="sr-only">{t("plugins.hero.brand")}</span>
+              </h1>
+              <span className="pg-hero-kicker">{t("plugins.hero.kicker")}</span>
+            </div>
+            <p className="pg-hero-desc">{t("plugins.hero.desc")}</p>
           </div>
-        )}
-      </div>
+          {isDesktop && (
+            <div className="pg-actions">
+              <button className="btn" type="button" onClick={fromFolder} disabled={busyId !== null}>
+                {busyId === "__folder__" ? <Spinner /> : <FolderOpen size={13} />} {t("plugins.action.fromFolder")}
+              </button>
+              <button className="btn primary" type="button" onClick={() => setLinkOpen(true)}>
+                <Link2 size={13} /> {t("plugins.action.fromLink")}
+              </button>
+            </div>
+          )}
+        </div>
+        <div className="pg-hero-create">
+          <span className="pg-hero-create-text">{t("plugins.hero.createHint")}</span>
+          <button
+            className="btn sm"
+            type="button"
+            onClick={() => runtime.openExternal(COMMUNITY_URL).catch(() => {})}
+          >
+            <Github size={13} /> {t("plugins.hero.openRepo")} <ExternalLink size={11} />
+          </button>
+        </div>
+      </section>
 
       {!isDesktop && <div className="pg-note">{t("plugins.webOnly")}</div>}
       {error && <div className="pg-alert err">{error}</div>}
