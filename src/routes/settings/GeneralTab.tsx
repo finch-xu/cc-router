@@ -127,7 +127,7 @@ export function GeneralTab({ form }: { form: SettingsForm }) {
               className="radio-group"
               role="radiogroup"
               aria-label={t("settings.appearance.theme.label")}
-              style={{ display: "flex", maxWidth: 300 }}
+              style={{ display: "flex", maxWidth: 380 }}
             >
               {THEMES.map((theme) => (
                 <button

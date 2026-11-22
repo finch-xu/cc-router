@@ -17,6 +17,8 @@ import "./themes/classic.css";
 import "./themes/plain.css";
 import "./themes/win2k.css";
 import "./themes/quiet.css";
+// 继承 quiet 的主题必须排在 quiet.css 之后
+import "./themes/sparrow.css";
 
 // 首帧前打平台标记: 拖窗带高度 / 窗口三键的排版靠 <html data-platform> 分流
 applyPlatformAttr();

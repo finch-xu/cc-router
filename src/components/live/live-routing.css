@@ -6,9 +6,12 @@
  * 所以圆角、描边、字体会随主题走, 这里只管本页特有的布局与图形。
  * 圆角统一用 --r-md / --r-lg (win2k 下为 0)。
  * 动效纪律: 只表达「正在发生」—— 粒子 = 请求在途; 空闲时没有任何循环动画。
+ * 「正在流动」的颜色 (粒子 / 有流量的连线 / 在途点 / 忙碌节点) 走 --lv-flow:
+ * 主题可选提供 --flow (麻雀 = 水花蓝), 没有就用 --accent, 其余主题外观不变。
  * ============================================================ */
 
 .lv-page {
+  --lv-flow: var(--flow, var(--accent));
   --lv-warn-bg: color-mix(in srgb, var(--warn) 13%, var(--surface));
   --lv-tk-cr: color-mix(in srgb, var(--accent) 18%, var(--surface));
   --lv-tk-cw: color-mix(in srgb, var(--accent) 45%, var(--surface));
@@ -65,7 +68,7 @@
 .lv-spark .line { fill: none; stroke: var(--accent); stroke-width: 1.5; stroke-linejoin: round; vector-effect: non-scaling-stroke; }
 .lv-spark circle { fill: var(--accent); }
 .lv-inflight-dots { display: flex; flex-wrap: wrap; gap: 3px; height: 18px; margin-top: 10px; overflow: hidden; align-items: center; }
-.lv-inflight-dots i { width: 8px; height: 8px; border-radius: 50%; background: var(--accent); animation: lv-breathe 1.4s var(--lv-ease) infinite; }
+.lv-inflight-dots i { width: 8px; height: 8px; border-radius: 50%; background: var(--lv-flow); animation: lv-breathe 1.4s var(--lv-ease) infinite; }
 .lv-inflight-dots i:nth-child(2n) { animation-delay: -0.5s; }
 .lv-inflight-dots i:nth-child(3n) { animation-delay: -0.9s; }
 .lv-inflight-dots i.fo { background: var(--warn); }
@@ -77,10 +80,10 @@
 .lv-flow-head { display: flex; align-items: center; gap: 14px; flex-wrap: wrap; padding: 4px 10px 0; font-size: 11.5px; color: var(--ink-4); }
 .lv-legend { margin-left: auto; display: flex; gap: 14px; flex-wrap: wrap; }
 .lv-legend span { display: inline-flex; align-items: center; gap: 6px; }
-.lv-legend .pt { width: 7px; height: 7px; border-radius: 50%; background: var(--accent); }
+.lv-legend .pt { width: 7px; height: 7px; border-radius: 50%; background: var(--lv-flow); }
 .lv-legend .pt.bg { width: 5px; height: 5px; background: var(--ink-3); }
 .lv-legend .pt.fo { background: var(--warn); }
-.lv-legend .ln { width: 18px; height: 0; border-top: 3px solid color-mix(in srgb, var(--accent) 40%, transparent); border-radius: 2px; }
+.lv-legend .ln { width: 18px; height: 0; border-top: 3px solid color-mix(in srgb, var(--lv-flow) 40%, transparent); border-radius: 2px; }
 
 .lv-flow {
   position: relative;
@@ -115,10 +118,10 @@
 .lv-node .cnt {
   flex: none; min-width: 18px; height: 17px; padding: 0 5px; border-radius: 9px;
   display: none; place-items: center; font-size: 10.5px; font-weight: 650; font-variant-numeric: tabular-nums;
-  background: var(--accent); color: var(--surface);
+  background: var(--lv-flow); color: var(--surface);
 }
 .lv-node.busy .cnt { display: grid; }
-.lv-node.busy { box-shadow: 0 0 0 1.5px color-mix(in srgb, var(--accent) 45%, transparent); }
+.lv-node.busy { box-shadow: 0 0 0 1.5px color-mix(in srgb, var(--lv-flow) 45%, transparent); }
 .lv-node.dim { opacity: 0.32; }
 .lv-cli { height: 46px; padding: 0 10px; }
 .lv-cli .ic { flex: none; width: 28px; height: 28px; border-radius: var(--r-sm); display: grid; place-items: center; background: var(--surface-3); color: var(--ink-2); }
@@ -159,13 +162,13 @@
 
 .lv-edge { fill: none; stroke-linecap: round; transition: stroke-width 0.5s var(--lv-ease), opacity 0.2s var(--lv-ease); }
 .lv-edge.idle { stroke: var(--line-2); stroke-dasharray: 2 5; }
-.lv-edge.on { stroke: color-mix(in srgb, var(--accent) 34%, transparent); }
+.lv-edge.on { stroke: color-mix(in srgb, var(--lv-flow) 34%, transparent); }
 .lv-edge.fo { stroke: color-mix(in srgb, var(--warn) 55%, transparent); stroke-dasharray: 5 5; }
 .lv-edge.dim { opacity: 0.12; }
-.lv-pt { fill: var(--accent); }
+.lv-pt { fill: var(--lv-flow); }
 .lv-pt.bg { fill: var(--ink-3); }
 .lv-pt.fo { fill: var(--warn); }
-.lv-glow { fill: var(--accent); opacity: 0.18; }
+.lv-glow { fill: var(--lv-flow); opacity: 0.18; }
 .lv-glow.bg { fill: var(--ink-3); }
 .lv-glow.fo { fill: var(--warn); }
 

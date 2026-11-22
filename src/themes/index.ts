@@ -10,9 +10,14 @@
  * 以后加主题: 同一画风下换一套配色只需新增一个 id + 一段配色 CSS;
  * 新画风才需要动组件。
  *
+ * 主题也可以继承: 「麻雀」(sparrow) 建在「简洁」(quiet) 的全部外形规则上, 只换配色 token,
+ * 所以 <html data-theme="quiet sparrow">, quiet.css 用 [data-theme~="quiet"] 匹配,
+ * sparrow.css 只写 token (在 main.tsx 里排在 quiet.css 之后, 同权重靠顺序覆盖)。
+ * 这也是将来第三方主题插件的形状: 选一个内置主题做底, 只覆盖 token。
+ *
  * index.html 里有一段首帧前的内联脚本同步这两个属性, 增删主题时要一起改。
  */
-export type ThemeId = "classic" | "sketch" | "win2000" | "quiet";
+export type ThemeId = "classic" | "sketch" | "win2000" | "quiet" | "sparrow";
 export type ThemeArt = "plain" | "sketch" | "win2k";
 
 export interface ThemeDef {
@@ -20,6 +25,8 @@ export interface ThemeDef {
   art: ThemeArt;
   /** 主题名的 i18n key */
   labelKey: string;
+  /** 继承哪个主题的外形规则 (只换配色); 写进 data-theme 的前面 */
+  base?: ThemeId;
 }
 
 /** 顺序即侧栏主题按钮的轮换顺序、设置页里按钮的排列顺序 */
@@ -28,6 +35,7 @@ export const THEMES: readonly ThemeDef[] = [
   { id: "sketch", art: "sketch", labelKey: "theme.name.sketch" },
   { id: "win2000", art: "win2k", labelKey: "theme.name.win2000" },
   { id: "quiet", art: "plain", labelKey: "theme.name.quiet" },
+  { id: "sparrow", art: "plain", labelKey: "theme.name.sparrow", base: "quiet" },
 ];
 
 /** 画风 → data-art 的值 (含继承链) */
@@ -63,6 +71,7 @@ export function nextThemeId(id: ThemeId): ThemeId {
 
 export function applyThemeAttrs(id: ThemeId) {
   const root = document.documentElement;
-  root.dataset.theme = id;
-  root.dataset.art = ART_ATTR[themeDef(id).art];
+  const def = themeDef(id);
+  root.dataset.theme = def.base ? `${def.base} ${id}` : id;
+  root.dataset.art = ART_ATTR[def.art];
 }
