@@ -3564,6 +3564,14 @@ html:not([data-platform="macos"]) .main.flush > .page-bar { height: calc(52px + 
 .pv-win2000 .pv-bar { background: linear-gradient(90deg, #0A246A, #A6CAF0); }
 .pv-win2000 .pv-card { background: #D4D0C8; border: 1px solid #404040; box-shadow: inset 1px 1px 0 #FFFFFF, inset -1px -1px 0 #808080; }
 .pv-win2000 .pv-btn { background: #0A246A; }
+.pv-quiet { background: #F8F7F5; border-color: #E2E0DC; }
+.pv-quiet .pv-bar { background: #EFEEEB; }
+.pv-quiet .pv-card { background: #FFFFFF; box-shadow: 0 0 0 1px rgb(41 37 36 / 8%); border-radius: 6px; }
+.pv-quiet .pv-btn { background: #D4553A; border-radius: 4px; }
+.pv-sparrow { background: #FFFAF1; border-color: #EADCC5; }
+.pv-sparrow .pv-bar { background: #F8EEDC; }
+.pv-sparrow .pv-card { background: #FFFFFF; box-shadow: 0 0 0 1px rgb(90 55 20 / 8%), inset 3px 0 0 #3FA6E6; border-radius: 6px; }
+.pv-sparrow .pv-btn { background: #B9501C; border-radius: 4px; }
 
 .ob-mode-row { display: flex; align-items: center; gap: 12px; margin-top: 4px; }
 .ob-seg { display: inline-flex; gap: 4px; padding: 4px; background: var(--surface-3); border-radius: 12px; }

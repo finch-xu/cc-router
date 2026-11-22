@@ -8,7 +8,7 @@ import type { CSSProperties, ReactNode } from "react";
  */
 export type SidebarIconName =
   | "guide" | "live" | "agent" | "vm" | "subs" | "logs" | "stats"
-  | "receipts" | "updates" | "backup" | "settings" | "about" | "logout" | "whatsnew"
+  | "receipts" | "plugins" | "updates" | "backup" | "settings" | "about" | "logout" | "whatsnew"
   // 侧栏底部的两枚图案按钮: 明暗模式三态 + 当前主题
   | "mode-system" | "mode-light" | "mode-dark" | "theme";
 
@@ -255,6 +255,18 @@ const ICONS: Record<SidebarIconName, IconDef> = {
       <>
         <path style={PAPER} d="M18.6 5.8 C 12.6 6.6, 8.2 11.4, 8.5 17.2 C 8.8 23.2, 13.8 27.2, 19.6 26.6 C 22.8 26.2, 25.4 24.5, 26.8 22 C 21.2 23.2, 15.4 18.8, 15.4 12.8 C 15.4 10, 16.6 7.6, 18.6 5.8 Z" />
         <path style={thin} d="M23.4 7.4 L23.5 11.6 M21.4 9.5 L25.6 9.4" />
+      </>
+    ),
+  },
+  // 插件: 一块拼图, 凸起处点一颗陶土色
+  plugins: {
+    blob: BLOB.e,
+    fill: "var(--fill-sky)",
+    draw: (thin) => (
+      <>
+        <path style={PAPER} d="M6.8 10.4 L12.8 10.2 C 12.2 7.8, 13.6 5.8, 16 5.9 C 18.4 6, 19.6 8, 19 10.3 L25 10.2 L25.2 16.2 C 27.4 15.6, 29.2 16.9, 29.1 19.2 C 29 21.5, 27.2 22.6, 25.1 22.1 L25 27 L7 27.2 Z" />
+        <path style={{ ...ACCENT, strokeWidth: 0 }} d="M14.2 8.6 C 14.4 7.4, 15.4 6.9, 16.3 7.1 C 17.3 7.4, 17.6 8.4, 17.3 9.2 Z" />
+        <path style={thin} d="M10.4 21.4 L15.6 21.2 M10.4 17.6 L13.4 17.5" />
       </>
     ),
   },

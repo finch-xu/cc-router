@@ -10,6 +10,7 @@ pub mod error;
 pub mod integrations;
 pub mod session_monitor;
 pub mod oauth;
+pub mod plugins;
 pub mod observability;
 pub mod provider;
 pub mod proxy;
@@ -220,6 +221,14 @@ pub fn run() {
             commands::tls::tls_export_ca_zip,
             commands::tls::tls_get_ca_zip_bytes,
             commands::tls::tls_regenerate_leaf,
+            commands::plugins::list_plugins,
+            commands::plugins::load_plugin,
+            commands::plugins::stage_plugin_from_github,
+            commands::plugins::stage_plugin_from_dir,
+            commands::plugins::install_staged_plugin,
+            commands::plugins::discard_staged_plugin,
+            commands::plugins::uninstall_plugin,
+            commands::plugins::fetch_community_index,
             commands::tui::tui_launch_info,
             commands::tui::install_tui_command,
             commands::tui::uninstall_tui_command,

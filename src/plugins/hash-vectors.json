@@ -1,0 +1,27 @@
+[
+  {
+    "files": {},
+    "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+  },
+  {
+    "files": {
+      "cc-router-plugin.json": "{}"
+    },
+    "sha256": "2eadbdcf0552b140d4c45ee377a06899751c82e5a2eba8b10e02ec97fc9ec3ae"
+  },
+  {
+    "files": {
+      "b.json": "2",
+      "a.json": "1",
+      "assets/x.png": "\u0000\u0001"
+    },
+    "sha256": "e2d333e068ed73b5b58120c04add80d34ef7f70b408868b273f1831c02c765e9"
+  },
+  {
+    "files": {
+      "中文.json": "x",
+      "Z.json": "y"
+    },
+    "sha256": "98112941eb15e3b1d629674f7c6efbf565701e7cd911414bb8a4fe448a520baa"
+  }
+]

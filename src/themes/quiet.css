@@ -11,13 +11,17 @@
  *   4. 品牌珊瑚色给: 主按钮、侧栏选中图标、开关 / 滑块 / 焦点、此刻首选的路由。
  *   5. 只有设置这种「一条一条」的内容才用描边分组 + 行分隔线 (同 T3 设置页)。
  *
- * 写法与 plain.css 相同: token 放层外; 规则写成 `:where([data-theme="quiet"]) 原选择器`
+ * 被继承: 「麻雀」(sparrow.css) 用 data-theme="quiet sparrow" 复用本文件全部规则, 所以选择器一律写
+ * [data-theme~="quiet"]。规则里需要随配色变的颜色要写成 token (带回退值), 不要写死,
+ * 例如 var(--on-accent, #fff) / var(--q-hover, …)。
+ *
+ * 写法与 plain.css 相同: token 放层外; 规则写成 `:where([data-theme~="quiet"]) 原选择器`
  * 放进 utilities 层。本文件在 main.tsx 里排在 plain.css 之后, 权重持平时胜出,
  * 所以覆盖某条 plain / styles.css 规则时, 选择器的「形状」要与原规则一致
  * (例如原规则是 .pill.ok, 这里也要写到 .pill.ok)。
  * ============================================================ */
 
-:root:where([data-theme="quiet"]) {
+:root:where([data-theme~="quiet"]) {
   --bg:        #f8f7f5;   /* 画布 */
   --surface:   #ffffff;   /* 卡片 */
   --q-pop:     #ffffff;   /* 弹层 */
@@ -91,7 +95,7 @@
   --ring: 11 64% 53%;
 }
 
-.dark:where([data-theme="quiet"]) {
+.dark:where([data-theme~="quiet"]) {
   --bg:        #1a1918;
   --surface:   #242220;
   --q-pop:     #2a2826;
@@ -141,152 +145,152 @@
 @layer utilities {
 
 /* ---------- 侧栏: 最深的一层, 选中项是白色胶囊 ---------- */
-:where([data-theme="quiet"]) .sidebar { background: var(--surface-2); border-right: none; }
-:where([data-theme="quiet"]) .brand { border-bottom: none; margin-bottom: 8px; }
-:where([data-theme="quiet"]) .brand-name { font-size: 14px; font-weight: 650; letter-spacing: -0.01em; }
-:where([data-theme="quiet"]) .nav-item { padding: 6px 10px; color: var(--ink-2); border-radius: 9px; }
-:where([data-theme="quiet"]) .nav-item .nav-icon { color: var(--ink-3); }
-:where([data-theme="quiet"]) .nav-item:hover { background: rgb(41 37 36 / 5%); color: var(--ink); }
-.dark:where([data-theme="quiet"]) .nav-item:hover { background: rgb(255 255 255 / 5%); }
-:where([data-theme="quiet"]) .nav-item.active {
+:where([data-theme~="quiet"]) .sidebar { background: var(--surface-2); border-right: none; }
+:where([data-theme~="quiet"]) .brand { border-bottom: none; margin-bottom: 8px; }
+:where([data-theme~="quiet"]) .brand-name { font-size: 14px; font-weight: 650; letter-spacing: -0.01em; }
+:where([data-theme~="quiet"]) .nav-item { padding: 6px 10px; color: var(--ink-2); border-radius: var(--q-r-ctl, 9px); }
+:where([data-theme~="quiet"]) .nav-item .nav-icon { color: var(--ink-3); }
+:where([data-theme~="quiet"]) .nav-item:hover { background: var(--q-hover, rgb(41 37 36 / 5%)); color: var(--ink); }
+.dark:where([data-theme~="quiet"]) .nav-item:hover { background: var(--q-hover, rgb(255 255 255 / 5%)); }
+:where([data-theme~="quiet"]) .nav-item.active {
   background: var(--surface);
   color: var(--ink);
   font-weight: 550;
   box-shadow: var(--q-sh-pill);
 }
-:where([data-theme="quiet"]) .nav-item.active .nav-icon { color: var(--accent); }
-:where([data-theme="quiet"]) .nav-item .badge,
-:where([data-theme="quiet"]) .nav-item.active .badge { background: none; border: none; color: var(--ink-4); padding: 0; }
-:where([data-theme="quiet"]) .nav-dot { box-shadow: none; }
-:where([data-theme="quiet"]) .nav-dot.ok { box-shadow: 0 0 0 3px color-mix(in srgb, var(--ok) 18%, transparent); }
+:where([data-theme~="quiet"]) .nav-item.active .nav-icon { color: var(--accent); }
+:where([data-theme~="quiet"]) .nav-item .badge,
+:where([data-theme~="quiet"]) .nav-item.active .badge { background: none; border: none; color: var(--ink-4); padding: 0; }
+:where([data-theme~="quiet"]) .nav-dot { box-shadow: none; }
+:where([data-theme~="quiet"]) .nav-dot.ok { box-shadow: 0 0 0 3px color-mix(in srgb, var(--ok) 18%, transparent); }
 
 /* ---------- 页头: 大标题 + 一行说明 ---------- */
-:where([data-theme="quiet"]) .page-header h1 { font-size: 22px; font-weight: 650; letter-spacing: -0.015em; margin-bottom: 4px; }
-:where([data-theme="quiet"]) .page-header .subtitle { color: var(--ink-3); font-size: 13px; }
-:where([data-theme="quiet"]) .page-bar h1 { font-size: 15px; font-weight: 600; }
+:where([data-theme~="quiet"]) .page-header h1 { font-size: 22px; font-weight: 650; letter-spacing: -0.015em; margin-bottom: 4px; }
+:where([data-theme~="quiet"]) .page-header .subtitle { color: var(--ink-3); font-size: 13px; }
+:where([data-theme~="quiet"]) .page-bar h1 { font-size: 15px; font-weight: 600; }
 
 /* ---------- 容器: 白色扁平卡片 (1px 极淡描边, 无投影) ---------- */
-:where([data-theme="quiet"]) .card {
+:where([data-theme~="quiet"]) .card {
   background: var(--surface);
   border: none;
-  border-radius: 16px;
+  border-radius: var(--q-r-card, 16px);
   box-shadow: var(--q-sh-card);
 }
-:where([data-theme="quiet"]) .card-title { font-size: 14px; font-weight: 620; }
-:where([data-theme="quiet"]) .card-sub { color: var(--ink-4); }
-:where([data-theme="quiet"]) .slot-card,
-:where([data-theme="quiet"]) .slot-card:nth-child(even),
-:where([data-theme="quiet"]) .slot-card.wide {
+:where([data-theme~="quiet"]) .card-title { font-size: 14px; font-weight: 620; }
+:where([data-theme~="quiet"]) .card-sub { color: var(--ink-4); }
+:where([data-theme~="quiet"]) .slot-card,
+:where([data-theme~="quiet"]) .slot-card:nth-child(even),
+:where([data-theme~="quiet"]) .slot-card.wide {
   border: none;
-  border-radius: 16px;
-  background: var(--surface);
-  box-shadow: var(--q-sh-card);
-}
-:where([data-theme="quiet"]) .stats-section {
-  border: none;
-  border-radius: 16px;
+  border-radius: var(--q-r-card, 16px);
   background: var(--surface);
   box-shadow: var(--q-sh-card);
 }
-:where([data-theme="quiet"]) .stats-section-title,
-:where([data-theme="quiet"]) .stats-block-title { font-family: inherit; font-size: 14px; font-weight: 620; }
-:where([data-theme="quiet"]) .help-panel,
-:where([data-theme="quiet"]) .copyline,
-:where([data-theme="quiet"]) .brand-card {
+:where([data-theme~="quiet"]) .stats-section {
+  border: none;
+  border-radius: var(--q-r-card, 16px);
+  background: var(--surface);
+  box-shadow: var(--q-sh-card);
+}
+:where([data-theme~="quiet"]) .stats-section-title,
+:where([data-theme~="quiet"]) .stats-block-title { font-family: inherit; font-size: 14px; font-weight: 620; }
+:where([data-theme~="quiet"]) .help-panel,
+:where([data-theme~="quiet"]) .copyline,
+:where([data-theme~="quiet"]) .brand-card {
   border: none;
   background: var(--surface-3);
 }
-:where([data-theme="quiet"]) .codeblock {
+:where([data-theme~="quiet"]) .codeblock {
   border: none;
   background: #1c1917;
   color: #e7e5e4;
-  border-radius: 12px;
+  border-radius: var(--q-r-ctl, 12px);
 }
-.dark:where([data-theme="quiet"]) .codeblock { background: #0f0e0d; }
-:where([data-theme="quiet"]) .codeblock .copy { border: none; background: rgb(255 255 255 / 10%); color: #fff; }
-:where([data-theme="quiet"]) .codeblock .copy:hover { background: rgb(255 255 255 / 18%); }
-:where([data-theme="quiet"]) .copyline-copy { border: none; background: var(--surface); box-shadow: 0 0 0 1px var(--line-2); }
-:where([data-theme="quiet"]) .danger-card {
+.dark:where([data-theme~="quiet"]) .codeblock { background: #0f0e0d; }
+:where([data-theme~="quiet"]) .codeblock .copy { border: none; background: rgb(255 255 255 / 10%); color: #fff; }
+:where([data-theme~="quiet"]) .codeblock .copy:hover { background: rgb(255 255 255 / 18%); }
+:where([data-theme~="quiet"]) .copyline-copy { border: none; background: var(--surface); box-shadow: 0 0 0 1px var(--line-2); }
+:where([data-theme~="quiet"]) .danger-card {
   background: var(--err-bg);
   border: none;
-  border-radius: 14px;
+  border-radius: var(--q-r-card, 14px);
 }
-:where([data-theme="quiet"]) .alert { border: none; border-radius: 12px; background: var(--surface-3); color: var(--ink-2); }
-:where([data-theme="quiet"]) .alert.warn { background: var(--q-warn-bg); color: var(--ink-2); }
-:where([data-theme="quiet"]) .alert.err { background: var(--err-bg); color: var(--ink-2); }
-:where([data-theme="quiet"]) .app-mark,
-:where([data-theme="quiet"]) .logo-plain.tile { box-shadow: none; }
+:where([data-theme~="quiet"]) .alert { border: none; border-radius: var(--q-r-ctl, 12px); background: var(--surface-3); color: var(--ink-2); }
+:where([data-theme~="quiet"]) .alert.warn { background: var(--q-warn-bg); color: var(--ink-2); }
+:where([data-theme~="quiet"]) .alert.err { background: var(--err-bg); color: var(--ink-2); }
+:where([data-theme~="quiet"]) .app-mark,
+:where([data-theme~="quiet"]) .logo-plain.tile { box-shadow: none; }
 
 /* ---------- 设置: 标题在外, 描边分组 + 行分隔 (T3 设置页同款) ---------- */
-:where([data-theme="quiet"]) .card.section {
+:where([data-theme~="quiet"]) .card.section {
   background: transparent;
   box-shadow: none;
   border-radius: 0;
 }
-:where([data-theme="quiet"]) .card.section > .card-head { padding: 0 2px 10px; }
-:where([data-theme="quiet"]) .card.section > .card-head .card-title { font-size: 15px; }
-:where([data-theme="quiet"]) .card.section > .card-body {
+:where([data-theme~="quiet"]) .card.section > .card-head { padding: 0 2px 10px; }
+:where([data-theme~="quiet"]) .card.section > .card-head .card-title { font-size: 15px; }
+:where([data-theme~="quiet"]) .card.section > .card-body {
   background: var(--surface);
-  border-radius: 14px;
+  border-radius: var(--q-r-card, 14px);
   box-shadow: 0 0 0 1px var(--q-hair);
   padding: 14px 18px;
 }
-:where([data-theme="quiet"]) .card.section > .card-body:has(> .setting-row) { padding-top: 0; padding-bottom: 0; }
-:where([data-theme="quiet"]) .setting-row,
-:where([data-theme="quiet"]) .setting-row:first-child,
-:where([data-theme="quiet"]) .setting-row:last-child { padding-top: 14px; padding-bottom: 14px; }
-:where([data-theme="quiet"]) .setting-row {
+:where([data-theme~="quiet"]) .card.section > .card-body:has(> .setting-row) { padding-top: 0; padding-bottom: 0; }
+:where([data-theme~="quiet"]) .setting-row,
+:where([data-theme~="quiet"]) .setting-row:first-child,
+:where([data-theme~="quiet"]) .setting-row:last-child { padding-top: 14px; padding-bottom: 14px; }
+:where([data-theme~="quiet"]) .setting-row {
   border-bottom: 1px solid var(--q-hair);
   /* 说明文字占左半, 控件靠右 (T3 设置页的排法); 宽控件 (输入框 / 文本域) 仍占满右半 */
   grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
   align-items: center;
 }
 /* !important: 部分控件带内联 justify-self:start (旧布局防拉伸用) */
-:where([data-theme="quiet"]) .setting-row > :nth-child(2) { justify-self: end !important; max-width: 100%; }
-:where([data-theme="quiet"]) .setting-row > :nth-child(2):is(.input, textarea, .codeblock, .copyline) { justify-self: stretch !important; }
-:where([data-theme="quiet"]) .setting-row:last-child { border-bottom: none; }
-:where([data-theme="quiet"]) .setting-row .label-col { font-weight: 550; color: var(--ink); }
-:where([data-theme="quiet"]) .setting-row .label-col .desc { font-size: 12.5px; color: var(--ink-3); }
+:where([data-theme~="quiet"]) .setting-row > :nth-child(2) { justify-self: end !important; max-width: 100%; }
+:where([data-theme~="quiet"]) .setting-row > :nth-child(2):is(.input, textarea, .codeblock, .copyline) { justify-self: stretch !important; }
+:where([data-theme~="quiet"]) .setting-row:last-child { border-bottom: none; }
+:where([data-theme~="quiet"]) .setting-row .label-col { font-weight: 550; color: var(--ink); }
+:where([data-theme~="quiet"]) .setting-row .label-col .desc { font-size: 12.5px; color: var(--ink-3); }
 
 /* ---------- 按钮 ---------- */
-:where([data-theme="quiet"]) .btn {
+:where([data-theme~="quiet"]) .btn {
   border: 1px solid transparent;
   background: var(--surface);
   color: var(--ink-2);
   font-weight: 500;
-  border-radius: 9px;
+  border-radius: var(--q-r-ctl, 9px);
   box-shadow: 0 0 0 1px var(--line-2);
 }
-:where([data-theme="quiet"]) .btn:hover { background: var(--surface-3); border-color: transparent; color: var(--ink); }
-:where([data-theme="quiet"]) .btn.primary,
-:where([data-theme="quiet"]) .btn.accent {
+:where([data-theme~="quiet"]) .btn:hover { background: var(--surface-3); border-color: transparent; color: var(--ink); }
+:where([data-theme~="quiet"]) .btn.primary,
+:where([data-theme~="quiet"]) .btn.accent {
   background: var(--accent);
   border-color: var(--accent);
-  color: #fff;
+  color: var(--on-accent, #fff);
   box-shadow: none;
 }
-:where([data-theme="quiet"]) .btn.primary:hover:not(:disabled),
-:where([data-theme="quiet"]) .btn.accent:hover:not(:disabled) {
+:where([data-theme~="quiet"]) .btn.primary:hover:not(:disabled),
+:where([data-theme~="quiet"]) .btn.accent:hover:not(:disabled) {
   background: var(--accent-ink);
   border-color: var(--accent-ink);
-  color: #fff;
+  color: var(--on-accent, #fff);
   filter: none;
 }
-.dark:where([data-theme="quiet"]) .btn.primary:hover:not(:disabled),
-.dark:where([data-theme="quiet"]) .btn.accent:hover:not(:disabled) { background: var(--accent); filter: brightness(1.08); }
-:where([data-theme="quiet"]) .btn.danger {
+.dark:where([data-theme~="quiet"]) .btn.primary:hover:not(:disabled),
+.dark:where([data-theme~="quiet"]) .btn.accent:hover:not(:disabled) { background: var(--accent); filter: brightness(1.08); }
+:where([data-theme~="quiet"]) .btn.danger {
   background: var(--surface);
   border-color: transparent;
   color: var(--err);
 }
-:where([data-theme="quiet"]) .btn.danger:hover:not(:disabled) { background: var(--err-bg); filter: none; }
-:where([data-theme="quiet"]) .btn.ghost { border: 1px solid transparent; background: transparent; color: var(--ink-3); box-shadow: none; }
-:where([data-theme="quiet"]) .btn.ghost:hover { border-color: transparent; background: var(--surface-3); color: var(--ink); }
-:where([data-theme="quiet"]) .btn.bare { background: transparent; box-shadow: none; }
-:where([data-theme="quiet"]) .lrc-btn-dark { border: none; border-radius: 9px; }
+:where([data-theme~="quiet"]) .btn.danger:hover:not(:disabled) { background: var(--err-bg); filter: none; }
+:where([data-theme~="quiet"]) .btn.ghost { border: 1px solid transparent; background: transparent; color: var(--ink-3); box-shadow: none; }
+:where([data-theme~="quiet"]) .btn.ghost:hover { border-color: transparent; background: var(--surface-3); color: var(--ink); }
+:where([data-theme~="quiet"]) .btn.bare { background: transparent; box-shadow: none; }
+:where([data-theme~="quiet"]) .lrc-btn-dark { border: none; border-radius: var(--q-r-ctl, 9px); }
 
 /* ---------- 状态: 正常 = 绿点灰字; 异常 = 淡色底标签 ---------- */
-:where([data-theme="quiet"]) .pill {
+:where([data-theme~="quiet"]) .pill {
   border: none;
   border-radius: 999px;
   background: var(--surface-3);
@@ -294,79 +298,79 @@
   padding: 2px 9px;
   font-weight: 500;
 }
-:where([data-theme="quiet"]) .pill .dot { border-radius: 50%; }
-:where([data-theme="quiet"]) .pill.ok { background: transparent; color: var(--ink-2); padding-left: 0; padding-right: 0; }
-:where([data-theme="quiet"]) .pill.ok .dot { background: var(--ok); }
-:where([data-theme="quiet"]) .pill.warn { background: var(--q-warn-bg); color: var(--warn); }
-:where([data-theme="quiet"]) .pill.warn .dot { background: var(--warn); }
-:where([data-theme="quiet"]) .pill.err { background: var(--err-bg); color: var(--err); }
-:where([data-theme="quiet"]) .pill.err .dot { background: var(--err); }
-:where([data-theme="quiet"]) .pill.accent { background: var(--accent-bg); color: var(--accent-ink); }
-:where([data-theme="quiet"]) .pill.tag {
+:where([data-theme~="quiet"]) .pill .dot { border-radius: 50%; }
+:where([data-theme~="quiet"]) .pill.ok { background: transparent; color: var(--ink-2); padding-left: 0; padding-right: 0; }
+:where([data-theme~="quiet"]) .pill.ok .dot { background: var(--ok); }
+:where([data-theme~="quiet"]) .pill.warn { background: var(--q-warn-bg); color: var(--warn); }
+:where([data-theme~="quiet"]) .pill.warn .dot { background: var(--warn); }
+:where([data-theme~="quiet"]) .pill.err { background: var(--err-bg); color: var(--err); }
+:where([data-theme~="quiet"]) .pill.err .dot { background: var(--err); }
+:where([data-theme~="quiet"]) .pill.accent { background: var(--accent-bg); color: var(--accent-ink); }
+:where([data-theme~="quiet"]) .pill.tag {
   border: none;
   background: var(--surface-3);
   color: var(--ink-3);
   padding: 1px 7px;
   border-radius: 6px;
 }
-:where([data-theme="quiet"]) .pill.tag.cap-jev { color: var(--accent-ink); background: var(--accent-bg); }
+:where([data-theme~="quiet"]) .pill.tag.cap-jev { color: var(--accent-ink); background: var(--accent-bg); }
 
 /* ---------- 输入: 白底 + 细描边, 聚焦珊瑚光圈 ---------- */
-:where([data-theme="quiet"]) .input,
-:where([data-theme="quiet"]) .select {
+:where([data-theme~="quiet"]) .input,
+:where([data-theme~="quiet"]) .select {
   background: var(--surface);
   border: 1px solid var(--line-2);
-  border-radius: 9px;
+  border-radius: var(--q-r-ctl, 9px);
 }
-:where([data-theme="quiet"]) :is(.input, .select):hover:not(:disabled):not(:focus) { border-color: var(--ink-5); background: var(--surface); }
-:where([data-theme="quiet"]) .input:focus,
-:where([data-theme="quiet"]) .select:focus {
+:where([data-theme~="quiet"]) :is(.input, .select):hover:not(:disabled):not(:focus) { border-color: var(--ink-5); background: var(--surface); }
+:where([data-theme~="quiet"]) .input:focus,
+:where([data-theme~="quiet"]) .select:focus {
   border-color: var(--accent);
   box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 18%, transparent);
   background: var(--surface);
 }
 
 /* ---------- 开关 / 分段 / 页签: 凹槽底 + 白色滑块 ---------- */
-:where([data-theme="quiet"]) .toggle { background: var(--q-sel); }
-:where([data-theme="quiet"]) .toggle.on { background: var(--accent); }
-:where([data-theme="quiet"]) .radio-group,
-:where([data-theme="quiet"]) .range-tabs,
-:where([data-theme="quiet"]) .seg-tabs {
+:where([data-theme~="quiet"]) .toggle { background: var(--q-sel); }
+:where([data-theme~="quiet"]) .toggle.on { background: var(--accent); }
+:where([data-theme~="quiet"]) .radio-group,
+:where([data-theme~="quiet"]) .range-tabs,
+:where([data-theme~="quiet"]) .seg-tabs {
   background: var(--surface-3);
   border: none;
-  border-radius: 10px;
+  border-radius: var(--q-r-ctl, 10px);
   padding: 3px;
   gap: 2px;
 }
-:where([data-theme="quiet"]) .radio-group button,
-:where([data-theme="quiet"]) .range-tab,
-:where([data-theme="quiet"]) .seg-tab { color: var(--ink-3); border-radius: 7px; font-weight: 500; white-space: nowrap; }
-:where([data-theme="quiet"]) .radio-group button:hover,
-:where([data-theme="quiet"]) .range-tab:hover,
-:where([data-theme="quiet"]) .seg-tab:hover { color: var(--ink); }
-:where([data-theme="quiet"]) .radio-group button.on,
-:where([data-theme="quiet"]) .range-tab.active,
-:where([data-theme="quiet"]) .seg-tab.active {
+:where([data-theme~="quiet"]) .radio-group button,
+:where([data-theme~="quiet"]) .range-tab,
+:where([data-theme~="quiet"]) .seg-tab { color: var(--ink-3); border-radius: 7px; font-weight: 500; white-space: nowrap; }
+:where([data-theme~="quiet"]) .radio-group button:hover,
+:where([data-theme~="quiet"]) .range-tab:hover,
+:where([data-theme~="quiet"]) .seg-tab:hover { color: var(--ink); }
+:where([data-theme~="quiet"]) .radio-group button.on,
+:where([data-theme~="quiet"]) .range-tab.active,
+:where([data-theme~="quiet"]) .seg-tab.active {
   background: var(--surface);
   color: var(--ink);
   font-weight: 550;
   box-shadow: var(--q-sh-pill);
 }
-.dark:where([data-theme="quiet"]) .radio-group button.on,
-.dark:where([data-theme="quiet"]) .range-tab.active,
-.dark:where([data-theme="quiet"]) .seg-tab.active { background: var(--q-sel); box-shadow: var(--q-sh-pill); }
-:where([data-theme="quiet"]) .tabs {
+.dark:where([data-theme~="quiet"]) .radio-group button.on,
+.dark:where([data-theme~="quiet"]) .range-tab.active,
+.dark:where([data-theme~="quiet"]) .seg-tab.active { background: var(--q-sel); box-shadow: var(--q-sh-pill); }
+:where([data-theme~="quiet"]) .tabs {
   display: inline-flex;
   flex-wrap: wrap;
   max-width: 100%;
   border-bottom: none;
   background: var(--surface-3);
-  border-radius: 10px;
+  border-radius: var(--q-r-ctl, 10px);
   padding: 3px;
   gap: 2px;
   margin-bottom: 20px;
 }
-:where([data-theme="quiet"]) .tab {
+:where([data-theme~="quiet"]) .tab {
   border-radius: 7px;
   color: var(--ink-3);
   border-bottom: none;
@@ -374,77 +378,77 @@
   padding: 5px 12px;
   font-weight: 500;
 }
-:where([data-theme="quiet"]) .tab:hover { color: var(--ink); background: transparent; }
-:where([data-theme="quiet"]) .tab::after { display: none; }
-:where([data-theme="quiet"]) .tab.active { background: var(--surface); color: var(--ink); font-weight: 550; box-shadow: var(--q-sh-pill); }
-.dark:where([data-theme="quiet"]) .tab.active { background: var(--q-sel); }
+:where([data-theme~="quiet"]) .tab:hover { color: var(--ink); background: transparent; }
+:where([data-theme~="quiet"]) .tab::after { display: none; }
+:where([data-theme~="quiet"]) .tab.active { background: var(--surface); color: var(--ink); font-weight: 550; box-shadow: var(--q-sh-pill); }
+.dark:where([data-theme~="quiet"]) .tab.active { background: var(--q-sel); }
 
 /* ui/select 的触发器 (Radix, 带 role=combobox): 与 .select 同款 */
-:where([data-theme="quiet"]) button[role="combobox"] {
+:where([data-theme~="quiet"]) button[role="combobox"] {
   background: var(--surface);
   border-color: var(--line-2);
-  border-radius: 9px;
+  border-radius: var(--q-r-ctl, 9px);
 }
-:where([data-theme="quiet"]) button[role="combobox"]:hover { border-color: var(--ink-5); }
-:where([data-theme="quiet"]) button[role="combobox"]:focus {
+:where([data-theme~="quiet"]) button[role="combobox"]:hover { border-color: var(--ink-5); }
+:where([data-theme~="quiet"]) button[role="combobox"]:focus {
   border-color: var(--accent);
   box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 18%, transparent);
 }
 
 /* ---------- 表格: 无线, 行悬停圆角底; 失败行整行淡红 ---------- */
-:where([data-theme="quiet"]) .table { border-collapse: separate; border-spacing: 0; }
-:where([data-theme="quiet"]) .table th {
+:where([data-theme~="quiet"]) .table { border-collapse: separate; border-spacing: 0; }
+:where([data-theme~="quiet"]) .table th {
   background: transparent;
   border-bottom: none;
   color: var(--ink-4);
   font-weight: 500;
 }
-:where([data-theme="quiet"]) .table td { border-bottom: none; }
-:where([data-theme="quiet"]) .table tr:hover td { background: var(--surface-3); }
-:where([data-theme="quiet"]) .table tr td:first-child { border-radius: 9px 0 0 9px; }
-:where([data-theme="quiet"]) .table tr td:last-child { border-radius: 0 9px 9px 0; }
-:where([data-theme="quiet"]) .card > .table { padding: 6px; }
-:where([data-theme="quiet"]) .rd-table th,
-:where([data-theme="quiet"]) .rd-table td { border-bottom: none; }
+:where([data-theme~="quiet"]) .table td { border-bottom: none; }
+:where([data-theme~="quiet"]) .table tr:hover td { background: var(--surface-3); }
+:where([data-theme~="quiet"]) .table tr td:first-child { border-radius: 9px 0 0 9px; }
+:where([data-theme~="quiet"]) .table tr td:last-child { border-radius: 0 9px 9px 0; }
+:where([data-theme~="quiet"]) .card > .table { padding: 6px; }
+:where([data-theme~="quiet"]) .rd-table th,
+:where([data-theme~="quiet"]) .rd-table td { border-bottom: none; }
 
 /* ---------- 统计: 核心指标是一排数字卡 ---------- */
-:where([data-theme="quiet"]) .stat {
+:where([data-theme~="quiet"]) .stat {
   background: var(--surface);
   border: none;
-  border-radius: 16px;
+  border-radius: var(--q-r-card, 16px);
   box-shadow: var(--q-sh-card);
   padding: 18px 20px;
 }
-:where([data-theme="quiet"]) .stat-label { text-transform: none; letter-spacing: 0; font-size: 12px; color: var(--ink-3); font-weight: 500; }
-:where([data-theme="quiet"]) .stat-val { font-family: inherit; font-size: 26px; font-weight: 650; letter-spacing: -0.02em; font-variant-numeric: tabular-nums; color: var(--ink); }
-:where([data-theme="quiet"]) .stat-delta.up { color: var(--ok); }
+:where([data-theme~="quiet"]) .stat-label { text-transform: none; letter-spacing: 0; font-size: 12px; color: var(--ink-3); font-weight: 500; }
+:where([data-theme~="quiet"]) .stat-val { font-family: inherit; font-size: 26px; font-weight: 650; letter-spacing: -0.02em; font-variant-numeric: tabular-nums; color: var(--ink); }
+:where([data-theme~="quiet"]) .stat-delta.up { color: var(--ok); }
 
 /* ---------- Agent 会话卡 (经典版通栏区块) ---------- */
-:where([data-theme="quiet"]) .lrc-flush-section,
-:where([data-theme="quiet"]) .lrc-flush-split { background: transparent; }
-:where([data-theme="quiet"]) .lrc-flush-split > * + * { border-left: none; }
-:where([data-theme="quiet"]) .lrc-flush-section,
-:where([data-theme="quiet"]) .lrc-flush-split > * { border-top: none; }
-:where([data-theme="quiet"]) .lrc-flush-title { font-size: 15px; font-weight: 620; }
+:where([data-theme~="quiet"]) .lrc-flush-section,
+:where([data-theme~="quiet"]) .lrc-flush-split { background: transparent; }
+:where([data-theme~="quiet"]) .lrc-flush-split > * + * { border-left: none; }
+:where([data-theme~="quiet"]) .lrc-flush-section,
+:where([data-theme~="quiet"]) .lrc-flush-split > * { border-top: none; }
+:where([data-theme~="quiet"]) .lrc-flush-title { font-size: 15px; font-weight: 620; }
 
 /* ---------- 接入指南: 接入信息是本页主卡 ---------- */
-:where([data-theme="quiet"]) .page-flow > .lrc-flush-split:first-child {
+:where([data-theme~="quiet"]) .page-flow > .lrc-flush-split:first-child {
   background: var(--surface);
-  border-radius: 20px;
+  border-radius: var(--q-r-card, 20px);
   box-shadow: var(--q-sh-hero);
   margin-bottom: 12px;
 }
-:where([data-theme="quiet"]) .lrc-access-value {
+:where([data-theme~="quiet"]) .lrc-access-value {
   border: none;
   background: var(--surface-3);
-  border-radius: 9px;
+  border-radius: var(--q-r-ctl, 9px);
   color: var(--ink);
   font-weight: 550;
 }
-:where([data-theme="quiet"]) .lrc-access-copy { border: none; background: var(--surface); box-shadow: 0 0 0 1px var(--line-2); border-radius: 9px; }
-:where([data-theme="quiet"]) .lrc-access-copy:hover { background: var(--surface-3); }
-:where([data-theme="quiet"]) .lrc-api-row { border-bottom: none; }
-:where([data-theme="quiet"]) .lrc-api-method {
+:where([data-theme~="quiet"]) .lrc-access-copy { border: none; background: var(--surface); box-shadow: 0 0 0 1px var(--line-2); border-radius: var(--q-r-ctl, 9px); }
+:where([data-theme~="quiet"]) .lrc-access-copy:hover { background: var(--surface-3); }
+:where([data-theme~="quiet"]) .lrc-api-row { border-bottom: none; }
+:where([data-theme~="quiet"]) .lrc-api-method {
   border: none;
   padding: 1px 6px;
   border-radius: 5px;
@@ -452,30 +456,30 @@
   color: var(--ink-3);
   font-weight: 600;
 }
-:where([data-theme="quiet"]) .lrc-api-row:has(.lrc-api-path) .lrc-api-method:not(:empty) { min-width: 42px; text-align: center; }
+:where([data-theme~="quiet"]) .lrc-api-row:has(.lrc-api-path) .lrc-api-method:not(:empty) { min-width: 42px; text-align: center; }
 
 /* 虚拟模型映射三列: 虚线框换成白卡, 中列 (cc-router 内部) 用强调色淡底 */
-:where([data-theme="quiet"]) .lrc-vm-map-col {
+:where([data-theme~="quiet"]) .lrc-vm-map-col {
   --c-line: var(--q-hair);
   border: none;
-  border-radius: 12px;
+  border-radius: var(--q-r-ctl, 12px);
   background: var(--surface);
   box-shadow: var(--q-sh-card);
 }
-:where([data-theme="quiet"]) .lrc-vm-map-col.router { --c-line: var(--accent-line); background: var(--accent-bg); box-shadow: none; }
-:where([data-theme="quiet"]) .lrc-vm-map-row.fallback { border-top: 1px solid var(--c-line); }
-:where([data-theme="quiet"]) .lrc-readonly-note { border: none; background: var(--surface-3); border-radius: 12px; }
+:where([data-theme~="quiet"]) .lrc-vm-map-col.router { --c-line: var(--accent-line); background: var(--accent-bg); box-shadow: none; }
+:where([data-theme~="quiet"]) .lrc-vm-map-row.fallback { border-top: 1px solid var(--c-line); }
+:where([data-theme~="quiet"]) .lrc-readonly-note { border: none; background: var(--surface-3); border-radius: var(--q-r-ctl, 12px); }
 
 /* ---------- 虚拟模型: 每个虚拟模型一张卡, 此刻首选整行珊瑚底 ---------- */
-:where([data-theme="quiet"]) .vm-time {
+:where([data-theme~="quiet"]) .vm-time {
   background: var(--surface);
   border: none;
   box-shadow: var(--q-sh-card);
-  border-radius: 12px;
+  border-radius: var(--q-r-ctl, 12px);
   padding: 6px 12px;
 }
-:where([data-theme="quiet"]) .vm-time-title { font-family: inherit; font-size: 12.5px; color: var(--ink-3); }
-:where([data-theme="quiet"]) .vm-time-now {
+:where([data-theme~="quiet"]) .vm-time-title { font-family: inherit; font-size: 12.5px; color: var(--ink-3); }
+:where([data-theme~="quiet"]) .vm-time-now {
   min-height: 28px;
   padding: 0 10px;
   border: none;
@@ -484,12 +488,12 @@
   box-shadow: none;
   font-size: 12.5px;
 }
-:where([data-theme="quiet"]) .vm-time-days {
+:where([data-theme~="quiet"]) .vm-time-days {
   background: var(--surface-3);
-  border-radius: 9px;
+  border-radius: var(--q-r-ctl, 9px);
   padding: 2px;
 }
-:where([data-theme="quiet"]) .vm-time-days button {
+:where([data-theme~="quiet"]) .vm-time-days button {
   min-width: 28px;
   height: 26px;
   border: none;
@@ -498,22 +502,22 @@
   border-radius: 7px;
   font-size: 12.5px;
 }
-:where([data-theme="quiet"]) .vm-time-days button:hover:not(:disabled) { color: var(--ink); }
-:where([data-theme="quiet"]) .vm-time-now[aria-pressed="true"],
-:where([data-theme="quiet"]) .vm-time-days button[aria-pressed="true"] {
+:where([data-theme~="quiet"]) .vm-time-days button:hover:not(:disabled) { color: var(--ink); }
+:where([data-theme~="quiet"]) .vm-time-now[aria-pressed="true"],
+:where([data-theme~="quiet"]) .vm-time-days button[aria-pressed="true"] {
   background: var(--surface);
   color: var(--ink);
   font-weight: 550;
   box-shadow: var(--q-sh-pill);
 }
-.dark:where([data-theme="quiet"]) .vm-time-now[aria-pressed="true"],
-.dark:where([data-theme="quiet"]) .vm-time-days button[aria-pressed="true"] { background: var(--q-sel); }
-:where([data-theme="quiet"]) .vm-time-readout { font-family: var(--font-mono); font-size: 13px; font-weight: 600; }
-:where([data-theme="quiet"]) .vm-summary,
-:where([data-theme="quiet"]) .vm-summary.first,
-:where([data-theme="quiet"]) .vm-summary.pool,
-:where([data-theme="quiet"]) .vm-summary.none,
-:where([data-theme="quiet"]) .vm-summary.empty {
+.dark:where([data-theme~="quiet"]) .vm-time-now[aria-pressed="true"],
+.dark:where([data-theme~="quiet"]) .vm-time-days button[aria-pressed="true"] { background: var(--q-sel); }
+:where([data-theme~="quiet"]) .vm-time-readout { font-family: var(--font-mono); font-size: 13px; font-weight: 600; }
+:where([data-theme~="quiet"]) .vm-summary,
+:where([data-theme~="quiet"]) .vm-summary.first,
+:where([data-theme~="quiet"]) .vm-summary.pool,
+:where([data-theme~="quiet"]) .vm-summary.none,
+:where([data-theme~="quiet"]) .vm-summary.empty {
   border-radius: 999px;
   font-weight: 500;
   font-size: 12px;
@@ -522,112 +526,112 @@
   align-items: center;
   gap: 6px;
 }
-:where([data-theme="quiet"]) .vm-summary::before {
+:where([data-theme~="quiet"]) .vm-summary::before {
   content: "";
   width: 6px;
   height: 6px;
   border-radius: 50%;
   background: currentColor;
 }
-:where([data-theme="quiet"]) .vm-summary.first,
-:where([data-theme="quiet"]) .vm-summary.pool { background: transparent; color: var(--ink-2); padding-left: 0; padding-right: 0; }
-:where([data-theme="quiet"]) .vm-summary.first::before,
-:where([data-theme="quiet"]) .vm-summary.pool::before { background: var(--ok); }
-:where([data-theme="quiet"]) .vm-summary.none { background: var(--err-bg); color: var(--err); }
-:where([data-theme="quiet"]) .vm-summary.empty { background: var(--surface-3); color: var(--ink-3); }
-:where([data-theme="quiet"]) .vm-summary.empty::before { background: var(--ink-5); }
-:where([data-theme="quiet"]) .vm-gap {
+:where([data-theme~="quiet"]) .vm-summary.first,
+:where([data-theme~="quiet"]) .vm-summary.pool { background: transparent; color: var(--ink-2); padding-left: 0; padding-right: 0; }
+:where([data-theme~="quiet"]) .vm-summary.first::before,
+:where([data-theme~="quiet"]) .vm-summary.pool::before { background: var(--ok); }
+:where([data-theme~="quiet"]) .vm-summary.none { background: var(--err-bg); color: var(--err); }
+:where([data-theme~="quiet"]) .vm-summary.empty { background: var(--surface-3); color: var(--ink-3); }
+:where([data-theme~="quiet"]) .vm-summary.empty::before { background: var(--ink-5); }
+:where([data-theme~="quiet"]) .vm-gap {
   background: var(--q-warn-bg);
   border: none;
-  border-radius: 10px;
+  border-radius: var(--q-r-ctl, 10px);
   padding: 8px 12px;
   color: var(--ink-2);
 }
 
-:where([data-theme="quiet"]) .vrm-vm {
+:where([data-theme~="quiet"]) .vrm-vm {
   background: var(--surface-3);
   border: none;
-  border-radius: 12px;
+  border-radius: var(--q-r-ctl, 12px);
   font-weight: 600;
 }
-:where([data-theme="quiet"]) .vrm-sub,
-:where([data-theme="quiet"]) .vrm-sub.on {
+:where([data-theme~="quiet"]) .vrm-sub,
+:where([data-theme~="quiet"]) .vrm-sub.on {
   border: none;
   background: var(--surface-3);
-  border-radius: 10px;
+  border-radius: var(--q-r-ctl, 10px);
   box-shadow: none;
 }
-:where([data-theme="quiet"]) .vrm-sub.first {
+:where([data-theme~="quiet"]) .vrm-sub.first {
   border: none;
   background: var(--accent-bg);
   box-shadow: none;
-  border-radius: 10px;
+  border-radius: var(--q-r-ctl, 10px);
 }
-:where([data-theme="quiet"]) .vrm-sub.first .vrm-sub-name { color: var(--ink); font-weight: 550; }
-:where([data-theme="quiet"]) .vrm-sub.first .vrm-idx { color: var(--accent-ink); font-weight: 600; }
-:where([data-theme="quiet"]) .vrm-sub.off { border: none; background: transparent; }
-:where([data-theme="quiet"]) .vrm-idx { font-family: var(--font-mono); font-size: 11px; color: var(--ink-4); }
-:where([data-theme="quiet"]) .vrm-sub-name:hover { color: var(--ink); }
-:where([data-theme="quiet"]) .vrm-edge.first { stroke: var(--accent); stroke-width: 2; }
-:where([data-theme="quiet"]) .vrm-edge.backup { stroke: var(--ink-5); stroke-width: 1.2; stroke-dasharray: 3 4; }
-:where([data-theme="quiet"]) .vrm-edge.join { stroke: var(--ink-4); stroke-width: 1.4; }
-:where([data-theme="quiet"]) .vrm-edge.off,
-:where([data-theme="quiet"]) .vrm-edge.miss,
-:where([data-theme="quiet"]) .vrm-edge.idle { stroke: var(--line-2); stroke-width: 1; }
+:where([data-theme~="quiet"]) .vrm-sub.first .vrm-sub-name { color: var(--ink); font-weight: 550; }
+:where([data-theme~="quiet"]) .vrm-sub.first .vrm-idx { color: var(--accent-ink); font-weight: 600; }
+:where([data-theme~="quiet"]) .vrm-sub.off { border: none; background: transparent; }
+:where([data-theme~="quiet"]) .vrm-idx { font-family: var(--font-mono); font-size: 11px; color: var(--ink-4); }
+:where([data-theme~="quiet"]) .vrm-sub-name:hover { color: var(--ink); }
+:where([data-theme~="quiet"]) .vrm-edge.first { stroke: var(--accent); stroke-width: 2; }
+:where([data-theme~="quiet"]) .vrm-edge.backup { stroke: var(--ink-5); stroke-width: 1.2; stroke-dasharray: 3 4; }
+:where([data-theme~="quiet"]) .vrm-edge.join { stroke: var(--ink-4); stroke-width: 1.4; }
+:where([data-theme~="quiet"]) .vrm-edge.off,
+:where([data-theme~="quiet"]) .vrm-edge.miss,
+:where([data-theme~="quiet"]) .vrm-edge.idle { stroke: var(--line-2); stroke-width: 1; }
 /* 模型行: 按模型着色的左侧色条与时段条压成灰阶; 此刻首选那行用强调色 */
-:where([data-theme="quiet"]) .vrm-row {
+:where([data-theme~="quiet"]) .vrm-row {
   --vrm-bar: var(--ink-5) !important;
   border-left-width: 2px;
   border-radius: 0 10px 10px 0;
   background: transparent;
 }
-:where([data-theme="quiet"]) .vrm-row.active { background: var(--surface-3); box-shadow: none; }
-:where([data-theme="quiet"]) .vrm-row:has(.vrm-tag.first) { --vrm-bar: var(--accent) !important; background: var(--accent-bg); }
-:where([data-theme="quiet"]) .vrm-tag,
-:where([data-theme="quiet"]) .vrm-tag.first,
-:where([data-theme="quiet"]) .vrm-tag.backup,
-:where([data-theme="quiet"]) .vrm-tag.off,
-:where([data-theme="quiet"]) .vrm-tag.rr,
-:where([data-theme="quiet"]) .vrm-tag.sticky,
-:where([data-theme="quiet"]) .vrm-tag.skipped {
+:where([data-theme~="quiet"]) .vrm-row.active { background: var(--surface-3); box-shadow: none; }
+:where([data-theme~="quiet"]) .vrm-row:has(.vrm-tag.first) { --vrm-bar: var(--accent) !important; background: var(--accent-bg); }
+:where([data-theme~="quiet"]) .vrm-tag,
+:where([data-theme~="quiet"]) .vrm-tag.first,
+:where([data-theme~="quiet"]) .vrm-tag.backup,
+:where([data-theme~="quiet"]) .vrm-tag.off,
+:where([data-theme~="quiet"]) .vrm-tag.rr,
+:where([data-theme~="quiet"]) .vrm-tag.sticky,
+:where([data-theme~="quiet"]) .vrm-tag.skipped {
   background: transparent;
   box-shadow: none;
   padding: 0;
   font-weight: 400;
   color: var(--ink-3);
 }
-:where([data-theme="quiet"]) .vrm-tag.first { color: var(--accent-ink); font-weight: 600; }
-:where([data-theme="quiet"]) .vrm-tag.skipped { color: var(--warn); }
-:where([data-theme="quiet"]) .vrm-day { background: var(--surface-3); color: var(--ink-5); }
-:where([data-theme="quiet"]) .vrm-day.on { --vrm-fill: var(--q-sel) !important; color: var(--ink-2); }
-:where([data-theme="quiet"]) .vrm-day.hatch {
+:where([data-theme~="quiet"]) .vrm-tag.first { color: var(--accent-ink); font-weight: 600; }
+:where([data-theme~="quiet"]) .vrm-tag.skipped { color: var(--warn); }
+:where([data-theme~="quiet"]) .vrm-day { background: var(--surface-3); color: var(--ink-5); }
+:where([data-theme~="quiet"]) .vrm-day.on { --vrm-fill: var(--q-sel) !important; color: var(--ink-2); }
+:where([data-theme~="quiet"]) .vrm-day.hatch {
   background: repeating-linear-gradient(135deg, var(--q-sel) 0 3px, var(--surface-3) 3px 6px);
 }
-:where([data-theme="quiet"]) .vrm-bar { background: var(--surface-3); }
-:where([data-theme="quiet"]) .vrm-bar > span:not(.vrm-tick) { background: color-mix(in srgb, var(--ink) 25%, var(--surface)) !important; }
-:where([data-theme="quiet"]) .vrm-row:has(.vrm-tag.first) + .vrm-days + .vrm-bar > span:not(.vrm-tick) { background: var(--accent) !important; }
-:where([data-theme="quiet"]) .vrm-bar > .vrm-tick { background: var(--ink); }
-:where([data-theme="quiet"]) .vrm-add {
+:where([data-theme~="quiet"]) .vrm-bar { background: var(--surface-3); }
+:where([data-theme~="quiet"]) .vrm-bar > span:not(.vrm-tick) { background: color-mix(in srgb, var(--ink) 25%, var(--surface)) !important; }
+:where([data-theme~="quiet"]) .vrm-row:has(.vrm-tag.first) + .vrm-days + .vrm-bar > span:not(.vrm-tick) { background: var(--accent) !important; }
+:where([data-theme~="quiet"]) .vrm-bar > .vrm-tick { background: var(--ink); }
+:where([data-theme~="quiet"]) .vrm-add {
   border: none;
   background: transparent;
   color: var(--ink-3);
-  border-radius: 9px;
+  border-radius: var(--q-r-ctl, 9px);
 }
-:where([data-theme="quiet"]) .vrm-add:hover { background: var(--surface-3); color: var(--ink); }
+:where([data-theme~="quiet"]) .vrm-add:hover { background: var(--surface-3); color: var(--ink); }
 
 /* ---------- 扁平: 清掉 plain 画风与 ui/* 组件里写死的投影 ---------- */
 /* Tailwind 的 shadow-xs/sm/md/lg 都读 --tw-shadow-color (注册为不继承), 逐元素置透明即可;
  * 只动颜色不动 box-shadow, 焦点 ring (ring-1 / ring-2) 照常显示 */
-:where([data-theme="quiet"]) [class*="shadow-"] { --tw-shadow-color: transparent; }
-:where([data-theme="quiet"]) .toggle::after,
-.dark:where([data-theme="quiet"]) .toggle.on::after { box-shadow: none; }
-:where([data-theme="quiet"]) .rn-row.open { box-shadow: none; }
-:where([data-theme="quiet"]) .jev-hangtag-tag { box-shadow: none; }
+:where([data-theme~="quiet"]) [class*="shadow-"] { --tw-shadow-color: transparent; }
+:where([data-theme~="quiet"]) .toggle::after,
+.dark:where([data-theme~="quiet"]) .toggle.on::after { box-shadow: none; }
+:where([data-theme~="quiet"]) .rn-row.open { box-shadow: none; }
+:where([data-theme~="quiet"]) .jev-hangtag-tag { box-shadow: none; }
 /* plain.css 末尾的暗色微调写在层外, 层内规则压不过, 只能 !important */
-.dark:where([data-theme="quiet"]) :is(.radio-group button.on, .range-tab.active, .seg-tab.active, .stats-tooltip),
-.dark:where([data-theme="quiet"]) .toggle.on::after { box-shadow: none !important; }
+.dark:where([data-theme~="quiet"]) :is(.radio-group button.on, .range-tab.active, .seg-tab.active, .stats-tooltip),
+.dark:where([data-theme~="quiet"]) .toggle.on::after { box-shadow: none !important; }
 
 /* ---------- 弹窗 ---------- */
-:where([data-theme="quiet"]) .cc-dialog { border: none; box-shadow: var(--shadow-pop); background: var(--q-pop); border-radius: 16px; }
-:where([data-theme="quiet"]) .stats-tooltip { border: none; box-shadow: var(--shadow-pop); background: var(--q-pop); border-radius: 10px; }
+:where([data-theme~="quiet"]) .cc-dialog { border: none; box-shadow: var(--shadow-pop); background: var(--q-pop); border-radius: var(--q-r-card, 16px); }
+:where([data-theme~="quiet"]) .stats-tooltip { border: none; box-shadow: var(--shadow-pop); background: var(--q-pop); border-radius: var(--q-r-ctl, 10px); }
 }

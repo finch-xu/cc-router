@@ -6,6 +6,7 @@ pub mod header_preview;
 pub mod integrations;
 pub mod oauth;
 pub mod onboarding;
+pub mod plugins;
 pub mod providers;
 pub mod proxy;
 pub mod receipts;

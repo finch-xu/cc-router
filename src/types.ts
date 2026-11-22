@@ -1388,3 +1388,46 @@ export interface ImportReport {
   token_imported: boolean;
   token_error?: string;
 }
+
+// ===== 插件 (src-tauri/src/plugins/store.rs) =====
+
+export type PluginSourceKind = "github" | "community" | "local";
+
+export interface PluginSource {
+  kind: PluginSourceKind;
+  /** `owner/repo` 或本地文件夹的绝对路径 */
+  location: string;
+  path: string | null;
+  /** 40 位提交号 (GitHub / 社区) */
+  commit: string | null;
+}
+
+export interface InstalledPlugin {
+  id: string;
+  plugin_type: string;
+  version: string;
+  /** 清单原文; 显示前用 src/plugins/manifest.ts 校验 */
+  manifest: unknown;
+  source: PluginSource;
+  sha256: string;
+  installed_at: number;
+  size: number;
+}
+
+export interface PluginContent {
+  manifest: unknown;
+  entry: string;
+  /** 资源路径 → data URL */
+  assets: Record<string, string>;
+}
+
+export interface StagedPlugin {
+  staging_id: string;
+  manifest: unknown;
+  entry: string;
+  assets: { path: string; size: number }[];
+  total_size: number;
+  sha256: string;
+  source: PluginSource;
+  installed: InstalledPlugin | null;
+}

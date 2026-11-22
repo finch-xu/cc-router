@@ -194,6 +194,15 @@ web_commands! {
     // release notes
     get_release_notes() => commands::release_notes::get_release_notes(st).await,
     mark_release_notes_seen() => commands::release_notes::mark_release_notes_seen(st).await,
+    // plugins: 读已安装的两边都开放; 下载 / 安装 / 卸载会改宿主机文件, 只能在桌面窗口
+    list_plugins() => commands::plugins::list_plugins(st).await,
+    load_plugin(id: String) => commands::plugins::load_plugin(st, args.id).await,
+    stage_plugin_from_github(link: String) => Err::<(), AppError>(AppError::BadRequest(DESKTOP_ONLY.into())),
+    stage_plugin_from_dir(path: String) => Err::<(), AppError>(AppError::BadRequest(DESKTOP_ONLY.into())),
+    install_staged_plugin(staging_id: String, community_sha256: Option<String>) => Err::<(), AppError>(AppError::BadRequest(DESKTOP_ONLY.into())),
+    discard_staged_plugin(staging_id: String) => Err::<(), AppError>(AppError::BadRequest(DESKTOP_ONLY.into())),
+    uninstall_plugin(id: String) => Err::<(), AppError>(AppError::BadRequest(DESKTOP_ONLY.into())),
+    fetch_community_index() => Err::<(), AppError>(AppError::BadRequest(DESKTOP_ONLY.into())),
     // onboarding
     get_onboarding_state() => commands::onboarding::get_onboarding_state(st).await,
     complete_onboarding() => commands::onboarding::complete_onboarding(st).await,
@@ -301,6 +310,28 @@ mod tests {
                 .unwrap_or_else(|| panic!("找不到 {name} 的登记行"));
             assert!(line.contains("DESKTOP_ONLY") && line.contains("Err::<"), "{name} 不是拒绝桩: {line}");
             assert!(!line.contains("commands::tui::"), "{name} 调到了真实实现: {line}");
+        }
+    }
+
+    /// 插件的下载 / 安装 / 卸载会改宿主机文件 (app_data_dir/plugins), 网页 / TUI 通道必须是拒绝桩。
+    #[test]
+    fn host_mutating_plugin_commands_are_refusal_stubs_here() {
+        let src = include_str!("api.rs");
+        for name in [
+            "stage_plugin_from_github",
+            "stage_plugin_from_dir",
+            "install_staged_plugin",
+            "discard_staged_plugin",
+            "uninstall_plugin",
+            "fetch_community_index",
+        ] {
+            assert!(REGISTERED.contains(&name), "{name} 必须登记 (两边集合要一致)");
+            let line = src
+                .lines()
+                .find(|l| l.trim_start().starts_with(&format!("{name}(")))
+                .unwrap_or_else(|| panic!("找不到 {name} 的登记行"));
+            assert!(line.contains("DESKTOP_ONLY") && line.contains("Err::<"), "{name} 不是拒绝桩: {line}");
+            assert!(!line.contains("commands::plugins::"), "{name} 调到了真实实现: {line}");
         }
     }
 

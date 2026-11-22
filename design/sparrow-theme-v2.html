@@ -1,0 +1,657 @@
+<!doctype html>
+<html lang="zh-CN" data-mode="light">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>晒太阳的麻雀</title>
+<style>
+/* ============================================================
+ * 「麻雀 Sparrow」配色 v1 —— 建在「简洁」(quiet) 的结构上, 只换颜色
+ *   羽毛四色 → 界面四个角色:
+ *   1. 白颊 / 灰白腹  → 画布、卡片 (暖白, 不是纯白)
+ *   2. 背羽浅褐       → 侧栏、凹陷区、分隔 (带一点黄的沙色)
+ *   3. 黑喉斑 / 眼纹  → 文字、主卡里的路由节点 (暖黑, 不是 #000)
+ *   4. 栗色头顶       → 唯一的品牌色: 主按钮、选中项、流动的连线
+ *   少量其他: 喙角黄 = 警告, 苔绿 (麻雀常落的灌木) = 正常, 锈红 = 错误
+ * ============================================================ */
+:root {
+  /* 阳光下洗澡的麻雀: 底色是被太阳晒暖的奶白, 不是旧纸 */
+  --sidebar:  #f8eedc;   /* 晒暖的沙色 */
+  --bg:       #fffaf1;   /* 阳光奶白 */
+  --card:     #ffffff;   /* 白颊 */
+  --well:     #fbf3e6;
+  --well-2:   #f1e4cf;
+  --hair:     rgb(90 55 20 / 10%);
+  --ink:      #2a1f17;   /* 黑喉斑 */
+  --ink-2:    #4f4134;
+  --ink-3:    #6e6152;
+  --ink-4:    #a8998a;
+
+  --accent:      #b9501c;   /* 阳光下的栗色头顶 → 姜橙 */
+  --accent-2:    #9a3f12;
+  --accent-soft: #fdeadb;
+  --accent-ring: rgb(185 80 28 / 22%);
+  --water:       #1a78b8;   /* 洗澡溅起的水花 = 流动的请求 */
+  --water-bright:#3fa6e6;
+  --water-soft:  #e3f2fc;
+  --sun:         #f6b93b;   /* 阳光, 只做光斑与高亮, 不承载文字 */
+  --sun-soft:    #fff3d4;
+  --buff:        #e9b871;   /* 背羽浅褐, 晒过以后更金 */
+  --buff-soft:   #fbefd9;
+
+  --ok:   #1a804a; --ok-soft:   #e3f5ea;
+  --warn: #a8640a; --warn-soft: #fff1d6;
+  --err:  #d12f4a; --err-soft:  #fde6ea;
+
+  --sh-card: 0 0 0 1px rgb(90 55 20 / 7%);
+  --sh-pill: 0 0 0 1px rgb(90 55 20 / 8%), 0 1px 2px rgb(90 55 20 / 6%);
+  --r-lg: 18px; --r: 14px; --r-sm: 9px;
+  --font: Inter, -apple-system, BlinkMacSystemFont, "Segoe UI Variable Text", "Segoe UI", Roboto, "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", "Noto Sans SC", system-ui, sans-serif;
+  --mono: "JetBrains Mono", ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+  --ease: cubic-bezier(.2,.7,.2,1);
+  --spring: cubic-bezier(.3,1.4,.5,1);
+}
+:root[data-mode="dark"] {
+  /* 傍晚的水洼: 深暖底, 颜色都提亮一档 */
+  --sidebar:  #17120e;
+  --bg:       #1e1813;
+  --card:     #2a221b;
+  --well:     #241d17;
+  --well-2:   #382d24;
+  --hair:     rgb(255 235 210 / 8%);
+  --ink:      #fbf3e8;
+  --ink-2:    #ddd0c0;
+  --ink-3:    #b5a795;
+  --ink-4:    #7a6c5e;
+  --accent:      #ff9a5c;
+  --accent-2:    #ffb88a;
+  --accent-soft: rgb(255 154 92 / 15%);
+  --accent-ring: rgb(255 154 92 / 32%);
+  --water:       #5cb8ef;
+  --water-bright:#8fd0f7;
+  --water-soft:  rgb(92 184 239 / 14%);
+  --sun:         #f5c04e;
+  --sun-soft:    rgb(245 192 78 / 12%);
+  --buff:        #a8834f;
+  --buff-soft:   rgb(233 184 113 / 13%);
+  --ok:   #6fd39a; --ok-soft:   rgb(111 211 154 / 13%);
+  --warn: #f5c04e; --warn-soft: rgb(245 192 78 / 13%);
+  --err:  #ff6f82; --err-soft:  rgb(255 111 130 / 14%);
+  --sh-card: 0 0 0 1px rgb(255 235 210 / 7%);
+  --sh-pill: 0 0 0 1px rgb(255 235 210 / 8%), 0 1px 2px rgb(0 0 0 / 40%);
+}
+
+* { box-sizing: border-box; }
+html { background: #f3e7d3; }
+:root[data-mode="dark"] { background: #0d0b09; }
+body { margin: 0; font: 13.5px/1.55 var(--font); color: var(--ink); -webkit-font-smoothing: antialiased; }
+button { font: inherit; color: inherit; cursor: pointer; border: 0; background: none; }
+.mono { font-family: var(--mono); font-size: .93em; letter-spacing: -.01em; }
+.num { font-variant-numeric: tabular-nums; }
+.c2 { color: var(--ink-2); } .c3 { color: var(--ink-3); } .c4 { color: var(--ink-4); }
+svg.i { width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-width: 1.7; stroke-linecap: round; stroke-linejoin: round; flex: none; }
+
+/* ---------- 文档外壳 ---------- */
+.doc { max-width: 1400px; margin: 0 auto; padding: 28px 24px 60px; }
+.doc-head { display: flex; gap: 24px; align-items: flex-end; justify-content: space-between; flex-wrap: wrap; margin-bottom: 18px; }
+.doc-head h1 { font-size: 20px; margin: 0 0 4px; letter-spacing: -.01em; }
+.doc-head p { margin: 0; color: var(--ink-3); max-width: 760px; }
+:root[data-mode="dark"] .doc-head h1 { color: var(--ink); }
+.doc-ctrl { display: flex; gap: 8px; flex-wrap: wrap; }
+.seg { display: inline-flex; background: var(--well-2); border-radius: 10px; padding: 3px; gap: 2px; }
+.seg button { padding: 5px 12px; border-radius: 8px; color: var(--ink-3); font-size: 12.5px; transition: background .12s var(--ease), color .12s var(--ease); }
+.seg button.on { background: var(--card); color: var(--ink); box-shadow: var(--sh-pill); font-weight: 550; }
+
+/* ---------- 羽毛 → 颜色 ---------- */
+.palette { display: grid; grid-template-columns: 300px 1fr; gap: 20px; margin-bottom: 22px; background: var(--card); border-radius: var(--r-lg); box-shadow: var(--sh-card); padding: 20px; }
+.bird-box { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 8px; background: var(--bg); border-radius: var(--r); padding: 16px; }
+.bird-box svg { width: 230px; height: auto; }
+.bird-box small { color: var(--ink-3); font-size: 12px; text-align: center; }
+.sw-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(190px, 1fr)); gap: 10px; align-content: start; }
+.sw { display: flex; gap: 10px; align-items: center; padding: 8px; border-radius: 10px; background: var(--bg); }
+.sw i { width: 38px; height: 38px; border-radius: 9px; flex: none; box-shadow: inset 0 0 0 1px rgb(0 0 0 / 8%); }
+.sw b { display: block; font-size: 12.5px; font-weight: 600; }
+.sw span { display: block; font-size: 11.5px; color: var(--ink-3); line-height: 1.35; }
+.sw-title { grid-column: 1 / -1; font-size: 11.5px; color: var(--ink-3); letter-spacing: .03em; margin: 6px 0 -2px; }
+.sw-title:first-child { margin-top: 0; }
+
+/* ---------- 窗口 ---------- */
+.window { display: grid; grid-template-columns: 228px 1fr; height: 820px; border-radius: 14px; overflow: hidden; background: var(--bg);
+  box-shadow: 0 0 0 1px rgb(40 25 10 / 12%), 0 30px 80px -30px rgb(40 25 10 / 40%); position: relative; }
+.sidebar { background: var(--sidebar); display: flex; flex-direction: column; padding: 40px 12px 12px; gap: 2px; min-height: 0; overflow: auto; }
+.lights { position: absolute; top: 12px; left: 16px; display: flex; gap: 8px; }
+.lights i { width: 12px; height: 12px; border-radius: 50%; background: #ff5f57; } .lights i:nth-child(2){background:#febc2e} .lights i:nth-child(3){background:#28c840}
+.brand { display: flex; align-items: center; gap: 10px; padding: 6px 8px 16px; }
+.brand .logo { width: 32px; height: 32px; border-radius: 9px; background: var(--card); box-shadow: var(--sh-pill); display: grid; place-items: center; }
+.brand .logo svg { width: 26px; height: 26px; }
+.brand b { display: block; font-size: 14px; letter-spacing: -.01em; }
+.brand small { display: block; color: var(--ink-3); font-size: 11.5px; margin-top: -1px; }
+.nav-label { font-size: 11px; color: var(--ink-3); padding: 14px 10px 4px; letter-spacing: .02em; }
+.nav-item { display: flex; align-items: center; gap: 10px; width: 100%; padding: 7px 10px; border-radius: 9px; color: var(--ink-2); text-align: left; transition: background .12s var(--ease); }
+.nav-item svg { color: var(--ink-3); }
+.nav-item:hover { background: rgb(60 40 25 / 6%); }
+:root[data-mode="dark"] .nav-item:hover { background: rgb(255 240 220 / 5%); }
+.nav-item.active { background: var(--card); color: var(--ink); font-weight: 550; box-shadow: var(--sh-pill); }
+.nav-item.active svg { color: var(--accent); }
+.nav-item .count { margin-left: auto; font-size: 11px; color: var(--ink-3); }
+.nav-item .count.alert { color: var(--err); background: var(--err-soft); padding: 0 6px; border-radius: 6px; font-weight: 600; }
+.side-foot { margin-top: auto; padding: 10px; border-radius: 10px; background: rgb(60 40 25 / 5%); font-size: 12px; color: var(--ink-3); display: flex; gap: 8px; align-items: center; }
+:root[data-mode="dark"] .side-foot { background: rgb(255 240 220 / 4%); }
+.dot { width: 7px; height: 7px; border-radius: 50%; background: var(--ok); flex: none; display: inline-block; }
+.dot.warn { background: var(--warn); } .dot.err { background: var(--err); } .dot.idle { background: var(--ink-4); }
+
+.main { overflow: auto; padding: 22px 28px 36px; }
+.screen { display: none; } .screen.on { display: block; animation: fadein .22s var(--ease); }
+@keyframes fadein { from { opacity: 0; transform: translateY(3px); } }
+@media (prefers-reduced-motion: reduce) { .screen.on { animation: none; } }
+.page-head { display: flex; align-items: center; gap: 12px; margin-bottom: 16px; }
+.page-head h1 { font-size: 19px; margin: 0; letter-spacing: -.015em; }
+.page-head .sub { color: var(--ink-3); font-size: 12.5px; white-space: nowrap; }
+.page-head .sp { flex: 1; }
+.btn { display: inline-flex; align-items: center; gap: 6px; padding: 6px 12px; border-radius: 9px; background: var(--card); box-shadow: var(--sh-pill); font-size: 12.5px; color: var(--ink-2); }
+.btn.primary { background: var(--accent); color: #fff; box-shadow: 0 1px 0 rgb(255 255 255 / 25%) inset, 0 2px 6px -2px var(--accent-ring); font-weight: 600; transition: transform .12s var(--spring), background .12s; }
+.btn.primary:active { transform: scale(.97); }
+:root[data-mode="dark"] .btn.primary { color: #1d1612; }
+.btn.primary:hover { background: var(--accent-2); }
+
+.card { background: var(--card); border-radius: var(--r); box-shadow: var(--sh-card); }
+.card-h { display: flex; align-items: center; gap: 10px; padding: 14px 16px 6px; }
+.card-h h2 { font-size: 13.5px; margin: 0; font-weight: 600; }
+.card-h .sp { flex: 1; }
+
+.kpis { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; margin-bottom: 14px; }
+.kpi { padding: 14px 16px; }
+.kpi .k { font-size: 12px; color: var(--ink-3); }
+.kpi .v { font-size: 24px; font-weight: 650; letter-spacing: -.02em; margin-top: 2px; }
+.kpi .v small { font-size: 13px; font-weight: 500; color: var(--ink-3); margin-left: 2px; }
+.kpi .d { font-size: 11.5px; margin-top: 2px; }
+.up { color: var(--ok); } .down { color: var(--err); }
+
+/* 主卡: 路由图 */
+.hero { border-radius: var(--r-lg); padding: 4px 0 16px; margin-bottom: 14px; }
+.flow { display: grid; grid-template-columns: 1fr 180px 1fr; gap: 0; align-items: center; padding: 10px 20px 0; position: relative; }
+.flow svg.lines { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; }
+.col { display: flex; flex-direction: column; gap: 10px; position: relative; z-index: 1; width: min(100%, 250px); }
+.col.right { justify-self: end; }
+.col.right { align-items: flex-end; }
+.node { display: flex; align-items: center; gap: 9px; padding: 8px 11px; border-radius: 10px; background: var(--well); min-width: 190px; font-size: 12.5px; }
+.node b { font-weight: 600; }
+.node .meta { margin-left: auto; color: var(--ink-3); font-size: 11.5px; }
+.node.first { background: var(--accent-soft); box-shadow: inset 0 0 0 1px var(--accent-ring); }
+.node.first::after { content: ""; width: 6px; height: 6px; border-radius: 50%; background: var(--accent); margin-left: 2px; }
+.node.first .meta { color: var(--accent); font-weight: 600; }
+.node.bad { background: var(--err-soft); }
+.node.bad .meta { color: var(--err); }
+.node.cool { background: var(--warn-soft); }
+.node.cool .meta { color: var(--warn); }
+.router { position: relative; z-index: 1; justify-self: center; width: 150px; padding: 14px 12px; border-radius: 16px; text-align: center;
+  background: var(--ink); color: var(--card); }
+:root[data-mode="dark"] .router { background: #0f0c0a; color: var(--ink); box-shadow: inset 0 0 0 1px rgb(255 240 220 / 10%); }
+.router .cheek { width: 36px; height: 36px; margin: 0 auto 6px; border-radius: 50%; background: var(--card); display: grid; place-items: center; }
+:root[data-mode="dark"] .router .cheek { background: var(--well-2); }
+.router .cheek svg { width: 28px; height: 28px; }
+.router b { display: block; font-size: 13px; }
+.router small { display: block; font-size: 11px; opacity: .65; }
+.flow-legend { display: flex; gap: 16px; padding: 12px 20px 0; font-size: 11.5px; color: var(--ink-3); }
+.flow-legend span { display: inline-flex; gap: 6px; align-items: center; }
+.flow-legend i { width: 16px; height: 2px; border-radius: 2px; background: var(--accent); }
+.flow-legend i.buff { background: var(--water); } .flow-legend i.drop-l { width: 7px; height: 7px; border-radius: 50%; background: var(--water-bright); } .flow-legend i.mute { background: var(--well-2); }
+
+/* 主卡的一小块阳光: 静态光斑, 不动 */
+.hero { position: relative; overflow: hidden; }
+.hero::before { content: ""; position: absolute; right: -120px; top: -160px; width: 420px; height: 420px; border-radius: 50%;
+  background: radial-gradient(circle, color-mix(in srgb, var(--sun) 22%, transparent) 0%, transparent 65%); pointer-events: none; }
+.hero > * { position: relative; }
+.live-dot { position: relative; width: 8px; height: 8px; border-radius: 50%; background: var(--water); display: inline-block; flex: none; }
+.live-dot::after { content: ""; position: absolute; inset: 0; border-radius: 50%; background: var(--water); animation: ripple 1.8s var(--ease) infinite; }
+@keyframes ripple { from { transform: scale(1); opacity: .55; } to { transform: scale(3); opacity: 0; } }
+.kpi.live { background: linear-gradient(160deg, var(--water-soft), var(--card) 70%); }
+.kpi.live .v { color: var(--water); }
+.drop { fill: var(--water-bright); }
+.drop.sun { fill: var(--sun); }
+@media (prefers-reduced-motion: reduce) { .live-dot::after { animation: none; } #drops { display: none; } }
+.row.new { animation: rowin .5s var(--spring); }
+.row.new::before { content: ""; }
+@keyframes rowin { from { background: var(--water-soft); transform: translateY(-4px); opacity: 0; } 60% { background: var(--water-soft); } }
+@media (prefers-reduced-motion: reduce) { .row.new { animation: none; } }
+
+/* 请求行 */
+.rows { padding: 0 6px 6px; }
+.row > span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.row { display: grid; grid-template-columns: 58px 88px minmax(0,1.3fr) minmax(0,1fr) 50px 40px 48px; gap: 10px; align-items: center; padding: 8px 10px; border-radius: 8px; font-size: 12.5px; }
+.row:hover { background: var(--well); }
+.row.fail { background: var(--err-soft); }
+.row.head { color: var(--ink-3); font-size: 11.5px; padding-top: 4px; padding-bottom: 4px; }
+.row.head:hover { background: none; }
+.chip { flex: none; display: inline-flex; align-items: center; gap: 5px; padding: 1px 7px; border-radius: 6px; font-size: 11.5px; background: var(--well); color: var(--ink-2); white-space: nowrap; }
+.chip.main { background: var(--accent-soft); color: var(--accent); font-weight: 550; }
+.chip.agent { background: var(--water-soft); color: var(--water); font-weight: 550; }
+.chip.sunny { background: var(--sun-soft); color: var(--warn); }
+.tag { display: inline-flex; align-items: center; gap: 5px; font-size: 12px; color: var(--ink-3); white-space: nowrap; }
+.tag.bad { color: var(--err); font-weight: 550; background: var(--err-soft); padding: 1px 7px; border-radius: 6px; }
+.tag.warn { color: var(--warn); font-weight: 550; background: var(--warn-soft); padding: 1px 7px; border-radius: 6px; }
+.r { text-align: right; }
+
+/* 两栏 */
+.split { display: grid; grid-template-columns: 2fr 1fr; gap: 14px; }
+.attn { padding: 4px 8px 10px; display: flex; flex-direction: column; gap: 6px; }
+.attn-item { display: flex; gap: 10px; align-items: flex-start; padding: 10px; border-radius: 9px; background: var(--well); font-size: 12.5px; }
+.attn-item p { margin: 2px 0 0; color: var(--ink-3); font-size: 12px; }
+.attn-item .btn { margin-left: auto; padding: 4px 10px; font-size: 12px; flex: none; }
+
+/* 订阅页 */
+.filters { display: flex; gap: 8px; margin-bottom: 12px; flex-wrap: wrap; }
+.fchip { padding: 4px 11px; border-radius: 999px; font-size: 12px; color: var(--ink-2); background: var(--card); box-shadow: var(--sh-pill); }
+.fchip.on { background: var(--accent); color: #fff; box-shadow: none; }
+:root[data-mode="dark"] .fchip.on { color: #1f1712; }
+.subs { display: flex; flex-direction: column; gap: 8px; }
+.sub { display: grid; grid-template-columns: 34px 1.4fr 1fr 170px 150px 28px; gap: 14px; align-items: center; padding: 12px 14px; }
+.sub .av { width: 34px; height: 34px; border-radius: 9px; display: grid; place-items: center; font-weight: 700; font-size: 13px; background: var(--well); color: var(--ink-2); }
+.sub .name b { display: block; font-size: 13px; }
+.sub .name span { font-size: 11.5px; color: var(--ink-3); }
+.slots { display: flex; gap: 4px; flex-wrap: wrap; }
+.slots span { font-size: 11px; padding: 0 6px; border-radius: 5px; background: var(--well); color: var(--ink-3); }
+.bars { display: flex; align-items: flex-end; gap: 2px; height: 26px; }
+.bars i { flex: 1; background: var(--buff); border-radius: 2px; opacity: .9; transform-origin: bottom; animation: grow .5s var(--spring) both; }
+@keyframes grow { from { transform: scaleY(.2); } }
+@media (prefers-reduced-motion: reduce) { .bars i { animation: none; } }
+.bars i.hi { background: var(--water); opacity: 1; }
+.bars i.e { background: var(--err); }
+.quota { font-size: 11.5px; color: var(--ink-3); }
+.quota .bar { height: 5px; border-radius: 3px; background: var(--well-2); margin-top: 4px; overflow: hidden; }
+.quota .bar i { display: block; height: 100%; background: var(--accent); border-radius: 3px; }
+.quota .bar i.full { background: var(--err); }
+.more { color: var(--ink-4); }
+.sub.need { box-shadow: var(--sh-card), inset 3px 0 0 var(--err); }
+
+.notes { margin-top: 22px; display: grid; grid-template-columns: repeat(3, 1fr); gap: 14px; }
+.note { padding: 16px 18px; }
+.note h3 { margin: 0 0 6px; font-size: 13.5px; }
+.note p, .note li { margin: 0; color: var(--ink-2); font-size: 12.5px; }
+.note ul { margin: 0; padding-left: 18px; }
+.note li + li { margin-top: 3px; }
+
+@media (max-width: 1100px) {
+  .palette { grid-template-columns: 1fr; }
+  .notes { grid-template-columns: 1fr; }
+  .split { grid-template-columns: 1fr; }
+}
+@media (max-width: 860px) {
+  .doc { padding: 20px 16px 40px; }
+  .window { grid-template-columns: 1fr; height: auto; }
+  .sidebar { display: none; }
+  .main { padding: 18px 14px 26px; }
+  .kpis { grid-template-columns: repeat(2, 1fr); }
+  .flow { grid-template-columns: 1fr; gap: 14px; }
+  .flow svg.lines { display: none; }
+  .col.right { align-items: stretch; } .col { width: 100%; }
+  .row { grid-template-columns: 62px 1fr 70px; }
+  .row > :nth-child(2), .row > :nth-child(4), .row > :nth-child(5), .row > :nth-child(7) { display: none; }
+  .sub { grid-template-columns: 34px 1fr auto; }
+  .sub > :nth-child(3), .sub > :nth-child(4), .sub > :nth-child(6) { display: none; }
+}
+</style>
+</head>
+<body>
+<svg width="0" height="0" style="position:absolute">
+  <defs>
+    <!-- 小麻雀: 栗色头顶 / 白颊 / 黑喉斑 / 褐背 -->
+    <symbol id="sparrow" viewBox="0 0 64 64">
+      <path d="M10 40c4-12 16-20 30-18l14 6-6 6c-2 10-12 16-24 14-6-1-11-4-14-8z" fill="#ad8350"/>
+      <path d="M20 36c6 2 13 1 19-3-2 8-10 13-19 11-3-.8-5-2.6-6-4.6 2 .2 4-1.6 6-3.4z" fill="#d9ccb9"/>
+      <path d="M24 30l9-3 5 3-8 3z" fill="#5a3a22" opacity=".7"/>
+      <path d="M33 34l7-2-4 6z" fill="#3a2a1d" opacity=".55"/>
+      <circle cx="44" cy="22" r="11" fill="#ad8350"/>
+      <path d="M33.5 20.5A11 11 0 0 1 54 17.5c-5-1-11 0-15 3.5z" fill="#bf5a22"/>
+      <ellipse cx="43" cy="26" rx="6.5" ry="4.6" fill="#f6efe4"/>
+      <path d="M48 26c3 0 6 1.5 6.5 4-1.8 4-5.4 6-8.6 5.6 1.2-2.6 1.8-6 2.1-9.6z" fill="#241d18"/>
+      <path d="M38 19.5l12 .3" stroke="#241d18" stroke-width="1.4" stroke-linecap="round"/>
+      <circle cx="47" cy="20" r="1.7" fill="#241d18"/>
+      <path d="M54.5 21.5l6 1.6-6 1.8z" fill="#3a2e24"/>
+      <path d="M8 40l-6 4 9-1z" fill="#5a4330"/>
+      <path d="M26 49l-1 7M31 49l1 7" stroke="#b08a6c" stroke-width="1.6" stroke-linecap="round"/>
+    </symbol>
+  </defs>
+</svg>
+
+<div class="doc">
+  <div class="doc-head">
+    <div>
+      <h1>麻雀 Sparrow · 配色设计稿 v2「晒太阳洗澡」</h1>
+      <p>v1 的栗褐太沉。v2 把麻雀放到太阳底下的水洼里：底色晒成奶白，栗色被阳光照成姜橙，再请进两位配角——<b>水花蓝</b>专门表示「正在流动」的请求，<b>阳光金</b>只做光斑。网关越忙，界面上的水花越多。右上角可切换页面与浅色 / 深色。</p>
+    </div>
+    <div class="doc-ctrl">
+      <div class="seg" id="screenSeg">
+        <button class="on" data-s="s-live">实时路由</button>
+        <button data-s="s-subs">订阅管理</button>
+      </div>
+      <div class="seg" id="modeSeg">
+        <button class="on" data-m="light">浅色</button>
+        <button data-m="dark">深色</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- 羽毛 → token -->
+  <div class="palette">
+    <div class="bird-box">
+      <svg viewBox="0 0 120 92" aria-label="在水洼里洗澡的麻雀" style="width:250px">
+        <circle cx="100" cy="16" r="11" fill="var(--sun)"/>
+        <g stroke="var(--sun)" stroke-width="2" stroke-linecap="round" opacity=".7"><path d="M100 0v-0M84 16h-5M116 16h4M89 5l-3-3M111 5l3-3M89 27l-3 3"/></g>
+        <ellipse cx="54" cy="80" rx="46" ry="8" fill="var(--water-soft)"/>
+        <ellipse cx="54" cy="80" rx="30" ry="4.5" fill="none" stroke="var(--water-bright)" stroke-width="1.4" opacity=".6"/>
+        <svg x="18" y="20" width="70" height="70" viewBox="0 0 64 64"><use href="#sparrow"/></svg>
+        <g fill="var(--water-bright)"><path d="M20 58c-2-4 0-7 0-7s2 3 0 7z"/><circle cx="14" cy="50" r="2.2"/><circle cx="24" cy="44" r="1.6"/><circle cx="90" cy="60" r="2"/><circle cx="96" cy="52" r="1.4"/><path d="M84 66c-2-4 0-7 0-7s2 3 0 7z"/></g>
+      </svg>
+      <small>在阳光下的水洼里扑腾的麻雀 · 栗色被太阳照成姜橙，水花是蓝的</small>
+    </div>
+    <div class="sw-grid">
+      <div class="sw-title">中性色（占界面 90% 以上）</div>
+      <div class="sw"><i style="background:var(--card)"></i><div><b>白颊</b><span>卡片 · 纯白</span></div></div>
+      <div class="sw"><i style="background:var(--bg)"></i><div><b>阳光奶白</b><span>画布 · --bg</span></div></div>
+      <div class="sw"><i style="background:var(--sidebar)"></i><div><b>晒暖的沙色</b><span>侧栏 · --surface-2</span></div></div>
+      <div class="sw"><i style="background:var(--ink-3)"></i><div><b>褐灰</b><span>次要文字 · 5.8:1</span></div></div>
+      <div class="sw"><i style="background:var(--ink)"></i><div><b>黑喉斑</b><span>正文 · 路由节点 · 16:1</span></div></div>
+      <div class="sw-title">两个主角：一个是鸟，一个是水</div>
+      <div class="sw"><i style="background:var(--accent)"></i><div><b>姜橙头顶</b><span>品牌：主按钮 / 选中 / 首选 · 5.0:1</span></div></div>
+      <div class="sw"><i style="background:var(--water)"></i><div><b>水花蓝</b><span>动的东西：在途 / 流动 / 新到的请求</span></div></div>
+      <div class="sw"><i style="background:var(--sun)"></i><div><b>阳光金</b><span>只做光斑和点缀，不放文字</span></div></div>
+      <div class="sw"><i style="background:var(--buff)"></i><div><b>金褐背羽</b><span>图表第二序列 · 活动条</span></div></div>
+      <div class="sw-title">少量其他（只表示状态）</div>
+      <div class="sw"><i style="background:var(--ok)"></i><div><b>嫩叶绿</b><span>正常 · 4.9:1</span></div></div>
+      <div class="sw"><i style="background:var(--warn)"></i><div><b>喙角琥珀</b><span>冷却 / 限流 · 4.7:1</span></div></div>
+      <div class="sw"><i style="background:var(--err)"></i><div><b>莓红</b><span>失败 / 凭证失效 · 5.0:1</span></div></div>
+    </div>
+  </div>
+
+  <div class="window">
+    <div class="lights"><i></i><i></i><i></i></div>
+    <aside class="sidebar">
+      <div class="brand">
+        <div class="logo"><svg viewBox="0 0 64 64"><use href="#sparrow"/></svg></div>
+        <div><b>cc-router</b><small>Sparrow · 小而全的路由</small></div>
+      </div>
+      <div class="nav-label">运行</div>
+      <button class="nav-item active" data-s="s-live"><svg class="i" viewBox="0 0 24 24"><path d="M3 12h4l3-7 4 14 3-7h4"/></svg>实时路由</button>
+      <button class="nav-item"><svg class="i" viewBox="0 0 24 24"><path d="M4 6h16M4 12h16M4 18h10"/></svg>请求日志</button>
+      <button class="nav-item"><svg class="i" viewBox="0 0 24 24"><path d="M5 20V10M12 20V4M19 20v-7"/></svg>数据统计</button>
+      <div class="nav-label">配置</div>
+      <button class="nav-item" data-s="s-subs"><svg class="i" viewBox="0 0 24 24"><rect x="3" y="5" width="18" height="14" rx="3"/><path d="M3 10h18"/></svg>订阅管理<span class="count alert">2</span></button>
+      <button class="nav-item"><svg class="i" viewBox="0 0 24 24"><circle cx="6" cy="12" r="2.5"/><circle cx="18" cy="6" r="2.5"/><circle cx="18" cy="18" r="2.5"/><path d="M8.3 11l7.4-3.8M8.3 13l7.4 3.8"/></svg>虚拟模型</button>
+      <button class="nav-item"><svg class="i" viewBox="0 0 24 24"><path d="M12 3v3M12 18v3M4.2 7.5l2.6 1.5M17.2 15l2.6 1.5M4.2 16.5l2.6-1.5M17.2 9l2.6-1.5"/><circle cx="12" cy="12" r="3.5"/></svg>设置</button>
+      <div class="side-foot"><span class="dot"></span>代理运行中 · <span class="mono">:23456</span></div>
+    </aside>
+
+    <main class="main">
+      <!-- ============ 实时路由 ============ -->
+      <section class="screen on" id="s-live">
+        <div class="page-head">
+          <h1>实时路由</h1><span class="sub">最近 1 小时</span>
+          <span class="sp"></span>
+          <div class="seg"><button>15 分钟</button><button class="on">1 小时</button><button>6 小时</button></div>
+          <button class="btn primary"><svg class="i" viewBox="0 0 24 24"><rect x="8" y="8" width="12" height="12" rx="2"/><path d="M16 8V5a1 1 0 0 0-1-1H5a1 1 0 0 0-1 1v10a1 1 0 0 0 1 1h3"/></svg>复制环境变量</button>
+        </div>
+
+        <div class="kpis">
+          <div class="card kpi live"><div class="k" style="display:flex;align-items:center;gap:8px"><span class="live-dot"></span>在途</div><div class="v num" id="inflight">3</div><div class="d c3">2 主对话 · 1 子 Agent</div></div>
+          <div class="card kpi"><div class="k">请求</div><div class="v num">1,284</div><div class="d up">↑ 12% 较上一小时</div></div>
+          <div class="card kpi"><div class="k">成功率</div><div class="v num">98.6<small>%</small></div><div class="d down">18 次失败，已自动切换</div></div>
+          <div class="card kpi"><div class="k">首字中位数</div><div class="v num">1.42<small>s</small></div><div class="d c3">p95 4.8s</div></div>
+        </div>
+
+        <div class="card hero">
+          <div class="card-h"><h2>路由图</h2><span class="c3" style="font-size:12px">粗线 = 此刻首选</span><span class="sp"></span><span class="tag" style="color:var(--water)"><span class="live-dot" style="margin-right:4px"></span>每秒 0.4 个请求</span><span class="tag"><span class="dot"></span>4 个订阅可调度</span></div>
+          <div class="flow" id="flow">
+            <svg class="lines" id="lines"></svg><svg class="lines" id="drops"></svg>
+            <div class="col" id="cl">
+              <div class="node"><b>Claude Code</b><span class="meta num">1,102</span></div>
+              <div class="node"><b>Codex CLI</b><span class="meta num">141</span></div>
+              <div class="node"><b>Cherry Studio</b><span class="meta num">41</span></div>
+            </div>
+            <div class="router" id="router">
+              <div class="cheek"><svg viewBox="0 0 64 64"><use href="#sparrow"/></svg></div>
+              <b>cc-router</b><small>model-opus · sticky</small>
+            </div>
+            <div class="col right" id="cr">
+              <div class="node first"><b>Anthropic 主号</b><span class="meta num">812</span></div>
+              <div class="node"><b>DeepSeek</b><span class="meta num">296</span></div>
+              <div class="node cool"><b>Kimi</b><span class="meta">冷却 42s</span></div>
+              <div class="node bad"><b>Codex 副号</b><span class="meta">凭证失效</span></div>
+            </div>
+          </div>
+          <div class="flow-legend"><span><i></i>首选路线</span><span><i class="buff"></i>其他有流量的路线</span><span><i class="mute"></i>无流量</span><span><i class="drop-l"></i>一滴 = 一个请求</span></div>
+        </div>
+
+        <div class="split">
+          <div class="card">
+            <div class="card-h"><h2>最近请求</h2><span class="sp"></span><button class="btn">全部日志</button></div>
+            <div class="rows" id="rows">
+              <div class="row head"><span>时间</span><span>用途</span><span>模型</span><span>订阅</span><span class="r">Token</span><span class="r">首字</span><span class="r">状态</span></div>
+              <div class="row"><span class="mono c3">14:32:08</span><span><span class="chip main">主对话</span></span><span class="mono">claude-opus-4-7</span><span>Anthropic 主号</span><span class="r num">18.4k</span><span class="r num">1.1s</span><span class="r"><span class="tag"><span class="dot"></span>200</span></span></div>
+              <div class="row"><span class="mono c3">14:32:02</span><span><span class="chip agent">子 Agent</span></span><span class="mono">deepseek-v4</span><span>DeepSeek</span><span class="r num">6.2k</span><span class="r num">0.9s</span><span class="r"><span class="tag"><span class="dot"></span>200</span></span></div>
+              <div class="row fail"><span class="mono c3">14:31:57</span><span><span class="chip">压缩</span></span><span class="mono">gpt-5.5</span><span>Codex 副号</span><span class="r num">—</span><span class="r num">—</span><span class="r"><span class="tag bad">401</span></span></div>
+              <div class="row"><span class="mono c3">14:31:57</span><span><span class="chip sunny">压缩</span></span><span class="mono">claude-opus-4-7</span><span>Anthropic 主号</span><span class="r num">41.0k</span><span class="r num">2.3s</span><span class="r"><span class="tag"><span class="dot"></span>200</span></span></div>
+              <div class="row"><span class="mono c3">14:31:40</span><span><span class="chip">标题</span></span><span class="mono">claude-haiku-4-5</span><span>Anthropic 主号</span><span class="r num">0.4k</span><span class="r num">0.6s</span><span class="r"><span class="tag"><span class="dot"></span>200</span></span></div>
+              <div class="row"><span class="mono c3">14:31:22</span><span><span class="chip main">主对话</span></span><span class="mono">kimi-k3</span><span>Kimi</span><span class="r num">—</span><span class="r num">—</span><span class="r"><span class="tag warn">429</span></span></div>
+            </div>
+          </div>
+          <div class="card">
+            <div class="card-h"><h2>需要处理</h2></div>
+            <div class="attn">
+              <div class="attn-item"><span class="dot err" style="margin-top:6px"></span><div><b>Codex 副号 凭证失效</b><p>上游返回 401，已停止调度</p></div><button class="btn">重新登录</button></div>
+              <div class="attn-item"><span class="dot err" style="margin-top:6px"></span><div><b>智谱 本月额度已满</b><p>12 月 1 日自动恢复</p></div><button class="btn">调整限额</button></div>
+              <div class="attn-item"><span class="dot warn" style="margin-top:6px"></span><div><b>Kimi 冷却中</b><p>会自行恢复，无需处理</p></div></div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- ============ 订阅管理 ============ -->
+      <section class="screen" id="s-subs">
+        <div class="page-head">
+          <h1>订阅管理</h1><span class="sub">6 个订阅 · 4 个可调度</span>
+          <span class="sp"></span>
+          <button class="btn"><svg class="i" viewBox="0 0 24 24"><path d="M4 12a8 8 0 0 1 14-5.3M20 12a8 8 0 0 1-14 5.3M18 3v4h-4M6 21v-4h4"/></svg>全部测试</button>
+          <button class="btn primary"><svg class="i" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg>添加订阅</button>
+        </div>
+        <div class="filters">
+          <button class="fchip on">全部 6</button><button class="fchip">需要处理 2</button><button class="fchip">可调度 4</button><button class="fchip">已停用 0</button>
+        </div>
+        <div class="subs">
+          <div class="card sub need">
+            <div class="av">C</div>
+            <div class="name"><b>Codex 副号</b><span>OpenAI Codex · ChatGPT 登录</span></div>
+            <div class="slots"><span>opus gpt-5.5</span><span>sonnet gpt-5.5</span></div>
+            <div class="bars" data-b="3,4,2,5,6,4,3,5,7,6,4,3,0,0,0,0,0,0,0,0,0,0,0,0" data-e="12"></div>
+            <div><span class="tag bad">凭证失效</span></div>
+            <div class="more">⋯</div>
+          </div>
+          <div class="card sub need">
+            <div class="av">智</div>
+            <div class="name"><b>智谱</b><span>智谱 GLM · Coding Plan</span></div>
+            <div class="slots"><span>opus glm-5</span><span>haiku glm-4.7-air</span></div>
+            <div class="quota">本月 2.00M / 2.00M<div class="bar"><i class="full" style="width:100%"></i></div></div>
+            <div><span class="tag bad">限额已满</span></div>
+            <div class="more">⋯</div>
+          </div>
+          <div class="card sub">
+            <div class="av">A</div>
+            <div class="name"><b>Anthropic 主号</b><span>Anthropic · 官方 API</span></div>
+            <div class="slots"><span>fable</span><span>opus</span><span>sonnet</span><span>haiku</span></div>
+            <div class="bars" data-b="4,6,5,8,9,12,10,14,18,16,20,22,19,24,21,26,23,20,18,22,25,28,30,27" data-h="21,22,23"></div>
+            <div><span class="tag"><span class="dot"></span>可调度</span></div>
+            <div class="more">⋯</div>
+          </div>
+          <div class="card sub">
+            <div class="av">D</div>
+            <div class="name"><b>DeepSeek</b><span>DeepSeek · Anthropic 入口</span></div>
+            <div class="slots"><span>sonnet deepseek-v4</span><span>haiku</span></div>
+            <div class="quota">今日 1.21M / 3.00M<div class="bar"><i style="width:40%"></i></div></div>
+            <div><span class="tag"><span class="dot"></span>可调度</span></div>
+            <div class="more">⋯</div>
+          </div>
+          <div class="card sub">
+            <div class="av">K</div>
+            <div class="name"><b>Kimi</b><span>月之暗面 · 国际版</span></div>
+            <div class="slots"><span>sonnet kimi-k3</span></div>
+            <div class="bars" data-b="2,3,3,4,2,5,6,4,5,7,6,8,7,9,8,6,7,9,10,8,9,11,6,2"></div>
+            <div><span class="tag warn">冷却 42s</span></div>
+            <div class="more">⋯</div>
+          </div>
+          <div class="card sub">
+            <div class="av">M</div>
+            <div class="name"><b>MiniMax</b><span>MiniMax · 国际版</span></div>
+            <div class="slots"><span>haiku minimax-m3</span></div>
+            <div class="bars" data-b="1,0,1,2,1,1,0,2,3,1,2,1,2,3,2,1,2,3,2,1,1,2,1,1"></div>
+            <div><span class="tag"><span class="dot"></span>可调度</span></div>
+            <div class="more">⋯</div>
+          </div>
+        </div>
+      </section>
+    </main>
+  </div>
+
+  <div class="notes">
+    <div class="card note">
+      <h3>v2 改了什么</h3>
+      <ul>
+        <li>底色从「旧纸」换成「阳光奶白」，卡片回到纯白，整体亮了一档。</li>
+        <li>栗褐 → 姜橙：还是麻雀头顶那块颜色，只是被太阳照着。</li>
+        <li>新增水花蓝，<b>只给会动的东西</b>：在途数、连线上的水滴、刚到的请求行、子 Agent。用户会慢慢把「蓝 = 正在发生」记住。</li>
+      </ul>
+    </div>
+    <div class="card note">
+      <h3>活力从哪来（但不吵）</h3>
+      <ul>
+        <li>路由图上一滴水 = 一个真实请求，忙时多、闲时停，<b>没有流量就完全静止</b>。</li>
+        <li>新请求行从上方轻轻落下、底色由蓝褪白；在途数旁的水波纹表示「正在进行」。</li>
+        <li>阳光金只是主卡右上角一块静态光斑，不动；按钮按下有一点回弹。系统开了「减少动态效果」时全部关掉。</li>
+      </ul>
+    </div>
+    <div class="card note">
+      <h3>仍要注意</h3>
+      <ul>
+        <li>姜橙和错误色曾经撞色，所以错误改成偏粉的莓红，并保留「淡底标签 + 文字」。</li>
+        <li>阳光金对白底只有约 1.9:1，<b>永远不放文字</b>；警告用更深的琥珀。</li>
+        <li>颜色从 3 种增加到 5 种，规则必须守住：橙 = 品牌/选中，蓝 = 流动，其他只表示状态，否则会变花。</li>
+      </ul>
+    </div>
+  </div>
+</div>
+
+<script>
+const root = document.documentElement;
+function show(id) {
+  document.querySelectorAll('.screen').forEach(s => s.classList.toggle('on', s.id === id));
+  document.querySelectorAll('#screenSeg button').forEach(b => b.classList.toggle('on', b.dataset.s === id));
+  document.querySelectorAll('.nav-item[data-s]').forEach(b => b.classList.toggle('active', b.dataset.s === id));
+  if (id === 's-live') requestAnimationFrame(drawLines);
+}
+document.querySelectorAll('[data-s]').forEach(b => b.addEventListener('click', () => show(b.dataset.s)));
+document.querySelectorAll('#modeSeg button').forEach(b => b.addEventListener('click', () => {
+  root.dataset.mode = b.dataset.m;
+  document.querySelectorAll('#modeSeg button').forEach(x => x.classList.toggle('on', x === b));
+}));
+
+// 24h 活动条
+document.querySelectorAll('.bars').forEach(el => {
+  const v = el.dataset.b.split(',').map(Number), max = Math.max(...v, 1);
+  const hi = (el.dataset.h || '').split(',').filter(Boolean).map(Number);
+  const e = el.dataset.e ? Number(el.dataset.e) : -1;
+  el.innerHTML = v.map((n, i) => `<i class="${hi.includes(i) ? 'hi' : ''}${i === e ? ' e' : ''}" style="height:${Math.max(n / max * 100, 6)}%"></i>`).join('');
+});
+
+// 路由图连线: 按节点实测位置画
+let paths = [];
+function drawLines() {
+  const flow = document.getElementById('flow'), svg = document.getElementById('lines');
+  if (!flow.offsetParent || getComputedStyle(svg).display === 'none') return;
+  const fr = flow.getBoundingClientRect(), rr = document.getElementById('router').getBoundingClientRect();
+  const midY = rr.top + rr.height / 2 - fr.top;
+  const css = getComputedStyle(root);
+  const c = { a: css.getPropertyValue('--accent'), b: css.getPropertyValue('--water'), m: css.getPropertyValue('--well-2') };
+  const left = [...document.querySelectorAll('#cl .node')], right = [...document.querySelectorAll('#cr .node')];
+  const lw = [[c.a, 2.4], [c.b, 1.5], [c.b, 1.2]], rw = [[c.a, 3], [c.b, 1.6], [c.m, 1.4], [c.m, 1.4]];
+  paths = [];
+  let p = '';
+  left.forEach((n, i) => {
+    const r = n.getBoundingClientRect(), x1 = r.right - fr.left, y1 = r.top + r.height / 2 - fr.top, x2 = rr.left - fr.left;
+    const mx = (x1 + x2) / 2;
+    const dl = `M${x1} ${y1}C${mx} ${y1} ${mx} ${midY} ${x2} ${midY}`; paths.push({ side: 'l', i, d: dl });
+    p += `<path d="${dl}" stroke="${lw[i][0]}" stroke-width="${lw[i][1]}" fill="none" stroke-linecap="round"/>`;
+  });
+  right.forEach((n, i) => {
+    const r = n.getBoundingClientRect(), x1 = rr.right - fr.left, x2 = r.left - fr.left, y2 = r.top + r.height / 2 - fr.top;
+    const mx = (x1 + x2) / 2;
+    const dr = `M${x1} ${midY}C${mx} ${midY} ${mx} ${y2} ${x2} ${y2}`; paths.push({ side: 'r', i, d: dr });
+    p += `<path d="${dr}" stroke="${rw[i][0]}" stroke-width="${rw[i][1]}" fill="none" stroke-linecap="round" ${i > 1 ? 'stroke-dasharray="3 4"' : ''}/>`;
+  });
+  svg.innerHTML = p;
+}
+new MutationObserver(drawLines).observe(root, { attributes: true, attributeFilter: ['data-mode'] });
+addEventListener('resize', drawLines);
+drawLines();
+
+// 水滴: 一滴 = 一个请求, 左边进 → 经过 cc-router → 右边出。没有请求时循环停下。
+const reduce = matchMedia('(prefers-reduced-motion: reduce)').matches;
+const dropsSvg = document.getElementById('drops');
+let drops = [], raf = 0;
+function pathEl(d) { const e = document.createElementNS('http://www.w3.org/2000/svg', 'path'); e.setAttribute('d', d); return e; }
+function spawn(clientIdx, subIdx) {
+  if (reduce || !paths.length) return;
+  const L = paths.find(p => p.side === 'l' && p.i === clientIdx), R = paths.find(p => p.side === 'r' && p.i === subIdx);
+  if (!L || !R) return;
+  const el = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
+  el.setAttribute('r', subIdx === 0 ? 3.6 : 3); el.setAttribute('class', 'drop' + (Math.random() < .12 ? ' sun' : ''));
+  dropsSvg.appendChild(el);
+  const a = pathEl(L.d), b = pathEl(R.d);
+  drops.push({ el, segs: [[a, a.getTotalLength()], [b, b.getTotalLength()]], t0: performance.now(), dur: 1500 + Math.random() * 500 });
+  if (!raf) raf = requestAnimationFrame(tick);
+}
+function tick(now) {
+  drops = drops.filter(d => {
+    let k = (now - d.t0) / d.dur;
+    if (k >= 1) { d.el.remove(); return false; }
+    const e = k < .5 ? k * 2 : (k - .5) * 2, [seg, len] = d.segs[k < .5 ? 0 : 1];
+    const pt = seg.getPointAtLength(len * (1 - Math.pow(1 - e, 1.6) * .999));
+    d.el.setAttribute('cx', pt.x); d.el.setAttribute('cy', pt.y);
+    d.el.setAttribute('opacity', k > .92 ? (1 - k) / .08 : 1);
+    return true;
+  });
+  raf = drops.length ? requestAnimationFrame(tick) : 0;
+}
+const weightsL = [.78, .16, .06], weightsR = [.7, .3];
+const pick = w => { let r = Math.random(), i = 0; for (; i < w.length - 1; i++) { if ((r -= w[i]) < 0) break; } return i; };
+
+// 新请求落到列表顶部
+const samples = [
+  ['主对话', 'main', 'claude-opus-4-7', 'Anthropic 主号', '1.0s'],
+  ['子 Agent', 'agent', 'deepseek-v4', 'DeepSeek', '0.8s'],
+  ['主对话', 'main', 'claude-opus-4-7', 'Anthropic 主号', '1.3s'],
+  ['标题', '', 'claude-haiku-4-5', 'Anthropic 主号', '0.5s'],
+];
+let n = 0;
+function arrive() {
+  const s = samples[n++ % samples.length], d = new Date();
+  const t = [d.getHours(), d.getMinutes(), d.getSeconds()].map(x => String(x).padStart(2, '0')).join(':');
+  const tok = (Math.random() * 30 + 2).toFixed(1) + 'k';
+  const rows = document.getElementById('rows'), head = rows.querySelector('.row.head');
+  const row = document.createElement('div');
+  row.className = 'row' + (reduce ? '' : ' new');
+  row.innerHTML = `<span class="mono c3">${t}</span><span><span class="chip ${s[1]}">${s[0]}</span></span><span class="mono">${s[2]}</span><span>${s[3]}</span><span class="r num">${tok}</span><span class="r num">${s[4]}</span><span class="r"><span class="tag"><span class="dot"></span>200</span></span>`;
+  head.after(row);
+  const all = rows.querySelectorAll('.row:not(.head)'); if (all.length > 6) all[all.length - 1].remove();
+  spawn(s[3] === 'DeepSeek' ? 0 : pick(weightsL), s[3] === 'DeepSeek' ? 1 : 0);
+}
+function loop() {
+  if (document.getElementById('s-live').classList.contains('on') && !document.hidden) {
+    spawn(pick(weightsL), pick(weightsR));
+    if (Math.random() < .3) arrive();
+    const f = document.getElementById('inflight'); f.textContent = 2 + Math.floor(Math.random() * 4);
+  }
+  setTimeout(loop, 350 + Math.random() * 900);
+}
+loop();
+</script>
+</body>
+</html>
