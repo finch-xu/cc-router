@@ -504,6 +504,7 @@ fn finalize_streaming(
             tool_calls: tool_tally.fields(&ctx.tools),
             headers: ctx.header_log(),
             net: ctx.net_log(),
+            plugins_applied: ctx.plugins_applied.clone(),
         };
         let _ = log_tx.try_send(entry);
     });
@@ -653,6 +654,7 @@ fn finalize_non_streaming(
             tool_calls,
             headers: ctx.header_log(),
             net: ctx.net_log(),
+            plugins_applied: ctx.plugins_applied.clone(),
         };
         let _ = log_tx.try_send(entry);
     });

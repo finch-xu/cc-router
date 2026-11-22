@@ -458,6 +458,47 @@ mod tests {
     }
 
     #[test]
+    fn rules_plugin_stages_installs_and_reports_expanded_actions_on_update() {
+        use crate::plugins::config::PluginConfig;
+        use crate::plugins::runtime::installed_rules_plugins;
+        let tmp = tempfile::tempdir().unwrap();
+        let app = tmp.path();
+        let mk = |rules_json: &str| {
+            let mut f = Files::new();
+            f.insert(
+                MANIFEST_FILE.into(),
+                br#"{"manifest":1,"id":"side-tasks","type":"rules","version":"1.0.0","name":"x","author":"a","entry":"rules.json","assets":[]}"#.to_vec(),
+            );
+            f.insert("rules.json".into(), rules_json.as_bytes().to_vec());
+            f
+        };
+        let v1 = r#"{"rulesApi":1,"params":[{"id":"vm","type":"virtual_model","label":"VM"}],"rules":[{"id":"r1","hook":"route","do":[{"use_virtual_model":"{{params.vm}}"}]}]}"#;
+        let s = stage(app, mk(v1), local(app)).unwrap();
+        assert!(s.system.as_ref().unwrap().ok);
+        install(app, &s.staging_id, None).unwrap();
+
+        // 默认停用: 不会进入规则注册表
+        assert!(installed_rules_plugins(app, &Default::default()).is_empty());
+        // 启用但缺必填参数: 跳过
+        let mut cfgs = HashMap::new();
+        cfgs.insert("side-tasks".into(), PluginConfig { enabled: true, priority: 0, params: "{}".into() });
+        assert!(installed_rules_plugins(app, &cfgs).is_empty());
+        // 填齐参数并启用: 加载成功
+        cfgs.insert("side-tasks".into(), PluginConfig { enabled: true, priority: 0, params: r#"{"vm":"haiku"}"#.into() });
+        let loaded = installed_rules_plugins(app, &cfgs);
+        assert_eq!(loaded.len(), 1);
+        assert_eq!(loaded[0].0.params["vm"], "haiku");
+
+        // 更新新增 reject 动作: 能力差异报告 expands = true
+        let v2 = r#"{"rulesApi":1,"params":[{"id":"vm","type":"virtual_model","label":"VM"}],"rules":[{"id":"r1","hook":"route","do":[{"use_virtual_model":"{{params.vm}}"}]},{"id":"r2","hook":"request","do":[{"reject":{"message":"no"}}]}]}"#;
+        let s2 = stage(app, mk(v2), local(app)).unwrap();
+        let diff = s2.system.unwrap().diff.expect("有能力差异");
+        assert!(diff.expands());
+        assert!(diff.added_actions.iter().any(|a| a == "reject"));
+        discard(&s2.staging_id);
+    }
+
+    #[test]
     fn text_assets_come_back_as_text() {
         let tmp = tempfile::tempdir().unwrap();
         let app = tmp.path();

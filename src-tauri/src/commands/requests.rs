@@ -74,6 +74,8 @@ pub struct RequestLogDto {
     pub summary: RequestSummary,
     /// 网络耗时分段 (proxy/net_timing.rs), 详情页耗时条用; 老日志各字段为 null。
     pub net: crate::proxy::net_timing::NetTimingFields,
+    /// 命中的规则插件记录 (JSON 数组), 老日志或未命中为 null。
+    pub plugins_applied: Option<String>,
 }
 
 #[derive(Debug, Serialize)]
@@ -198,7 +200,8 @@ fn build_filter_clause(filters: &RequestLogFilters) -> (String, Vec<Bind>) {
 /// 列表 / 详情共用的列: 详情字段 + 摘要字段 (重名列 SQLite 允许重复出现)。
 const DTO_COLUMNS: &str = "endpoint_id, is_streaming, upstream_response_body,
     client_user_agent, client_version, client_ip, entry_kind, downstream_http_version,
-    client_effort, effort_source, upstream_effort, tool_result_count, tool_use_count";
+    client_effort, effort_source, upstream_effort, tool_result_count, tool_use_count,
+    plugins_applied";
 
 fn dto_from_row(r: &sqlx::sqlite::SqliteRow, auth: &HashMap<String, AuthType>) -> RequestLogDto {
     RequestLogDto {
@@ -239,6 +242,7 @@ fn dto_from_row(r: &sqlx::sqlite::SqliteRow, auth: &HashMap<String, AuthType>) -
         tool_use_names: r.try_get("tool_use_names").ok(),
         summary: live_feed::from_row(r, auth),
         net: crate::proxy::net_timing::NetTimingFields::from_row(r),
+        plugins_applied: r.try_get("plugins_applied").ok(),
     }
 }
 

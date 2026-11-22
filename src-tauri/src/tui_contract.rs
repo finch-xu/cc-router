@@ -656,6 +656,7 @@ fn request_log_matches() {
             remote_addr: Some("1.2.3.4:443".into()),
             upstream_stream: Some(true),
         },
+        plugins_applied: Some(r#"[{"plugin_id":"demo","version":"1.0.0","rules":["r1"]}]"#.into()),
     };
     let view: dto::RequestLog = through_json(&real);
     assert_eq!(
@@ -746,6 +747,7 @@ fn request_log_matches() {
         tool_use_names: None,
         summary: crate::observability::live_feed::sample_summary("x"),
         net: crate::proxy::net_timing::NetTimingFields::none(),
+        plugins_applied: None,
     };
     let view: dto::RequestLog = through_json(&sparse);
     assert_eq!(
@@ -831,6 +833,7 @@ fn list_requests_result_matches() {
             tool_use_names: None,
             summary: crate::observability::live_feed::sample_summary("x"),
             net: crate::proxy::net_timing::NetTimingFields::none(),
+            plugins_applied: None,
         }],
         total: 42,
     };

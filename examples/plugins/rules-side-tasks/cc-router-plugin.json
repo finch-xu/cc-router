@@ -1,0 +1,17 @@
+{
+  "manifest": 1,
+  "id": "rules-side-tasks",
+  "type": "rules",
+  "version": "1.0.0",
+  "name": { "zh": "杂活走便宜模型", "zh-Hant": "雜事走便宜模型", "en": "Side tasks on a cheap model", "ja": "雑用は安いモデルへ" },
+  "description": {
+    "zh": "规则插件的写法示范：把标题生成、对话压缩、安全检查、网页摘要这类杂活改道到你选的虚拟模型；可选地在发出前屏蔽常见的 API Key。",
+    "zh-Hant": "規則外掛的寫法示範：把標題生成、對話壓縮、安全檢查、網頁摘要這類雜事改道到你選的虛擬模型；可選擇在送出前遮蔽常見的 API Key。",
+    "en": "Shows how to write a rules plugin: send side tasks (titles, compaction, safety checks, web summaries) to a virtual model of your choice, and optionally mask common API keys before requests leave your machine.",
+    "ja": "ルールプラグインの書き方の見本：タイトル生成・会話の圧縮・安全チェック・Web 要約などの雑用を選んだ仮想モデルへ回し、必要なら送信前によくある API キーを伏せ字にします。"
+  },
+  "author": "cc-router",
+  "license": "MIT",
+  "entry": "rules.json",
+  "assets": []
+}

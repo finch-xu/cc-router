@@ -10,6 +10,8 @@ pub mod plugin;
 pub mod pricing_plugin;
 pub mod provider;
 pub mod provider_plugin;
+pub mod rules_engine;
+pub mod rules_plugin;
 
 use std::fmt;
 

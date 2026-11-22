@@ -1,0 +1,23 @@
+{
+  "rulesApi": 1,
+  "params": [
+    { "id": "cheap", "type": "virtual_model", "default": "haiku",
+      "label": { "zh": "杂活改道到", "zh-Hant": "雜事改道到", "en": "Send side tasks to", "ja": "雑用の送り先" } },
+    { "id": "mask_keys", "type": "bool", "default": false,
+      "label": { "zh": "发出前屏蔽 API Key", "zh-Hant": "送出前遮蔽 API Key", "en": "Mask API keys before sending", "ja": "送信前に API キーを伏せる" } }
+  ],
+  "rules": [
+    {
+      "id": "side-tasks",
+      "hook": "route",
+      "when": { "purpose": ["title", "compact", "guard", "fetch"], "virtual_model": ["fable", "opus", "sonnet"] },
+      "do": [ { "use_virtual_model": "{{params.cheap}}" } ]
+    },
+    {
+      "id": "mask-keys",
+      "hook": "request",
+      "when": { "param": "mask_keys" },
+      "do": [ { "redact": { "preset": ["api_keys"], "scope": "user_text" } } ]
+    }
+  ]
+}

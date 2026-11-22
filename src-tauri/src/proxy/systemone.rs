@@ -353,6 +353,7 @@ pub fn log_entry(
         tool_calls: ToolLogFields::empty(),
         headers: ctx.header_log(),
         net: ctx.net_log(),
+        plugins_applied: ctx.plugins_applied.clone(),
     }
 }
 

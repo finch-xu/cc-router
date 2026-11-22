@@ -84,6 +84,7 @@ pub async fn messages(
         log_headers,
         upstream_request_headers_log: None,
         upstream_response_headers_log: None,
+        plugins_applied: None,
     }.with_monitor_identity(&headers, &parsed);
 
     info!(
@@ -215,6 +216,7 @@ pub async fn responses(
         log_headers,
         upstream_request_headers_log: None,
         upstream_response_headers_log: None,
+        plugins_applied: None,
     }.with_monitor_identity(&headers, &parsed);
 
     info!(
@@ -572,6 +574,7 @@ pub async fn chat_completions(
         log_headers,
         upstream_request_headers_log: None,
         upstream_response_headers_log: None,
+        plugins_applied: None,
     };
 
     info!(
@@ -845,6 +848,7 @@ pub async fn systemone(
         log_headers,
         upstream_request_headers_log: None,
         upstream_response_headers_log: None,
+        plugins_applied: None,
     };
     info!(%model, client_tool = ?ctx.info.tool, client_ip = ?ctx.ip, "proxy received /v1/systemone request");
     systemone::dispatch(&state, body, model, &ctx).await

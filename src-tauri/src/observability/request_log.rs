@@ -176,6 +176,8 @@ pub struct RequestLogEntry {
     pub headers: HeaderLogFields,
     /// 网络耗时 (proxy/net_timing.rs), 纯观测。无 `Default`: 构造点照抄 `net: ctx.net_log()`。
     pub net: crate::proxy::net_timing::NetTimingFields,
+    /// 命中的规则插件记录 (JSON 数组, 见 `plugins/rules.rs`)。无 `Default`: 构造点照抄 `plugins_applied: ctx.plugins_applied.clone()`。
+    pub plugins_applied: Option<String>,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -456,10 +458,11 @@ pub(crate) async fn flush_batch(
                 purpose_kind, purpose_guessed, purpose_turn, purpose_step, purpose_prev_tools,
                 session_client, session_id, trace_id,
                 net_prep_ms, net_dns_ms, net_connect_ms, net_headers_ms,
-                net_conn_reused, net_via_proxy, net_remote_addr, net_upstream_stream)
+                net_conn_reused, net_via_proxy, net_remote_addr, net_upstream_stream,
+                plugins_applied)
              VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
                      ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
-                     ?, ?, ?, ?, ?, ?, ?, ?)",
+                     ?, ?, ?, ?, ?, ?, ?, ?, ?)",
         )
         .bind(entry.id.to_string())
         .bind(entry.timestamp_ms)
@@ -516,6 +519,7 @@ pub(crate) async fn flush_batch(
         .bind(entry.net.via_proxy.map(i64::from))
         .bind(entry.net.remote_addr)
         .bind(entry.net.upstream_stream.map(i64::from))
+        .bind(entry.plugins_applied)
         .execute(&mut *tx)
         .await;
         if let Err(e) = result {
@@ -707,7 +711,35 @@ mod tests {
             tool_calls: crate::proxy::tool_log::ToolLogFields::empty(),
             headers: crate::proxy::header_log::HeaderLogFields::none(),
             net: crate::proxy::net_timing::NetTimingFields::none(),
+            plugins_applied: None,
         }
+    }
+
+    /// 规则插件命中记录落库后原样读回 (migration 034 往返)。
+    #[tokio::test]
+    async fn flush_persists_and_reads_back_plugins_applied() {
+        let pool = fresh_pool().await;
+        let sub = Uuid::new_v4();
+        let mut with_plugins = make_entry(1000, VirtualModelName::Haiku, sub, "p", RequestStatus::Success, Some(100), Some(10), Some(20));
+        let json = r#"[{"plugin_id":"rules-side-tasks","version":"1.0.0","rules":["side-tasks"]}]"#.to_string();
+        with_plugins.plugins_applied = Some(json.clone());
+        let plain = make_entry(2000, VirtualModelName::Sonnet, sub, "p", RequestStatus::Success, Some(100), Some(10), Some(20));
+        let id_with = with_plugins.id.to_string();
+        let id_plain = plain.id.to_string();
+        flush_batch(&pool, vec![with_plugins, plain], vec![]).await.unwrap();
+
+        let got: Option<String> = sqlx::query_scalar("SELECT plugins_applied FROM requests WHERE id = ?")
+            .bind(&id_with)
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+        assert_eq!(got.as_deref(), Some(json.as_str()));
+        let got_plain: Option<String> = sqlx::query_scalar("SELECT plugins_applied FROM requests WHERE id = ?")
+            .bind(&id_plain)
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+        assert_eq!(got_plain, None);
     }
 
     /// First-content timing keeps zero distinct from unknown and persists with the log batch.

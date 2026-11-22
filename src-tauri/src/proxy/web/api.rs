@@ -208,6 +208,7 @@ web_commands! {
     // 启用会改变 app 行为 (厂商出现在列表里 / 以后的规则改请求), 只在桌面; 停用是安全方向, 两边都开放
     enable_plugin(id: String) => Err::<(), AppError>(AppError::BadRequest(DESKTOP_ONLY.into())),
     disable_plugin(id: String) => commands::plugins::disable_plugin(st, args.id).await,
+    set_plugin_params(id: String, params: serde_json::Map<String, Value>) => commands::plugins::set_plugin_params(st, args.id, args.params).await,
     fetch_community_index() => Err::<(), AppError>(AppError::BadRequest(DESKTOP_ONLY.into())),
     // onboarding
     get_onboarding_state() => commands::onboarding::get_onboarding_state(st).await,
