@@ -13,6 +13,16 @@ export function useOverallStats(range: StatsRange) {
   });
 }
 
+/** 费用卡片: 按当前价格表现算; 计价插件装 / 卸 / 启停经 plugins_changed 让 STATS_KEY 失效 */
+export function useCostSummary(range: StatsRange) {
+  return useQuery({
+    queryKey: [STATS_KEY, "cost", range],
+    queryFn: () => api.getCostSummary(range),
+    placeholderData: keepPreviousData,
+    staleTime: 5_000,
+  });
+}
+
 export function useDailySeries(range: StatsRange) {
   return useQuery({
     queryKey: [STATS_KEY, "daily", range],

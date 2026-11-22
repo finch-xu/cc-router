@@ -27,6 +27,7 @@ import {
 import { REQUESTS_KEY } from "@/hooks/useRequests";
 import { useSubscriptions } from "@/hooks/useSubscriptions";
 import { useT, type TFunction } from "@/i18n";
+import { formatCostLine } from "@/lib/cost";
 import { fmtNum, fmtRequestSeconds, fmtTime, fmtTokenSpeed } from "@/lib/format";
 import { isReturnedToClient } from "@/lib/headerSources";
 import { timingModel, type TimingSegKind } from "@/lib/requestTiming";
@@ -515,6 +516,12 @@ export function RequestDetailPage() {
                     <div><small><i style={{ background: "var(--rqd-tk-cw)" }} />{t("stats.daily.tokenTooltipCacheCreate")}</small><b>{fmtNum(parts.cacheWrite)}</b></div>
                     <div><small><i style={{ background: "var(--rqd-tk-in)" }} />{t("requestLogs.page.perf.uncached")}</small><b>{fmtNum(parts.input)}</b></div>
                     <div><small><i style={{ background: "var(--rqd-tk-out)" }} />{t("stats.daily.tokenTooltipOutput")}</small><b>{fmtNum(parts.output)}</b></div>
+                    {data?.cost && (
+                      <div title={t("requestLogs.page.perf.costSource", { plugin: data.cost.source.plugin_id, version: data.cost.source.version })}>
+                        <small>{data.cost.equivalent ? t("requestLogs.page.perf.costEquivalent") : t("requestLogs.page.perf.cost")}</small>
+                        <b>{formatCostLine(data.cost)}</b>
+                      </div>
+                    )}
                   </div>
                   <p className="rqd-note">
                     {hit != null && `${t("requestLogs.page.perf.cacheHit", { pct: Math.round(hit * 100) })} · `}

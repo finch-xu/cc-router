@@ -1,5 +1,5 @@
 import { useMemo, useState } from "react";
-import { ExternalLink, FolderOpen, Link2, Palette, Plug, Puzzle, Receipt } from "lucide-react";
+import { Coins, ExternalLink, FolderOpen, Link2, Palette, Plug, Puzzle, Receipt } from "lucide-react";
 import Github from "@lobehub/icons/es/Github";
 import { useNavigate } from "react-router";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
@@ -23,10 +23,10 @@ import { pluginLinks, type PluginLinks } from "@/plugins/links";
 import type { InstalledPlugin, StagedPlugin } from "@/types";
 
 type Tab = "community" | "installed";
-type Kind = "all" | "theme" | "receipt" | "provider";
+type Kind = "all" | "theme" | "receipt" | "provider" | "pricing";
 /** 类型 chip 分两组: 外观 (主题 / 小票) 与功能 (系统插件)。某类型两边都没有条目就不显示 */
 const LOOK_KINDS = ["theme", "receipt"] as const;
-const FEATURE_KINDS = ["provider"] as const;
+const FEATURE_KINDS = ["provider", "pricing"] as const;
 
 /** 清单原文里的名字 / 介绍 (已安装列表用; 内容在安装时已校验过) */
 function manifestText(m: unknown, key: "name" | "description"): LocalizedText | undefined {
@@ -256,7 +256,15 @@ export function PluginsPage() {
                     <img className="pg-shot" src={e.screenshots[0]} alt="" loading="lazy" />
                   ) : (
                     <div className="pg-shot empty">
-                      {e.type === "receipt" ? <Receipt size={22} /> : e.type === "provider" ? <Plug size={22} /> : <Palette size={22} />}
+                      {e.type === "receipt" ? (
+                        <Receipt size={22} />
+                      ) : e.type === "provider" ? (
+                        <Plug size={22} />
+                      ) : e.type === "pricing" ? (
+                        <Coins size={22} />
+                      ) : (
+                        <Palette size={22} />
+                      )}
                     </div>
                   )}
                   <div className="pg-card-body">

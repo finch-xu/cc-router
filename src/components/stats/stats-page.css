@@ -142,3 +142,12 @@ a.sx-row:hover, button.sx-row:hover { background: var(--surface-2); }
   .sx-perf .share, .sx-perf .r.hide-sm, .sx-perf .go { display: none; }
 }
 .sx-page > .stats-section { margin-bottom: 0; }
+
+/* 费用卡片 (CostCard) */
+.sx-cost-hint .card-body { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; color: var(--ink-3); font-size: 12.5px; }
+.sx-cost-top { display: flex; flex-wrap: wrap; margin: -6px -8px 0; }
+.sx-cost-top .sx-kpi { flex: 1 1 180px; }
+.sx-cost-eq { font-weight: 450; color: var(--ink-4); }
+.sx-cost-unpriced { margin-top: 12px; font-size: 11.5px; color: var(--ink-4); display: grid; gap: 2px; }
+.sx-cost-unpriced .l { color: var(--ink-3); font-size: 12px; margin-bottom: 2px; }
+.sx-cost-source { margin-top: 12px; font-size: 11.5px; color: var(--ink-4); }

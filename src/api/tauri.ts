@@ -5,6 +5,7 @@ const invoke = runtime.invoke;
 import type {
   InstalledPlugin,
   RebuildPreview,
+  CostSummaryDto,
   PluginContent,
   StagedPlugin,
   RequestHeaders,
@@ -212,6 +213,8 @@ export const api = {
   // statistics (聚合表查询, 跨范围全局)
   getOverallStats: (range: StatsRange) =>
     invoke<OverallStatsDto>("get_overall_stats", { range }),
+  /** 统计页费用卡片: 按当前价格表现算 (没有计价插件时 has_pricing = false) */
+  getCostSummary: (range: StatsRange) => invoke<CostSummaryDto>("get_cost_summary", { range }),
   getDailySeries: (range: StatsRange) =>
     invoke<DailySeriesPointDto[]>("get_daily_series", { range }),
   getBreakdown: (range: StatsRange, by: BreakdownBy) =>

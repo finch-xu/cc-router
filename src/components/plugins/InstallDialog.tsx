@@ -133,6 +133,7 @@ export function InstallDialog({
 
   function startUsing(rec: InstalledPlugin) {
     if (rec.plugin_type === "provider") navigate(`/subscriptions/new?provider=${encodeURIComponent(`plugin:${rec.id}`)}`);
+    else if (rec.plugin_type === "pricing") navigate("/statistics");
     else if (rec.plugin_type === "receipt") navigate(`/receipts?theme=plugin:${rec.id}`);
     else setThemeId(`plugin:${rec.id}`);
     close();
@@ -226,7 +227,11 @@ export function InstallDialog({
             )}
             {staged && ok && staged.source.kind === "github" && !communitySha256 && (
               <div className="pg-alert warn">
-                {checked?.kind === "system" ? t("plugins.install.unreviewedProvider") : t("plugins.install.unreviewed")}
+                {checked?.kind !== "system"
+                  ? t("plugins.install.unreviewed")
+                  : checked.ok.manifest.type === "pricing"
+                    ? t("plugins.install.unreviewedPricing")
+                    : t("plugins.install.unreviewedProvider")}
               </div>
             )}
             {staged?.installed && ok && (
@@ -254,7 +259,11 @@ export function InstallDialog({
               </button>
               {!alreadyInUse && (
                 <button className="btn primary" type="button" onClick={() => startUsing(installed)}>
-                  {installed.plugin_type === "provider" ? t("plugins.btn.addSubscription") : t("plugins.btn.useNow")}
+                  {installed.plugin_type === "provider"
+                    ? t("plugins.btn.addSubscription")
+                    : installed.plugin_type === "pricing"
+                      ? t("plugins.btn.viewCosts")
+                      : t("plugins.btn.useNow")}
                 </button>
               )}
             </>

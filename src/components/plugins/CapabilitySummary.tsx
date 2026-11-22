@@ -3,10 +3,27 @@ import type { PluginCapabilities, PluginCapabilityDiff } from "@/types";
 
 /**
  * 系统插件「会做什么」: 由 Rust 从插件内容推导 (不是作者自己写的, 没法少报)。
- * 厂商插件 = API Key 会发往哪些 host; 更新时再列出与已装版本的差异。
+ * 厂商插件 = API Key 会发往哪些 host; 更新时再列出与已装版本的差异。计价插件 = 币种、条目数、覆盖的厂商。
  */
 export function CapabilitySummary({ capabilities, diff }: { capabilities: PluginCapabilities; diff?: PluginCapabilityDiff }) {
   const { t } = useT();
+  if (capabilities.kind === "pricing") {
+    // 计价插件不连网也不改请求, 只说明它覆盖什么
+    return (
+      <div className="pg-caps">
+        <div className="pg-caps-title">
+          {t("plugins.caps.pricing", { currency: capabilities.currency, rules: capabilities.rules })}
+        </div>
+        <ul className="pg-caps-list">
+          {capabilities.providers.map((p) => (
+            <li key={p}>
+              <code>{p === "*" ? t("plugins.caps.anyProvider") : p}</code>
+            </li>
+          ))}
+        </ul>
+      </div>
+    );
+  }
   const changed = diff && (diff.added_hosts.length > 0 || diff.removed_hosts.length > 0 || diff.auth_type_changed);
   return (
     <div className="pg-caps">
