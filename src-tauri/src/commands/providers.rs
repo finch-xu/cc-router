@@ -172,7 +172,8 @@ impl From<&Provider> for ProviderInfo {
 
 #[tauri::command]
 pub async fn list_providers(state: State<'_, AppState>) -> AppResult<Vec<ProviderInfo>> {
-    let mut out: Vec<ProviderInfo> = state.providers.values().map(ProviderInfo::from).collect();
+    let registry = state.providers();
+    let mut out: Vec<ProviderInfo> = registry.values().map(ProviderInfo::from).collect();
     // 四种界面语言都按英文名排, 顺序一致; 忽略大小写 (否则 `xAI` 会排到 `Zhipu` 后面)。
     out.sort_by_cached_key(|p| p.translations.en.display_name.to_lowercase());
     Ok(out)

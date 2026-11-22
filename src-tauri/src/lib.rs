@@ -339,7 +339,7 @@ async fn bootstrap(
 
     let state = AppState {
         db: pool,
-        providers: Arc::new(providers),
+        providers: Arc::new(std::sync::RwLock::new(Arc::new(provider::registry::ProviderRegistry::builtin(providers)))),
         subscriptions: subscriptions_arc,
         route_edits: Default::default(),
         virtual_models: Arc::new(RwLock::new(virtual_models)),

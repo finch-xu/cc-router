@@ -1,6 +1,6 @@
 # workspace 根就是主 crate 自己: Cargo.lock 与 target/ 位置不变, 不带 -p 的 cargo 命令仍只作用于主 crate。
 [workspace]
-members = [".", "crates/cc-router-tui"]
+members = [".", "crates/cc-router-tui", "crates/cc-router-plugin-spec"]
 
 [package]
 name = "cc-router"
@@ -76,7 +76,8 @@ sha2 = "0.11.1"
 
 sqlx = { version = "0.9.1", default-features = false, features = ["runtime-tokio", "sqlite", "macros", "chrono"] }
 
-jsonschema = { version = "0.60.2", default-features = false }
+# 厂商描述符模型 / schema / 语义校验 (与社区仓库 CI 共用; jsonschema 随它进来)
+cc-router-plugin-spec = { path = "crates/cc-router-plugin-spec" }
 
 tracing = "0.1.44"
 tracing-subscriber = { version = "0.3.23", features = ["env-filter", "fmt", "json"] }

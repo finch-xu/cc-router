@@ -819,6 +819,7 @@ dependencies = [
  "base64 0.23.1",
  "bitflags 2.13.2",
  "bytes",
+ "cc-router-plugin-spec",
  "cc-router-tui",
  "chacha20poly1305",
  "chrono",
@@ -828,7 +829,6 @@ dependencies = [
  "hyper",
  "hyper-util",
  "if-addrs",
- "jsonschema",
  "once_cell",
  "rcgen",
  "regex",
@@ -862,6 +862,18 @@ dependencies = [
  "wiremock",
  "zeroize",
  "zip",
+]
+
+[[package]]
+name = "cc-router-plugin-spec"
+version = "1.0.0"
+dependencies = [
+ "jsonschema",
+ "once_cell",
+ "regex",
+ "serde",
+ "serde_json",
+ "serde_yaml",
 ]
 
 [[package]]

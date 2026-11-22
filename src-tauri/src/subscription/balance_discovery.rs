@@ -20,6 +20,7 @@ use tracing::{info, warn};
 
 use crate::error::AppError;
 use crate::provider::model::BalanceParser;
+use crate::provider::BalanceMethodExt;
 use crate::subscription::{
     model::{BalanceDetail, BalanceEntry, BalanceSeverity, BalanceSnapshot, SubscriptionRow},
     store,

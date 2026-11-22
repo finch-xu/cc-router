@@ -321,7 +321,7 @@ pub async fn list_subscriptions(state: State<'_, AppState>) -> AppResult<Vec<Sub
     for (id, rt) in subs.iter() {
         let guard = rt.read().await;
         let referenced = refs.get(id).cloned().unwrap_or_default();
-        out.push(SubscriptionDto::from_runtime(&guard, referenced, &state.providers));
+        out.push(SubscriptionDto::from_runtime(&guard, referenced, &state.providers()));
     }
     out.sort_by(|a, b| a.display_name.cmp(&b.display_name));
     Ok(out)
@@ -339,7 +339,7 @@ pub async fn get_subscription(
         .get(&id)
         .ok_or_else(|| AppError::SubscriptionNotFound(id.to_string()))?;
     let guard = rt.read().await;
-    Ok(SubscriptionDto::from_runtime(&guard, referenced, &state.providers))
+    Ok(SubscriptionDto::from_runtime(&guard, referenced, &state.providers()))
 }
 
 #[tauri::command]
@@ -357,8 +357,8 @@ pub async fn create_subscription(
             endpoint_id,
             url_params,
         } => {
-            let provider = state
-                .providers
+            let registry = state.providers();
+            let provider = registry
                 .get(&provider_id)
                 .ok_or_else(|| AppError::ProviderNotFound(provider_id.clone()))?;
             let endpoint = provider
@@ -517,7 +517,7 @@ async fn insert_subscription(state: &AppState, row: SubscriptionRow) -> AppResul
     }
 
     let guard = rt.read().await;
-    Ok(SubscriptionDto::from_runtime(&guard, vec![], &state.providers))
+    Ok(SubscriptionDto::from_runtime(&guard, vec![], &state.providers()))
 }
 
 #[tauri::command]
@@ -575,8 +575,8 @@ pub async fn update_subscription(
                 "自定义订阅不支持切 endpoint / url_params, 请用 connection patch 改连接信息".into(),
             ));
         }
-        let provider = state
-            .providers
+        let registry = state.providers();
+        let provider = registry
             .get(&provider_id)
             .ok_or_else(|| AppError::ProviderNotFound(provider_id.clone()))?;
         let endpoint_id = patch.endpoint_id.clone().unwrap_or(current_endpoint);
@@ -689,7 +689,7 @@ pub async fn update_subscription(
     let refs = collect_references(&state).await;
     let guard = rt.read().await;
     let referenced = refs.get(&id).cloned().unwrap_or_default();
-    Ok(SubscriptionDto::from_runtime(&guard, referenced, &state.providers))
+    Ok(SubscriptionDto::from_runtime(&guard, referenced, &state.providers()))
 }
 
 #[tauri::command]
@@ -1210,7 +1210,7 @@ pub async fn update_token_quotas(
     store::update_row(&state.db, &row_snapshot).await?;
     let referenced_by = referenced_by_names(&state, &id).await;
     let guard = rt.read().await;
-    Ok(SubscriptionDto::from_runtime(&guard, referenced_by, &state.providers))
+    Ok(SubscriptionDto::from_runtime(&guard, referenced_by, &state.providers()))
 }
 
 /// Shared by `update_slot_schedules` and backup import so both reject the same rows. Takes the
@@ -1247,7 +1247,7 @@ pub async fn update_slot_schedules(
     store::update_row(&state.db, &row_snapshot).await?;
     let referenced_by = referenced_by_names(&state, &id).await;
     let guard = rt.read().await;
-    Ok(SubscriptionDto::from_runtime(&guard, referenced_by, &state.providers))
+    Ok(SubscriptionDto::from_runtime(&guard, referenced_by, &state.providers()))
 }
 
 /// The host machine's local wall clock, as the scheduler sees it. The web UI / TUI may run on
@@ -1289,7 +1289,7 @@ pub async fn reset_total_quota_usage(
     store::save_quota_usage_snapshot(&state.db, &id, &usage).await?;
     let referenced_by = referenced_by_names(&state, &id).await;
     let guard = rt.read().await;
-    Ok(SubscriptionDto::from_runtime(&guard, referenced_by, &state.providers))
+    Ok(SubscriptionDto::from_runtime(&guard, referenced_by, &state.providers()))
 }
 
 #[cfg(test)]

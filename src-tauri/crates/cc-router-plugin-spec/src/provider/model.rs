@@ -395,15 +395,6 @@ pub enum BalanceHttpMethod {
     Post,
 }
 
-impl BalanceHttpMethod {
-    pub fn as_reqwest(self) -> reqwest::Method {
-        match self {
-            Self::Get => reqwest::Method::GET,
-            Self::Post => reqwest::Method::POST,
-        }
-    }
-}
-
 /// Known parsers. yaml load fails (via serde) if a provider declares an unknown
 /// parser — moves the error from runtime "refresh balance" click to app startup.
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]

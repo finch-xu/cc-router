@@ -23,7 +23,7 @@ pub struct LocalState {
     pub bindings: HashMap<VirtualModelName, Vec<Uuid>>,
     /// Built-in provider registry: built-in subscriptions get their connection re-snapshotted
     /// from it instead of trusting the file (see [`rebuilt_connection`]).
-    pub providers: Arc<HashMap<String, Provider>>,
+    pub providers: Arc<crate::provider::registry::ProviderRegistry>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
@@ -485,7 +485,7 @@ mod tests {
     }
 
     fn empty_local() -> LocalState {
-        LocalState { existing_ids: HashSet::new(), bindings: HashMap::new(), providers: Arc::new(HashMap::new()) }
+        LocalState { existing_ids: HashSet::new(), bindings: HashMap::new(), providers: Arc::new(crate::provider::registry::ProviderRegistry::default()) }
     }
 
     fn resolved(f: &Fixture) -> ResolvedSecrets {
@@ -603,7 +603,7 @@ mod tests {
 
     #[test]
     fn builtin_subscription_without_secrets_gets_template_headers_back_from_the_registry() {
-        let providers = Arc::new(crate::provider::loader::load_all().unwrap());
+        let providers = Arc::new(crate::provider::registry::ProviderRegistry::builtin(crate::provider::loader::load_all().unwrap()));
         let row = cloudflare_gateway_row(&providers);
         let file = build_export(std::slice::from_ref(&row), &[], None, "6.1.0", Utc::now()).unwrap();
         let exported = &file.subscriptions[0];
@@ -651,7 +651,7 @@ mod tests {
     }
     #[test]
     fn builtin_subscription_connection_comes_from_the_registry_not_the_file() {
-        let providers = Arc::new(crate::provider::loader::load_all().unwrap());
+        let providers = Arc::new(crate::provider::registry::ProviderRegistry::builtin(crate::provider::loader::load_all().unwrap()));
         let row = cloudflare_gateway_row(&providers);
         let mut file = build_export(std::slice::from_ref(&row), &[], None, "6.1.0", Utc::now()).unwrap();
         file.subscriptions[0].base_url = "https://evil.example/accounts/x/ai".into();
