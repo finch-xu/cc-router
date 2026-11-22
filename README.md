@@ -82,6 +82,7 @@
 - **出口三协议，订阅一站调度** —— 内置 24 家厂商预设（DeepSeek、Qwen、Kimi、MiMo、MiniMax、GLM、Claude、OpenAI、Gemini 等），任何 Anthropic / OpenAI / Gemini 兼容端点也能直接配进来
 - **聚合所有模型Token** —— 顺序 / 轮询 / 会话亲和、自动切换、故障转移
 - **用量小票** —— token 用量一键导出成一张「超市小票」样式的消费凭证，晒图、留档都方便
+- **Sparrow Bakery 插件中心** —— 内置纯数据插件商店与创作中心，支持界面主题、小票主题、厂商描述、计价表、路由/脱敏规则与告警通知六类插件，不执行任何代码，详见 [Sparrow Bakery](#sparrow-bakery)
 - **四语完整翻译** —— 简体中文 / 繁體中文 / English / 日本語，可跟随系统或在设置页手动切换
 - **桌面 / 网页 / 终端三种界面** —— 除了桌面 GUI，还能在浏览器里打开与桌面完全相同的[网页界面](#网页界面可选默认关闭)，或用[终端 TUI 界面](#终端界面可选默认关闭)在命令行里管理订阅、查看实时路由与请求日志
 - **虚拟模型多别名** —— fable / opus / sonnet / haiku 四个槽位各识别多种命名，以 opus 为例，`model-opus` / `claude-opus-4-7` / `anthropic/model-opus` / `anthropic/claude-opus-4-7` 都路由到同一虚拟模型，工具用什么命名都不挑
@@ -91,11 +92,14 @@
 <table align="center">
   <tr>
     <td align="center" width="50%"><img src="assets/screenshots/zh/routing.png" alt="cc-router 实时路由页截图" /><br /><sub><b>实时路由</b> · 请求流向一图看全</sub></td>
-    <td align="center" width="50%"><img src="assets/screenshots/zh/models.png" alt="cc-router 虚拟模型配置页截图" /><br /><sub><b>虚拟模型</b> · 拖拽排订阅优先级</sub></td>
+    <td align="center" width="50%"><img src="assets/screenshots/zh/models.png" alt="cc-router 虚拟模型配置页截图" /><br /><sub><b>虚拟模型</b> · 拖拽排订阅优先级与分时段路由</sub></td>
   </tr>
   <tr>
-    <td align="center" width="50%"><img src="assets/screenshots/zh/logs.png" alt="cc-router 请求日志页截图" /><br /><sub><b>请求日志</b> · 每次请求的模型、耗时与 token</sub></td>
+    <td align="center" width="50%"><img src="assets/screenshots/zh/logs.png" alt="cc-router 请求日志详情页截图" /><br /><sub><b>请求详情</b> · 单次请求的路由、耗时与 token 明细</sub></td>
     <td align="center" width="50%"><img src="assets/screenshots/zh/receipts.png" alt="cc-router 用量小票页截图" /><br /><sub><b>用量小票</b> · token 用量导出成小票</sub></td>
+  </tr>
+  <tr>
+    <td align="center" colspan="2"><img src="assets/screenshots/zh/sparrow-bakery.png" alt="cc-router Sparrow Bakery 社区插件商店截图" /><br /><sub><b>Sparrow Bakery</b> · 社区插件商店与创作中心</sub></td>
   </tr>
   <tr>
     <td align="center" width="50%"><img src="assets/screenshots/zh/tui-overview.png" alt="cc-router 终端界面总览页截图" /><br /><sub><b>终端界面总览</b> · 订阅健康与额度一屏看完</sub></td>
@@ -370,7 +374,23 @@ curl http://127.0.0.1:23456/v1/systemone \
 
 **虚拟模型：查看各订阅的模型与生效时段**
 
-![cc-router 虚拟模型的分时段路由、订阅与生效时段预览](assets/screenshots/zh/virtual-model-schedules.png)
+![cc-router 虚拟模型的分时段路由、订阅与生效时段预览](assets/screenshots/zh/models.png)
+
+### Sparrow Bakery
+
+**Sparrow Bakery**（麻雀面包坊）是 cc-router 内置的社区插件商店与创作中心，用来扩展界面外观、账单样式与代理能力。**所有插件都是纯数据描述（颜色、模板、配置、规则），不会执行任何代码**。
+
+- **六类插件** ——
+  - **界面主题**：自定义配色、圆角、纹理与字体，支持安装前实时「试穿」
+  - **小票主题**：自定义用量小票的排版、风格与字体（如内置社区示例「麻雀面包坊」）
+  - **厂商描述**：补充社区维护的厂商接入点与模型发现配置（OAuth 类仍仅限内置）
+  - **计价**：导入模型价格表，在请求日志与数据统计中估算费用
+  - **规则**：声明式路由改道与请求改写（如杂活自动走便宜模型、请求前脱敏 API 密钥与隐私、调整采样/思考参数等），支持用最近请求日志「试运行」验证，安装后默认停用
+  - **通知**：通过 Webhook / 推送模板将告警与每日用量汇总发到 Bark、飞书、钉钉、Telegram、Slack、ntfy 等通道（不含 API Key、提示词与请求头），安装后默认停用，需配置并测试后再手动启用
+- **三种安装方式** —— 在桌面端侧栏的 **Sparrow Bakery** 页中，可直接从社区目录一键安装，也可以通过 GitHub 链接（固定到指定 commit，不自动拉取后续变更）或本地文件夹加载；网页界面支持浏览和使用已安装插件，安装与卸载在桌面端完成
+- **社区创作** —— 社区仓库 [cc-router-community](https://github.com/finch-xu/cc-router-community) 提供完整规范文档、范例与 AI 制作工具包，欢迎制作并提交自己的插件
+
+![cc-router Sparrow Bakery 社区插件商店与创作中心](assets/screenshots/zh/sparrow-bakery.png)
 
 ## 常见问题&使用场景
 

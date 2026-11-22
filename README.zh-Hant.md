@@ -82,6 +82,7 @@
 - **出口三協議，訂閱一站調度** —— 內建 24 家廠商預設（DeepSeek、Qwen、Kimi、MiMo、MiniMax、GLM、Claude、OpenAI、Gemini 等），任何 Anthropic / OpenAI / Gemini 相容端點也能直接配進來
 - **聚合所有模型Token** —— 依序 / 輪詢 / 工作階段親和、自動切換、故障轉移
 - **用量小票** —— token 用量一鍵匯出成一張「超市小票」樣式的消費憑證，曬圖、留檔都方便
+- **Sparrow Bakery 外掛中心** —— 內建純資料外掛商店與創作中心，支援介面主題、小票主題、廠商描述、計價表、路由/脫敏規則與告警通知六類外掛，不執行任何程式碼，詳見 [Sparrow Bakery](#sparrow-bakery)
 - **四語完整翻譯** —— 简体中文 / 繁體中文 / English / 日本語，可跟隨系統或在設定頁手動切換
 - **桌面 / 網頁 / 終端機三種介面** —— 除了桌面 GUI，還能在瀏覽器裡開啟與桌面完全相同的[網頁介面](#網頁介面可選預設關閉)，或用[終端機 TUI 介面](#終端機介面可選預設關閉)在命令列裡管理訂閱、檢視即時路由與請求紀錄
 - **虛擬模型多別名** —— fable / opus / sonnet / haiku 四個槽位各識別多種命名，以 opus 為例，`model-opus` / `claude-opus-4-7` / `anthropic/model-opus` / `anthropic/claude-opus-4-7` 都路由到同一虛擬模型，工具用什麼命名都不挑
@@ -91,11 +92,14 @@
 <table align="center">
   <tr>
     <td align="center" width="50%"><img src="assets/screenshots/zh/routing.png" alt="cc-router 即時路由頁截圖" /><br /><sub><b>即時路由</b> · 請求流向一圖看全</sub></td>
-    <td align="center" width="50%"><img src="assets/screenshots/zh/models.png" alt="cc-router 虛擬模型設定頁截圖" /><br /><sub><b>虛擬模型</b> · 拖曳排訂閱優先順序</sub></td>
+    <td align="center" width="50%"><img src="assets/screenshots/zh/models.png" alt="cc-router 虛擬模型設定頁截圖" /><br /><sub><b>虛擬模型</b> · 拖曳排訂閱優先順序與分時段路由</sub></td>
   </tr>
   <tr>
-    <td align="center" width="50%"><img src="assets/screenshots/zh/logs.png" alt="cc-router 請求紀錄頁截圖" /><br /><sub><b>請求紀錄</b> · 每次請求的模型、耗時與 token</sub></td>
+    <td align="center" width="50%"><img src="assets/screenshots/zh/logs.png" alt="cc-router 請求紀錄詳情頁截圖" /><br /><sub><b>請求詳情</b> · 單次請求的路由、耗時與 token 明細</sub></td>
     <td align="center" width="50%"><img src="assets/screenshots/zh/receipts.png" alt="cc-router 用量小票頁截圖" /><br /><sub><b>用量小票</b> · token 用量匯出成小票</sub></td>
+  </tr>
+  <tr>
+    <td align="center" colspan="2"><img src="assets/screenshots/zh/sparrow-bakery.png" alt="cc-router Sparrow Bakery 社群外掛商店截圖" /><br /><sub><b>Sparrow Bakery</b> · 社群外掛商店與創作中心</sub></td>
   </tr>
   <tr>
     <td align="center" width="50%"><img src="assets/screenshots/zh/tui-overview.png" alt="cc-router 終端機介面總覽頁截圖" /><br /><sub><b>終端機介面總覽</b> · 訂閱健康與額度一屏看完</sub></td>
@@ -370,7 +374,23 @@ curl http://127.0.0.1:23456/v1/systemone \
 
 **虛擬模型：檢視各訂閱的模型與生效時段**
 
-![cc-router 虛擬模型的分時段路由、訂閱與生效時段預覽](assets/screenshots/zh/virtual-model-schedules.png)
+![cc-router 虛擬模型的分時段路由、訂閱與生效時段預覽](assets/screenshots/zh/models.png)
+
+### Sparrow Bakery
+
+**Sparrow Bakery**（麻雀麵包坊）是 cc-router 內建的社群外掛商店與創作中心，用來擴充介面外觀、小票樣式與代理能力。**所有外掛都是純資料描述（顏色、範本、設定、規則），不會執行任何程式碼**。
+
+- **六類外掛** ——
+  - **介面主題**：自訂配色、形狀、紋理與字型，支援安裝前即時「試穿」
+  - **小票主題**：自訂用量小票的排版、風格與字型（如社群範例「麻雀麵包坊」）
+  - **廠商描述**：補充社群維護的廠商接入點與模型探索設定（OAuth 類仍僅限內建）
+  - **計價**：匯入模型價格表，在請求紀錄與資料統計中估算費用
+  - **規則**：宣告式路由改道與請求改寫（如雜活自動走便宜模型、請求前脫敏 API 金鑰與隱私、調整取樣/思考參數等），支援用最近請求紀錄「試執行」驗證，安裝後預設停用
+  - **通知**：透過 Webhook / 推送範本將告警與每日用量彙總送到 Bark、飛書、釘釘、Telegram、Slack、ntfy 等通道（不含 API Key、提示詞與請求標頭），安裝後預設停用，需設定並測試後再手動啟用
+- **三種安裝方式** —— 在桌面端側欄的 **Sparrow Bakery** 頁中，可直接從社群目錄一鍵安裝，也可以透過 GitHub 連結（固定到指定 commit，不自動拉取後續變動）或本機資料夾載入；網頁介面支援瀏覽和使用已安裝外掛，安裝與解除安裝在桌面端完成
+- **社群創作** —— 社群儲存庫 [cc-router-community](https://github.com/finch-xu/cc-router-community) 提供完整規範文件、範例與 AI 製作工具包，歡迎製作並提交自己的外掛
+
+![cc-router Sparrow Bakery 社群外掛商店與創作中心](assets/screenshots/zh/sparrow-bakery.png)
 
 ## 常見問題&使用場景
 

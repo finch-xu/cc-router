@@ -82,6 +82,7 @@ Highlights:
 - **Three outbound protocols, every subscription in one router** — 24 built-in provider presets (DeepSeek, Qwen, Kimi, MiMo, MiniMax, GLM, Claude, OpenAI, Gemini, …), plus any Anthropic / OpenAI / Gemini-compatible endpoint you bring yourself
 - **Pool every token you have** — sequential / round-robin / session-affinity dispatch with automatic switching and failover
 - **Usage receipts** — export your token usage as a "supermarket receipt" in one click, handy for sharing or keeping records
+- **Sparrow Bakery plugin hub** — built-in data-only plugin store and creator hub supporting UI themes, receipt themes, provider definitions, pricing tables, routing/redaction rules, and alert notifiers — never executes code; see [Sparrow Bakery](#sparrow-bakery)
 - **Fully translated UI** — 简体中文 / 繁體中文 / English / 日本語, follows your system locale or pick manually in Settings
 - **Desktop, web and terminal UIs** — besides the desktop GUI, open the exact same management UI in a browser via the [Web UI](#web-ui-optional-off-by-default), or use the [terminal UI (TUI)](#terminal-ui-optional-off-by-default) to manage subscriptions and watch live routing and request logs from the command line
 - **Virtual model aliases** — each of fable / opus / sonnet / haiku accepts multiple names; for opus that's `model-opus` / `claude-opus-4-7` / `anthropic/model-opus` / `anthropic/claude-opus-4-7`, all routed to the same virtual model — pick whatever naming your tool prefers
@@ -91,11 +92,14 @@ Highlights:
 <table align="center">
   <tr>
     <td align="center" width="50%"><img src="assets/screenshots/en/routing.png" alt="cc-router live routing page" /><br /><sub><b>Live routing</b> · see where every request flows</sub></td>
-    <td align="center" width="50%"><img src="assets/screenshots/en/models.png" alt="cc-router virtual model configuration page" /><br /><sub><b>Virtual models</b> · drag to set subscription priority</sub></td>
+    <td align="center" width="50%"><img src="assets/screenshots/en/models.png" alt="cc-router virtual model configuration page" /><br /><sub><b>Virtual models</b> · drag priority and time-based routing</sub></td>
   </tr>
   <tr>
-    <td align="center" width="50%"><img src="assets/screenshots/en/logs.png" alt="cc-router request logs page" /><br /><sub><b>Request logs</b> · model, latency and tokens per request</sub></td>
+    <td align="center" width="50%"><img src="assets/screenshots/en/logs.png" alt="cc-router request log detail page" /><br /><sub><b>Request detail</b> · route, timing and token breakdown</sub></td>
     <td align="center" width="50%"><img src="assets/screenshots/en/receipts.png" alt="cc-router usage receipts page" /><br /><sub><b>Usage receipts</b> · export token usage as a receipt</sub></td>
+  </tr>
+  <tr>
+    <td align="center" colspan="2"><img src="assets/screenshots/en/sparrow-bakery.png" alt="cc-router Sparrow Bakery community plugin store" /><br /><sub><b>Sparrow Bakery</b> · community plugin store and creator hub</sub></td>
   </tr>
   <tr>
     <td align="center" width="50%"><img src="assets/screenshots/en/tui-overview.png" alt="cc-router terminal UI overview" /><br /><sub><b>Terminal UI overview</b> · subscription health and quotas at a glance</sub></td>
@@ -370,7 +374,23 @@ Keep the same virtual model in your client while cc-router switches each subscri
 
 **Virtual models: subscriptions, model mappings, and active hours**
 
-![cc-router time-based virtual model routing and active hours preview](assets/screenshots/en/virtual-model-schedules.png)
+![cc-router time-based virtual model routing and active hours preview](assets/screenshots/en/models.png)
+
+### Sparrow Bakery
+
+**Sparrow Bakery** is cc-router's built-in community plugin store and creator hub for customizing the look, receipts, and proxy behavior. **Every plugin is purely declarative data (colors, templates, configs, and rules) and never runs code.**
+
+- **Six plugin types** —
+  - **UI themes**: custom color palettes, shapes, textures, and fonts, with live "Try on" preview before installing
+  - **Receipt themes**: custom usage receipt layouts, styles, and fonts (such as the community "Sparrow Bakery" slip)
+  - **Providers**: community-maintained provider endpoints and model discovery definitions (OAuth providers remain built-in only)
+  - **Pricing**: model pricing tables for cost estimation across Request logs and Statistics
+  - **Rules**: declarative routing and request rewriting (send side tasks to cheaper models, redact secrets/PII before sending upstream, set or clamp sampling/reasoning parameters, etc.), with dry-run testing against recent request logs; starts disabled until manually enabled
+  - **Notifiers**: webhook and push templates for alerts and daily usage summaries via Bark, DingTalk, Feishu, Telegram, Slack, ntfy, and more (never sends API keys, prompts, or headers); starts disabled until configured and tested
+- **Three ways to install** — open **Sparrow Bakery** in the desktop sidebar to install one-click from the community catalog, install from a GitHub link (pinned to a specific commit so upstream edits are never pulled automatically), or load from a local folder. The Web UI lets you browse and use installed plugins; installing and uninstalling happen in the desktop app.
+- **Build your own** — the community repository [cc-router-community](https://github.com/finch-xu/cc-router-community) ships full specs, examples, and an AI plugin-building kit so you can create and submit plugins easily.
+
+![cc-router Sparrow Bakery community plugin store and creator hub](assets/screenshots/en/sparrow-bakery.png)
 
 ## FAQ & Use Cases
 

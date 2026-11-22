@@ -82,6 +82,7 @@
 - **出口は 3 プロトコル、全サブスクを一括ディスパッチ** —— 24 社のプロバイダプリセットを内蔵（DeepSeek・Qwen・Kimi・MiMo・MiniMax・GLM・Claude・OpenAI・Gemini など）。Anthropic / OpenAI / Gemini 互換のエンドポイントなら何でも追加可能
 - **手持ちのトークンをすべて集約** —— 順次 / ラウンドロビン / セッション親和のディスパッチ、自動切替とフェイルオーバー
 - **利用レシート** —— トークン使用量を「スーパーのレシート」風の画像にワンクリックで書き出し。共有にも記録にも便利
+- **Sparrow Bakery プラグインセンター** —— UIテーマ・レシートテーマ・プロバイダー定義・料金表・ルーティング／マスキングルール・通知の 6 種類に対応したデータ専用のプラグインストア＆創作センター。コードは一切実行しません。詳細は [Sparrow Bakery](#sparrow-bakery)
 - **4 言語完全翻訳** —— 简体中文 / 繁體中文 / English / 日本語、システム言語追従または設定画面で手動切替
 - **デスクトップ / Web / ターミナルの 3 つの UI** —— デスクトップ GUI に加えて、デスクトップと同じ管理画面をブラウザで開ける [Web UI](#web-uiオプションデフォルト無効) や、コマンドラインからサブスクリプションの管理・リアルタイムルーティング・リクエストログの確認ができる[ターミナル UI（TUI）](#ターミナル-uiオプションデフォルト無効) も使えます
 - **仮想モデルのエイリアス対応** —— fable / opus / sonnet / haiku の各スロットが複数の命名を識別。opus を例にすると `model-opus` / `claude-opus-4-7` / `anthropic/model-opus` / `anthropic/claude-opus-4-7` がすべて同じ仮想モデルにルーティングされ、ツール側の命名規約に左右されません
@@ -90,12 +91,15 @@
 
 <table align="center">
   <tr>
-    <td align="center" width="50%"><img src="assets/screenshots/ja/routing.png" alt="cc-router リアルタイムルーティング画面" /><br /><sub><b>リアルタイムルーティング</b> · リクエストの流れを一目で</sub></td>
-    <td align="center" width="50%"><img src="assets/screenshots/ja/models.png" alt="cc-router 仮想モデル設定画面" /><br /><sub><b>仮想モデル</b> · ドラッグでサブスクの優先度を設定</sub></td>
+    <td align="center" width="50%"><img src="assets/screenshots/en/routing.png" alt="cc-router リアルタイムルーティング画面" /><br /><sub><b>リアルタイムルーティング</b> · リクエストの流れを一目で</sub></td>
+    <td align="center" width="50%"><img src="assets/screenshots/en/models.png" alt="cc-router 仮想モデル設定画面" /><br /><sub><b>仮想モデル</b> · ドラッグで優先度設定と時間帯別ルーティング</sub></td>
   </tr>
   <tr>
-    <td align="center" width="50%"><img src="assets/screenshots/ja/logs.png" alt="cc-router リクエストログ画面" /><br /><sub><b>リクエストログ</b> · リクエストごとのモデル・レイテンシ・トークン</sub></td>
-    <td align="center" width="50%"><img src="assets/screenshots/ja/receipts.png" alt="cc-router 利用レシート画面" /><br /><sub><b>利用レシート</b> · トークン使用量をレシートで書き出し</sub></td>
+    <td align="center" width="50%"><img src="assets/screenshots/en/logs.png" alt="cc-router リクエスト詳細画面" /><br /><sub><b>リクエスト詳細</b> · ルーティング・レイテンシ・トークン内訳</sub></td>
+    <td align="center" width="50%"><img src="assets/screenshots/en/receipts.png" alt="cc-router 利用レシート画面" /><br /><sub><b>利用レシート</b> · トークン使用量をレシートで書き出し</sub></td>
+  </tr>
+  <tr>
+    <td align="center" colspan="2"><img src="assets/screenshots/en/sparrow-bakery.png" alt="cc-router Sparrow Bakery コミュニティプラグインストア画面" /><br /><sub><b>Sparrow Bakery</b> · コミュニティプラグインストア＆創作センター</sub></td>
   </tr>
   <tr>
     <td align="center" width="50%"><img src="assets/screenshots/ja/tui-overview.png" alt="cc-router ターミナル UI 概要画面" /><br /><sub><b>ターミナル UI 概要</b> · サブスクの状態と上限を一画面で</sub></td>
@@ -370,7 +374,23 @@ curl http://127.0.0.1:23456/v1/systemone \
 
 **仮想モデル：サブスクリプション、実モデル、有効な時間帯（英語 UI）**
 
-![cc-router の時間帯別仮想モデルルーティングと有効な時間帯のプレビュー（英語 UI）](assets/screenshots/en/virtual-model-schedules.png)
+![cc-router の時間帯別仮想モデルルーティングと有効な時間帯のプレビュー（英語 UI）](assets/screenshots/en/models.png)
+
+### Sparrow Bakery
+
+**Sparrow Bakery**（スズメベーカリー）は、cc-router に内蔵されたコミュニティプラグインストア＆創作センターです。見た目やレシートのデザインからプロキシの挙動まで拡張できます。**すべてのプラグインは純粋なデータ定義（配色・テンプレート・設定・ルール）のみで構成され、コードは一切実行しません。**
+
+- **6 種類のプラグイン** ——
+  - **UIテーマ**：配色・形状・テクスチャ・フォントをカスタマイズ。インストール前にライブで「試着」できます
+  - **レシートテーマ**：利用レシートのレイアウト・デザイン・フォントをカスタマイズ（コミュニティ作例「Sparrow Bakery」など）
+  - **プロバイダー**：コミュニティが管理するプロバイダーのエンドポイントやモデル取得定義を追加（OAuth 系は内蔵のみ）
+  - **料金**：モデル料金表を取り込み、リクエストログや統計画面で推定コストを表示
+  - **ルール**：宣言的なルーティング変更やリクエスト書き換え（雑務の安価モデルへの振り分け、送信前の API キー・機密情報のマスキング、サンプリング／推論パラメータの調整など）。直近のリクエストログでのドライラン検証に対応し、インストール直後は無効状態で開始します
+  - **通知**：Webhook やプッシュ通知テンプレートで、Bark・DingTalk・Feishu・Telegram・Slack・ntfy などへアラートや日次サマリーを送信（API キー・プロンプト・ヘッダーは含まれません）。インストール直後は無効のため、パラメータ設定とテスト送信後に手動で有効化します
+- **3 つの導入方法** —— デスクトップ版サイドバーの **Sparrow Bakery** から、コミュニティカタログからのワンクリック導入、GitHub リンク指定（特定コミットに固定され、後から自動で書き換わりません）、ローカルフォルダ読み込みの 3 通りに対応。Web UI ではインストール済みプラグインの閲覧と利用が可能で、インストール・アンインストールはデスクトップ版で行います
+- **コミュニティでの制作** —— コミュニティリポジトリ [cc-router-community](https://github.com/finch-xu/cc-router-community) に仕様ドキュメント・サンプル・AI 制作キットを用意しています。自作プラグインの投稿も歓迎です
+
+![cc-router Sparrow Bakery コミュニティプラグインストア＆創作センター（英語 UI）](assets/screenshots/en/sparrow-bakery.png)
 
 ## FAQ・ユースケース
 
