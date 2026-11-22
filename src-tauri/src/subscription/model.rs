@@ -470,6 +470,11 @@ pub enum BalanceDetail {
     TopupGranted { topped_up: String, granted: String },
     /// 「充值 X, 已用 Y」(OpenRouter)。
     TopupUsed { topped_up: String, used: String },
+    /// 声明式 `parser: json`: 只有剩余额度, 可选「已用 Y」。
+    Remaining {
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        used: Option<String>,
+    },
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]

@@ -438,6 +438,7 @@ mod tests {
             url: "https://bal.example/balance".into(),
             method: BalanceHttpMethod::Get,
             parser: BalanceParser::Deepseek,
+            json: None,
             cache_ttl_minutes: 10,
         };
         assert_eq!(
@@ -465,6 +466,7 @@ mod tests {
             url: "https://a.example/user/balance".into(),
             method: BalanceHttpMethod::Get,
             parser: BalanceParser::Deepseek,
+            json: None,
             cache_ttl_minutes: 10,
         };
         assert_eq!(

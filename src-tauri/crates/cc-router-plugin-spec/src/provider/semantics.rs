@@ -57,6 +57,30 @@ pub fn validate(p: &Provider) -> SpecResult<()> {
         check("model_discovery.url", u, None)?;
     }
 
+    // 2b. balance parser: `json` <=> rules present, and the rules are well-formed
+    if let Some(b) = &p.balance_discovery {
+        use crate::provider::model::{BalanceParser, JsonBalanceSpec};
+        match (&b.parser, &b.json) {
+            (BalanceParser::Json, None) => return fail("balance_discovery: parser json 需要 json 取值规则".into()),
+            (BalanceParser::Json, Some(j)) => {
+                for (name, path) in [("remaining", Some(&j.remaining)), ("used", j.used.as_ref()), ("available", j.available.as_ref())] {
+                    if let Some(path) = path {
+                        crate::balance_json::parse_path(path)
+                            .map_err(|e| SpecError::Invalid(format!("balance_discovery.json.{name}: {e}")))?;
+                    }
+                }
+                if j.divisor.is_some_and(|d| !(d.is_finite() && d > 0.0)) {
+                    return fail("balance_discovery.json.divisor 必须是正数".into());
+                }
+                if !JsonBalanceSpec::UNITS.contains(&j.unit.as_str()) {
+                    return fail(format!("balance_discovery.json.unit 只能是 {}", JsonBalanceSpec::UNITS.join(" / ")));
+                }
+            }
+            (_, Some(_)) => return fail("balance_discovery.json 只能与 parser: json 一起用".into()),
+            (_, None) => {}
+        }
+    }
+
     // 3. every declared param is used by at least one endpoint
     for param in &p.url_params {
         if !p.endpoints.iter().any(|e| p.params_used(e).contains(&param.id)) {

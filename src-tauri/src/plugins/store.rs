@@ -21,6 +21,8 @@ use uuid::Uuid;
 use super::files::{check_asset, data_url, is_safe_path, is_text_asset, package_hash};
 use super::{is_valid_id, parse_manifest, ManifestCore, PluginSource, SourceKind, MANIFEST_FILE, MAX_ENTRY_BYTES, MAX_FILE_BYTES, MAX_MANIFEST_BYTES, MAX_TOTAL_BYTES};
 use crate::error::{AppError, AppResult};
+use cc_router_plugin_spec::check::{CapabilityDiff, CheckResult};
+use cc_router_plugin_spec::plugin::{check_system, is_system_type};
 
 const INSTALL_META: &str = ".ccr-install.json";
 const STAGING_TTL: Duration = Duration::from_secs(60 * 60);
@@ -53,6 +55,10 @@ pub struct StagedPlugin {
     pub source: PluginSource,
     /// 本机已装的同 id 插件 (覆盖安装 / 来源不同的提示用)
     pub installed: Option<InstalledPlugin>,
+    /// 系统插件 (厂商等) 的 Rust 校验结果: 问题、能力摘要、与已装版本的能力差异。主题 / 小票为 None
+    /// (它们由前端校验)。
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub system: Option<CheckResult>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -167,6 +173,22 @@ pub fn stage(app_data_dir: &Path, files: Files, source: PluginSource) -> AppResu
         std::fs::write(target, bytes)?;
     }
     let installed = list(app_data_dir)?.into_iter().find(|p| p.id == core.id);
+    let system = is_system_type(&core.plugin_type).then(|| {
+        let (mut result, _) = check_system(&core.plugin_type, &core.id, &entry, &core.assets);
+        // 与已装版本比能力 (同类型才比; 旧版本读不出来就不给差异)
+        if let (Some(new_caps), Some(old)) = (&result.capabilities, installed.as_ref()) {
+            if old.plugin_type == core.plugin_type {
+                if let Ok((old_core, old_entry)) = read_entry(app_data_dir, &old.id) {
+                    if let (CheckResult { capabilities: Some(old_caps), .. }, _) =
+                        check_system(&old_core.plugin_type, &old_core.id, &old_entry, &old_core.assets)
+                    {
+                        result.diff = Some(CapabilityDiff::between(&old_caps, new_caps));
+                    }
+                }
+            }
+        }
+        result
+    });
     let out = StagedPlugin {
         staging_id: staging_id.clone(),
         manifest: manifest.clone(),
@@ -177,6 +199,7 @@ pub fn stage(app_data_dir: &Path, files: Files, source: PluginSource) -> AppResu
         sha256: sha256.clone(),
         source: source.clone(),
         installed,
+        system,
     };
     staged_lock().insert(staging_id, Staged { dir, core, manifest, source, sha256, total, created: Instant::now() });
     Ok(out)
@@ -212,6 +235,15 @@ pub fn install(app_data_dir: &Path, staging_id: &str, community_sha256: Option<&
         .remove(staging_id)
         .ok_or_else(|| AppError::BadRequest("这次下载已过期, 请重新获取".into()))?;
     let mut source = staged.source.clone();
+    // 系统插件在代理里执行: 不信前端的确认结果, 装之前在 Rust 里再校验一次
+    if is_system_type(&staged.core.plugin_type) {
+        let entry = std::fs::read_to_string(staged.dir.join(&staged.core.entry))?;
+        let (result, _) = check_system(&staged.core.plugin_type, &staged.core.id, &entry, &staged.core.assets);
+        if !result.ok {
+            let _ = std::fs::remove_dir_all(&staged.dir);
+            return Err(AppError::BadRequest(format!("插件内容有 {} 处问题, 无法安装", result.issues.len().max(1))));
+        }
+    }
     if let Some(expected) = community_sha256 {
         if !expected.eq_ignore_ascii_case(&staged.sha256) {
             let _ = std::fs::remove_dir_all(&staged.dir);
@@ -308,6 +340,21 @@ pub fn load(app_data_dir: &Path, id: &str) -> AppResult<PluginContent> {
     Ok(PluginContent { manifest, entry, assets, texts })
 }
 
+/// 读出已安装插件的清单核心字段与入口文本 (系统插件重建运行时用; 每次都重新解析清单)。
+pub fn read_entry(app_data_dir: &Path, id: &str) -> AppResult<(ManifestCore, String)> {
+    let dir = installed_dir(app_data_dir, id)?;
+    let (core, _) = parse_manifest(&std::fs::read(dir.join(MANIFEST_FILE))?)?;
+    if core.id != id {
+        return Err(AppError::BadRequest("插件清单与安装目录不一致".into()));
+    }
+    let bytes = std::fs::read(dir.join(&core.entry))?;
+    if bytes.len() as u64 > MAX_ENTRY_BYTES {
+        return Err(AppError::BadRequest("入口文件过大".into()));
+    }
+    let entry = String::from_utf8(bytes).map_err(|_| AppError::BadRequest(format!("{} 不是 UTF-8 文本", core.entry)))?;
+    Ok((core, entry))
+}
+
 pub fn uninstall(app_data_dir: &Path, id: &str) -> AppResult<()> {
     let dir = installed_dir(app_data_dir, id)?;
     std::fs::remove_dir_all(dir)?;
@@ -364,6 +411,50 @@ mod tests {
         uninstall(app, "demo-a").unwrap();
         assert!(list(app).unwrap().is_empty());
         assert!(load(app, "demo-a").is_err());
+    }
+
+    fn provider_pkg(id: &str, base_url: &str) -> Files {
+        let manifest = format!(
+            r#"{{"manifest":1,"id":"{id}","type":"provider","version":"1.0.0","name":"x","author":"a","entry":"provider.yaml","assets":[]}}"#
+        );
+        let yaml = format!(
+            "display_name: Relay\ncategory: aggregator\ncompatibility: untested\nauth: {{ type: api_key, header_name: Authorization, header_format: bearer }}\nendpoints:\n  - {{ id: main, label: Main, base_url: '{base_url}', messages_path: /v1/messages }}\nmodel_discovery: {{ enabled: false }}\n"
+        );
+        let mut f = Files::new();
+        f.insert(MANIFEST_FILE.into(), manifest.into_bytes());
+        f.insert("provider.yaml".into(), yaml.into_bytes());
+        f
+    }
+
+    #[test]
+    fn provider_plugins_are_checked_in_rust_and_reach_the_registry() {
+        use crate::plugins::runtime::installed_provider_plugins;
+        let tmp = tempfile::tempdir().unwrap();
+        let app = tmp.path();
+
+        let s = stage(app, provider_pkg("relay", "https://api.example.com"), local(app)).unwrap();
+        let sys = s.system.as_ref().expect("系统插件带 Rust 校验结果");
+        assert!(sys.ok, "{:?}", sys.issues);
+        assert!(sys.diff.is_none(), "首次安装没有差异");
+        install(app, &s.staging_id, None).unwrap();
+
+        let plugins = installed_provider_plugins(app, &Default::default());
+        assert_eq!(plugins.len(), 1);
+        assert_eq!(plugins[0].0.id, "plugin:relay");
+        assert!(plugins[0].1.enabled, "厂商插件默认生效");
+
+        // 更新换了域名: 暂存时给出能力差异
+        let s2 = stage(app, provider_pkg("relay", "https://other.example.com"), local(app)).unwrap();
+        let diff = s2.system.unwrap().diff.expect("与已装版本比较");
+        assert_eq!(diff.added_hosts, vec!["other.example.com"]);
+        assert_eq!(diff.removed_hosts, vec!["api.example.com"]);
+        discard(&s2.staging_id);
+
+        // 内容有问题: 暂存时报出来, 安装被 Rust 拒绝 (不信前端)
+        let bad = stage(app, provider_pkg("relay", "http://api.example.com"), local(app)).unwrap();
+        assert!(!bad.system.as_ref().unwrap().ok);
+        assert!(install(app, &bad.staging_id, None).is_err());
+        assert_eq!(installed_provider_plugins(app, &Default::default())[0].0.endpoints[0].base_url, "https://api.example.com");
     }
 
     #[test]

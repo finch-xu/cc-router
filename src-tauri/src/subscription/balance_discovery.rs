@@ -19,7 +19,7 @@ use sqlx::SqlitePool;
 use tracing::{info, warn};
 
 use crate::error::AppError;
-use crate::provider::model::BalanceParser;
+use crate::provider::model::{BalanceParser, JsonBalanceSpec};
 use crate::provider::BalanceMethodExt;
 use crate::subscription::{
     model::{BalanceDetail, BalanceEntry, BalanceSeverity, BalanceSnapshot, SubscriptionRow},
@@ -71,6 +71,11 @@ pub async fn fetch(
     match bd.parser {
         BalanceParser::Deepseek => parse_deepseek(&text),
         BalanceParser::Openrouter => parse_openrouter(&text),
+        BalanceParser::Json => match &bd.json {
+            Some(spec) => parse_json(&text, spec),
+            // 加载期的语义校验保证 parser: json 一定带规则; 老快照被手改才会走到这里
+            None => Err(BalanceError::InvalidResponse("parser json 缺少取值规则".into())),
+        },
     }
 }
 
@@ -228,6 +233,50 @@ fn parse_openrouter(text: &str) -> Result<BalanceSnapshot, BalanceError> {
     })
 }
 
+/// 声明式 `parser: json` (厂商插件 / 内置 yaml): 按 [`JsonBalanceSpec`] 的路径取值。
+fn parse_json(text: &str, spec: &JsonBalanceSpec) -> Result<BalanceSnapshot, BalanceError> {
+    use cc_router_plugin_spec::balance_json::{eval, number, parse_path};
+    let v: serde_json::Value = serde_json::from_str(text)?;
+    let lookup = |path: &str| -> Result<Option<&serde_json::Value>, BalanceError> {
+        let segs = parse_path(path).map_err(BalanceError::InvalidResponse)?;
+        Ok(eval(&v, &segs))
+    };
+    let divisor = spec.divisor.unwrap_or(1.0);
+    let amount = |path: &str| -> Result<Option<f64>, BalanceError> {
+        Ok(lookup(path)?.and_then(number).map(|n| n / divisor))
+    };
+    let remaining = amount(&spec.remaining)?
+        .ok_or_else(|| BalanceError::InvalidResponse(format!("{} 不是数字或不存在", spec.remaining)))?;
+    let used = match spec.used.as_deref() {
+        Some(p) => amount(p)?,
+        None => None,
+    };
+    let is_available = match spec.available.as_deref() {
+        Some(p) => lookup(p)?.and_then(serde_json::Value::as_bool),
+        None => None,
+    };
+    let severity = if remaining < 0.0 {
+        BalanceSeverity::Critical
+    } else if spec.low_below.is_some_and(|low| remaining < low) {
+        BalanceSeverity::Low
+    } else {
+        BalanceSeverity::Normal
+    };
+    let used_text = used.map(format_amount);
+    Ok(BalanceSnapshot {
+        is_available,
+        entries: vec![BalanceEntry {
+            label: format!("余额 ({})", spec.unit),
+            value_text: format_amount(remaining),
+            unit: spec.unit.clone(),
+            hint: used_text.as_ref().map(|u| format!("已用 {u}")),
+            severity,
+            detail: Some(BalanceDetail::Remaining { used: used_text }),
+        }],
+        fetched_at: Utc::now(),
+    })
+}
+
 /// 2 decimal places — keeps the UI consistent with DeepSeek's string-formatted amounts.
 fn format_amount(v: f64) -> String {
     format!("{:.2}", v)
@@ -360,6 +409,28 @@ mod tests {
         )
         .expect("old cache shape");
         assert_eq!(e.detail, None);
+    }
+
+    fn json_spec(extra: &str) -> JsonBalanceSpec {
+        serde_yaml::from_str(&format!("{{ remaining: \"$.data.quota\", unit: USD{extra} }}")).unwrap()
+    }
+
+    #[test]
+    fn parse_json_reads_paths_divides_and_classifies() {
+        let body = r#"{"data":{"quota":"2500000","used_quota":500000,"ok":true}}"#;
+        let snap = parse_json(body, &json_spec(", used: \"$.data.used_quota\", available: \"$.data.ok\", divisor: 500000, low_below: 10")).unwrap();
+        let e = &snap.entries[0];
+        assert_eq!(e.value_text, "5.00");
+        assert_eq!(e.unit, "USD");
+        assert_eq!(e.severity, BalanceSeverity::Low);
+        assert_eq!(e.detail, Some(BalanceDetail::Remaining { used: Some("1.00".into()) }));
+        assert_eq!(snap.is_available, Some(true));
+
+        let plain = parse_json(r#"{"data":{"quota":-1}}"#, &json_spec("")).unwrap();
+        assert_eq!(plain.entries[0].severity, BalanceSeverity::Critical);
+        assert_eq!(plain.entries[0].hint, None);
+        assert!(parse_json(r#"{"data":{}}"#, &json_spec("")).is_err());
+        assert!(parse_json("not json", &json_spec("")).is_err());
     }
 
     #[test]

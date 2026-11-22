@@ -7,9 +7,11 @@
 //!
 //! 插件只装数据不装代码, 所以「从链接安装」不需要额外门槛 (设计 §6.1)。
 
+pub mod config;
 pub mod files;
 pub mod github;
 pub mod link;
+pub mod runtime;
 pub mod store;
 
 use serde::{Deserialize, Serialize};
@@ -30,7 +32,7 @@ pub const MAX_TOTAL_BYTES: u64 = 60 * 1024 * 1024;
 pub const MAX_INDEX_BYTES: u64 = 4 * 1024 * 1024;
 
 /// 本版 app 能加载的插件类型 (与 `src/plugins/manifest.ts::SUPPORTED_TYPES` 一致)。
-pub const SUPPORTED_TYPES: &[&str] = &["theme", "receipt"];
+pub const SUPPORTED_TYPES: &[&str] = &["theme", "receipt", "provider"];
 /// 不能当插件 id 的名字 (与 `src/plugins/manifest.ts::RESERVED_IDS` 一致, `pnpm check:plugins` 比对两边)。
 pub const RESERVED_IDS: &[&str] = &["classic", "sketch", "win2000", "win2k", "quiet", "sparrow", "plain", "cc-router"];
 

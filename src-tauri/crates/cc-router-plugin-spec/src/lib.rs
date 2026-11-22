@@ -4,9 +4,11 @@
 //! 唯一的规则来源, app (主 crate) 与社区仓库 CI (`ccr-plugin-check`) 共用。只依赖纯数据 crate。
 //! 设计: docs/superpowers/specs/2026-11-22-system-plugins-design.md
 
+pub mod balance_json;
 pub mod check;
 pub mod plugin;
 pub mod provider;
+pub mod provider_plugin;
 
 use std::fmt;
 

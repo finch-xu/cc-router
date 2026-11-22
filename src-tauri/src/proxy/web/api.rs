@@ -202,6 +202,9 @@ web_commands! {
     install_staged_plugin(staging_id: String, community_sha256: Option<String>) => Err::<(), AppError>(AppError::BadRequest(DESKTOP_ONLY.into())),
     discard_staged_plugin(staging_id: String) => Err::<(), AppError>(AppError::BadRequest(DESKTOP_ONLY.into())),
     uninstall_plugin(id: String) => Err::<(), AppError>(AppError::BadRequest(DESKTOP_ONLY.into())),
+    // 启用会改变 app 行为 (厂商出现在列表里 / 以后的规则改请求), 只在桌面; 停用是安全方向, 两边都开放
+    enable_plugin(id: String) => Err::<(), AppError>(AppError::BadRequest(DESKTOP_ONLY.into())),
+    disable_plugin(id: String) => commands::plugins::disable_plugin(st, args.id).await,
     fetch_community_index() => Err::<(), AppError>(AppError::BadRequest(DESKTOP_ONLY.into())),
     // onboarding
     get_onboarding_state() => commands::onboarding::get_onboarding_state(st).await,
@@ -324,6 +327,7 @@ mod tests {
             "discard_staged_plugin",
             "uninstall_plugin",
             "fetch_community_index",
+            "enable_plugin",
         ] {
             assert!(REGISTERED.contains(&name), "{name} 必须登记 (两边集合要一致)");
             let line = src
