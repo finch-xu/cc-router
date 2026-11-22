@@ -120,6 +120,15 @@ pub struct Settings {
     /// 刻意不进 SettingsPatch: 只由 mark_release_notes_seen 写入当前版本。
     #[serde(default)]
     pub last_seen_release_notes: Option<String>,
+    /// 内置系统桌面通知总开关 (设计 §7.5)。默认关: macOS 首次发送才触发系统授权, 不在启动时打扰。
+    #[serde(default)]
+    pub desktop_notifications_enabled: bool,
+    /// 内置系统桌面通知勾选的事件名列表 (默认只勾 subscription.auth_failed / subscription.quota_reached / proxy.stopped)。
+    #[serde(default = "default_desktop_notification_events")]
+    pub desktop_notification_events: Vec<String>,
+    /// 每日用量汇总的本地触发时间 (`HH:MM`), 桌面通知与通知插件共用。默认 `21:00`。
+    #[serde(default = "default_daily_summary_time")]
+    pub daily_summary_time: String,
 }
 
 fn default_port() -> u16 {
@@ -166,6 +175,16 @@ fn default_receipt_print_animation() -> bool {
 fn default_auto_check_updates() -> bool {
     true
 }
+fn default_desktop_notification_events() -> Vec<String> {
+    vec![
+        "subscription.auth_failed".to_string(),
+        "subscription.quota_reached".to_string(),
+        "proxy.stopped".to_string(),
+    ]
+}
+fn default_daily_summary_time() -> String {
+    "21:00".to_string()
+}
 
 impl Default for Settings {
     fn default() -> Self {
@@ -194,6 +213,9 @@ impl Default for Settings {
             receipt_print_animation: default_receipt_print_animation(),
             auto_check_updates: default_auto_check_updates(),
             last_seen_release_notes: None,
+            desktop_notifications_enabled: false,
+            desktop_notification_events: default_desktop_notification_events(),
+            daily_summary_time: default_daily_summary_time(),
         }
     }
 }
@@ -222,6 +244,9 @@ pub struct SettingsPatch {
     pub tui_enabled: Option<bool>,
     pub receipt_print_animation: Option<bool>,
     pub auto_check_updates: Option<bool>,
+    pub desktop_notifications_enabled: Option<bool>,
+    pub desktop_notification_events: Option<Vec<String>>,
+    pub daily_summary_time: Option<String>,
 }
 
 impl Settings {
@@ -291,6 +316,15 @@ impl Settings {
         }
         if let Some(p) = patch.auto_check_updates {
             self.auto_check_updates = p;
+        }
+        if let Some(p) = patch.desktop_notifications_enabled {
+            self.desktop_notifications_enabled = p;
+        }
+        if let Some(p) = patch.desktop_notification_events {
+            self.desktop_notification_events = p;
+        }
+        if let Some(p) = patch.daily_summary_time {
+            self.daily_summary_time = p;
         }
     }
 }

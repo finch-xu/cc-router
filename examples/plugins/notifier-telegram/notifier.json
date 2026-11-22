@@ -1,0 +1,30 @@
+{
+  "notifierApi": 1,
+  "params": [
+    { "id": "bot_token", "type": "secret",
+      "label": { "zh": "Bot Token", "zh-Hant": "Bot Token", "en": "Bot Token", "ja": "Bot Token" } },
+    { "id": "chat_id", "type": "string",
+      "label": { "zh": "Chat ID", "zh-Hant": "Chat ID", "en": "Chat ID", "ja": "Chat ID" } }
+  ],
+  "events": [
+    "subscription.auth_failed",
+    "subscription.quota_reached",
+    "subscription.quota_warning",
+    "subscription.balance_low",
+    "requests.all_failed",
+    "proxy.stopped",
+    "update.available",
+    "usage.daily_summary"
+  ],
+  "request": {
+    "method": "POST",
+    "url": "https://api.telegram.org/bot{{params.bot_token}}/sendMessage",
+    "body": {
+      "type": "json",
+      "template": {
+        "chat_id": "{{params.chat_id}}",
+        "text": "{{title}}\n{{body}}"
+      }
+    }
+  }
+}

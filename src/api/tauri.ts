@@ -272,6 +272,12 @@ export const api = {
   disablePlugin: (id: string) => invoke<void>("disable_plugin", { id }),
   /** 保存系统插件用户参数 (网页端也开放: 改参数本身不启用插件) */
   setPluginParams: (id: string, params: Record<string, unknown>) => invoke<void>("set_plugin_params", { id, params }),
+  /** 通知插件测试推送 (仅桌面端; 网页端拒绝) */
+  testNotifierPlugin: (id: string) => invoke<import("@/types").NotifierDeliveryRecord>("test_notifier_plugin", { id }),
+  /** 查询通知插件最近发送记录 (内存最近 20 条, 不含请求体) */
+  listNotifierDeliveries: (id: string) => invoke<import("@/types").NotifierDeliveryRecord[]>("list_notifier_deliveries", { id }),
+  /** 发送系统桌面测试通知 (仅桌面端; 网页端拒绝) */
+  testDesktopNotification: () => invoke<void>("test_desktop_notification"),
   fetchCommunityIndex: () => invoke<unknown>("fetch_community_index"),
 
   // onboarding

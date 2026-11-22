@@ -1,0 +1,17 @@
+{
+  "manifest": 1,
+  "id": "notifier-bark",
+  "type": "notifier",
+  "version": "1.0.0",
+  "name": { "zh": "Bark 推送", "zh-Hant": "Bark 推播", "en": "Bark", "ja": "Bark 通知" },
+  "description": {
+    "zh": "通过 Bark 将 cc-router 告警推送到 iPhone / iPad。",
+    "zh-Hant": "透過 Bark 將 cc-router 警示推播到 iPhone / iPad。",
+    "en": "Push cc-router alerts to iOS devices via Bark.",
+    "ja": "Bark 経由で iOS デバイスに cc-router のアラートを送信します。"
+  },
+  "author": "cc-router",
+  "license": "MIT",
+  "entry": "notifier.json",
+  "assets": []
+}

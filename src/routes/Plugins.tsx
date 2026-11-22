@@ -1,5 +1,5 @@
 import { useMemo, useState } from "react";
-import { Coins, ExternalLink, FolderOpen, Link2, Palette, Plug, Puzzle, Receipt, SlidersHorizontal } from "lucide-react";
+import { Bell, Coins, ExternalLink, FolderOpen, Link2, Palette, Plug, Puzzle, Receipt, SlidersHorizontal } from "lucide-react";
 import Github from "@lobehub/icons/es/Github";
 import { useNavigate } from "react-router";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
@@ -24,10 +24,10 @@ import { pluginLinks, type PluginLinks } from "@/plugins/links";
 import type { InstalledPlugin, StagedPlugin } from "@/types";
 
 type Tab = "community" | "installed";
-type Kind = "all" | "theme" | "receipt" | "provider" | "pricing" | "rules";
+type Kind = "all" | "theme" | "receipt" | "provider" | "pricing" | "rules" | "notifier";
 /** 类型 chip 分两组: 外观 (主题 / 小票) 与功能 (系统插件)。某类型两边都没有条目就不显示 */
 const LOOK_KINDS = ["theme", "receipt"] as const;
-const FEATURE_KINDS = ["provider", "pricing", "rules"] as const;
+const FEATURE_KINDS = ["provider", "pricing", "rules", "notifier"] as const;
 
 /** 清单原文里的名字 / 介绍 (已安装列表用; 内容在安装时已校验过) */
 function manifestText(m: unknown, key: "name" | "description"): LocalizedText | undefined {
@@ -271,6 +271,8 @@ export function PluginsPage() {
                         <Coins size={22} />
                       ) : e.type === "rules" ? (
                         <SlidersHorizontal size={22} />
+                      ) : e.type === "notifier" ? (
+                        <Bell size={22} />
                       ) : (
                         <Palette size={22} />
                       )}
@@ -364,7 +366,7 @@ export function PluginsPage() {
                         {t("plugins.btn.addSubscription")}
                       </button>
                     )}
-                    {p.param_decls && p.param_decls.length > 0 && (
+                    {(p.plugin_type === "notifier" || (p.param_decls && p.param_decls.length > 0)) && (
                       <button
                         className="btn sm"
                         type="button"
@@ -470,7 +472,7 @@ export function PluginsPage() {
           setTab("installed");
           setKind("all");
           const found = installedById.get(id);
-          if (found?.param_decls && found.param_decls.length > 0) {
+          if (found?.plugin_type === "notifier" || (found?.param_decls && found.param_decls.length > 0)) {
             setEditingParams({ id, promptEnable: true });
           }
         }}

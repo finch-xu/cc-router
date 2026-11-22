@@ -1,0 +1,29 @@
+{
+  "notifierApi": 1,
+  "params": [
+    { "id": "server", "type": "base_url", "default": "https://api.day.app",
+      "label": { "zh": "Bark 服务器", "zh-Hant": "Bark 伺服器", "en": "Bark server", "ja": "Bark サーバー" } },
+    { "id": "device_key", "type": "secret",
+      "label": { "zh": "Device Key", "zh-Hant": "Device Key", "en": "Device Key", "ja": "Device Key" } }
+  ],
+  "events": [
+    "subscription.auth_failed",
+    "subscription.quota_reached",
+    "subscription.balance_low",
+    "requests.all_failed",
+    "proxy.stopped",
+    "usage.daily_summary"
+  ],
+  "request": {
+    "method": "POST",
+    "url": "{{params.server}}/{{params.device_key}}",
+    "body": {
+      "type": "json",
+      "template": {
+        "title": "{{title}}",
+        "body": "{{body}}",
+        "group": "cc-router"
+      }
+    }
+  }
+}

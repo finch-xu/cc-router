@@ -1,0 +1,30 @@
+{
+  "notifierApi": 1,
+  "params": [
+    { "id": "server", "type": "base_url", "default": "https://ntfy.sh",
+      "label": { "zh": "ntfy 服务器", "zh-Hant": "ntfy 伺服器", "en": "ntfy server", "ja": "ntfy サーバー" } },
+    { "id": "topic", "type": "string",
+      "label": { "zh": "主题（Topic）", "zh-Hant": "主題（Topic）", "en": "Topic", "ja": "トピック" } },
+    { "id": "token", "type": "secret", "optional": true,
+      "label": { "zh": "访问令牌（可选）", "zh-Hant": "存取權杖（可選）", "en": "Access token (optional)", "ja": "アクセストークン（任意）" } }
+  ],
+  "events": [
+    "subscription.auth_failed",
+    "subscription.quota_reached",
+    "subscription.quota_warning",
+    "subscription.balance_low",
+    "requests.all_failed",
+    "proxy.stopped",
+    "update.available",
+    "usage.daily_summary"
+  ],
+  "request": {
+    "method": "POST",
+    "url": "{{params.server}}/{{params.topic}}",
+    "headers": {
+      "Authorization": "{{#if params.token}}Bearer {{params.token}}{{/if}}",
+      "Title": "{{title}}"
+    },
+    "body": { "type": "text", "template": "{{body}}" }
+  }
+}

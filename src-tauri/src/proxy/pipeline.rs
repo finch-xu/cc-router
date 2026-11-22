@@ -289,6 +289,10 @@ pub async fn dispatch(
                 summary.push(format!("- {}: {}", g.row.display_name, reason));
             }
         }
+        state.notify.emit(crate::notify::NotifyEvent::RequestsAllFailed {
+            virtual_model: vm_name.as_str().to_string(),
+            count: 1,
+        });
         return Ok(overloaded::response_with_summary(vm_name.clone(), &summary));
     }
 
@@ -1980,6 +1984,11 @@ pub async fn dispatch(
             "candidates": summary,
         })),
     );
+
+    state.notify.emit(crate::notify::NotifyEvent::RequestsAllFailed {
+        virtual_model: vm_name.as_str().to_string(),
+        count: 1,
+    });
 
     let mut resp = overloaded::response_with_summary(vm_name.clone(), &summary);
     response_headers::set_retry_after(resp.headers_mut(), response_headers::retry_after_secs(cooldowns_ms));

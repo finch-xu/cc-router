@@ -44,6 +44,13 @@ export function useSettingsForm() {
   const [webUiEnabled, setWebUiEnabled] = useState(false);
   const [webUiAuthEnabled, setWebUiAuthEnabled] = useState(true);
   const [tuiEnabled, setTuiEnabled] = useState(false);
+  const [desktopNotificationsEnabled, setDesktopNotificationsEnabled] = useState(false);
+  const [desktopNotificationEvents, setDesktopNotificationEvents] = useState<string[]>([
+    "subscription.auth_failed",
+    "subscription.quota_reached",
+    "proxy.stopped",
+  ]);
+  const [dailySummaryTime, setDailySummaryTime] = useState("21:00");
 
   // 仅在首次拿到 settings.data 时灌入本地 state. 后续 mutate refetch
   // 不再回灌, 否则会覆盖用户正在 input 里编辑但尚未 blur 的值 (port/cors origin 跳光标).
@@ -68,6 +75,15 @@ export function useSettingsForm() {
     setWebUiEnabled(settings.data.web_ui_enabled);
     setWebUiAuthEnabled(settings.data.web_ui_auth_enabled);
     setTuiEnabled(settings.data.tui_enabled);
+    setDesktopNotificationsEnabled(settings.data.desktop_notifications_enabled ?? false);
+    setDesktopNotificationEvents(
+      settings.data.desktop_notification_events ?? [
+        "subscription.auth_failed",
+        "subscription.quota_reached",
+        "proxy.stopped",
+      ],
+    );
+    setDailySummaryTime(settings.data.daily_summary_time ?? "21:00");
     initializedRef.current = true;
   }, [settings.data]);
 
@@ -171,6 +187,23 @@ export function useSettingsForm() {
   async function changeCorsOrigin(next: string) {
     await patch({ cors_allow_origin: next });
   }
+  async function changeDesktopNotificationsEnabled(next: boolean) {
+    setDesktopNotificationsEnabled(next);
+    await patch({ desktop_notifications_enabled: next });
+  }
+  async function toggleDesktopNotificationEvent(eventName: string, checked: boolean) {
+    const next = checked
+      ? Array.from(new Set([...desktopNotificationEvents, eventName]))
+      : desktopNotificationEvents.filter((e) => e !== eventName);
+    setDesktopNotificationEvents(next);
+    await patch({ desktop_notification_events: next });
+  }
+  async function changeDailySummaryTime(next: string) {
+    setDailySummaryTime(next);
+    if (/^\d{2}:\d{2}$/.test(next)) {
+      await patch({ daily_summary_time: next });
+    }
+  }
 
   async function restartProxy() {
     // 保存失败已在 patch 里提示过, 这里只等它结束
@@ -228,6 +261,9 @@ export function useSettingsForm() {
     webUiEnabled,
     webUiAuthEnabled,
     tuiEnabled,
+    desktopNotificationsEnabled,
+    desktopNotificationEvents,
+    dailySummaryTime,
     changeLanguage,
     changeUpdateSource,
     changeAutoCheckUpdates,
@@ -247,6 +283,9 @@ export function useSettingsForm() {
     changeTuiEnabled,
     changeCorsEnabled,
     changeCorsOrigin,
+    changeDesktopNotificationsEnabled,
+    toggleDesktopNotificationEvent,
+    changeDailySummaryTime,
   };
 }
 

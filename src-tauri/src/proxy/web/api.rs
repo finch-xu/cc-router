@@ -209,6 +209,9 @@ web_commands! {
     enable_plugin(id: String) => Err::<(), AppError>(AppError::BadRequest(DESKTOP_ONLY.into())),
     disable_plugin(id: String) => commands::plugins::disable_plugin(st, args.id).await,
     set_plugin_params(id: String, params: serde_json::Map<String, Value>) => commands::plugins::set_plugin_params(st, args.id, args.params).await,
+    test_notifier_plugin(id: String) => Err::<(), AppError>(AppError::BadRequest(DESKTOP_ONLY.into())),
+    list_notifier_deliveries(id: String) => commands::plugins::list_notifier_deliveries(st, args.id).await,
+    test_desktop_notification() => Err::<(), AppError>(AppError::BadRequest(DESKTOP_ONLY.into())),
     fetch_community_index() => Err::<(), AppError>(AppError::BadRequest(DESKTOP_ONLY.into())),
     // onboarding
     get_onboarding_state() => commands::onboarding::get_onboarding_state(st).await,
@@ -332,6 +335,8 @@ mod tests {
             "uninstall_plugin",
             "fetch_community_index",
             "enable_plugin",
+            "test_notifier_plugin",
+            "test_desktop_notification",
         ] {
             assert!(REGISTERED.contains(&name), "{name} 必须登记 (两边集合要一致)");
             let line = src

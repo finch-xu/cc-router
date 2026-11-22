@@ -13,7 +13,7 @@ use std::time::Duration;
 
 use chrono::Utc;
 use sqlx::SqlitePool;
-use tauri::{AppHandle, Emitter};
+use tauri::{AppHandle, Emitter, Manager};
 use tokio::sync::{mpsc, RwLock};
 use tracing::{info, warn};
 use uuid::Uuid;
@@ -77,7 +77,15 @@ pub fn apply<'a>(
 
             let _ = app.emit("subscription_state_changed", &id.to_string());
 
-            let display_name = rt.read().await.row.display_name.clone();
+            let (display_name, provider_name) = {
+                let g = rt.read().await;
+                let p = if g.row.provider_display_name.is_empty() {
+                    g.row.provider_id.clone()
+                } else {
+                    g.row.provider_display_name.clone()
+                };
+                (g.row.display_name.clone(), p)
+            };
             let from_str = serde_json::to_value(prev_state)
                 .ok()
                 .and_then(|v| v.as_str().map(str::to_string))
@@ -98,6 +106,53 @@ pub fn apply<'a>(
                     "last_error_code": error_message_update.as_deref().and_then(LastError::parse),
                 }),
             );
+
+            if let Some(st) = app.try_state::<crate::state::AppState>() {
+                let reason = error_message_update
+                    .clone()
+                    .unwrap_or_else(|| describe_event(&event).to_string());
+                let notify_event = if transition.new_state == SubscriptionState::AuthFailed {
+                    Some(crate::notify::NotifyEvent::SubscriptionAuthFailed {
+                        subscription_id: id.to_string(),
+                        subscription_name: display_name,
+                        provider_name,
+                        reason,
+                    })
+                } else if prev_state == SubscriptionState::Healthy
+                    && matches!(
+                        transition.new_state,
+                        SubscriptionState::RateLimited
+                            | SubscriptionState::QuotaExhausted
+                            | SubscriptionState::TransientError
+                    )
+                {
+                    Some(crate::notify::NotifyEvent::SubscriptionCooldown {
+                        subscription_id: id.to_string(),
+                        subscription_name: display_name,
+                        provider_name,
+                        reason,
+                    })
+                } else if transition.new_state == SubscriptionState::Healthy
+                    && matches!(
+                        prev_state,
+                        SubscriptionState::AuthFailed
+                            | SubscriptionState::RateLimited
+                            | SubscriptionState::QuotaExhausted
+                            | SubscriptionState::TransientError
+                    )
+                {
+                    Some(crate::notify::NotifyEvent::SubscriptionRecovered {
+                        subscription_id: id.to_string(),
+                        subscription_name: display_name,
+                        provider_name,
+                    })
+                } else {
+                    None
+                };
+                if let Some(ne) = notify_event {
+                    st.notify.emit(ne);
+                }
+            }
         }
 
         if let Some(duration) = transition.schedule_cooldown {

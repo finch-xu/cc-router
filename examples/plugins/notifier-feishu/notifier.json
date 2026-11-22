@@ -1,0 +1,26 @@
+{
+  "notifierApi": 1,
+  "params": [
+    { "id": "token", "type": "secret",
+      "label": { "zh": "Webhook Token（链接末尾部分）", "zh-Hant": "Webhook Token（連結末尾部分）", "en": "Webhook token (URL suffix)", "ja": "Webhook トークン（URL 末尾）" } }
+  ],
+  "events": [
+    "subscription.auth_failed",
+    "subscription.quota_reached",
+    "subscription.quota_warning",
+    "requests.all_failed",
+    "proxy.stopped",
+    "usage.daily_summary"
+  ],
+  "request": {
+    "method": "POST",
+    "url": "https://open.feishu.cn/open-apis/bot/v2/hook/{{params.token}}",
+    "body": {
+      "type": "json",
+      "template": {
+        "msg_type": "text",
+        "content": { "text": "{{title}}\n{{body}}" }
+      }
+    }
+  }
+}

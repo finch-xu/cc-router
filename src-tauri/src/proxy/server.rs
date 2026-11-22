@@ -39,6 +39,8 @@ impl ProxyHooks for AppHooks {
         // 停止时不删 runtime.json: TUI 连不上会重读, 读到旧端口照样连不上, 按「未运行」处理.
         if ports.is_some() {
             write_runtime_file(&self.0).await;
+        } else if let Some(reason) = self.0.proxy.snapshot().last_error {
+            self.0.notify.emit(crate::notify::NotifyEvent::ProxyStopped { reason });
         }
         crate::tray::refresh(&self.0.app_handle);
         let _ = self.0.app_handle.emit("proxy_restarted", ());

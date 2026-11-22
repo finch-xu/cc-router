@@ -1,0 +1,17 @@
+{
+  "manifest": 1,
+  "id": "notifier-slack",
+  "type": "notifier",
+  "version": "1.0.0",
+  "name": { "zh": "Slack Webhook", "zh-Hant": "Slack Webhook", "en": "Slack Webhook", "ja": "Slack Webhook" },
+  "description": {
+    "zh": "通过 Slack Incoming Webhook 将 cc-router 状态发到指定频道。",
+    "zh-Hant": "透過 Slack Incoming Webhook 將 cc-router 狀態發送到指定頻道。",
+    "en": "Post cc-router alerts to a Slack channel via Incoming Webhook.",
+    "ja": "Slack Incoming Webhook でチャンネルに cc-router のアラートを投稿します。"
+  },
+  "author": "cc-router",
+  "license": "MIT",
+  "entry": "notifier.json",
+  "assets": []
+}
