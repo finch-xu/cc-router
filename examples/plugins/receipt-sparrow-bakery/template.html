@@ -16,8 +16,9 @@
     <p class="soldout">sold out · nothing on this shelf</p>
     {{else}}
     {{#each lines}}
-    <div class="row item"><span class="name">{{model}}</span><span>{{tokens}}</span></div>
-    <div class="row detail"><span class="name">{{provider}}{{#if provider}}{{#if subscription}} / {{/if}}{{/if}}{{subscription}}</span>{{#if options.showRequests}}<span>× {{requests}}</span>{{/if}}</div>
+    <!-- 「只看合计」的按订阅一组没有模型名: 那时用订阅名当这一行的名字 -->
+    <div class="row item"><span class="name">{{#if model}}{{model}}{{else}}{{subscription}}{{/if}}</span><span>{{tokens}}</span></div>
+    <div class="row detail"><span class="name">{{#if model}}{{provider}}{{#if provider}}{{#if subscription}} / {{/if}}{{/if}}{{subscription}}{{else}}{{provider}}{{/if}}</span>{{#if options.showRequests}}<span>× {{requests}}</span>{{/if}}</div>
     {{/each}}
     {{/if}}
   </section>

@@ -249,6 +249,7 @@ if (vt.theme) {
     check("设置: 关掉缓存行", !bySub.includes("cache write"));
     const totalsOnly = renderTemplate(vr.receipt.nodes, receiptData(sampleReceiptDto(), ctx, { ...DEFAULT_RECEIPT_OPTIONS, groupMode: "totals_only" }));
     check("设置: 只看合计", totalsOnly.includes("BY SUBSCRIPTION") && totalsOnly.includes("BY MODEL") && !totalsOnly.includes(" / </span>"));
+    check("设置: 只看合计时按订阅的行以订阅名为名", totalsOnly.includes('<div class="row item"><span class="name">Anthropic Main</span>') && !totalsOnly.includes('<div class="row item"><span class="name"></span>'));
     check("默认: 分组按虚拟模型且带分隔", html.includes("Anthropic / Anthropic Main"));
     check("小票范例渲染结果仍过 HTML 白名单", validateTemplateHtml(html).length === 0, JSON.stringify(validateTemplateHtml(html).slice(0, 3)));
   }
