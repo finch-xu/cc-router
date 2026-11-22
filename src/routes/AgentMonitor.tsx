@@ -5,7 +5,7 @@ import * as DropdownMenu from "@radix-ui/react-dropdown-menu";
 import ClaudeCode from "@lobehub/icons/es/ClaudeCode";
 import Codex from "@lobehub/icons/es/Codex";
 import { useT } from "@/i18n";
-import { isTauriHost } from "@/runtime";
+import { isTauriHost, runtime } from "@/runtime";
 import { agentNames, useAgentMonitor, useAgentMonitorBusy, useAgentVersion, useConfigureAgentMonitor } from "@/hooks/useAgentMonitor";
 
 const agentIcons = { claude: ClaudeCode.Color, codex: Codex };
@@ -61,8 +61,8 @@ function AgentRow({ row, configure, mutating }: {
   const action = cleanup ? "clear" : enabled ? "pause" : "enable";
   const label = cleanup ? "retry" : enabled ? "pause" : unconfigured ? "connect" : "enable";
 
-  function clear() {
-    if (window.confirm(t("agentMonitor.confirmClear", { client: name }))) {
+  async function clear() {
+    if (await runtime.confirm(t("agentMonitor.confirmClear", { client: name }))) {
       configure.mutate({ client: row.client, action: "clear" });
     }
   }

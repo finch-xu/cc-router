@@ -4,6 +4,8 @@ export interface Runtime {
   listen<T>(name: string, handler: (event: { payload: T }) => void): Promise<() => void>;
   openExternal(url: string): Promise<void>;
   copyText(text: string): Promise<void>;
+  /** 确认对话框: 桌面走 plugin-dialog (异步), web 走 window.confirm; 避免直接调 window.confirm (tauri-plugin-dialog 把它覆写成了 async 函数, 同步判真会直接跳过确认) */
+  confirm(message: string): Promise<boolean>;
   /** 桌面: 系统保存对话框, 返回用户选的路径 (取消 → null); web: 抛错 (调用方应先判 kind) */
   pickSavePath(opts: { defaultName: string; filters: { name: string; extensions: string[] }[] }): Promise<string | null>;
   /** 桌面: 系统选择文件夹对话框 (取消 → null); web: 抛错 (调用方应先判 kind) */

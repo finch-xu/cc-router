@@ -14,6 +14,7 @@ import {
 } from "@/lib/recommendedClaudeCodeEnv";
 import type { ClaudeCodeSyncStatus } from "@/types";
 import { errorText } from "@/lib/errorText";
+import { runtime } from "@/runtime";
 
 type BadgeKey = ClaudeCodeSyncStatus | "loading";
 
@@ -82,7 +83,7 @@ export function ClaudeCodeSettingsEditor() {
   );
 
   const handleReload = async () => {
-    if (isDirty && !window.confirm(t("guide.editor.confirm.discardDirty"))) return;
+    if (isDirty && !(await runtime.confirm(t("guide.editor.confirm.discardDirty")))) return;
     setDraft(null);
     await read.refetch();
   };

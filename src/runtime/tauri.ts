@@ -4,7 +4,7 @@ import { getCurrentWindow } from "@tauri-apps/api/window";
 import { downloadDir } from "@tauri-apps/api/path";
 import { open as openShell } from "@tauri-apps/plugin-shell";
 import { writeText } from "@tauri-apps/plugin-clipboard-manager";
-import { open as openDialog, save } from "@tauri-apps/plugin-dialog";
+import { confirm as confirmDialog, open as openDialog, save } from "@tauri-apps/plugin-dialog";
 import { platform } from "@tauri-apps/plugin-os";
 import type { Runtime } from "./types";
 
@@ -23,6 +23,7 @@ export const tauriRuntime: Runtime = {
       await navigator.clipboard.writeText(text);
     }
   },
+  confirm: (message) => confirmDialog(message),
   pickSavePath: async ({ defaultName, filters }) => {
     const p = await save({ defaultPath: defaultName, filters });
     return p ?? null;

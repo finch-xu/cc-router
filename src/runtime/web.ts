@@ -109,6 +109,7 @@ export const webRuntime: Runtime = {
       ta.remove();
     }
   },
+  confirm: async (message) => window.confirm(message),
   pickSavePath: () => {
     throw new Error("pickSavePath is desktop-only");
   },

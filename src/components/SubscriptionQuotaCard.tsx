@@ -9,6 +9,7 @@ import { fmtCompact, fmtTime, fmtTimeShort } from "@/lib/format";
 import { formatTokenShorthand, parseTokenShorthand } from "@/lib/quota";
 import type { QuotaPeriod, QuotaUsageDto, SubscriptionDto, TokenQuotas } from "@/types";
 import { errorText } from "@/lib/errorText";
+import { runtime } from "@/runtime";
 
 interface Props {
   subscription: SubscriptionDto;
@@ -86,7 +87,7 @@ export function SubscriptionQuotaCard({ subscription, onChanged }: Props) {
   }
 
   async function resetTotal() {
-    if (!window.confirm(t("quota.resetTotalConfirm"))) return;
+    if (!(await runtime.confirm(t("quota.resetTotalConfirm")))) return;
     setResetError(null);
     try {
       await resetMut.mutateAsync(subscription.id);

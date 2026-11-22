@@ -62,7 +62,7 @@ export function HttpsCertSection() {
   }
 
   async function onRegenerate() {
-    if (!confirm(t("settings.https.cert.regenerateConfirm"))) return;
+    if (!(await runtime.confirm(t("settings.https.cert.regenerateConfirm")))) return;
     try {
       const fresh = await api.tlsRegenerateLeaf();
       qc.setQueryData(["tlsStatus"], fresh);

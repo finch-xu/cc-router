@@ -149,12 +149,12 @@ export function useSettingsForm() {
     await patch({ auth_enabled: next });
   }
   async function changeWebUiEnabled(next: boolean) {
-    if (!next && runtime.kind === "web" && !confirm(t("settings.webUi.selfDisable.confirm"))) return;
+    if (!next && runtime.kind === "web" && !(await runtime.confirm(t("settings.webUi.selfDisable.confirm")))) return;
     setWebUiEnabled(next);
     await patch({ web_ui_enabled: next });
   }
   async function changeWebUiAuthEnabled(next: boolean) {
-    if (!next && !confirm(t("settings.webUi.auth.confirmOff"))) return;
+    if (!next && !(await runtime.confirm(t("settings.webUi.auth.confirmOff")))) return;
     if (next && runtime.kind === "web") alert(t("settings.webUi.auth.relogin"));
     setWebUiAuthEnabled(next);
     await patch({ web_ui_auth_enabled: next });
@@ -184,7 +184,7 @@ export function useSettingsForm() {
         https_port: s.https_port ?? 23457,
         listen_all: s.listen_all,
       });
-      if (warn && !confirm(t(warn))) return;
+      if (warn && !(await runtime.confirm(t(warn)))) return;
     }
     restartInFlightRef.current = true;
     try {

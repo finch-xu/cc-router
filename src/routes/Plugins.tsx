@@ -87,10 +87,11 @@ export function PluginsPage() {
 
   async function uninstall(p: InstalledPlugin) {
     const name = localized(manifestText(p.manifest, "name"), locale) || p.id;
-    if (!window.confirm(t("plugins.uninstall.confirm", { name }))) return;
-    setBusyId(p.id);
+    setBusyId(`__confirm:${p.id}`);
     setError(null);
     try {
+      if (!(await runtime.confirm(t("plugins.uninstall.confirm", { name })))) return;
+      setBusyId(p.id);
       if (themeId === `plugin:${p.id}`) setThemeId("quiet");
       await api.uninstallPlugin(p.id);
     } catch (e) {
