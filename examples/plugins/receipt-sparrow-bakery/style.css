@@ -1,0 +1,27 @@
+/* 麻雀面包房: 阳光奶白的纸, 姜橙封口, 水花蓝的小点缀 */
+.paper {
+  background: #fffaf1;
+  color: #2a1f17;
+  border-top: 6px solid #b9501c;
+  padding: 20px 20px 24px;
+  font-family: "Space Mono", ui-monospace, monospace;
+  font-size: 11.5px;
+  line-height: 1.6;
+}
+.head { text-align: center; }
+.head img { display: block; margin: 0 auto 4px; border-radius: 10px; }
+h1 { font-family: "Caveat", cursive; font-size: 34px; font-weight: 700; margin: 0; line-height: 1.1; color: #b9501c; }
+.tagline { margin: 0 0 6px; color: #6e6152; }
+.meta { margin: 0; font-size: 10px; color: #6e6152; }
+hr { border: 0; border-top: 1px dashed #c4b6a4; margin: 12px 0; }
+.row { display: flex; justify-content: space-between; gap: 10px; }
+.name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
+.group { margin-bottom: 8px; }
+.shelf { font-weight: 700; letter-spacing: 1px; }
+.item { padding-left: 10px; }
+.detail { padding-left: 18px; font-size: 10px; color: #6e6152; }
+.soldout { margin: 0; padding-left: 10px; font-size: 10px; color: #a8998a; font-style: italic; }
+.grand { font-size: 16px; font-weight: 700; margin: 6px 0 2px; padding-top: 6px; border-top: 2px solid #2a1f17; }
+footer { text-align: center; margin-top: 14px; color: #2a1f17; }
+footer svg { display: block; margin: 0 auto 6px; }
+.thanks { font-family: "Caveat", cursive; font-size: 20px; margin: 0; color: #1a78b8; }

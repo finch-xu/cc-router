@@ -1417,8 +1417,10 @@ export interface InstalledPlugin {
 export interface PluginContent {
   manifest: unknown;
   entry: string;
-  /** 资源路径 → data URL */
+  /** 二进制资源路径 → data URL */
   assets: Record<string, string>;
+  /** 文本资源 (小票模板 / 样式) 路径 → 原文 */
+  texts: Record<string, string>;
 }
 
 export interface StagedPlugin {
@@ -1426,6 +1428,8 @@ export interface StagedPlugin {
   manifest: unknown;
   entry: string;
   assets: { path: string; size: number }[];
+  /** 文本资源 (html / css) 原文 */
+  texts: Record<string, string>;
   total_size: number;
   sha256: string;
   source: PluginSource;

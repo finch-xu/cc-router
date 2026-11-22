@@ -1,0 +1,42 @@
+<div class="paper">
+  <header class="head">
+    <ccr-logo size="40"></ccr-logo>
+    <h1>Sparrow Bakery</h1>
+    <p class="tagline">fresh tokens, baked daily</p>
+    <p class="meta">No. {{receipt.no}} · {{receipt.issued.date}} {{receipt.issued.time}} UTC</p>
+    <p class="meta">{{receipt.start.date}} → {{receipt.end.date}}</p>
+  </header>
+
+  <hr>
+
+  {{#each groups}}
+  <section class="group">
+    <div class="row shelf"><span>{{name}}</span><span>{{subtotal.tokens}}</span></div>
+    {{#if empty}}
+    <p class="soldout">sold out · nothing on this shelf</p>
+    {{else}}
+    {{#each lines}}
+    <div class="row item"><span class="name">{{model}}</span><span>{{tokens}}</span></div>
+    <div class="row detail"><span class="name">{{provider}} / {{subscription}}</span><span>× {{requests}}</span></div>
+    {{/each}}
+    {{/if}}
+  </section>
+  {{/each}}
+
+  <hr>
+
+  <div class="row"><span>flour (input)</span><span>{{total.input}}</span></div>
+  <div class="row"><span>bread (output)</span><span>{{total.output}}</span></div>
+  {{#if total.hasCache}}
+  <div class="row"><span>proofing (cache write)</span><span>{{total.cacheWrite}}</span></div>
+  <div class="row"><span>day-old (cache read)</span><span>{{total.cacheRead}}</span></div>
+  {{/if}}
+  <div class="row grand"><span>TOTAL</span><span>{{total.tokens}}</span></div>
+  <div class="row"><span>loaves sold</span><span>{{total.requests}}</span></div>
+
+  <footer>
+    <ccr-qr size="72"></ccr-qr>
+    <p class="thanks">thank you, come again ♥</p>
+    <p class="meta">cc-router v{{receipt.version}} · {{receipt.site}}</p>
+  </footer>
+</div>

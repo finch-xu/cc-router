@@ -171,6 +171,83 @@ if (vt.theme) {
   check("非法插件 id 拒绝生成", threw);
 }
 
+// ---------- 4b. 小票插件 ----------
+{
+  const { parseTemplate, renderTemplate } = await import(`${SRC}plugins/receipt/template.ts`);
+  const { validateTemplateHtml } = await import(`${SRC}plugins/receipt/html.ts`);
+  const { parseReceiptCss, scopedCss } = await import(`${SRC}plugins/receipt/css.ts`);
+  const { validateReceipt } = await import(`${SRC}plugins/receipt/validate.ts`);
+  const { receiptData, sampleReceiptDto } = await import(`${SRC}plugins/receipt/fields.ts`);
+
+  // 模板语言
+  const tpl = (src, data) => {
+    const r = parseTemplate(src);
+    return r.nodes ? renderTemplate(r.nodes, data) : `ERR:${JSON.stringify(r.errors)}`;
+  };
+  check("模板: 输出转义", tpl("<b>{{x}}</b>", { x: "<img onerror=1>&" }) === "<b>&lt;img onerror=1&gt;&amp;</b>");
+  check("模板: each + 外层字段 + @index", tpl("{{#each xs}}{{@index}}{{n}}{{k}};{{/each}}", { k: "K", xs: [{ n: "a" }, { n: "b" }] }) === "0aK;1bK;");
+  check("模板: if / else / unless", tpl("{{#if a}}Y{{else}}N{{/if}}{{#unless a}}U{{/unless}}", { a: [] }) === "NU");
+  check("模板: 对象不输出", tpl("[{{o}}]", { o: { a: 1 } }) === "[]");
+  check("模板: 原型链字段取不到", tpl("[{{constructor.name}}][{{toString}}][{{xs.constructor}}]", { xs: [] }) === "[][][]");
+  for (const bad of ["{{#each a}}", "{{/if}}", "{{{raw}}}", "{{a b}}", "{{#if a}}{{/each}}", "{{x", "{{constructor.prototype}}x{{__proto__.y}}"]) {
+    const r = parseTemplate(bad);
+    // 原型链字段语法上合法, 但 lookup 只认自有键: 渲染结果为空
+    if (bad.includes("proto")) check(`模板: 原型链取不到值 ${bad}`, r.nodes && renderTemplate(r.nodes, {}) === "x");
+    else check(`模板拒绝 ${JSON.stringify(bad)}`, r.nodes === null);
+  }
+
+  // HTML 白名单
+  const htmlOk = (src) => validateTemplateHtml(src).length === 0;
+  for (const good of ["<div class=\"a b\"><span>{{x}}</span></div>", "<p>a<br>b</p><hr>", "<ccr-qr size=\"80\"></ccr-qr><ccr-logo/>", "<table><tr><td colspan=\"2\">x</td></tr></table>", "<!-- note --><b>&amp; ok</b>"]) {
+    check(`HTML 接受 ${good}`, htmlOk(good), JSON.stringify(validateTemplateHtml(good)));
+  }
+  for (const bad of [
+    "<script>alert(1)</script>", "<img src=x onerror=alert(1)>", "<div onclick=\"x()\">a</div>", "<a href=\"https://evil\">x</a>",
+    "<div style=\"color:red\">x</div>", "<div class=\"{{cls}}\">x</div>", "<div id=\"x\">a</div>", "<iframe></iframe>", "<svg><script/></svg>",
+    "<div>", "</div>", "<ccr-qr size=\"999\"></ccr-qr>", "<ccr-qr onload=\"x\"></ccr-qr>", "<div class=\"a\"x=1>b</div>", "<div class='a\"><img'>x</div>",
+    "<b>{{x}}</b><{{tag}}>", "<style>body{}</style>",
+  ]) {
+    check(`HTML 拒绝 ${bad}`, !htmlOk(bad));
+  }
+
+  // CSS 白名单 + 作用域
+  const cssOk = (src) => parseReceiptCss(src).rules !== null;
+  for (const good of [".a { color: #fff; font-family: \"Space Mono\", monospace }", "h1, .b > span:first-child { margin: 0 }", ".c::before { content: \"★ 小票\" }", "/* 注释; } */ .d { clip-path: polygon(0 0, 100% 0, 50% 100%) }"]) {
+    check(`CSS 接受 ${good}`, cssOk(good), JSON.stringify(parseReceiptCss(good).errors));
+  }
+  for (const bad of [
+    ".a { background: url(https://evil/x.png) }", "@import \"x.css\";", "@media print { .a { color: red } }", "body { color: red }", ":root { --x: 1 }",
+    "html .a { color: red }", ".a { position: fixed }", ".a { width: expression(alert(1)) }", ".a { color: \\72 ed }", ".a { b\\ackground: red }",
+    ".a[href] { color: red }", ".a { color: red", "x { content: \"</style><script>\" }", ".a { font-family: \"a\";} .b { color: \"x }",
+    ".a { background: image-set(\"x.png\" 1x) }",
+  ]) {
+    check(`CSS 拒绝 ${bad}`, !cssOk(bad));
+  }
+  const scoped = scopedCss(parseReceiptCss("h1, .a span { color: red }").rules, "ccr-rcpt-demo");
+  check("CSS 作用域前缀", scoped.startsWith(".ccr-rcpt-demo h1, .ccr-rcpt-demo .a span {"), scoped);
+
+  // 范例: 校验 + 用样例数据渲染
+  const dir = "examples/plugins/receipt-sparrow-bakery/";
+  const man = readJson(`${dir}cc-router-plugin.json`);
+  const mr = validateManifest(man, "6.7.0");
+  check("小票范例清单合法", mr.manifest !== null && mr.warnings.length === 0, JSON.stringify([mr.errors, mr.warnings]));
+  const texts = Object.fromEntries(man.assets.filter((a) => /\.(html|css)$/.test(a)).map((a) => [a, readFileSync(ROOT + dir + a, "utf8")]));
+  const vr = validateReceipt(readJson(`${dir}receipt.json`), man.assets, texts);
+  check("小票范例合法且无警告", vr.receipt !== null && vr.warnings.length === 0, JSON.stringify([vr.errors, vr.warnings]));
+  if (vr.receipt) {
+    const html = renderTemplate(vr.receipt.nodes, receiptData(sampleReceiptDto(), { port: 23456, version: "9.9.9", deletedLabel: "(deleted)" }));
+    for (const want of ["No. 5A7C0E21", "MODEL-OPUS", "claude-opus-4-7", "sold out", "(deleted)", "46.52M", "711", "v9.9.9", "<ccr-qr size=\"72\">"]) {
+      check(`小票范例渲染包含 ${want}`, html.includes(want));
+    }
+    check("小票范例渲染结果仍过 HTML 白名单", validateTemplateHtml(html).length === 0, JSON.stringify(validateTemplateHtml(html).slice(0, 3)));
+  }
+  const vrBad = validateReceipt({ receiptApi: 1, template: "t.html", fonts: { "Bad;Name": "f.woff2" } }, ["t.html"], { "t.html": "<div>{{receipt.nope}}</div>" });
+  check("小票: 字体名非法 / 字体未登记 → 错误", vrBad.receipt === null && vrBad.errors.some((e) => e.path.startsWith("fonts.")));
+  const vrWarn = validateReceipt({ receiptApi: 1, template: "t.html" }, ["t.html"], { "t.html": "<div>{{receipt.nope}}</div>" });
+  check("小票: 未知字段只警告", vrWarn.receipt !== null && vrWarn.warnings.some((w) => w.detail === "{{receipt.nope}}"));
+  check("清单: 主题插件不能带 html", validateManifest({ ...exManifest, assets: ["a.html"] }, "6.7.0").manifest === null);
+}
+
 // ---------- 5. Rust 与 TS 两份名单一致 ----------
 {
   const rs = readFileSync(`${ROOT}src-tauri/src/plugins/mod.rs`, "utf8");

@@ -51,4 +51,7 @@
 .pg-alert.info { background: var(--surface-2); color: var(--ink-3); }
 .pg-issues { margin: 6px 0 0; padding-left: 18px; font-size: 12px; }
 .pg-issues li { margin: 2px 0; }
+.pg-receipt-preview { margin-top: 4px; padding: 12px; border-radius: var(--r-md); background: var(--surface-2); max-height: 360px; overflow: auto; }
+.pg-receipt-preview > .pg-receipt-preview-label { font-size: 11.5px; color: var(--ink-4); margin-bottom: 8px; }
+.pg-receipt-preview > div:last-child { margin: 0 auto; }
 .pg-issues code { font-family: var(--font-mono); font-size: 11.5px; }

@@ -2,7 +2,8 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { CircleCheck, ExternalLink, X } from "lucide-react";
 import { runtime } from "@/runtime";
 import { useT } from "@/i18n";
-import { ReceiptSlip, type ReceiptDisplayOptions } from "@/components/receipts/ReceiptSlip";
+import { useSearchParams } from "react-router";
+import { ReceiptSlip, type ReceiptDisplayOptions, type ReceiptTheme } from "@/components/receipts/ReceiptSlip";
 import { ReceiptControls, RECEIPT_RANGES } from "@/components/receipts/ReceiptControls";
 import {
   ReceiptPrintOverlay,
@@ -78,10 +79,13 @@ export function ReceiptsPage() {
   const { t } = useT();
 
   const [range, setRange] = useState<ReceiptRange>("all_time");
+  // 插件页「去用这张小票」带 ?theme=plugin:<id> 过来
+  const [searchParams] = useSearchParams();
+  const themeParam = searchParams.get("theme");
   const [options, setOptions] = useState<ReceiptDisplayOptions>({
     showCacheTokens: true,
     showRequestCounts: true,
-    theme: "color",
+    theme: themeParam && /^plugin:[a-z0-9][a-z0-9-]{1,39}$/.test(themeParam) ? (themeParam as ReceiptTheme) : "color",
     showProviderLogo: true,
     compactTokens: true,
     groupMode: "virtual_model",
