@@ -60,11 +60,14 @@ export function InstallDialog({
   staged,
   communitySha256,
   onClose,
+  onConfigureRules,
 }: {
   staged: StagedPlugin | null;
   /** 从社区目录安装时传目录里的包哈希, 后端核对 */
   communitySha256?: string;
   onClose: () => void;
+  /** 安装完规则插件后点「去配置」: 切到已安装页并打开参数框 */
+  onConfigureRules?: (pluginId: string) => void;
 }) {
   const { t, locale } = useT();
   const navigate = useNavigate();
@@ -134,6 +137,7 @@ export function InstallDialog({
   function startUsing(rec: InstalledPlugin) {
     if (rec.plugin_type === "provider") navigate(`/subscriptions/new?provider=${encodeURIComponent(`plugin:${rec.id}`)}`);
     else if (rec.plugin_type === "pricing") navigate("/statistics");
+    else if (rec.plugin_type === "rules") onConfigureRules?.(rec.id);
     else if (rec.plugin_type === "receipt") navigate(`/receipts?theme=plugin:${rec.id}`);
     else setThemeId(`plugin:${rec.id}`);
     close();
@@ -216,7 +220,15 @@ export function InstallDialog({
         )}
 
         {installed ? (
-          <div className="pg-alert info">{t("plugins.install.done", { name })}</div>
+          <div className="pg-alert info">
+            {t("plugins.install.done", { name })}
+            {installed.plugin_type === "rules" && (
+              <>
+                {" "}
+                {t("plugins.install.rulesDisabledHint")}
+              </>
+            )}
+          </div>
         ) : (
           <>
             {checked?.kind === "error" && (
@@ -231,7 +243,9 @@ export function InstallDialog({
                   ? t("plugins.install.unreviewed")
                   : checked.ok.manifest.type === "pricing"
                     ? t("plugins.install.unreviewedPricing")
-                    : t("plugins.install.unreviewedProvider")}
+                    : checked.ok.manifest.type === "rules"
+                      ? t("plugins.install.unreviewedRules")
+                      : t("plugins.install.unreviewedProvider")}
               </div>
             )}
             {staged?.installed && ok && (
@@ -263,7 +277,9 @@ export function InstallDialog({
                     ? t("plugins.btn.addSubscription")
                     : installed.plugin_type === "pricing"
                       ? t("plugins.btn.viewCosts")
-                      : t("plugins.btn.useNow")}
+                      : installed.plugin_type === "rules"
+                        ? t("plugins.btn.configure")
+                        : t("plugins.btn.useNow")}
                 </button>
               )}
             </>

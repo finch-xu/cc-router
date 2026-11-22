@@ -906,6 +906,16 @@ export interface RequestLogDto {
   summary: RequestSummary;
   /** 网络耗时分段 (proxy/net_timing.rs); 老日志各字段为 null */
   net: NetTiming;
+  /** 命中的规则插件记录 (JSON 数组); 老日志或未命中为 null */
+  plugins_applied?: string | null;
+}
+
+/** 规则插件对单条请求做过的操作 (`cc_router_plugin_spec::rules_engine::Applied`) */
+export interface AppliedPluginRule {
+  plugin_id: string;
+  version: string;
+  rules: string[];
+  error?: string;
 }
 
 /**
@@ -1452,6 +1462,13 @@ export interface PluginSource {
   commit: string | null;
 }
 
+export type RuleParamDecl =
+  | { id: string; type: "string"; label: import("@/plugins/manifest").LocalizedText; default?: string }
+  | { id: string; type: "number"; label: import("@/plugins/manifest").LocalizedText; default?: number }
+  | { id: string; type: "bool"; label: import("@/plugins/manifest").LocalizedText; default?: boolean }
+  | { id: string; type: "enum"; values: string[]; label: import("@/plugins/manifest").LocalizedText; default?: string }
+  | { id: string; type: "virtual_model"; label: import("@/plugins/manifest").LocalizedText; default?: string };
+
 export interface InstalledPlugin {
   id: string;
   plugin_type: string;
@@ -1464,6 +1481,12 @@ export interface InstalledPlugin {
   size: number;
   /** 系统插件 (厂商等) 是否生效; 主题 / 小票恒为 true */
   enabled: boolean;
+  /** 用户已保存的参数 (非参数化插件为 `{}`) */
+  params?: Record<string, unknown>;
+  /** 规则插件声明的参数表 */
+  param_decls?: RuleParamDecl[];
+  /** 启用前缺少的必填参数 id */
+  missing_params?: string[];
 }
 
 export interface PluginContent {
@@ -1513,12 +1536,22 @@ export type PluginCapabilities =
       rules: number;
       /** 覆盖的厂商 id (含 `*`) */
       providers: string[];
+    }
+  | {
+      kind: "rules";
+      hooks: ("route" | "request")[];
+      actions: string[];
+      /** 写死的虚拟模型短名, 或 `{{params.x}}` */
+      redirects_to: string[];
+      rules: number;
+      params: RuleParamDecl[];
     };
 
 export interface PluginCapabilityDiff {
   added_hosts: string[];
   removed_hosts: string[];
   auth_type_changed: boolean;
+  added_actions?: string[];
 }
 
 /** 对齐 Rust `subscription::rebuild::RebuildPreview` */

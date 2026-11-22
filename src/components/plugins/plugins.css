@@ -82,4 +82,15 @@
 .pg-caps-list li { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; min-width: 0; }
 .pg-caps-list code { font-family: var(--font-mono); font-size: 12px; color: var(--ink); overflow-wrap: anywhere; }
 .pg-caps-use { color: var(--ink-4); font-size: 11.5px; }
+.pg-caps-dl { margin: 6px 0 0; }
+.pg-caps-tags { display: flex; gap: 5px; flex-wrap: wrap; align-items: center; }
+.pg-caps-tags code { font-family: var(--font-mono); font-size: 11.5px; color: var(--ink); }
 .pg-chip-sep { width: 1px; align-self: stretch; margin: 4px 4px; background: var(--line, var(--surface-3)); }
+
+/* 规则插件参数设置对话框 */
+.pg-params-form { display: flex; flex-direction: column; gap: 12px; margin: 10px 0 4px; }
+.pg-param-row { display: flex; flex-direction: column; gap: 5px; }
+.pg-param-label { display: flex; align-items: center; gap: 6px; font-size: 12.5px; color: var(--ink-2); }
+.pg-param-req { font-size: 10.5px; padding: 0 5px; border-radius: 4px; background: color-mix(in srgb, var(--warn) 16%, var(--surface)); color: var(--ink-2); }
+.pg-param-bool { display: flex; align-items: center; gap: 8px; font-size: 12.5px; color: var(--ink-2); cursor: pointer; }
+.pg-param-bool input { accent-color: var(--accent); width: 15px; height: 15px; }
