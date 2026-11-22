@@ -14,6 +14,8 @@ import { checkReceiptPackage, type CheckedReceipt } from "@/plugins/receipt/appl
 import { sampleReceiptDto } from "@/plugins/receipt/fields";
 import { themeCss } from "@/plugins/theme/css";
 import { localized, type Issue } from "@/plugins/manifest";
+import { pluginLinks } from "@/plugins/links";
+import { runtime } from "@/runtime";
 import { version as APP_VERSION } from "../../../package.json";
 import type { InstalledPlugin, StagedPlugin } from "@/types";
 
@@ -120,6 +122,15 @@ export function InstallDialog({
   }
 
   const m = ok?.manifest;
+  const links = staged
+    ? pluginLinks({
+        homepage: m?.homepage,
+        repo: staged.source.kind === "local" ? null : staged.source.location,
+        commit: staged.source.commit,
+        path: staged.source.path,
+      })
+    : {};
+  const open = (url: string) => () => void runtime.openExternal(url).catch(() => {});
   const name = m ? localized(m.name, locale) : staged ? String((staged.manifest as { id?: unknown })?.id ?? "") : "";
   const warnings = ok ? (checked as { ok: { warnings: Issue[] } }).ok.warnings : [];
   const alreadyInUse = installed && installed.plugin_type === "theme" && themeId === `plugin:${installed.id}`;
@@ -148,10 +159,28 @@ export function InstallDialog({
                     <dd>{m.license}</dd>
                   </>
                 )}
+                {links.homepage && (
+                  <>
+                    <dt>{t("plugins.install.homepage")}</dt>
+                    <dd>
+                      <button className="pg-link" type="button" onClick={open(links.homepage)}>
+                        {links.homepage}
+                      </button>
+                    </dd>
+                  </>
+                )}
               </>
             )}
             <dt>{t("plugins.install.source")}</dt>
-            <dd className="mono">{sourceText(t, communitySha256 ? { ...staged.source, kind: "community" } : staged.source)}</dd>
+            <dd className="mono">
+              {links.source ? (
+                <button className="pg-link" type="button" title={links.source} onClick={open(links.source)}>
+                  {sourceText(t, communitySha256 ? { ...staged.source, kind: "community" } : staged.source)}
+                </button>
+              ) : (
+                sourceText(t, communitySha256 ? { ...staged.source, kind: "community" } : staged.source)
+              )}
+            </dd>
             <dt>{t("plugins.install.size")}</dt>
             <dd>{fmtBytes(staged.total_size)}</dd>
           </dl>

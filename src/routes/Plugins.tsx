@@ -18,6 +18,7 @@ import { errorText } from "@/lib/errorText";
 import { runtime } from "@/runtime";
 import { COMMUNITY_URL, entryLink, hasUpdate, type CommunityEntry } from "@/plugins/community";
 import { localized, type LocalizedText } from "@/plugins/manifest";
+import { pluginLinks, type PluginLinks } from "@/plugins/links";
 import type { InstalledPlugin, StagedPlugin } from "@/types";
 
 type Tab = "community" | "installed";
@@ -27,6 +28,18 @@ type Kind = "all" | "theme" | "receipt";
 function manifestText(m: unknown, key: "name" | "description"): LocalizedText | undefined {
   const v = (m as Record<string, unknown> | null)?.[key];
   return typeof v === "string" || (typeof v === "object" && v !== null) ? (v as LocalizedText) : undefined;
+}
+
+/** 已安装插件的介绍 / 源码链接 (清单原文的 homepage 在渲染前重新校验) */
+function installedLinks(p: InstalledPlugin): PluginLinks {
+  const homepage = (p.manifest as Record<string, unknown> | null)?.homepage;
+  const fromGithub = p.source.kind === "github" || p.source.kind === "community";
+  return pluginLinks({
+    homepage,
+    repo: fromGithub ? p.source.location : null,
+    commit: p.source.commit,
+    path: p.source.path,
+  });
 }
 
 export function PluginsPage() {
@@ -108,6 +121,10 @@ export function PluginsPage() {
     if (e && ins.source.kind === "community" && hasUpdate(ins.version, e)) return <span className="pg-badge acc">{t("plugins.badge.update")}</span>;
     return <span className="pg-badge ok">{t("plugins.badge.installed")}</span>;
   };
+
+  const detailLinks: PluginLinks = detail
+    ? pluginLinks({ homepage: detail.homepage, repo: detail.repo, commit: detail.latest.commit, path: detail.path })
+    : {};
 
   return (
     <div className="pg-page">
@@ -243,6 +260,7 @@ export function PluginsPage() {
               const inUse = themeId === `plugin:${p.id}`;
               const canUpdate = isDesktop && e && p.source.kind === "community" && hasUpdate(p.version, e);
               const revoked = e?.revoked && p.source.kind === "community" ? e.revoked : null;
+              const links = installedLinks(p);
               return (
                 <div key={p.id} className="card pg-row">
                   <div className="pg-row-main">
@@ -261,6 +279,16 @@ export function PluginsPage() {
                     {revoked && <div className="pg-alert err">{t("plugins.detail.revoked", { reason: revoked })}</div>}
                   </div>
                   <div className="pg-row-actions">
+                    {links.homepage && (
+                      <button className="btn sm" type="button" title={links.homepage} onClick={() => runtime.openExternal(links.homepage!).catch(() => {})}>
+                        <ExternalLink size={12} /> {t("plugins.btn.homepage")}
+                      </button>
+                    )}
+                    {links.source && (
+                      <button className="btn sm" type="button" title={links.source} onClick={() => runtime.openExternal(links.source!).catch(() => {})}>
+                        <Github size={12} /> {t("plugins.btn.repo")}
+                      </button>
+                    )}
                     {canUpdate && (
                       <button className="btn sm" type="button" disabled={busyId !== null} onClick={() => installFromCommunity(e)}>
                         {busyId === p.id ? <Spinner /> : null} {t("plugins.btn.update")} v{e.latest.version}
@@ -316,6 +344,16 @@ export function PluginsPage() {
                     <dd>{detail.license}</dd>
                   </>
                 )}
+                {detailLinks.homepage && (
+                  <>
+                    <dt>{t("plugins.install.homepage")}</dt>
+                    <dd>
+                      <button className="pg-link" type="button" onClick={() => runtime.openExternal(detailLinks.homepage!).catch(() => {})}>
+                        {detailLinks.homepage}
+                      </button>
+                    </dd>
+                  </>
+                )}
                 <dt>{t("plugins.install.source")}</dt>
                 <dd className="mono">
                   {detail.repo}
@@ -323,9 +361,16 @@ export function PluginsPage() {
                 </dd>
               </dl>
               <DialogFooter>
-                <button className="btn" type="button" onClick={() => runtime.openExternal(`https://github.com/${detail.repo}`).catch(() => {})}>
-                  <ExternalLink size={12} /> {t("plugins.btn.repo")}
-                </button>
+                {detailLinks.homepage && (
+                  <button className="btn" type="button" onClick={() => runtime.openExternal(detailLinks.homepage!).catch(() => {})}>
+                    <ExternalLink size={12} /> {t("plugins.btn.homepage")}
+                  </button>
+                )}
+                {detailLinks.source && (
+                  <button className="btn" type="button" onClick={() => runtime.openExternal(detailLinks.source!).catch(() => {})}>
+                    <Github size={12} /> {t("plugins.btn.repo")}
+                  </button>
+                )}
                 <button className="btn primary" type="button" disabled={busyId !== null} onClick={() => installFromCommunity(detail)}>
                   {busyId === detail.id && <Spinner />}
                   {installedById.has(detail.id) ? t("plugins.btn.reinstall") : t("plugins.btn.install")}

@@ -3,6 +3,8 @@
  * 社区仓库的 CI 也直接 import 本文件。零依赖。
  */
 
+import { safeHttpsUrl } from "./links";
+
 export const MANIFEST_VERSION = 1;
 export const MANIFEST_FILE = "cc-router-plugin.json";
 
@@ -157,8 +159,8 @@ export function validateManifest(
   const author = raw.author;
   if (typeof author !== "string" || !author.trim() || author.length > 80) issues.push({ path: "author", code: author === undefined ? "missing" : "invalid_value" });
   if (raw.license !== undefined && (typeof raw.license !== "string" || raw.license.length > 64)) issues.push({ path: "license", code: "invalid_value" });
-  if (raw.homepage !== undefined && (typeof raw.homepage !== "string" || !/^https:\/\/[^\s"'<>]+$/.test(raw.homepage))) {
-    issues.push({ path: "homepage", code: "invalid_value", detail: "https URL" });
+  if (raw.homepage !== undefined && safeHttpsUrl(raw.homepage) === undefined) {
+    issues.push({ path: "homepage", code: "invalid_value", detail: "https URL, at most 300 characters" });
   }
 
   const entry = raw.entry;

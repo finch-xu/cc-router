@@ -3,6 +3,7 @@
  * 格式由 cc-router-community 仓库的 publish 流程生成 (见实施文档 §2.6)。零依赖。
  */
 import { SUPPORTED_TYPES, compareVersions, isSafePath, type LocalizedText, type PluginType } from "./manifest";
+import { safeHttpsUrl } from "./links";
 
 export const COMMUNITY_REPO = "finch-xu/cc-router-community";
 export const COMMUNITY_RAW_BASE = `https://raw.githubusercontent.com/${COMMUNITY_REPO}/main/`;
@@ -15,6 +16,8 @@ export interface CommunityEntry {
   description?: LocalizedText;
   author: string;
   license?: string;
+  /** 插件介绍页 (清单 `homepage`, 由目录的发布流程抄进 index.json; 旧目录没有这个字段) */
+  homepage?: string;
   /** owner/repo */
   repo: string;
   path?: string;
@@ -62,6 +65,7 @@ export function parseCommunityIndex(raw: unknown): CommunityEntry[] {
       description: text(p.description),
       author,
       license: str(p.license, 64),
+      homepage: safeHttpsUrl(p.homepage),
       repo,
       path,
       tags: Array.isArray(p.tags) ? p.tags.filter((t): t is string => typeof t === "string" && /^[a-z0-9:-]{1,30}$/.test(t)).slice(0, 5) : [],
