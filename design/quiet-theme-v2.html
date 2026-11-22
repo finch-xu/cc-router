@@ -1,0 +1,795 @@
+<!doctype html>
+<html lang="zh-CN" data-mode="light">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>简洁主题 v2 设计稿</title>
+<style>
+/* ============================================================
+ * cc-router「简洁」主题 v2 设计稿
+ * token 名与 src/themes/quiet.css / styles.css 现有变量一一对应,
+ * 新增的只有 --surface-glass / --shadow-* / --ring-* / --grad-accent 几项。
+ * ============================================================ */
+:root {
+  /* 中性色: 冷调锌灰, 比 v1 更干净、层级更明确 */
+  --bg:        #f7f7f8;
+  --surface:   #ffffff;
+  --surface-2: #fafafa;
+  --surface-3: #f1f1f3;
+  --surface-glass: rgb(255 255 255 / 72%);
+  --line:      #ececef;
+  --line-2:    #dedee3;
+  --ink:       #18181b;
+  --ink-2:     #3f3f46;
+  --ink-3:     #63636e;
+  --ink-4:     #7c7c87;
+  --ink-5:     #a1a1aa;
+
+  /* 主色: 保留 cc-router 的珊瑚色识别, 调亮一档更现代 */
+  --accent:      #d9573b;
+  --accent-ink:  #b8432a;
+  --accent-bg:   #fdf0ec;
+  --accent-line: #f4c7b9;
+  --grad-accent: linear-gradient(135deg, #e8664a 0%, #c9452c 100%);
+
+  /* 语义色 (状态 pill / 图表) */
+  --ok:   #16a34a; --ok-bg:   #ecfdf3; --ok-line:   #bbf0cf;
+  --warn: #c2860a; --warn-bg: #fef8e7; --warn-line: #f6e1a6;
+  --err:  #dc2626; --err-bg:  #fef1f1; --err-line:  #f8caca;
+  --info: #4f6bed; --info-bg: #eff2fe; --info-line: #cdd6fb;
+  --mute: #71717a; --mute-bg: #f4f4f5; --mute-line: #e4e4e7;
+
+  /* 外形 */
+  --r-xs: 6px; --r-sm: 8px; --r-md: 10px; --r-lg: 14px; --r-xl: 18px;
+  --shadow-xs: 0 1px 2px rgb(16 16 20 / 5%);
+  --shadow-sm: 0 1px 2px rgb(16 16 20 / 4%), 0 2px 6px -2px rgb(16 16 20 / 6%);
+  --shadow-md: 0 2px 4px rgb(16 16 20 / 4%), 0 10px 24px -8px rgb(16 16 20 / 12%);
+  --shadow-lg: 0 4px 8px rgb(16 16 20 / 5%), 0 24px 48px -16px rgb(16 16 20 / 22%);
+  --ring: 0 0 0 3px color-mix(in srgb, var(--accent) 22%, transparent);
+
+  /* 动效 token (CLAUDE.md: 交互 ≤150ms, 入场 ≤300ms) */
+  --dur-fast: 120ms; --dur-base: 200ms; --dur-enter: 280ms;
+  --ease: cubic-bezier(.2,.8,.2,1);
+
+  --font-sans: -apple-system, BlinkMacSystemFont, "Segoe UI Variable Text", "Segoe UI", Inter, Roboto, "Helvetica Neue", "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", "Noto Sans SC", system-ui, sans-serif;
+  --font-mono: ui-monospace, "SF Mono", Menlo, "Cascadia Mono", Consolas, "JetBrains Mono", monospace;
+}
+html[data-mode="dark"] {
+  --bg:        #0f0f11;
+  --surface:   #17171a;
+  --surface-2: #131316;
+  --surface-3: #212125;
+  --surface-glass: rgb(23 23 26 / 72%);
+  --line:      #26262b;
+  --line-2:    #34343a;
+  --ink:       #f4f4f5;
+  --ink-2:     #d4d4d8;
+  --ink-3:     #a1a1aa;
+  --ink-4:     #8b8b94;
+  --ink-5:     #63636b;
+
+  --accent:      #ff8a6b;
+  --accent-ink:  #ffa48b;
+  --accent-bg:   #2c1913;
+  --accent-line: #5c2f22;
+  --grad-accent: linear-gradient(135deg, #ff9475 0%, #e7613f 100%);
+
+  --ok:   #4ade80; --ok-bg:   #0f2418; --ok-line:   #1d4a30;
+  --warn: #facc15; --warn-bg: #2a2209; --warn-line: #4f4013;
+  --err:  #f87171; --err-bg:  #2c1314; --err-line:  #592425;
+  --info: #8ea2ff; --info-bg: #171c33; --info-line: #2c3663;
+  --mute: #a1a1aa; --mute-bg: #1d1d21; --mute-line: #2e2e33;
+
+  --shadow-xs: 0 1px 2px rgb(0 0 0 / 30%);
+  --shadow-sm: 0 1px 2px rgb(0 0 0 / 35%), inset 0 1px 0 rgb(255 255 255 / 3%);
+  --shadow-md: 0 8px 24px -8px rgb(0 0 0 / 60%), inset 0 1px 0 rgb(255 255 255 / 4%);
+  --shadow-lg: 0 24px 48px -12px rgb(0 0 0 / 70%), inset 0 1px 0 rgb(255 255 255 / 5%);
+}
+
+* { box-sizing: border-box; }
+html, body { margin: 0; }
+body {
+  background: var(--bg); color: var(--ink);
+  font: 13.5px/1.55 var(--font-sans);
+  -webkit-font-smoothing: antialiased;
+  transition: background var(--dur-base), color var(--dur-base);
+}
+button { font: inherit; color: inherit; cursor: pointer; }
+.mono { font-family: var(--font-mono); font-feature-settings: "zero"; }
+.num  { font-variant-numeric: tabular-nums; }
+
+/* ========== 设计稿外框 ========== */
+.doc { max-width: 1320px; margin: 0 auto; padding: 40px 24px 80px; }
+.doc-head { display: flex; align-items: flex-end; justify-content: space-between; gap: 24px; flex-wrap: wrap; margin-bottom: 28px; }
+.doc-head h1 { margin: 0 0 6px; font-size: 26px; letter-spacing: -0.02em; }
+.doc-head p { margin: 0; color: var(--ink-3); max-width: 640px; }
+.doc-ctrl { display: flex; gap: 8px; flex-wrap: wrap; }
+.doc-section { margin: 56px 0 18px; display: flex; align-items: baseline; gap: 12px; }
+.doc-section h2 { margin: 0; font-size: 18px; letter-spacing: -0.01em; }
+.doc-section .idx { font: 600 11px var(--font-mono); color: var(--accent); background: var(--accent-bg); padding: 2px 7px; border-radius: 99px; }
+.doc-section span:last-child { color: var(--ink-4); font-size: 12.5px; }
+
+/* 窗口框 */
+.window {
+  border: 1px solid var(--line-2); border-radius: 14px; overflow: hidden;
+  background: var(--bg); box-shadow: var(--shadow-lg);
+  height: 780px; display: grid; grid-template-columns: 224px 1fr;
+}
+
+/* ========== 侧栏 ========== */
+.sidebar {
+  background: var(--surface-2); border-right: 1px solid var(--line);
+  display: flex; flex-direction: column; padding: 14px 12px 12px; gap: 2px; min-height: 0;
+}
+.traffic { display: flex; gap: 8px; padding: 2px 6px 16px; }
+.traffic i { width: 12px; height: 12px; border-radius: 50%; display: block; }
+.traffic i:nth-child(1){background:#ff5f57}.traffic i:nth-child(2){background:#febc2e}.traffic i:nth-child(3){background:#28c840}
+.brand { display: flex; align-items: center; gap: 10px; padding: 0 8px 14px; }
+.logo {
+  width: 30px; height: 30px; border-radius: 9px; background: var(--grad-accent);
+  display: grid; place-items: center; color: #fff; font: 700 12px var(--font-mono);
+  box-shadow: 0 1px 0 rgb(255 255 255 / 25%) inset, 0 4px 10px -4px var(--accent);
+}
+.brand b { display: block; font-size: 14px; letter-spacing: -0.01em; }
+.brand small { color: var(--ink-4); font-size: 11px; }
+
+.search {
+  display: flex; align-items: center; gap: 8px; margin: 0 2px 10px; padding: 6px 9px;
+  border: 1px solid var(--line); background: var(--surface); border-radius: var(--r-sm);
+  color: var(--ink-5); font-size: 12.5px; box-shadow: var(--shadow-xs);
+}
+.search kbd { margin-left: auto; font: 10.5px var(--font-mono); color: var(--ink-4); border: 1px solid var(--line); border-radius: 4px; padding: 0 4px; background: var(--surface-2); }
+
+.nav-group { font-size: 10.5px; font-weight: 600; letter-spacing: .06em; text-transform: uppercase; color: var(--ink-5); padding: 12px 10px 4px; }
+.nav-item {
+  position: relative; display: flex; align-items: center; gap: 10px;
+  padding: 6px 10px; border-radius: var(--r-sm); border: 0; background: none; text-align: left;
+  color: var(--ink-3); font-size: 13px; width: 100%;
+  transition: background var(--dur-fast) var(--ease), color var(--dur-fast) var(--ease);
+}
+.nav-item svg { width: 16px; height: 16px; flex: none; stroke: currentColor; fill: none; stroke-width: 1.7; stroke-linecap: round; stroke-linejoin: round; }
+.nav-item:hover { background: var(--surface-3); color: var(--ink); }
+.nav-item.active {
+  background: var(--surface); color: var(--ink); font-weight: 550;
+  box-shadow: var(--shadow-sm), 0 0 0 1px var(--line);
+}
+.nav-item.active svg { color: var(--accent); }
+.nav-item .count { margin-left: auto; font: 11px var(--font-mono); color: var(--ink-5); }
+.nav-item .live { margin-left: auto; width: 7px; height: 7px; border-radius: 50%; background: var(--ok); box-shadow: 0 0 0 3px var(--ok-bg); }
+.nav-item .upd  { margin-left: auto; font-size: 10px; font-weight: 600; color: #fff; background: var(--accent); padding: 0 6px; border-radius: 99px; }
+
+.side-foot { margin-top: auto; display: flex; flex-direction: column; gap: 8px; }
+.proxy-card {
+  border: 1px solid var(--line); background: var(--surface); border-radius: var(--r-md);
+  padding: 10px 11px; box-shadow: var(--shadow-xs);
+}
+.proxy-card .row { display: flex; align-items: center; gap: 7px; font-size: 12px; font-weight: 550; }
+.proxy-card .sub { font: 11px var(--font-mono); color: var(--ink-4); margin-top: 3px; }
+.pulse { width: 7px; height: 7px; border-radius: 50%; background: var(--ok); position: relative; }
+.pulse::after { content: ""; position: absolute; inset: -4px; border-radius: 50%; border: 2px solid var(--ok); opacity: .35; animation: pulse 1.8s var(--ease) infinite; }
+@keyframes pulse { 0% { transform: scale(.6); opacity: .5 } 100% { transform: scale(1.5); opacity: 0 } }
+@media (prefers-reduced-motion: reduce) { .pulse::after { animation: none; } * { transition: none !important; } }
+.side-tools { display: flex; align-items: center; justify-content: space-between; padding: 0 4px; color: var(--ink-5); font: 11px var(--font-mono); }
+.icon-btn { width: 28px; height: 28px; display: grid; place-items: center; border: 0; background: none; border-radius: var(--r-xs); color: var(--ink-4); }
+.icon-btn:hover { background: var(--surface-3); color: var(--ink); }
+.icon-btn svg { width: 15px; height: 15px; stroke: currentColor; fill: none; stroke-width: 1.7; stroke-linecap: round; stroke-linejoin: round; }
+
+/* ========== 主区 ========== */
+.main { overflow: auto; min-width: 0; }
+.main-inner { padding: 28px 32px 40px; max-width: 1080px; }
+.page-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; margin-bottom: 22px; }
+.crumb { font-size: 12px; color: var(--ink-4); margin-bottom: 4px; }
+.page-head h1 { margin: 0; font-size: 22px; font-weight: 650; letter-spacing: -0.02em; }
+.page-head .subtitle { color: var(--ink-3); margin-top: 3px; }
+.actions { display: flex; gap: 8px; flex: none; }
+
+/* 按钮 */
+.btn {
+  display: inline-flex; align-items: center; gap: 6px; height: 32px; padding: 0 12px;
+  border-radius: var(--r-sm); border: 1px solid var(--line-2); background: var(--surface);
+  font-size: 13px; font-weight: 500; color: var(--ink-2); box-shadow: var(--shadow-xs);
+  transition: background var(--dur-fast), border-color var(--dur-fast), box-shadow var(--dur-fast), transform var(--dur-fast);
+}
+.btn:hover { background: var(--surface-2); border-color: var(--ink-5); color: var(--ink); }
+.btn:active { transform: translateY(1px); }
+.btn:focus-visible { outline: none; box-shadow: var(--ring); }
+.btn svg { width: 14px; height: 14px; stroke: currentColor; fill: none; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+.btn.primary {
+  background: var(--grad-accent); border-color: transparent; color: #fff;
+  box-shadow: 0 1px 0 rgb(255 255 255 / 22%) inset, 0 1px 2px rgb(0 0 0 / 12%), 0 6px 14px -6px var(--accent);
+}
+.btn.primary:hover { filter: brightness(1.05); color: #fff; }
+.btn.ghost { background: none; border-color: transparent; box-shadow: none; color: var(--ink-3); }
+.btn.ghost:hover { background: var(--surface-3); color: var(--ink); }
+.btn.sm { height: 26px; padding: 0 9px; font-size: 12px; border-radius: var(--r-xs); }
+.btn.danger { color: var(--err); }
+
+/* 卡片 */
+.card { background: var(--surface); border: 1px solid var(--line); border-radius: var(--r-lg); box-shadow: var(--shadow-sm); }
+.card-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 14px 18px; }
+.card-head.bordered { border-bottom: 1px solid var(--line); }
+.card-title { font-weight: 600; font-size: 13.5px; }
+.card-sub { color: var(--ink-4); font-size: 12px; }
+.card-body { padding: 0 18px 18px; }
+
+/* KPI */
+.kpis { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; margin-bottom: 16px; }
+.kpi { padding: 14px 16px 12px; }
+.kpi .lbl { font-size: 12px; color: var(--ink-4); display: flex; align-items: center; justify-content: space-between; }
+.kpi .val { font-size: 24px; font-weight: 650; letter-spacing: -0.02em; margin-top: 4px; }
+.kpi .val small { font-size: 13px; color: var(--ink-4); font-weight: 500; margin-left: 2px; }
+.kpi .foot { display: flex; align-items: center; justify-content: space-between; margin-top: 6px; }
+.delta { font: 11.5px var(--font-mono); padding: 1px 6px; border-radius: 99px; }
+.delta.up { color: var(--ok); background: var(--ok-bg); }
+.delta.down { color: var(--err); background: var(--err-bg); }
+.spark { width: 84px; height: 24px; }
+
+/* pill / 状态 */
+.pill { display: inline-flex; align-items: center; gap: 6px; height: 22px; padding: 0 8px; border-radius: 99px; font-size: 11.5px; font-weight: 550; border: 1px solid; white-space: nowrap; }
+.pill::before { content: ""; width: 6px; height: 6px; border-radius: 50%; background: currentColor; }
+.pill.plain::before { display: none; }
+.pill.ok   { color: var(--ok);   background: var(--ok-bg);   border-color: var(--ok-line); }
+.pill.warn { color: var(--warn); background: var(--warn-bg); border-color: var(--warn-line); }
+.pill.err  { color: var(--err);  background: var(--err-bg);  border-color: var(--err-line); }
+.pill.info { color: var(--info); background: var(--info-bg); border-color: var(--info-line); }
+.pill.mute { color: var(--mute); background: var(--mute-bg); border-color: var(--mute-line); }
+.pill.accent { color: var(--accent-ink); background: var(--accent-bg); border-color: var(--accent-line); }
+.tag { display: inline-flex; align-items: center; height: 20px; padding: 0 6px; border-radius: 5px; background: var(--surface-3); color: var(--ink-3); font: 11px var(--font-mono); }
+
+/* 代理状态 hero */
+.hero { display: grid; grid-template-columns: 1.3fr 1fr; overflow: hidden; margin-bottom: 16px; }
+.hero-l { padding: 18px 20px; position: relative; }
+.hero-l::before { content: ""; position: absolute; inset: 0; background: radial-gradient(600px 160px at 0% 0%, var(--accent-bg), transparent 70%); pointer-events: none; }
+.hero-l > * { position: relative; }
+.hero-r { border-left: 1px solid var(--line); padding: 18px 20px; background: var(--surface-2); }
+.endpoint { display: flex; align-items: center; gap: 8px; margin-top: 12px; padding: 4px 4px 4px 12px; border: 1px solid var(--line-2); border-radius: var(--r-sm); background: var(--surface); }
+.endpoint code { font: 13px var(--font-mono); flex: 1; }
+.env { font: 11.5px/1.75 var(--font-mono); color: var(--ink-3); margin: 8px 0 0; white-space: pre; overflow: hidden; }
+.env b { color: var(--accent-ink); font-weight: 500; }
+
+/* 路由流 */
+.flow { display: grid; grid-template-columns: 180px 1fr 1fr; gap: 0; align-items: stretch; }
+.flow-col { display: flex; flex-direction: column; gap: 8px; }
+.flow-col.mid { padding: 0 20px; }
+.flow-head { font-size: 11px; color: var(--ink-5); text-transform: uppercase; letter-spacing: .06em; font-weight: 600; margin-bottom: 2px; }
+.vm { display: flex; align-items: center; gap: 8px; padding: 8px 10px; border: 1px solid var(--line); border-radius: var(--r-md); background: var(--surface); font: 12.5px var(--font-mono); }
+.vm.hot { border-color: var(--accent-line); background: var(--accent-bg); color: var(--accent-ink); }
+.vm .n { margin-left: auto; font-size: 11px; color: var(--ink-4); }
+.route { display: grid; grid-template-columns: 1fr auto; align-items: center; gap: 10px; padding: 8px 10px; border-radius: var(--r-md); border: 1px solid var(--line); }
+.route .bar { grid-column: 1 / -1; height: 4px; border-radius: 99px; background: var(--surface-3); overflow: hidden; }
+.route .bar i { display: block; height: 100%; border-radius: inherit; background: var(--accent); }
+.route .bar i.ok { background: var(--ok); } .route .bar i.warn { background: var(--warn); } .route .bar i.mute { background: var(--ink-5); }
+.route-name { display: flex; align-items: center; gap: 8px; font-size: 12.5px; font-weight: 550; }
+.plogo { width: 22px; height: 22px; border-radius: 6px; display: grid; place-items: center; font: 700 10px var(--font-sans); color: #fff; flex: none; }
+
+/* 事件流 */
+.stream { list-style: none; margin: 0; padding: 0; }
+.stream li { display: grid; grid-template-columns: 64px 92px 1fr auto auto; gap: 12px; align-items: center; padding: 9px 18px; border-top: 1px solid var(--line); font-size: 12.5px; animation: enter var(--dur-enter) var(--ease) both; }
+.stream li:first-child { border-top: 0; }
+.stream .t { font: 11.5px var(--font-mono); color: var(--ink-4); }
+.stream .ms { font: 11.5px var(--font-mono); color: var(--ink-3); text-align: right; min-width: 56px; }
+@keyframes enter { from { opacity: 0; transform: translateY(-3px); } }
+
+/* 表格 */
+.table { width: 100%; border-collapse: separate; border-spacing: 0; font-size: 13px; }
+.table th { text-align: left; font-weight: 550; font-size: 11.5px; color: var(--ink-4); padding: 10px 14px; background: var(--surface-2); border-bottom: 1px solid var(--line); white-space: nowrap; }
+.table th:first-child { border-top-left-radius: var(--r-lg); padding-left: 18px; }
+.table th:last-child { border-top-right-radius: var(--r-lg); padding-right: 18px; }
+.table td { padding: 12px 14px; border-bottom: 1px solid var(--line); vertical-align: middle; }
+.table td:first-child { padding-left: 18px; } .table td:last-child { padding-right: 18px; }
+.table tr:last-child td { border-bottom: 0; }
+.table tbody tr { transition: background var(--dur-fast); }
+.table tbody tr:hover { background: var(--surface-2); }
+.table tbody tr.sel { background: var(--accent-bg); }
+.table tbody tr.sel td:first-child { box-shadow: inset 2px 0 0 var(--accent); }
+.sub-name b { display: block; font-weight: 600; }
+.sub-name small { color: var(--ink-4); font-size: 11.5px; }
+.who { display: flex; align-items: center; gap: 10px; }
+.quota { display: flex; flex-direction: column; gap: 4px; min-width: 170px; }
+.quota .q { display: grid; grid-template-columns: 22px 1fr 44px; gap: 8px; align-items: center; font: 11px var(--font-mono); color: var(--ink-4); }
+.quota .track { height: 5px; border-radius: 99px; background: var(--surface-3); overflow: hidden; }
+.quota .track i { display: block; height: 100%; border-radius: inherit; background: var(--ok); }
+.quota .track i.warn { background: var(--warn); } .quota .track i.err { background: var(--err); }
+.chips { display: flex; gap: 4px; flex-wrap: wrap; }
+.row-actions { display: flex; gap: 2px; justify-content: flex-end; opacity: .0; transition: opacity var(--dur-fast); }
+.table tr:hover .row-actions, .table tr.sel .row-actions { opacity: 1; }
+
+/* 工具条 / 分段控件 / 输入 */
+.toolbar { display: flex; align-items: center; gap: 8px; margin-bottom: 12px; flex-wrap: wrap; }
+.seg { display: inline-flex; padding: 3px; gap: 2px; background: var(--surface-3); border-radius: var(--r-sm); }
+.seg button { border: 0; background: none; height: 26px; padding: 0 10px; border-radius: 6px; font-size: 12.5px; color: var(--ink-3); transition: all var(--dur-fast); }
+.seg button.on { background: var(--surface); color: var(--ink); box-shadow: var(--shadow-sm); font-weight: 550; }
+.input { display: flex; align-items: center; gap: 8px; height: 32px; padding: 0 10px; border: 1px solid var(--line-2); border-radius: var(--r-sm); background: var(--surface); color: var(--ink-5); min-width: 220px; font-size: 13px; box-shadow: var(--shadow-xs); }
+.input.focus { border-color: var(--accent); box-shadow: var(--ring); color: var(--ink); }
+.input svg { width: 14px; height: 14px; stroke: currentColor; fill: none; stroke-width: 2; }
+.select { display: inline-flex; align-items: center; gap: 6px; height: 32px; padding: 0 10px; border: 1px dashed var(--line-2); border-radius: var(--r-sm); color: var(--ink-3); font-size: 12.5px; background: none; }
+.select.on { border-style: solid; background: var(--accent-bg); border-color: var(--accent-line); color: var(--accent-ink); }
+
+/* 日志: 主从布局 */
+.split { display: grid; grid-template-columns: 1fr 340px; gap: 16px; align-items: start; }
+.drawer { position: sticky; top: 0; animation: slide var(--dur-enter) var(--ease) both; }
+@keyframes slide { from { opacity: 0; transform: translateX(8px); } }
+.kv { display: grid; grid-template-columns: 92px 1fr; gap: 8px 12px; font-size: 12.5px; }
+.kv dt { color: var(--ink-4); }
+.kv dd { margin: 0; }
+.timeline { display: flex; height: 8px; border-radius: 99px; overflow: hidden; gap: 2px; margin: 8px 0 4px; }
+.timeline i { display: block; height: 100%; }
+.legend { display: flex; gap: 12px; font-size: 11px; color: var(--ink-4); }
+.legend span::before { content: ""; display: inline-block; width: 8px; height: 8px; border-radius: 2px; margin-right: 5px; vertical-align: -1px; background: var(--c); }
+.attempts { display: flex; flex-direction: column; gap: 6px; margin-top: 4px; }
+.attempt { display: flex; align-items: center; gap: 8px; font-size: 12px; padding: 7px 9px; border-radius: var(--r-sm); background: var(--surface-2); border: 1px solid var(--line); }
+.attempt .ms { margin-left: auto; font: 11px var(--font-mono); color: var(--ink-4); }
+
+/* 设置页 */
+.settings { display: grid; grid-template-columns: 180px 1fr; gap: 28px; }
+.subnav { display: flex; flex-direction: column; gap: 2px; position: sticky; top: 0; }
+.subnav a { padding: 6px 10px; border-radius: var(--r-sm); color: var(--ink-3); text-decoration: none; font-size: 13px; }
+.subnav a.on { background: var(--surface-3); color: var(--ink); font-weight: 550; }
+.set-row { display: grid; grid-template-columns: 1fr auto; gap: 24px; align-items: center; padding: 14px 18px; border-top: 1px solid var(--line); }
+.set-row:first-child { border-top: 0; }
+.set-row b { font-weight: 550; display: block; }
+.set-row small { color: var(--ink-4); font-size: 12px; }
+.switch { width: 34px; height: 20px; border-radius: 99px; background: var(--line-2); position: relative; border: 0; transition: background var(--dur-fast); }
+.switch::after { content: ""; position: absolute; top: 2px; left: 2px; width: 16px; height: 16px; border-radius: 50%; background: #fff; box-shadow: 0 1px 2px rgb(0 0 0 / 25%); transition: transform var(--dur-base) var(--ease); }
+.switch.on { background: var(--accent); }
+.switch.on::after { transform: translateX(14px); }
+.themes { display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; padding: 0 18px 18px; }
+.theme-opt { border: 1px solid var(--line); border-radius: var(--r-md); padding: 8px; background: var(--surface); text-align: left; transition: border-color var(--dur-fast), box-shadow var(--dur-fast); }
+.theme-opt.on { border-color: var(--accent); box-shadow: var(--ring); }
+.theme-opt .pv { height: 64px; border-radius: 6px; margin-bottom: 8px; display: grid; grid-template-columns: 26% 1fr; overflow: hidden; border: 1px solid var(--line); }
+.theme-opt span { font-size: 12px; font-weight: 550; }
+.warnbox { display: flex; gap: 10px; padding: 10px 12px; margin: 0 18px 14px; border-radius: var(--r-md); background: var(--err-bg); border: 1px solid var(--err-line); color: var(--err); font-size: 12.5px; }
+
+/* 设计系统区块 */
+.ds { display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px; }
+.ds .card-body { padding-top: 4px; }
+.swatches { display: grid; grid-template-columns: repeat(5, 1fr); gap: 8px; }
+.sw { border-radius: var(--r-sm); height: 44px; border: 1px solid var(--line); position: relative; }
+.sw-l { font: 10.5px var(--font-mono); color: var(--ink-4); margin-top: 4px; }
+.type-row { display: flex; align-items: baseline; justify-content: space-between; border-top: 1px solid var(--line); padding: 8px 0; }
+.type-row:first-child { border-top: 0; }
+.type-row small { font: 11px var(--font-mono); color: var(--ink-5); }
+.compo { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-bottom: 12px; }
+.notes { margin: 0; padding-left: 18px; color: var(--ink-2); }
+.notes li { margin: 6px 0; }
+.notes code { font: 12px var(--font-mono); background: var(--surface-3); padding: 1px 5px; border-radius: 4px; }
+.cmp { display: grid; grid-template-columns: 1fr 1fr; gap: 0; }
+.cmp > div { padding: 14px 18px; }
+.cmp > div + div { border-left: 1px solid var(--line); }
+.cmp h4 { margin: 0 0 8px; font-size: 12px; color: var(--ink-4); text-transform: uppercase; letter-spacing: .06em; }
+
+/* 屏幕切换 */
+.screen { display: none; }
+.screen.on { display: block; animation: fade var(--dur-enter) var(--ease); }
+@keyframes fade { from { opacity: 0; transform: translateY(4px); } }
+
+@media (max-width: 960px) {
+  .window { grid-template-columns: 1fr; height: auto; }
+  .sidebar { display: none; }
+  .kpis { grid-template-columns: repeat(2, 1fr); }
+  .hero, .split, .settings, .flow, .ds, .cmp { grid-template-columns: 1fr; }
+  .flow-col.mid { padding: 12px 0; }
+  .main-inner { padding: 20px 16px; }
+  .table-wrap { overflow-x: auto; }
+}
+</style>
+</head>
+<body>
+<svg width="0" height="0" style="position:absolute">
+  <defs>
+    <symbol id="i-book" viewBox="0 0 24 24"><path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20V3H6.5A2.5 2.5 0 0 0 4 5.5z"/><path d="M4 19.5A2.5 2.5 0 0 0 6.5 22H20v-5"/></symbol>
+    <symbol id="i-activity" viewBox="0 0 24 24"><path d="M22 12h-4l-3 9L9 3l-3 9H2"/></symbol>
+    <symbol id="i-bot" viewBox="0 0 24 24"><rect x="4" y="8" width="16" height="12" rx="3"/><path d="M12 4v4M9 13v2M15 13v2"/></symbol>
+    <symbol id="i-layers" viewBox="0 0 24 24"><path d="m12 2 10 5-10 5L2 7z"/><path d="m2 17 10 5 10-5M2 12l10 5 10-5"/></symbol>
+    <symbol id="i-key" viewBox="0 0 24 24"><circle cx="7.5" cy="15.5" r="4.5"/><path d="m10.7 12.3 9.8-9.8M17 6l3 3M14 9l2 2"/></symbol>
+    <symbol id="i-scroll" viewBox="0 0 24 24"><path d="M8 21h11a2 2 0 0 0 2-2v-2H10v2a2 2 0 0 1-4 0V5a2 2 0 0 0-2-2h12a2 2 0 0 1 2 2v12"/><path d="M10 7h6M10 11h6"/></symbol>
+    <symbol id="i-chart" viewBox="0 0 24 24"><path d="M3 3v18h18"/><path d="M7 15v2M11 10v7M15 12v5M19 6v11"/></symbol>
+    <symbol id="i-receipt" viewBox="0 0 24 24"><path d="M5 2v20l3-2 2 2 2-2 2 2 2-2 3 2V2l-3 2-2-2-2 2-2-2-2 2z"/><path d="M9 8h6M9 12h6"/></symbol>
+    <symbol id="i-refresh" viewBox="0 0 24 24"><path d="M21 12a9 9 0 0 1-15 6.7L3 16M3 12a9 9 0 0 1 15-6.7L21 8"/><path d="M21 3v5h-5M3 21v-5h5"/></symbol>
+    <symbol id="i-settings" viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 0 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 0 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 0 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 0 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"/></symbol>
+    <symbol id="i-info" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><path d="M12 16v-4M12 8h.01"/></symbol>
+    <symbol id="i-search" viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></symbol>
+    <symbol id="i-plus" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></symbol>
+    <symbol id="i-copy" viewBox="0 0 24 24"><rect x="9" y="9" width="12" height="12" rx="2"/><path d="M5 15V5a2 2 0 0 1 2-2h10"/></symbol>
+    <symbol id="i-moon" viewBox="0 0 24 24"><path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8z"/></symbol>
+    <symbol id="i-palette" viewBox="0 0 24 24"><circle cx="13.5" cy="6.5" r="1"/><circle cx="17.5" cy="10.5" r="1"/><circle cx="8.5" cy="7.5" r="1"/><circle cx="6.5" cy="12.5" r="1"/><path d="M12 2a10 10 0 0 0 0 20c1 0 1.7-.8 1.7-1.7 0-.4-.2-.8-.4-1.1-.3-.3-.4-.7-.4-1.1 0-.9.8-1.7 1.7-1.7H17a5 5 0 0 0 5-5C22 6 17.5 2 12 2z"/></symbol>
+    <symbol id="i-filter" viewBox="0 0 24 24"><path d="M3 5h18l-7 8v6l-4 2v-8z"/></symbol>
+    <symbol id="i-download" viewBox="0 0 24 24"><path d="M12 3v12m0 0-4-4m4 4 4-4M4 21h16"/></symbol>
+    <symbol id="i-pause" viewBox="0 0 24 24"><path d="M9 5v14M15 5v14"/></symbol>
+    <symbol id="i-more" viewBox="0 0 24 24"><circle cx="5" cy="12" r="1"/><circle cx="12" cy="12" r="1"/><circle cx="19" cy="12" r="1"/></symbol>
+    <symbol id="i-x" viewBox="0 0 24 24"><path d="M18 6 6 18M6 6l12 12"/></symbol>
+    <symbol id="i-alert" viewBox="0 0 24 24"><path d="M10.3 3.9 1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0zM12 9v4M12 17h.01"/></symbol>
+  </defs>
+</svg>
+
+<div class="doc">
+  <header class="doc-head">
+    <div>
+      <div class="crumb">cc-router · 界面主题 · 设计稿</div>
+      <h1>「简洁」主题 v2</h1>
+      <p>保留现有信息架构与 <code class="mono">plain</code> 画风骨架，只换外形与层级：冷调锌灰中性色、珊瑚渐变主色、浮起式导航选中态、分组侧栏、状态卡片化、表格主从布局。所有 token 与 <code class="mono">quiet.css</code> 现有变量同名，可直接落地。</p>
+    </div>
+    <div class="doc-ctrl">
+      <div class="seg" id="modeSeg">
+        <button class="on" data-mode="light">浅色</button>
+        <button data-mode="dark">暗色</button>
+      </div>
+    </div>
+  </header>
+
+  <!-- ================= 01 应用界面 ================= -->
+  <div class="doc-section"><span class="idx">01</span><h2>应用界面</h2><span>点击侧栏切换页面：实时路由 / 订阅管理 / 请求日志 / 设置</span></div>
+
+  <div class="window">
+    <aside class="sidebar">
+      <div class="traffic"><i></i><i></i><i></i></div>
+      <div class="brand">
+        <div class="logo">cc</div>
+        <div><b>cc-router</b><small>多订阅聚合代理</small></div>
+      </div>
+      <div class="search"><svg width="13" height="13" style="stroke:currentColor;fill:none;stroke-width:2"><use href="#i-search"/></svg>搜索页面与订阅<kbd>⌘K</kbd></div>
+
+      <div class="nav-group">开始</div>
+      <button class="nav-item" data-go="live"><svg><use href="#i-book"/></svg>接入指南</button>
+
+      <div class="nav-group">路由</div>
+      <button class="nav-item active" data-go="live"><svg><use href="#i-activity"/></svg>实时路由<span class="live" title="代理运行中"></span></button>
+      <button class="nav-item" data-go="live"><svg><use href="#i-bot"/></svg>Agent 监控</button>
+      <button class="nav-item" data-go="subs"><svg><use href="#i-layers"/></svg>虚拟模型<span class="count">6</span></button>
+      <button class="nav-item" data-go="subs"><svg><use href="#i-key"/></svg>订阅管理<span class="count">8</span></button>
+
+      <div class="nav-group">观测</div>
+      <button class="nav-item" data-go="logs"><svg><use href="#i-scroll"/></svg>请求日志</button>
+      <button class="nav-item" data-go="live"><svg><use href="#i-chart"/></svg>数据统计</button>
+      <button class="nav-item" data-go="live"><svg><use href="#i-receipt"/></svg>用量小票</button>
+
+      <div class="nav-group">系统</div>
+      <button class="nav-item" data-go="settings"><svg><use href="#i-settings"/></svg>设置</button>
+      <button class="nav-item" data-go="settings"><svg><use href="#i-refresh"/></svg>检查更新<span class="upd">新</span></button>
+
+      <div class="side-foot">
+        <div class="proxy-card">
+          <div class="row"><span class="pulse"></span>代理运行中</div>
+          <div class="sub">127.0.0.1:23456 · 3 进行中</div>
+        </div>
+        <div class="side-tools">
+          <span>v6.8.0</span>
+          <span style="display:flex;gap:2px">
+            <button class="icon-btn" title="明暗模式" id="sideMode"><svg><use href="#i-moon"/></svg></button>
+            <button class="icon-btn" title="界面主题"><svg><use href="#i-palette"/></svg></button>
+            <button class="icon-btn" title="关于"><svg><use href="#i-info"/></svg></button>
+          </span>
+        </div>
+      </div>
+    </aside>
+
+    <main class="main">
+      <!-- ---------- 实时路由 ---------- -->
+      <section class="screen on" id="s-live"><div class="main-inner">
+        <div class="page-head">
+          <div>
+            <div class="crumb">路由</div>
+            <h1>实时路由</h1>
+            <div class="subtitle">Claude Code 的每个请求如何被分配到订阅</div>
+          </div>
+          <div class="actions">
+            <button class="btn"><svg><use href="#i-pause"/></svg>暂停</button>
+            <button class="btn primary"><svg><use href="#i-copy"/></svg>复制环境变量</button>
+          </div>
+        </div>
+
+        <div class="card hero">
+          <div class="hero-l">
+            <div style="display:flex;align-items:center;gap:8px">
+              <span class="pill ok">运行中</span>
+              <span class="card-sub">已运行 3 天 4 小时 · HTTP/2 · 仅本机</span>
+            </div>
+            <div class="endpoint">
+              <code>http://127.0.0.1:23456</code>
+              <button class="btn sm ghost"><svg><use href="#i-copy"/></svg>复制</button>
+            </div>
+            <div class="env"><b>ANTHROPIC_BASE_URL</b>=http://127.0.0.1:23456
+<b>ANTHROPIC_DEFAULT_OPUS_MODEL</b>=model-opus
+<b>ANTHROPIC_DEFAULT_SONNET_MODEL</b>=model-sonnet</div>
+          </div>
+          <div class="hero-r">
+            <div class="card-title" style="margin-bottom:10px">订阅健康度</div>
+            <div style="display:flex;align-items:baseline;gap:6px"><span style="font-size:28px;font-weight:650;letter-spacing:-.02em">6</span><span class="card-sub">/ 8 可调度</span></div>
+            <div class="timeline" style="height:8px">
+              <i style="flex:6;background:var(--ok)"></i><i style="flex:1;background:var(--warn)"></i><i style="flex:1;background:var(--ink-5)"></i>
+            </div>
+            <div class="legend" style="margin-top:8px"><span style="--c:var(--ok)">正常 6</span><span style="--c:var(--warn)">限流 1</span><span style="--c:var(--ink-5)">停用 1</span></div>
+          </div>
+        </div>
+
+        <div class="kpis">
+          <div class="card kpi"><div class="lbl">今日请求</div><div class="val num">1,284</div>
+            <div class="foot"><span class="delta up">+12.4%</span><svg class="spark" viewBox="0 0 84 24"><path d="M0 18 L12 16 L24 17 L36 11 L48 13 L60 7 L72 9 L84 4" fill="none" stroke="var(--accent)" stroke-width="1.6"/></svg></div></div>
+          <div class="card kpi"><div class="lbl">Token 用量</div><div class="val num">48.2<small>M</small></div>
+            <div class="foot"><span class="delta up">+8.1%</span><svg class="spark" viewBox="0 0 84 24"><path d="M0 16 L12 14 L24 15 L36 12 L48 9 L60 11 L72 6 L84 7" fill="none" stroke="var(--accent)" stroke-width="1.6"/></svg></div></div>
+          <div class="card kpi"><div class="lbl">成功率</div><div class="val num">99.2<small>%</small></div>
+            <div class="foot"><span class="delta down">−0.3%</span><svg class="spark" viewBox="0 0 84 24"><path d="M0 6 L12 5 L24 6 L36 5 L48 8 L60 6 L72 9 L84 8" fill="none" stroke="var(--ink-5)" stroke-width="1.6"/></svg></div></div>
+          <div class="card kpi"><div class="lbl">P95 首字延迟</div><div class="val num">1.42<small>s</small></div>
+            <div class="foot"><span class="delta up">−180ms</span><svg class="spark" viewBox="0 0 84 24"><path d="M0 8 L12 10 L24 9 L36 13 L48 12 L60 15 L72 14 L84 17" fill="none" stroke="var(--ink-5)" stroke-width="1.6"/></svg></div></div>
+        </div>
+
+        <div class="card" style="margin-bottom:16px">
+          <div class="card-head"><div><div class="card-title">路由拓扑</div><div class="card-sub">虚拟模型 → 订阅，条长 = 近 1 小时请求占比</div></div>
+            <div class="seg"><button class="on">1 小时</button><button>今天</button><button>7 天</button></div></div>
+          <div class="card-body">
+            <div class="flow">
+              <div class="flow-col">
+                <div class="flow-head">虚拟模型</div>
+                <div class="vm">model-fable<span class="n">12</span></div>
+                <div class="vm hot">model-opus<span class="n">418</span></div>
+                <div class="vm">model-sonnet<span class="n">706</span></div>
+                <div class="vm">model-haiku<span class="n">131</span></div>
+                <div class="vm">fallback<span class="n">17</span></div>
+              </div>
+              <div class="flow-col mid">
+                <div class="flow-head">model-opus · 顺序调度</div>
+                <div class="route"><div class="route-name"><span class="plogo" style="background:#d97757">A</span>Anthropic 主号</div><span class="pill ok">正常</span><div class="bar"><i style="width:72%"></i></div></div>
+                <div class="route"><div class="route-name"><span class="plogo" style="background:#3b5bdb">Z</span>智谱 GLM 包月</div><span class="pill warn">限流 · 42s</span><div class="bar"><i class="warn" style="width:21%"></i></div></div>
+                <div class="route"><div class="route-name"><span class="plogo" style="background:#111">K</span>Kimi 国际版</div><span class="pill ok">正常</span><div class="bar"><i class="ok" style="width:7%"></i></div></div>
+                <div class="route"><div class="route-name"><span class="plogo" style="background:#9ca3af">O</span>Codex 副号</div><span class="pill mute">停用</span><div class="bar"><i class="mute" style="width:0"></i></div></div>
+              </div>
+              <div class="flow-col">
+                <div class="flow-head">真实模型</div>
+                <div class="vm" style="justify-content:space-between">claude-opus-4-7<span class="tag">72%</span></div>
+                <div class="vm" style="justify-content:space-between">glm-5.1<span class="tag">21%</span></div>
+                <div class="vm" style="justify-content:space-between">kimi-k3<span class="tag">7%</span></div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div class="card">
+          <div class="card-head bordered"><div class="card-title">请求流</div><span class="card-sub"><span class="pulse" style="display:inline-block;margin-right:6px"></span>实时</span></div>
+          <ul class="stream">
+            <li><span class="t">14:02:31</span><span class="tag">model-opus</span><span>Anthropic 主号 · claude-opus-4-7</span><span class="pill info">流式中</span><span class="ms">…</span></li>
+            <li><span class="t">14:02:29</span><span class="tag">model-sonnet</span><span>DeepSeek · deepseek-v4</span><span class="pill ok">200</span><span class="ms">2.13s</span></li>
+            <li><span class="t">14:02:27</span><span class="tag">model-opus</span><span>智谱 GLM 包月 → Anthropic 主号</span><span class="pill warn">429 · 重试</span><span class="ms">3.80s</span></li>
+            <li><span class="t">14:02:22</span><span class="tag">model-haiku</span><span>Kimi 国际版 · kimi-k3-turbo</span><span class="pill ok">200</span><span class="ms">0.64s</span></li>
+            <li><span class="t">14:02:18</span><span class="tag">fallback</span><span>OpenRouter · 透传 gpt-5.5</span><span class="pill err">502</span><span class="ms">11.2s</span></li>
+          </ul>
+        </div>
+      </div></section>
+
+      <!-- ---------- 订阅管理 ---------- -->
+      <section class="screen" id="s-subs"><div class="main-inner">
+        <div class="page-head">
+          <div><div class="crumb">路由</div><h1>订阅管理</h1><div class="subtitle">每个 API Key 一条订阅，绑定到虚拟模型后参与调度</div></div>
+          <div class="actions"><button class="btn primary"><svg><use href="#i-plus"/></svg>添加订阅</button></div>
+        </div>
+        <div class="toolbar">
+          <div class="input"><svg><use href="#i-search"/></svg>搜索名称、厂商、模型</div>
+          <div class="seg"><button class="on">全部 8</button><button>正常 6</button><button>异常 1</button><button>停用 1</button></div>
+          <span style="flex:1"></span>
+          <button class="select"><svg width="13" height="13" style="stroke:currentColor;fill:none;stroke-width:2"><use href="#i-filter"/></svg>厂商</button>
+        </div>
+        <div class="card table-wrap">
+          <table class="table">
+            <thead><tr><th>订阅</th><th style="width:110px">状态</th><th style="width:220px">限额</th><th>被引用</th><th style="width:90px">更新</th><th style="width:90px"></th></tr></thead>
+            <tbody>
+              <tr><td><div class="who"><span class="plogo" style="background:#d97757;width:30px;height:30px;border-radius:8px">A</span><div class="sub-name"><b>Anthropic 主号</b><small>Anthropic · 国际</small></div></div></td>
+                <td><span class="pill ok">正常</span></td>
+                <td><div class="quota"><div class="q"><span>日</span><span class="track"><i style="width:34%"></i></span><span>34%</span></div><div class="q"><span>周</span><span class="track"><i style="width:61%"></i></span><span>61%</span></div></div></td>
+                <td><div class="chips"><span class="tag">opus</span><span class="tag">sonnet</span><span class="tag">fable</span></div></td>
+                <td class="card-sub">2 分钟前</td>
+                <td><div class="row-actions"><button class="btn sm ghost">编辑</button><button class="icon-btn"><svg><use href="#i-more"/></svg></button></div></td></tr>
+              <tr class="sel"><td><div class="who"><span class="plogo" style="background:#3b5bdb;width:30px;height:30px;border-radius:8px">Z</span><div class="sub-name"><b>智谱 GLM 包月</b><small>智谱 · 中国</small></div></div></td>
+                <td><span class="pill warn">限流 42s</span></td>
+                <td><div class="quota"><div class="q"><span>日</span><span class="track"><i class="warn" style="width:88%"></i></span><span>88%</span></div><div class="q"><span>月</span><span class="track"><i style="width:40%"></i></span><span>40%</span></div></div></td>
+                <td><div class="chips"><span class="tag">opus</span></div></td>
+                <td class="card-sub">1 小时前</td>
+                <td><div class="row-actions"><button class="btn sm ghost">编辑</button><button class="icon-btn"><svg><use href="#i-more"/></svg></button></div></td></tr>
+              <tr><td><div class="who"><span class="plogo" style="background:#4d6bfe;width:30px;height:30px;border-radius:8px">D</span><div class="sub-name"><b>DeepSeek</b><small>DeepSeek · 中国</small></div></div></td>
+                <td><span class="pill ok">正常</span></td>
+                <td><span class="card-sub">未设限额</span></td>
+                <td><div class="chips"><span class="tag">sonnet</span><span class="tag">haiku</span></div></td>
+                <td class="card-sub">昨天</td>
+                <td><div class="row-actions"><button class="btn sm ghost">编辑</button><button class="icon-btn"><svg><use href="#i-more"/></svg></button></div></td></tr>
+              <tr><td><div class="who"><span class="plogo" style="background:#111;width:30px;height:30px;border-radius:8px">K</span><div class="sub-name"><b>Kimi 国际版</b><small>月之暗面 · 国际</small></div></div></td>
+                <td><span class="pill ok">正常</span></td>
+                <td><div class="quota"><div class="q"><span>总</span><span class="track"><i class="err" style="width:96%"></i></span><span>96%</span></div></div></td>
+                <td><div class="chips"><span class="tag">opus</span><span class="tag">haiku</span></div></td>
+                <td class="card-sub">3 天前</td>
+                <td><div class="row-actions"><button class="btn sm ghost">编辑</button><button class="icon-btn"><svg><use href="#i-more"/></svg></button></div></td></tr>
+              <tr><td><div class="who"><span class="plogo" style="background:#10a37f;width:30px;height:30px;border-radius:8px">O</span><div class="sub-name"><b>Codex 副号</b><small>ChatGPT OAuth</small></div></div></td>
+                <td><span class="pill mute">停用</span></td>
+                <td><span class="card-sub">—</span></td>
+                <td><span class="card-sub">未被使用</span></td>
+                <td class="card-sub">上周</td>
+                <td><div class="row-actions"><button class="btn sm ghost">编辑</button><button class="icon-btn"><svg><use href="#i-more"/></svg></button></div></td></tr>
+              <tr><td><div class="who"><span class="plogo" style="background:#7c3aed;width:30px;height:30px;border-radius:8px">C</span><div class="sub-name"><b>自建中转</b><small>自定义 · OpenAI Chat</small></div></div></td>
+                <td><span class="pill err">鉴权失败</span></td>
+                <td><span class="card-sub">—</span></td>
+                <td><div class="chips"><span class="tag">fallback</span></div></td>
+                <td class="card-sub">上周</td>
+                <td><div class="row-actions"><button class="btn sm ghost">编辑</button><button class="icon-btn"><svg><use href="#i-more"/></svg></button></div></td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div></section>
+
+      <!-- ---------- 请求日志 ---------- -->
+      <section class="screen" id="s-logs"><div class="main-inner" style="max-width:none">
+        <div class="page-head">
+          <div><div class="crumb">观测</div><h1>请求日志</h1><div class="subtitle">每次尝试一行，点击查看详情</div></div>
+          <div class="actions"><button class="btn"><svg><use href="#i-download"/></svg>导出 CSV</button></div>
+        </div>
+        <div class="toolbar">
+          <div class="input focus"><svg><use href="#i-search"/></svg>opus</div>
+          <button class="select on">虚拟模型: model-opus <svg width="11" height="11" style="stroke:currentColor;fill:none;stroke-width:2.2"><use href="#i-x"/></svg></button>
+          <button class="select">订阅</button>
+          <button class="select">状态</button>
+          <span style="flex:1"></span>
+          <div class="seg"><button>1h</button><button class="on">24h</button><button>7d</button></div>
+        </div>
+        <div class="split">
+          <div class="card table-wrap">
+            <table class="table">
+              <thead><tr><th>时间</th><th>订阅 → 模型</th><th>状态</th><th style="text-align:right">Tokens</th><th style="text-align:right">耗时</th></tr></thead>
+              <tbody class="num">
+                <tr><td class="mono card-sub">14:02:31</td><td>Anthropic 主号 <span class="card-sub">· claude-opus-4-7</span></td><td><span class="pill ok">200</span></td><td class="mono" style="text-align:right">18.4k</td><td class="mono" style="text-align:right">8.21s</td></tr>
+                <tr class="sel"><td class="mono card-sub">14:02:27</td><td>智谱 GLM 包月 <span class="card-sub">· glm-5.1</span></td><td><span class="pill warn">429</span></td><td class="mono" style="text-align:right">—</td><td class="mono" style="text-align:right">0.31s</td></tr>
+                <tr><td class="mono card-sub">14:01:58</td><td>Anthropic 主号 <span class="card-sub">· claude-opus-4-7</span></td><td><span class="pill ok">200</span></td><td class="mono" style="text-align:right">42.0k</td><td class="mono" style="text-align:right">14.9s</td></tr>
+                <tr><td class="mono card-sub">14:01:12</td><td>Kimi 国际版 <span class="card-sub">· kimi-k3</span></td><td><span class="pill ok">200</span></td><td class="mono" style="text-align:right">6.1k</td><td class="mono" style="text-align:right">3.02s</td></tr>
+                <tr><td class="mono card-sub">14:00:40</td><td>Anthropic 主号 <span class="card-sub">· claude-opus-4-7</span></td><td><span class="pill err">529</span></td><td class="mono" style="text-align:right">—</td><td class="mono" style="text-align:right">1.20s</td></tr>
+                <tr><td class="mono card-sub">13:59:03</td><td>Anthropic 主号 <span class="card-sub">· claude-opus-4-7</span></td><td><span class="pill ok">200</span></td><td class="mono" style="text-align:right">22.7k</td><td class="mono" style="text-align:right">9.48s</td></tr>
+                <tr><td class="mono card-sub">13:58:44</td><td>智谱 GLM 包月 <span class="card-sub">· glm-5.1</span></td><td><span class="pill ok">200</span></td><td class="mono" style="text-align:right">11.3k</td><td class="mono" style="text-align:right">5.66s</td></tr>
+              </tbody>
+            </table>
+          </div>
+          <div class="card drawer">
+            <div class="card-head bordered"><div><div class="card-title">请求详情</div><div class="card-sub mono">req_01JD…7KQ</div></div><button class="icon-btn"><svg><use href="#i-x"/></svg></button></div>
+            <div class="card-body" style="padding-top:14px">
+              <div style="display:flex;gap:6px;margin-bottom:14px"><span class="pill warn">429 rate_limited</span><span class="pill plain mute">/v1/messages</span></div>
+              <dl class="kv">
+                <dt>虚拟模型</dt><dd class="mono">model-opus</dd>
+                <dt>订阅</dt><dd>智谱 GLM 包月</dd>
+                <dt>真实模型</dt><dd class="mono">glm-5.1</dd>
+                <dt>Effort</dt><dd><span class="tag">high</span> <span class="card-sub">来自客户端</span></dd>
+                <dt>客户端</dt><dd>Claude Code 2.4.1</dd>
+              </dl>
+              <div class="card-title" style="margin:18px 0 4px">本次请求的尝试</div>
+              <div class="attempts">
+                <div class="attempt"><span class="pill warn">429</span>智谱 GLM 包月<span class="ms">0.31s</span></div>
+                <div class="attempt"><span class="pill ok">200</span>Anthropic 主号<span class="ms">7.92s</span></div>
+              </div>
+              <div class="card-title" style="margin:18px 0 0">耗时拆分</div>
+              <div class="timeline"><i style="flex:.31;background:var(--warn)"></i><i style="flex:1.1;background:var(--info)"></i><i style="flex:6.8;background:var(--accent)"></i></div>
+              <div class="legend"><span style="--c:var(--warn)">重试</span><span style="--c:var(--info)">首字</span><span style="--c:var(--accent)">流式</span></div>
+              <div style="display:flex;gap:8px;margin-top:18px"><button class="btn sm">请求头</button><button class="btn sm">错误体</button><button class="btn sm ghost">复制 ID</button></div>
+            </div>
+          </div>
+        </div>
+      </div></section>
+
+      <!-- ---------- 设置 ---------- -->
+      <section class="screen" id="s-settings"><div class="main-inner">
+        <div class="page-head"><div><div class="crumb">系统</div><h1>设置</h1><div class="subtitle">修改后即时生效，带 ↻ 的项需要重启代理服务</div></div></div>
+        <div class="settings">
+          <nav class="subnav"><a class="on" href="#">外观</a><a href="#">代理服务</a><a href="#">网页界面</a><a href="#">终端界面</a><a href="#">日志</a><a href="#">备份与迁移</a></nav>
+          <div style="display:flex;flex-direction:column;gap:16px">
+            <div class="card">
+              <div class="card-head"><div><div class="card-title">界面主题</div><div class="card-sub">简洁是默认主题</div></div>
+                <div class="seg"><button>跟随系统</button><button class="on">浅色</button><button>暗色</button></div></div>
+              <div class="themes">
+                <button class="theme-opt on"><div class="pv"><div style="background:#fafafa;border-right:1px solid #ececef"></div><div style="background:#fff;padding:8px"><div style="height:6px;width:50%;background:#18181b;border-radius:3px"></div><div style="height:14px;margin-top:8px;border-radius:4px;background:linear-gradient(135deg,#e8664a,#c9452c);width:40%"></div></div></div><span>简洁</span></button>
+                <button class="theme-opt"><div class="pv"><div style="background:#f3efe6"></div><div style="background:#fbf8f1"></div></div><span>手绘</span></button>
+                <button class="theme-opt"><div class="pv"><div style="background:#f2f2f2"></div><div style="background:#fff"></div></div><span>经典</span></button>
+                <button class="theme-opt"><div class="pv"><div style="background:#0a246a"></div><div style="background:#d4d0c8"></div></div><span>Win2000</span></button>
+              </div>
+            </div>
+            <div class="card">
+              <div class="card-head bordered"><div class="card-title">代理服务</div><span class="pill ok">运行中</span></div>
+              <div class="set-row"><div><b>端口 ↻</b><small>被占用时自动 +1，最多 100 次</small></div><div class="input" style="min-width:110px;color:var(--ink)"><span class="mono">23456</span></div></div>
+              <div class="set-row"><div><b>监听地址 ↻</b><small>0.0.0.0 会暴露给局域网</small></div><div class="seg"><button class="on">仅本机</button><button>局域网</button></div></div>
+              <div class="set-row"><div><b>代理鉴权</b><small>要求客户端携带访问令牌</small></div><button class="switch on"></button></div>
+              <div class="set-row"><div><b>记录请求头</b><small>敏感值自动打码</small></div><button class="switch on"></button></div>
+              <div class="set-row"><div><b>开机自动启动</b><small>启动后最小化到托盘</small></div><button class="switch"></button></div>
+            </div>
+            <div class="card">
+              <div class="card-head"><div class="card-title">网页界面</div><button class="switch"></button></div>
+              <div class="warnbox"><svg width="16" height="16" style="stroke:currentColor;fill:none;stroke-width:2;flex:none"><use href="#i-alert"/></svg>监听 0.0.0.0 且关闭鉴权时，局域网内任何人都能使用你的订阅。</div>
+            </div>
+          </div>
+        </div>
+      </div></section>
+    </main>
+  </div>
+
+  <!-- ================= 02 设计系统 ================= -->
+  <div class="doc-section"><span class="idx">02</span><h2>设计 token 与组件</h2><span>与现有变量同名，替换 quiet.css 即可</span></div>
+  <div class="ds">
+    <div class="card"><div class="card-head"><div class="card-title">中性色</div><span class="card-sub">冷调锌灰</span></div><div class="card-body">
+      <div class="swatches">
+        <div><div class="sw" style="background:var(--bg)"></div><div class="sw-l">--bg</div></div>
+        <div><div class="sw" style="background:var(--surface)"></div><div class="sw-l">--surface</div></div>
+        <div><div class="sw" style="background:var(--surface-3)"></div><div class="sw-l">--surface-3</div></div>
+        <div><div class="sw" style="background:var(--line-2)"></div><div class="sw-l">--line-2</div></div>
+        <div><div class="sw" style="background:var(--ink)"></div><div class="sw-l">--ink</div></div>
+      </div>
+      <div class="card-title" style="margin:16px 0 8px">主色与语义色</div>
+      <div class="swatches">
+        <div><div class="sw" style="background:var(--grad-accent)"></div><div class="sw-l">accent</div></div>
+        <div><div class="sw" style="background:var(--ok)"></div><div class="sw-l">ok</div></div>
+        <div><div class="sw" style="background:var(--warn)"></div><div class="sw-l">warn</div></div>
+        <div><div class="sw" style="background:var(--err)"></div><div class="sw-l">err</div></div>
+        <div><div class="sw" style="background:var(--info)"></div><div class="sw-l">info</div></div>
+      </div>
+    </div></div>
+
+    <div class="card"><div class="card-head"><div class="card-title">字号层级</div><span class="card-sub">系统字体 · 数字等宽</span></div><div class="card-body">
+      <div class="type-row"><span style="font-size:22px;font-weight:650;letter-spacing:-.02em">页面标题</span><small>22 / 650 / −2%</small></div>
+      <div class="type-row"><span style="font-size:24px;font-weight:650" class="num">1,284</span><small>KPI 24 / 650</small></div>
+      <div class="type-row"><span style="font-size:13.5px;font-weight:600">卡片标题</span><small>13.5 / 600</small></div>
+      <div class="type-row"><span>正文 Body</span><small>13.5 / 400</small></div>
+      <div class="type-row"><span class="card-sub">辅助说明</span><small>12 / ink-4</small></div>
+      <div class="type-row"><span class="nav-group" style="padding:0">分组标题</span><small>10.5 / 600 / +6%</small></div>
+      <div class="type-row"><span class="mono" style="font-size:12.5px">model-opus</span><small>mono 12.5</small></div>
+    </div></div>
+
+    <div class="card"><div class="card-head"><div class="card-title">组件</div><span class="card-sub">圆角 6 / 8 / 10 / 14</span></div><div class="card-body">
+      <div class="compo"><button class="btn primary"><svg><use href="#i-plus"/></svg>主按钮</button><button class="btn">次按钮</button><button class="btn ghost">幽灵</button><button class="btn danger">删除</button></div>
+      <div class="compo"><span class="pill ok">正常</span><span class="pill warn">限流</span><span class="pill err">鉴权失败</span><span class="pill info">流式中</span><span class="pill mute">停用</span><span class="pill accent">默认</span></div>
+      <div class="compo"><div class="seg"><button class="on">顺序</button><button>轮询</button><button>粘性</button></div><button class="switch on"></button><button class="switch"></button></div>
+      <div class="compo"><div class="input focus" style="min-width:0;flex:1"><svg><use href="#i-search"/></svg>聚焦态 · 3px 主色光环</div></div>
+      <div class="compo"><span class="tag">opus</span><span class="tag">sonnet</span><span class="select on">已选过滤 ×</span><span class="select">未选过滤</span></div>
+    </div></div>
+  </div>
+
+  <!-- ================= 03 说明 ================= -->
+  <div class="doc-section"><span class="idx">03</span><h2>与 v1 的差异与落地方式</h2></div>
+  <div class="card">
+    <div class="cmp">
+      <div>
+        <h4>视觉改动</h4>
+        <ul class="notes">
+          <li><b>中性色</b>：从带紫的灰 <code>#f6f6f8</code> 换成锌灰；暗色底降到 <code>#0f0f11</code>，卡片 <code>#17171a</code>，层级靠 1px 线 + 顶部内高光区分，不再靠大面积灰块。</li>
+          <li><b>主色</b>：<code>#aa4935</code> → <code>#d9573b</code>，主按钮与 Logo 用同色相的 135° 渐变 + 内高光，其它地方仍用纯色。</li>
+          <li><b>导航选中态</b>：从黑底白字改为「浮起的白卡片 + 主色图标」，视觉更轻；侧栏按 开始 / 路由 / 观测 / 系统 分组。</li>
+          <li><b>代理状态</b>：侧栏底部常驻状态卡（呼吸点 + 端口 + 进行中数），代替导航项上的绿点。</li>
+          <li><b>状态 pill</b>：统一「圆点 + 文字 + 同色描边」，6 种语义色，暗色下自动降饱和。</li>
+          <li><b>表格</b>：表头浅底、行 hover、选中行左侧 2px 主色条；行内操作 hover 才出现；日志页改成表格 + 右侧详情抽屉的主从布局。</li>
+          <li><b>数字</b>：KPI / 耗时 / Token 全部 <code>tabular-nums</code> 与等宽字体，滚动刷新时不跳动。</li>
+        </ul>
+      </div>
+      <div>
+        <h4>落地方式（不动组件结构）</h4>
+        <ul class="notes">
+          <li><code>src/themes/quiet.css</code>：替换两段配色 token（浅色 / <code>.dark</code>），同步 shadcn 的 HSL 变量。</li>
+          <li>新增 <code>--surface-glass</code> <code>--grad-accent</code> <code>--ring</code> <code>--dur-*</code>，只在 <code>[data-theme="quiet"]</code> 下定义，不影响经典 / Win2000。</li>
+          <li>外形规则写在 quiet.css 的 <code>@layer utilities</code>，沿用 <code>:where([data-theme="quiet"])</code> 不加权重的写法：<code>.nav-item.active</code>、<code>.btn.primary</code>、<code>.pill</code>、<code>.table th/td</code>、<code>.card</code> 阴影。</li>
+          <li>侧栏分组标题与底部状态卡需要改 <code>Sidebar.tsx</code>（按 <code>themeId === "quiet"</code> 渲染），新增文案四语齐全。</li>
+          <li>日志主从布局、KPI 迷你折线是页面级改动，建议作为第二步单独做。</li>
+          <li>动效全部 ≤ 280ms、可打断；呼吸点是唯一循环动画（表示「运行中」），尊重 <code>prefers-reduced-motion</code>。</li>
+        </ul>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+  const root = document.documentElement;
+  const segBtns = document.querySelectorAll('#modeSeg button');
+  function setMode(m) {
+    root.dataset.mode = m;
+    segBtns.forEach(b => b.classList.toggle('on', b.dataset.mode === m));
+  }
+  segBtns.forEach(b => b.addEventListener('click', () => setMode(b.dataset.mode)));
+  document.getElementById('sideMode').addEventListener('click', () => setMode(root.dataset.mode === 'dark' ? 'light' : 'dark'));
+  if (matchMedia('(prefers-color-scheme: dark)').matches) setMode('dark');
+
+  document.querySelectorAll('.nav-item').forEach(item => {
+    item.addEventListener('click', () => {
+      document.querySelectorAll('.nav-item').forEach(n => n.classList.remove('active'));
+      item.classList.add('active');
+      document.querySelectorAll('.screen').forEach(s => s.classList.toggle('on', s.id === 's-' + item.dataset.go));
+      document.querySelector('.main').scrollTop = 0;
+    });
+  });
+</script>
+</body>
+</html>
