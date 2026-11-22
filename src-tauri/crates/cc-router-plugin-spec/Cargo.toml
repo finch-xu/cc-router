@@ -1,0 +1,22 @@
+[package]
+name = "cc-router-plugin-spec"
+version = "1.0.0"
+edition = "2021"
+description = "cc-router 插件与厂商描述符的数据模型和校验 (app 与社区仓库 CI 共用)"
+license = "MIT"
+publish = false
+
+# 社区仓库 CI 用: cargo run -p cc-router-plugin-spec --bin ccr-plugin-check -- <插件目录>
+# 只依赖纯数据 crate, 编译它不需要 tauri / webkit。版本号不随 app 走 (不打包分发)。
+[[bin]]
+name = "ccr-plugin-check"
+path = "src/bin/ccr-plugin-check.rs"
+
+[dependencies]
+# 版本与主 crate 一致, 不引入新的依赖副本
+jsonschema = { version = "0.60.2", default-features = false }
+once_cell = "1.21.4"
+regex = "1.13.2"
+serde = { version = "1.0.229", features = ["derive"] }
+serde_json = { version = "1.0.154", features = ["preserve_order"] }
+serde_yaml = "0.9.34"

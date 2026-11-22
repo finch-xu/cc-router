@@ -71,7 +71,7 @@ pub(crate) fn provider_reasoning_defaults(
     provider_id: &str,
 ) -> (bool, Option<String>) {
     state
-        .providers
+        .providers()
         .get(provider_id)
         .map(|p| (p.expose_reasoning, p.default_reasoning_effort.clone()))
         .unwrap_or((true, Some(DEFAULT_REASONING_EFFORT.into())))
@@ -1319,7 +1319,7 @@ pub async fn dispatch(
             // 第一道的明文解包与第二道的 placeholder 注入。
             let is_deepseek_like = should_inject_thinking_placeholder(
                 state
-                    .providers
+                    .providers()
                     .get(&provider_id)
                     .map(|p| p.inject_missing_thinking_placeholder),
                 &url,

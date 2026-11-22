@@ -321,7 +321,7 @@ pub async fn list_subscriptions(state: State<'_, AppState>) -> AppResult<Vec<Sub
     for (id, rt) in subs.iter() {
         let guard = rt.read().await;
         let referenced = refs.get(id).cloned().unwrap_or_default();
-        out.push(SubscriptionDto::from_runtime(&guard, referenced, &state.providers));
+        out.push(SubscriptionDto::from_runtime(&guard, referenced, &state.providers()));
     }
     out.sort_by(|a, b| a.display_name.cmp(&b.display_name));
     Ok(out)
@@ -339,7 +339,7 @@ pub async fn get_subscription(
         .get(&id)
         .ok_or_else(|| AppError::SubscriptionNotFound(id.to_string()))?;
     let guard = rt.read().await;
-    Ok(SubscriptionDto::from_runtime(&guard, referenced, &state.providers))
+    Ok(SubscriptionDto::from_runtime(&guard, referenced, &state.providers()))
 }
 
 #[tauri::command]
@@ -357,10 +357,13 @@ pub async fn create_subscription(
             endpoint_id,
             url_params,
         } => {
-            let provider = state
-                .providers
+            let registry = state.providers();
+            let provider = registry
                 .get(&provider_id)
                 .ok_or_else(|| AppError::ProviderNotFound(provider_id.clone()))?;
+            if !registry.is_selectable(&provider_id) {
+                return Err(AppError::BadRequest("这个厂商插件已停用, 请先在插件页启用".into()));
+            }
             let endpoint = provider
                 .endpoint(&endpoint_id)
                 .ok_or_else(|| AppError::EndpointNotFound(endpoint_id.clone()))?;
@@ -517,7 +520,7 @@ async fn insert_subscription(state: &AppState, row: SubscriptionRow) -> AppResul
     }
 
     let guard = rt.read().await;
-    Ok(SubscriptionDto::from_runtime(&guard, vec![], &state.providers))
+    Ok(SubscriptionDto::from_runtime(&guard, vec![], &state.providers()))
 }
 
 #[tauri::command]
@@ -575,8 +578,8 @@ pub async fn update_subscription(
                 "自定义订阅不支持切 endpoint / url_params, 请用 connection patch 改连接信息".into(),
             ));
         }
-        let provider = state
-            .providers
+        let registry = state.providers();
+        let provider = registry
             .get(&provider_id)
             .ok_or_else(|| AppError::ProviderNotFound(provider_id.clone()))?;
         let endpoint_id = patch.endpoint_id.clone().unwrap_or(current_endpoint);
@@ -689,7 +692,66 @@ pub async fn update_subscription(
     let refs = collect_references(&state).await;
     let guard = rt.read().await;
     let referenced = refs.get(&id).cloned().unwrap_or_default();
-    Ok(SubscriptionDto::from_runtime(&guard, referenced, &state.providers))
+    Ok(SubscriptionDto::from_runtime(&guard, referenced, &state.providers()))
+}
+
+/// 预览「按新描述重建连接」: 用当前注册表里的厂商描述重算连接快照, 列出与现有快照的差异。
+#[tauri::command]
+pub async fn preview_subscription_rebuild(
+    state: State<'_, AppState>,
+    id: String,
+) -> AppResult<crate::subscription::rebuild::RebuildPreview> {
+    let id = Uuid::parse_str(&id).map_err(|_| AppError::BadRequest("无效 id".into()))?;
+    let rt = state
+        .subscriptions
+        .read()
+        .await
+        .get(&id)
+        .cloned()
+        .ok_or_else(|| AppError::SubscriptionNotFound(id.to_string()))?;
+    let guard = rt.read().await;
+    Ok(crate::subscription::rebuild::preview(&guard.row, &state.providers()))
+}
+
+/// 按当前厂商描述重建订阅的连接快照 (内置 yaml / 厂商插件更新后)。没有变化时原样返回。
+#[tauri::command]
+pub async fn rebuild_subscription_connection(state: State<'_, AppState>, id: String) -> AppResult<SubscriptionDto> {
+    use crate::subscription::rebuild::{self, BlockedReason};
+    let id = Uuid::parse_str(&id).map_err(|_| AppError::BadRequest("无效 id".into()))?;
+    let rt = state
+        .subscriptions
+        .read()
+        .await
+        .get(&id)
+        .cloned()
+        .ok_or_else(|| AppError::SubscriptionNotFound(id.to_string()))?;
+    let registry = state.providers();
+    {
+        let mut guard = rt.write().await;
+        let (plan, changes) = rebuild::plan(&guard.row, &registry).map_err(|reason| {
+            AppError::BadRequest(
+                match reason {
+                    BlockedReason::UserDefined => "自定义订阅请直接编辑连接信息",
+                    BlockedReason::Oauth => "OAuth 订阅的连接由登录流程管理",
+                    BlockedReason::ProviderMissing => "找不到这个订阅的厂商 (插件可能已卸载)",
+                    BlockedReason::EndpointMissing => "新的厂商描述里没有这个端点了, 请改选端点",
+                    BlockedReason::ParamsInvalid => "订阅填写的参数不符合新的厂商描述, 请在编辑页重新填写",
+                    BlockedReason::AuthChanged => "新的厂商描述换了鉴权方式, 请新建订阅",
+                    BlockedReason::ProtocolChanged => "新的厂商描述换了端点协议, 请新建订阅",
+                }
+                .into(),
+            )
+        })?;
+        if !changes.is_empty() {
+            rebuild::apply(&mut guard.row, plan);
+            guard.row.updated_at = Utc::now();
+            store::update_row(&state.db, &guard.row).await?;
+        }
+    }
+    let refs = collect_references(&state).await;
+    let guard = rt.read().await;
+    let referenced = refs.get(&id).cloned().unwrap_or_default();
+    Ok(SubscriptionDto::from_runtime(&guard, referenced, &registry))
 }
 
 #[tauri::command]
@@ -1210,7 +1272,7 @@ pub async fn update_token_quotas(
     store::update_row(&state.db, &row_snapshot).await?;
     let referenced_by = referenced_by_names(&state, &id).await;
     let guard = rt.read().await;
-    Ok(SubscriptionDto::from_runtime(&guard, referenced_by, &state.providers))
+    Ok(SubscriptionDto::from_runtime(&guard, referenced_by, &state.providers()))
 }
 
 /// Shared by `update_slot_schedules` and backup import so both reject the same rows. Takes the
@@ -1247,7 +1309,7 @@ pub async fn update_slot_schedules(
     store::update_row(&state.db, &row_snapshot).await?;
     let referenced_by = referenced_by_names(&state, &id).await;
     let guard = rt.read().await;
-    Ok(SubscriptionDto::from_runtime(&guard, referenced_by, &state.providers))
+    Ok(SubscriptionDto::from_runtime(&guard, referenced_by, &state.providers()))
 }
 
 /// The host machine's local wall clock, as the scheduler sees it. The web UI / TUI may run on
@@ -1289,7 +1351,7 @@ pub async fn reset_total_quota_usage(
     store::save_quota_usage_snapshot(&state.db, &id, &usage).await?;
     let referenced_by = referenced_by_names(&state, &id).await;
     let guard = rt.read().await;
-    Ok(SubscriptionDto::from_runtime(&guard, referenced_by, &state.providers))
+    Ok(SubscriptionDto::from_runtime(&guard, referenced_by, &state.providers()))
 }
 
 #[cfg(test)]

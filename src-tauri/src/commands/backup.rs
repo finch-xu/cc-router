@@ -92,7 +92,7 @@ async fn local_state(state: &AppState) -> LocalState {
         .values()
         .map(|c| (c.name.clone(), c.subscription_ids.clone()))
         .collect();
-    LocalState { existing_ids, bindings, providers: state.providers.clone() }
+    LocalState { existing_ids, bindings, providers: state.providers() }
 }
 
 async fn render_export(state: &AppState, password: Option<Zeroizing<String>>) -> AppResult<(String, usize)> {

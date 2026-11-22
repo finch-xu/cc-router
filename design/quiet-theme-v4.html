@@ -1,0 +1,580 @@
+<!doctype html>
+<html lang="zh-CN" data-mode="dark" data-accent="blue">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>简洁主题 v4 设计稿</title>
+<style>
+/* ============================================================
+ * cc-router「简洁」主题 v3 —— 克制版
+ * 参照 T3 Code 的配色: 中性灰阶 + 单一强调色, 细线几乎不可见,
+ * 层级靠灰阶与留白, 不靠色块与描边。
+ * 规则:
+ *   1. 彩色只出现在三处: 主按钮 / 焦点与开关 / 状态圆点
+ *   2. 状态 = 6px 圆点 + 灰色文字, 不用彩色底
+ *   3. 没有区块边框与行分隔线: 分组靠留白, 行靠悬停底色, 区域靠底色深浅
+ * ============================================================ */
+:root {
+  --background: #fcfcfc;
+  --sidebar:    #f7f7f8;
+  --card:       #ffffff;
+  --muted:      #f4f4f5;   /* hover / 选中行 / 分段控件底 */
+  --muted-2:    #ececee;
+  --border:     #e4e4e7;
+  --border-soft:#efeff1;
+  --foreground: #27272a;
+  --fg-2:       #52525b;
+  --muted-fg:   #71717b;
+  --faint:      #a1a1aa;
+
+  --accent:     #1b4ed8;
+  --accent-fg:  #ffffff;
+  --accent-soft: color-mix(in srgb, var(--accent) 10%, transparent);
+
+  --ok:   #10b981;
+  --warn: #f59e0b;
+  --err:  #ef4444;
+  --idle: #a1a1aa;
+
+  --radius: 10px;
+  --r-sm: 6px;
+  --shadow-pop: 0 8px 24px -8px rgb(0 0 0 / 12%), 0 0 0 1px var(--border);
+
+  --font-sans: Inter, -apple-system, BlinkMacSystemFont, "Segoe UI Variable Text", "Segoe UI", Roboto, "Helvetica Neue", "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", "Noto Sans SC", system-ui, sans-serif;
+  --font-mono: "JetBrains Mono", ui-monospace, "SF Mono", Menlo, "Cascadia Mono", Consolas, monospace;
+  --dur: 120ms;
+}
+html[data-mode="dark"] {
+  --background: #0a0a0a;
+  --sidebar:    #0d0d0d;
+  --card:       #111111;
+  --muted:      #161616;
+  --muted-2:    #1d1d1d;
+  --border:     #1f1f1f;
+  --border-soft:#171717;
+  --foreground: #f5f5f5;
+  --fg-2:       #c4c4c4;
+  --muted-fg:   #818181;
+  --faint:      #5c5c5c;
+
+  --accent:     #346bf1;
+  --accent-soft: color-mix(in srgb, var(--accent) 16%, transparent);
+
+  --ok:   #10b981;
+  --warn: #fe9a00;
+  --err:  #fb414a;
+  --idle: #5c5c5c;
+  --shadow-pop: 0 12px 32px -8px rgb(0 0 0 / 60%), 0 0 0 1px var(--border);
+}
+/* 备选强调色: 沿用 cc-router 的珊瑚色, 只换这一个值 */
+html[data-accent="coral"]                  { --accent: #c2492f; }
+html[data-accent="coral"][data-mode="dark"] { --accent: #e5664a; }
+
+* { box-sizing: border-box; }
+html, body { margin: 0; }
+body {
+  background: var(--background); color: var(--foreground);
+  font: 13px/1.5 var(--font-sans);
+  -webkit-font-smoothing: antialiased;
+}
+button { font: inherit; color: inherit; cursor: pointer; }
+.mono { font-family: var(--font-mono); font-size: 12px; }
+.num { font-variant-numeric: tabular-nums; }
+.muted { color: var(--muted-fg); }
+.faint { color: var(--faint); }
+svg.i { width: 15px; height: 15px; flex: none; stroke: currentColor; fill: none; stroke-width: 1.6; stroke-linecap: round; stroke-linejoin: round; }
+
+/* ---------- 设计稿外框 ---------- */
+.doc { max-width: 1280px; margin: 0 auto; padding: 40px 24px 80px; }
+.doc-head { display: flex; justify-content: space-between; align-items: flex-end; gap: 24px; flex-wrap: wrap; margin-bottom: 28px; }
+.doc-head h1 { margin: 0 0 4px; font-size: 20px; font-weight: 600; letter-spacing: -0.01em; }
+.doc-head p { margin: 0; color: var(--muted-fg); max-width: 620px; }
+.doc-ctrl { display: flex; gap: 8px; }
+.doc-h2 { margin: 48px 0 14px; font-size: 13px; font-weight: 600; display: flex; gap: 10px; align-items: baseline; }
+.doc-h2 span { color: var(--muted-fg); font-weight: 400; }
+
+.window {
+  height: 760px; display: grid; grid-template-columns: 216px 1fr;
+  border-radius: 12px; overflow: hidden; box-shadow: 0 0 0 1px var(--border), 0 30px 60px -30px rgb(0 0 0 / 35%);
+  background: var(--background);
+}
+
+/* ---------- 侧栏 ---------- */
+.sidebar { background: var(--sidebar); display: flex; flex-direction: column; padding: 12px 8px 10px; min-height: 0; }
+.traffic { display: flex; gap: 7px; padding: 2px 8px 14px; }
+.traffic i { width: 11px; height: 11px; border-radius: 50%; background: var(--muted-2); }
+.brand { display: flex; align-items: center; gap: 9px; padding: 0 8px 14px; }
+.mark { width: 22px; height: 22px; border-radius: 6px; background: var(--foreground); color: var(--background); display: grid; place-items: center; font: 700 10px var(--font-mono); }
+.brand b { font-size: 13px; font-weight: 600; }
+.nav-label { padding: 14px 10px 4px; font-size: 11.5px; color: var(--faint); }
+.nav-item {
+  display: flex; align-items: center; gap: 9px; width: 100%; height: 30px; padding: 0 10px;
+  border: 0; background: none; border-radius: var(--r-sm); color: var(--muted-fg); text-align: left;
+  transition: background var(--dur), color var(--dur);
+}
+.nav-item:hover { background: var(--muted); color: var(--foreground); }
+.nav-item.active { background: var(--muted-2); color: var(--foreground); }
+.nav-item .end { margin-left: auto; font: 11px var(--font-mono); color: var(--faint); }
+.dot { width: 6px; height: 6px; border-radius: 50%; background: var(--idle); flex: none; display: inline-block; }
+.dot.ok { background: var(--ok); } .dot.warn { background: var(--warn); } .dot.err { background: var(--err); } .dot.acc { background: var(--accent); }
+.side-foot { margin-top: auto; padding: 8px 10px 0; display: flex; flex-direction: column; gap: 8px; }
+.proxy { display: flex; align-items: center; gap: 8px; font-size: 12px; color: var(--fg-2); }
+.proxy .mono { color: var(--muted-fg); font-size: 11px; margin-left: auto; }
+.side-tools { display: flex; align-items: center; justify-content: space-between; color: var(--faint); font: 11px var(--font-mono); }
+.icon-btn { width: 26px; height: 26px; display: grid; place-items: center; border: 0; background: none; border-radius: var(--r-sm); color: var(--muted-fg); }
+.icon-btn:hover { background: var(--muted); color: var(--foreground); }
+
+/* ---------- 主区 ---------- */
+.main { display: flex; flex-direction: column; min-width: 0; min-height: 0; }
+.topbar { height: 48px; flex: none; display: flex; align-items: center; gap: 10px; padding: 0 28px; }
+.topbar h1 { margin: 0; font-size: 13px; font-weight: 600; }
+.topbar .sep { color: var(--faint); }
+.topbar .actions { margin-left: auto; display: flex; gap: 6px; }
+.scroll { flex: 1; overflow: auto; min-height: 0; }
+.content { padding: 12px 28px 48px; max-width: 1000px; }
+.screen { display: none; flex: 1; min-height: 0; flex-direction: column; }
+.screen.on { display: flex; }
+
+/* 按钮: 默认无边框的灰底; 主按钮是唯一实色 */
+.btn { display: inline-flex; align-items: center; gap: 6px; height: 28px; padding: 0 10px; border-radius: var(--r-sm); border: 0; background: var(--muted); color: var(--fg-2); font-size: 12.5px; transition: background var(--dur), color var(--dur); }
+.btn:hover { background: var(--muted-2); color: var(--foreground); }
+.btn.primary { background: var(--accent); color: var(--accent-fg); }
+.btn.primary:hover { filter: brightness(1.08); }
+.btn.ghost { background: none; color: var(--muted-fg); }
+.btn.ghost:hover { background: var(--muted); color: var(--foreground); }
+.btn.xs { height: 24px; padding: 0 8px; font-size: 12px; }
+.btn:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+
+/* 区块标题: 文字 + 右侧说明, 下面直接是内容, 不套卡片 */
+.sec { margin-top: 36px; }
+.sec:first-child { margin-top: 0; }
+.sec-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 6px; min-height: 28px; }
+.sec-head h2 { margin: 0; font-size: 12px; font-weight: 500; color: var(--muted-fg); }
+.sec-head span { color: var(--muted-fg); font-size: 12px; }
+
+/* 唯一的容器样式: 极淡描边 + 卡片底 */
+.panel { margin: 0 -10px; }
+
+/* 代理状态行 */
+.status-line { display: flex; align-items: center; gap: 12px; padding: 4px 10px; }
+.status-line .ep { font: 12.5px var(--font-mono); color: var(--foreground); }
+.status-line .meta { color: var(--muted-fg); font-size: 12px; margin-left: auto; }
+
+/* 指标: 一条横排, 用竖分隔线 */
+.stats { display: grid; grid-template-columns: repeat(4, 1fr); }
+.stat { padding: 4px 10px; }
+.stat .l { color: var(--muted-fg); font-size: 12px; }
+.stat .v { font-size: 24px; font-weight: 600; letter-spacing: -0.01em; margin-top: 2px; font-variant-numeric: tabular-nums; }
+.stat .v small { font-size: 12px; color: var(--muted-fg); font-weight: 400; margin-left: 2px; }
+.stat .d { font: 11.5px var(--font-mono); color: var(--muted-fg); margin-top: 2px; }
+
+/* 列表 / 表格 */
+.list { list-style: none; margin: 0; padding: 0; }
+.row { display: grid; align-items: center; gap: 12px; padding: 0 10px; height: 36px; border-radius: 8px; transition: background var(--dur); }
+.list .row:first-child { border-top: 0; }
+.row:hover { background: var(--muted); }
+.row.head { height: 32px; color: var(--faint); font-size: 11.5px; background: none; }
+.row.head:hover { background: none; }
+.row.sel { background: var(--muted); }
+.row.group { height: 36px; margin-top: 10px; background: none; color: var(--fg-2); font-weight: 500; }
+.row.group:hover { background: none; }
+.status { display: inline-flex; align-items: center; gap: 7px; color: var(--fg-2); font-size: 12.5px; white-space: nowrap; }
+.status small { color: var(--muted-fg); font: 11px var(--font-mono); }
+.share { height: 3px; border-radius: 2px; background: var(--muted-2); overflow: hidden; }
+.share i { display: block; height: 100%; background: var(--fg-2); border-radius: inherit; }
+.share i.warn { background: var(--warn); }
+.mono-tile { width: 22px; height: 22px; border-radius: 6px; background: var(--muted-2); color: var(--fg-2); display: grid; place-items: center; font: 600 10.5px var(--font-sans); flex: none; }
+.who { display: flex; align-items: center; gap: 10px; min-width: 0; }
+.who b { font-weight: 500; }
+.chip { font: 11px var(--font-mono); color: var(--muted-fg); }
+.chip + .chip::before { content: "· "; color: var(--faint); }
+.tag { font: 11.5px var(--font-mono); color: var(--fg-2); background: var(--muted); padding: 1px 6px; border-radius: 4px; }
+.row-act { opacity: 0; transition: opacity var(--dur); display: flex; justify-content: flex-end; }
+.row:hover .row-act, .row.sel .row-act { opacity: 1; }
+.quota { display: grid; grid-template-columns: 1fr 34px; gap: 8px; align-items: center; font: 11px var(--font-mono); color: var(--muted-fg); }
+
+/* 工具条 */
+.toolbar { display: flex; align-items: center; gap: 6px; margin-bottom: 14px; flex-wrap: wrap; }
+.input { display: flex; align-items: center; gap: 7px; height: 28px; padding: 0 9px; min-width: 240px; border: 0; border-radius: var(--r-sm); background: var(--muted); color: var(--faint); font-size: 12.5px; }
+.input.focus { box-shadow: 0 0 0 1px var(--accent), 0 0 0 4px var(--accent-soft); color: var(--foreground); }
+.seg { display: inline-flex; gap: 2px; }
+.seg button { border: 0; background: none; height: 24px; padding: 0 10px; border-radius: 5px; font-size: 12px; color: var(--muted-fg); }
+.seg button.on { background: var(--muted-2); color: var(--foreground); }
+.filter { display: inline-flex; align-items: center; gap: 5px; height: 28px; padding: 0 9px; border-radius: var(--r-sm); border: 0; background: none; color: var(--muted-fg); font-size: 12px; }
+.filter:hover { background: var(--muted); color: var(--foreground); }
+.filter.on { color: var(--foreground); background: var(--muted); }
+
+/* 日志: 主从 */
+.split { flex: 1; min-height: 0; display: grid; grid-template-columns: 1fr 320px; }
+.split > .scroll { }
+.detail { overflow: auto; padding: 4px 20px 20px; margin: 0 12px 12px 0; background: var(--sidebar); border-radius: 12px; }
+.detail h3 { margin: 0; font-size: 13px; font-weight: 600; }
+.kv { display: grid; grid-template-columns: 76px 1fr; gap: 9px 12px; margin: 16px 0 0; font-size: 12.5px; }
+.kv dt { color: var(--muted-fg); } .kv dd { margin: 0; }
+.subhead { font-size: 11.5px; color: var(--faint); margin: 22px 0 8px; }
+.steps { list-style: none; margin: 0; padding: 0; position: relative; }
+.steps li { display: flex; align-items: center; gap: 10px; padding: 5px 0; font-size: 12.5px; }
+.steps li .mono { margin-left: auto; color: var(--muted-fg); font-size: 11.5px; }
+.bars { display: flex; height: 4px; gap: 2px; border-radius: 2px; overflow: hidden; }
+.bars i { display: block; background: var(--muted-2); }
+.bars i.on { background: var(--fg-2); }
+
+/* 设置 */
+.set-sec { margin-bottom: 36px; }
+.set-sec > h2 { font-size: 12px; font-weight: 500; color: var(--muted-fg); margin: 0 0 4px; }
+.set-row { display: grid; grid-template-columns: 1fr auto; gap: 24px; align-items: center; padding: 10px 10px; border-radius: 8px; }
+.set-row b { display: block; font-weight: 500; }
+.set-row small { color: var(--muted-fg); font-size: 12px; }
+.switch { width: 30px; height: 18px; border-radius: 99px; border: 0; background: var(--muted-2); position: relative; transition: background var(--dur); }
+.switch::after { content: ""; position: absolute; top: 2px; left: 2px; width: 14px; height: 14px; border-radius: 50%; background: #fff; box-shadow: 0 1px 2px rgb(0 0 0 / 30%); transition: transform 180ms cubic-bezier(.2,.8,.2,1); }
+.switch.on { background: var(--accent); }
+.switch.on::after { transform: translateX(12px); }
+.note { color: var(--muted-fg); font-size: 12px; padding: 8px 10px; display: flex; gap: 8px; align-items: center; }
+.note .dot { background: var(--warn); }
+.theme-row { display: flex; gap: 8px; }
+.theme-opt { width: 88px; border: 0; border-radius: 8px; padding: 5px; background: none; text-align: left; font-size: 11.5px; color: var(--fg-2); }
+.theme-opt.on { background: var(--muted); }
+.theme-opt.on .pv { box-shadow: 0 0 0 2px var(--accent); }
+.theme-opt .pv { height: 40px; border-radius: 4px; margin-bottom: 5px; display: grid; grid-template-columns: 28% 1fr; overflow: hidden; }
+
+/* token 区 */
+.tok { display: grid; grid-template-columns: repeat(3, 1fr); gap: 14px; }
+.tok .panel { padding: 18px; margin: 0; background: var(--sidebar); border-radius: 12px; }
+.tok h3 { margin: 0 0 12px; font-size: 12.5px; font-weight: 600; }
+.sw-row { display: grid; grid-template-columns: 26px 1fr auto; gap: 10px; align-items: center; padding: 4px 0; font-size: 12px; }
+.sw { width: 26px; height: 18px; border-radius: 4px; box-shadow: inset 0 0 0 1px rgb(128 128 128 / 18%); }
+.sw-row .mono { color: var(--muted-fg); font-size: 11px; }
+.compo { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; margin-bottom: 12px; }
+.rules { margin: 0; padding-left: 18px; color: var(--fg-2); }
+.rules li { margin: 6px 0; }
+.rules code { font: 11.5px var(--font-mono); background: var(--muted); padding: 1px 5px; border-radius: 4px; }
+
+@media (max-width: 960px) {
+  .window { grid-template-columns: 1fr; height: auto; }
+  .sidebar { display: none; }
+  .stats { grid-template-columns: repeat(2, 1fr); }
+  
+  .split, .tok { grid-template-columns: 1fr; }
+  .content { padding: 18px 16px; }
+  .wide { overflow-x: auto; }
+}
+</style>
+</head>
+<body>
+<svg width="0" height="0" style="position:absolute">
+  <defs>
+    <symbol id="book" viewBox="0 0 24 24"><path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20V3H6.5A2.5 2.5 0 0 0 4 5.5z"/><path d="M4 19.5A2.5 2.5 0 0 0 6.5 22H20v-5"/></symbol>
+    <symbol id="activity" viewBox="0 0 24 24"><path d="M22 12h-4l-3 9L9 3l-3 9H2"/></symbol>
+    <symbol id="bot" viewBox="0 0 24 24"><rect x="4" y="8" width="16" height="12" rx="3"/><path d="M12 4v4M9 13v2M15 13v2"/></symbol>
+    <symbol id="layers" viewBox="0 0 24 24"><path d="m12 2 10 5-10 5L2 7z"/><path d="m2 17 10 5 10-5M2 12l10 5 10-5"/></symbol>
+    <symbol id="key" viewBox="0 0 24 24"><circle cx="7.5" cy="15.5" r="4.5"/><path d="m10.7 12.3 9.8-9.8M17 6l3 3M14 9l2 2"/></symbol>
+    <symbol id="scroll" viewBox="0 0 24 24"><path d="M14 3H6a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9z"/><path d="M14 3v6h6M8 13h8M8 17h5"/></symbol>
+    <symbol id="chart" viewBox="0 0 24 24"><path d="M3 3v18h18"/><path d="M7 15v2M11 10v7M15 12v5M19 6v11"/></symbol>
+    <symbol id="receipt" viewBox="0 0 24 24"><path d="M5 2v20l3-2 2 2 2-2 2 2 2-2 3 2V2l-3 2-2-2-2 2-2-2-2 2z"/><path d="M9 8h6M9 12h6"/></symbol>
+    <symbol id="settings" viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M12 2v3M12 19v3M4.2 4.2l2.1 2.1M17.7 17.7l2.1 2.1M2 12h3M19 12h3M4.2 19.8l2.1-2.1M17.7 6.3l2.1-2.1"/></symbol>
+    <symbol id="refresh" viewBox="0 0 24 24"><path d="M21 12a9 9 0 0 1-15 6.7L3 16M3 12a9 9 0 0 1 15-6.7L21 8"/><path d="M21 3v5h-5M3 21v-5h5"/></symbol>
+    <symbol id="search" viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></symbol>
+    <symbol id="plus" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></symbol>
+    <symbol id="copy" viewBox="0 0 24 24"><rect x="9" y="9" width="12" height="12" rx="2"/><path d="M5 15V5a2 2 0 0 1 2-2h10"/></symbol>
+    <symbol id="moon" viewBox="0 0 24 24"><path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8z"/></symbol>
+    <symbol id="palette" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 3a9 9 0 0 0 0 18z" fill="currentColor" stroke="none"/></symbol>
+    <symbol id="more" viewBox="0 0 24 24"><circle cx="5" cy="12" r=".8"/><circle cx="12" cy="12" r=".8"/><circle cx="19" cy="12" r=".8"/></symbol>
+    <symbol id="x" viewBox="0 0 24 24"><path d="M18 6 6 18M6 6l12 12"/></symbol>
+    <symbol id="pause" viewBox="0 0 24 24"><path d="M9 5v14M15 5v14"/></symbol>
+    <symbol id="download" viewBox="0 0 24 24"><path d="M12 3v12m0 0-4-4m4 4 4-4M4 21h16"/></symbol>
+    <symbol id="chev" viewBox="0 0 24 24"><path d="m9 6 6 6-6 6"/></symbol>
+  </defs>
+</svg>
+
+<div class="doc">
+  <header class="doc-head">
+    <div>
+      <h1>「简洁」主题 v4 · 无框版</h1>
+      <p>在 v3 的配色上去掉全部区块边框与行分隔线：分组靠留白和小标题，行靠悬停底色，区域靠底色深浅。整页只剩侧栏与主区两块底色。</p>
+    </div>
+    <div class="doc-ctrl">
+      <div class="seg" id="accSeg"><button class="on" data-v="blue">蓝</button><button data-v="coral">珊瑚</button></div>
+      <div class="seg" id="modeSeg"><button data-v="light">浅色</button><button class="on" data-v="dark">暗色</button></div>
+    </div>
+  </header>
+
+  <div class="doc-h2">应用界面 <span>点侧栏切换：实时路由 / 订阅管理 / 请求日志 / 设置</span></div>
+
+  <div class="window">
+    <aside class="sidebar">
+      <div class="traffic"><i></i><i></i><i></i></div>
+      <div class="brand"><div class="mark">cc</div><b>cc-router</b></div>
+
+      <button class="nav-item" data-go="live"><svg class="i"><use href="#book"/></svg>接入指南</button>
+      <div class="nav-label">路由</div>
+      <button class="nav-item active" data-go="live"><svg class="i"><use href="#activity"/></svg>实时路由</button>
+      <button class="nav-item" data-go="live"><svg class="i"><use href="#bot"/></svg>Agent 监控</button>
+      <button class="nav-item" data-go="subs"><svg class="i"><use href="#layers"/></svg>虚拟模型<span class="end">6</span></button>
+      <button class="nav-item" data-go="subs"><svg class="i"><use href="#key"/></svg>订阅管理<span class="end">8</span></button>
+      <div class="nav-label">观测</div>
+      <button class="nav-item" data-go="logs"><svg class="i"><use href="#scroll"/></svg>请求日志</button>
+      <button class="nav-item" data-go="live"><svg class="i"><use href="#chart"/></svg>数据统计</button>
+      <button class="nav-item" data-go="live"><svg class="i"><use href="#receipt"/></svg>用量小票</button>
+      <div class="nav-label">系统</div>
+      <button class="nav-item" data-go="settings"><svg class="i"><use href="#settings"/></svg>设置</button>
+      <button class="nav-item" data-go="settings"><svg class="i"><use href="#refresh"/></svg>检查更新<span class="dot acc" style="margin-left:auto"></span></button>
+
+      <div class="side-foot">
+        <div class="proxy"><span class="dot ok"></span>代理运行中<span class="mono">:23456</span></div>
+        <div class="side-tools"><span>v6.8.0</span>
+          <span style="display:flex">
+            <button class="icon-btn" id="sideMode" title="明暗模式"><svg class="i"><use href="#moon"/></svg></button>
+            <button class="icon-btn" title="界面主题"><svg class="i"><use href="#palette"/></svg></button>
+          </span>
+        </div>
+      </div>
+    </aside>
+
+    <main class="main">
+      <!-- ============ 实时路由 ============ -->
+      <section class="screen on" id="s-live">
+        <div class="topbar">
+          <h1>实时路由</h1>
+          <div class="actions">
+            <button class="btn ghost"><svg class="i"><use href="#pause"/></svg>暂停</button>
+            <button class="btn"><svg class="i"><use href="#copy"/></svg>复制环境变量</button>
+          </div>
+        </div>
+        <div class="scroll"><div class="content">
+          <div class="sec">
+            <div class="panel">
+              <div class="status-line">
+                <span class="dot ok"></span>
+                <span>运行中</span>
+                <span class="ep">http://127.0.0.1:23456</span>
+                <button class="btn ghost xs"><svg class="i" style="width:13px;height:13px"><use href="#copy"/></svg></button>
+                <span class="meta">仅本机 · HTTP/2 · 已运行 3 天</span>
+              </div>
+            </div>
+          </div>
+
+          <div class="sec">
+            <div class="sec-head"><h2>今天</h2><span>与昨天同时段相比</span></div>
+            <div class="panel stats">
+              <div class="stat"><div class="l">请求</div><div class="v">1,284</div><div class="d">+12.4%</div></div>
+              <div class="stat"><div class="l">Token</div><div class="v">48.2<small>M</small></div><div class="d">+8.1%</div></div>
+              <div class="stat"><div class="l">成功率</div><div class="v">99.2<small>%</small></div><div class="d">−0.3%</div></div>
+              <div class="stat"><div class="l">P95 首字</div><div class="v">1.42<small>s</small></div><div class="d">−180ms</div></div>
+            </div>
+          </div>
+
+          <div class="sec">
+            <div class="sec-head"><h2>路由</h2><div class="seg"><button class="on">1 小时</button><button>今天</button></div></div>
+            <div class="panel wide">
+              <div class="list">
+                <div class="row head" style="grid-template-columns: 1.4fr 110px 1fr 56px"><span>虚拟模型 / 订阅</span><span>状态</span><span>占比</span><span style="text-align:right">请求</span></div>
+                <div class="row group" style="grid-template-columns: 1.4fr 110px 1fr 56px"><span class="mono" style="font-size:12.5px;color:var(--foreground)">model-opus</span><span class="muted" style="font-size:12px">顺序</span><span></span><span class="mono muted" style="text-align:right">418</span></div>
+                <div class="row" style="grid-template-columns: 1.4fr 110px 1fr 56px"><div class="who" style="padding-left:14px"><span class="mono-tile">A</span><span>Anthropic 主号</span><span class="chip">claude-opus-4-7</span></div><span class="status"><span class="dot ok"></span>正常</span><div class="share"><i style="width:72%"></i></div><span class="mono muted num" style="text-align:right">301</span></div>
+                <div class="row" style="grid-template-columns: 1.4fr 110px 1fr 56px"><div class="who" style="padding-left:14px"><span class="mono-tile">Z</span><span>智谱 GLM 包月</span><span class="chip">glm-5.1</span></div><span class="status"><span class="dot warn"></span>限流 <small>42s</small></span><div class="share"><i style="width:21%"></i></div><span class="mono muted num" style="text-align:right">88</span></div>
+                <div class="row" style="grid-template-columns: 1.4fr 110px 1fr 56px"><div class="who" style="padding-left:14px"><span class="mono-tile">K</span><span>Kimi 国际版</span><span class="chip">kimi-k3</span></div><span class="status"><span class="dot ok"></span>正常</span><div class="share"><i style="width:7%"></i></div><span class="mono muted num" style="text-align:right">29</span></div>
+                <div class="row group" style="grid-template-columns: 1.4fr 110px 1fr 56px"><span class="mono" style="font-size:12.5px;color:var(--foreground)">model-sonnet</span><span class="muted" style="font-size:12px">轮询</span><span></span><span class="mono muted" style="text-align:right">706</span></div>
+                <div class="row" style="grid-template-columns: 1.4fr 110px 1fr 56px"><div class="who" style="padding-left:14px"><span class="mono-tile">D</span><span>DeepSeek</span><span class="chip">deepseek-v4</span></div><span class="status"><span class="dot ok"></span>正常</span><div class="share"><i style="width:54%"></i></div><span class="mono muted num" style="text-align:right">381</span></div>
+                <div class="row" style="grid-template-columns: 1.4fr 110px 1fr 56px"><div class="who" style="padding-left:14px"><span class="mono-tile">A</span><span>Anthropic 主号</span><span class="chip">claude-sonnet-5</span></div><span class="status"><span class="dot ok"></span>正常</span><div class="share"><i style="width:46%"></i></div><span class="mono muted num" style="text-align:right">325</span></div>
+              </div>
+            </div>
+          </div>
+
+          <div class="sec">
+            <div class="sec-head"><h2>最近请求</h2><span><span class="dot ok" style="margin-right:6px"></span>实时</span></div>
+            <div class="panel wide">
+              <div class="list mono">
+                <div class="row" style="grid-template-columns: 64px 104px 1fr 90px 60px"><span class="faint">14:02:31</span><span>model-opus</span><span style="font-family:var(--font-sans);font-size:12.5px">Anthropic 主号</span><span class="status"><span class="dot acc"></span>流式中</span><span class="muted" style="text-align:right">—</span></div>
+                <div class="row" style="grid-template-columns: 64px 104px 1fr 90px 60px"><span class="faint">14:02:29</span><span>model-sonnet</span><span style="font-family:var(--font-sans);font-size:12.5px">DeepSeek</span><span class="status"><span class="dot ok"></span>200</span><span class="muted" style="text-align:right">2.13s</span></div>
+                <div class="row" style="grid-template-columns: 64px 104px 1fr 90px 60px"><span class="faint">14:02:27</span><span>model-opus</span><span style="font-family:var(--font-sans);font-size:12.5px">智谱 GLM 包月 <span class="faint">→</span> Anthropic 主号</span><span class="status"><span class="dot warn"></span>429 重试</span><span class="muted" style="text-align:right">3.80s</span></div>
+                <div class="row" style="grid-template-columns: 64px 104px 1fr 90px 60px"><span class="faint">14:02:22</span><span>model-haiku</span><span style="font-family:var(--font-sans);font-size:12.5px">Kimi 国际版</span><span class="status"><span class="dot ok"></span>200</span><span class="muted" style="text-align:right">0.64s</span></div>
+                <div class="row" style="grid-template-columns: 64px 104px 1fr 90px 60px"><span class="faint">14:02:18</span><span>fallback</span><span style="font-family:var(--font-sans);font-size:12.5px">OpenRouter</span><span class="status"><span class="dot err"></span>502</span><span class="muted" style="text-align:right">11.2s</span></div>
+              </div>
+            </div>
+          </div>
+        </div></div>
+      </section>
+
+      <!-- ============ 订阅管理 ============ -->
+      <section class="screen" id="s-subs">
+        <div class="topbar">
+          <h1>订阅管理</h1><span class="muted">8</span>
+          <div class="actions"><button class="btn primary"><svg class="i"><use href="#plus"/></svg>添加订阅</button></div>
+        </div>
+        <div class="scroll"><div class="content">
+          <div class="toolbar">
+            <div class="input"><svg class="i" style="width:13px;height:13px"><use href="#search"/></svg>搜索订阅</div>
+            <div class="seg"><button class="on">全部</button><button>正常</button><button>异常</button><button>停用</button></div>
+          </div>
+          <div class="panel wide">
+            <div class="list">
+              <div class="row head" style="grid-template-columns: 1.6fr 110px 160px 1fr 80px 60px"><span>订阅</span><span>状态</span><span>今日限额</span><span>被引用</span><span>更新</span><span></span></div>
+              <div class="row" style="grid-template-columns: 1.6fr 110px 160px 1fr 80px 60px"><div class="who"><span class="mono-tile">A</span><b>Anthropic 主号</b><span class="faint" style="font-size:12px">Anthropic</span></div><span class="status"><span class="dot ok"></span>正常</span><div class="quota"><div class="share"><i style="width:34%"></i></div><span>34%</span></div><div><span class="chip">opus</span><span class="chip">sonnet</span><span class="chip">fable</span></div><span class="muted" style="font-size:12px">2 分钟前</span><div class="row-act"><button class="icon-btn"><svg class="i"><use href="#more"/></svg></button></div></div>
+              <div class="row sel" style="grid-template-columns: 1.6fr 110px 160px 1fr 80px 60px"><div class="who"><span class="mono-tile">Z</span><b>智谱 GLM 包月</b><span class="faint" style="font-size:12px">智谱 · 中国</span></div><span class="status"><span class="dot warn"></span>限流 <small>42s</small></span><div class="quota"><div class="share"><i class="warn" style="width:88%"></i></div><span>88%</span></div><div><span class="chip">opus</span></div><span class="muted" style="font-size:12px">1 小时前</span><div class="row-act"><button class="icon-btn"><svg class="i"><use href="#more"/></svg></button></div></div>
+              <div class="row" style="grid-template-columns: 1.6fr 110px 160px 1fr 80px 60px"><div class="who"><span class="mono-tile">D</span><b>DeepSeek</b><span class="faint" style="font-size:12px">DeepSeek</span></div><span class="status"><span class="dot ok"></span>正常</span><span class="faint" style="font-size:12px">未设限额</span><div><span class="chip">sonnet</span><span class="chip">haiku</span></div><span class="muted" style="font-size:12px">昨天</span><div class="row-act"><button class="icon-btn"><svg class="i"><use href="#more"/></svg></button></div></div>
+              <div class="row" style="grid-template-columns: 1.6fr 110px 160px 1fr 80px 60px"><div class="who"><span class="mono-tile">K</span><b>Kimi 国际版</b><span class="faint" style="font-size:12px">月之暗面</span></div><span class="status"><span class="dot ok"></span>正常</span><div class="quota"><div class="share"><i style="width:52%"></i></div><span>52%</span></div><div><span class="chip">opus</span><span class="chip">haiku</span></div><span class="muted" style="font-size:12px">3 天前</span><div class="row-act"><button class="icon-btn"><svg class="i"><use href="#more"/></svg></button></div></div>
+              <div class="row" style="grid-template-columns: 1.6fr 110px 160px 1fr 80px 60px"><div class="who"><span class="mono-tile">O</span><b>Codex 副号</b><span class="faint" style="font-size:12px">ChatGPT OAuth</span></div><span class="status"><span class="dot"></span>停用</span><span class="faint">—</span><span class="faint" style="font-size:12px">未被使用</span><span class="muted" style="font-size:12px">上周</span><div class="row-act"><button class="icon-btn"><svg class="i"><use href="#more"/></svg></button></div></div>
+              <div class="row" style="grid-template-columns: 1.6fr 110px 160px 1fr 80px 60px"><div class="who"><span class="mono-tile">C</span><b>自建中转</b><span class="faint" style="font-size:12px">自定义</span></div><span class="status"><span class="dot err"></span>鉴权失败</span><span class="faint">—</span><div><span class="chip">fallback</span></div><span class="muted" style="font-size:12px">上周</span><div class="row-act"><button class="icon-btn"><svg class="i"><use href="#more"/></svg></button></div></div>
+            </div>
+          </div>
+        </div></div>
+      </section>
+
+      <!-- ============ 请求日志 ============ -->
+      <section class="screen" id="s-logs">
+        <div class="topbar">
+          <h1>请求日志</h1>
+          <div class="actions"><button class="btn ghost"><svg class="i"><use href="#download"/></svg>导出</button></div>
+        </div>
+        <div class="split">
+          <div class="scroll"><div class="content" style="max-width:none;padding-right:20px">
+            <div class="toolbar">
+              <div class="input focus"><svg class="i" style="width:13px;height:13px"><use href="#search"/></svg>opus</div>
+              <button class="filter on">model-opus <svg class="i" style="width:12px;height:12px"><use href="#x"/></svg></button>
+              <button class="filter">订阅</button>
+              <button class="filter">状态</button>
+              <span style="flex:1"></span>
+              <div class="seg"><button>1h</button><button class="on">24h</button><button>7d</button></div>
+            </div>
+            <div class="panel wide">
+              <div class="list">
+                <div class="row head" style="grid-template-columns: 70px 1fr 80px 64px 64px"><span>时间</span><span>订阅</span><span>状态</span><span style="text-align:right">Token</span><span style="text-align:right">耗时</span></div>
+                <div class="row" style="grid-template-columns: 70px 1fr 80px 64px 64px"><span class="mono faint">14:02:31</span><span>Anthropic 主号 <span class="chip" style="margin-left:6px">claude-opus-4-7</span></span><span class="status"><span class="dot ok"></span>200</span><span class="mono muted" style="text-align:right">18.4k</span><span class="mono muted" style="text-align:right">8.21s</span></div>
+                <div class="row sel" style="grid-template-columns: 70px 1fr 80px 64px 64px"><span class="mono faint">14:02:27</span><span>智谱 GLM 包月 <span class="chip" style="margin-left:6px">glm-5.1</span></span><span class="status"><span class="dot warn"></span>429</span><span class="mono muted" style="text-align:right">—</span><span class="mono muted" style="text-align:right">0.31s</span></div>
+                <div class="row" style="grid-template-columns: 70px 1fr 80px 64px 64px"><span class="mono faint">14:01:58</span><span>Anthropic 主号 <span class="chip" style="margin-left:6px">claude-opus-4-7</span></span><span class="status"><span class="dot ok"></span>200</span><span class="mono muted" style="text-align:right">42.0k</span><span class="mono muted" style="text-align:right">14.9s</span></div>
+                <div class="row" style="grid-template-columns: 70px 1fr 80px 64px 64px"><span class="mono faint">14:01:12</span><span>Kimi 国际版 <span class="chip" style="margin-left:6px">kimi-k3</span></span><span class="status"><span class="dot ok"></span>200</span><span class="mono muted" style="text-align:right">6.1k</span><span class="mono muted" style="text-align:right">3.02s</span></div>
+                <div class="row" style="grid-template-columns: 70px 1fr 80px 64px 64px"><span class="mono faint">14:00:40</span><span>Anthropic 主号 <span class="chip" style="margin-left:6px">claude-opus-4-7</span></span><span class="status"><span class="dot err"></span>529</span><span class="mono muted" style="text-align:right">—</span><span class="mono muted" style="text-align:right">1.20s</span></div>
+                <div class="row" style="grid-template-columns: 70px 1fr 80px 64px 64px"><span class="mono faint">13:59:03</span><span>Anthropic 主号 <span class="chip" style="margin-left:6px">claude-opus-4-7</span></span><span class="status"><span class="dot ok"></span>200</span><span class="mono muted" style="text-align:right">22.7k</span><span class="mono muted" style="text-align:right">9.48s</span></div>
+                <div class="row" style="grid-template-columns: 70px 1fr 80px 64px 64px"><span class="mono faint">13:58:44</span><span>智谱 GLM 包月 <span class="chip" style="margin-left:6px">glm-5.1</span></span><span class="status"><span class="dot ok"></span>200</span><span class="mono muted" style="text-align:right">11.3k</span><span class="mono muted" style="text-align:right">5.66s</span></div>
+                <div class="row" style="grid-template-columns: 70px 1fr 80px 64px 64px"><span class="mono faint">13:57:20</span><span>DeepSeek <span class="chip" style="margin-left:6px">deepseek-v4</span></span><span class="status"><span class="dot ok"></span>200</span><span class="mono muted" style="text-align:right">9.8k</span><span class="mono muted" style="text-align:right">4.11s</span></div>
+              </div>
+            </div>
+          </div></div>
+          <aside class="detail">
+            <div style="display:flex;align-items:center;justify-content:space-between">
+              <h3>请求详情</h3><button class="icon-btn"><svg class="i"><use href="#x"/></svg></button>
+            </div>
+            <div class="mono faint" style="font-size:11px;margin-top:2px">req_01JD8F…7KQ</div>
+            <dl class="kv">
+              <dt>状态</dt><dd><span class="status"><span class="dot warn"></span>429 rate_limited</span></dd>
+              <dt>入口</dt><dd class="mono">/v1/messages</dd>
+              <dt>虚拟模型</dt><dd class="mono">model-opus</dd>
+              <dt>真实模型</dt><dd class="mono">glm-5.1</dd>
+              <dt>Effort</dt><dd>high <span class="faint">· 客户端</span></dd>
+              <dt>客户端</dt><dd>Claude Code 2.4.1</dd>
+            </dl>
+            <div class="subhead">尝试</div>
+            <ul class="steps">
+              <li><span class="dot warn"></span>智谱 GLM 包月<span class="mono">0.31s</span></li>
+              <li><span class="dot ok"></span>Anthropic 主号<span class="mono">7.92s</span></li>
+            </ul>
+            <div class="subhead">耗时</div>
+            <div class="bars"><i style="flex:.31"></i><i class="on" style="flex:1.1"></i><i style="flex:6.8"></i></div>
+            <div style="display:flex;justify-content:space-between;font:11px var(--font-mono);color:var(--muted-fg);margin-top:6px"><span>首字 1.10s</span><span>总计 8.23s</span></div>
+            <div style="display:flex;gap:6px;margin-top:22px"><button class="btn xs">请求头</button><button class="btn xs">错误体</button></div>
+          </aside>
+        </div>
+      </section>
+
+      <!-- ============ 设置 ============ -->
+      <section class="screen" id="s-settings">
+        <div class="topbar"><h1>设置</h1></div>
+        <div class="scroll"><div class="content" style="max-width:720px">
+          <div class="set-sec">
+            <h2>外观</h2>
+            <div class="panel">
+              <div class="set-row"><div><b>界面主题</b><small>简洁为默认主题</small></div>
+                <div class="theme-row">
+                  <button class="theme-opt on"><div class="pv" style="background:#0a0a0a"><div style="background:#0d0d0d;border-right:1px solid #1f1f1f"></div><div></div></div>简洁</button>
+                  <button class="theme-opt"><div class="pv" style="background:#fbf8f1"><div style="background:#f1ebde"></div><div></div></div>手绘</button>
+                  <button class="theme-opt"><div class="pv" style="background:#d4d0c8"><div style="background:#0a246a"></div><div></div></div>Win2000</button>
+                </div></div>
+              <div class="set-row"><div><b>明暗模式</b></div><div class="seg"><button>跟随系统</button><button>浅色</button><button class="on">暗色</button></div></div>
+              <div class="set-row"><div><b>界面语言</b></div><button class="btn">简体中文 <svg class="i" style="width:12px;height:12px;transform:rotate(90deg)"><use href="#chev"/></svg></button></div>
+            </div>
+          </div>
+          <div class="set-sec">
+            <h2>代理服务</h2>
+            <div class="panel">
+              <div class="set-row"><div><b>端口</b><small>被占用时自动 +1</small></div><div class="input" style="min-width:96px;color:var(--foreground)"><span class="mono">23456</span></div></div>
+              <div class="set-row"><div><b>监听地址</b><small>局域网模式会暴露给同一网络的设备</small></div><div class="seg"><button class="on">仅本机</button><button>局域网</button></div></div>
+              <div class="set-row"><div><b>代理鉴权</b><small>要求客户端携带访问令牌</small></div><button class="switch on"></button></div>
+              <div class="set-row"><div><b>记录请求头</b><small>敏感值自动打码</small></div><button class="switch on"></button></div>
+              <div class="note"><span class="dot"></span>端口与监听地址已修改，重启代理服务后生效。<button class="btn xs" style="margin-left:auto">重启代理</button></div>
+            </div>
+          </div>
+          <div class="set-sec">
+            <h2>启动</h2>
+            <div class="panel">
+              <div class="set-row"><div><b>开机自动启动</b><small>启动后收进托盘</small></div><button class="switch"></button></div>
+              <div class="set-row"><div><b>网页界面</b><small>在浏览器里打开同一套界面</small></div><button class="switch"></button></div>
+            </div>
+          </div>
+        </div></div>
+      </section>
+    </main>
+  </div>
+
+  <div class="doc-h2">Token 与规则 <span>写进 src/themes/quiet.css，变量名沿用现有</span></div>
+  <div class="tok">
+    <div class="panel">
+      <h3>灰阶</h3>
+      <div class="sw-row"><span class="sw" style="background:var(--background)"></span>--bg 画布<span class="mono" data-l="#fcfcfc" data-d="#0a0a0a"></span></div>
+      <div class="sw-row"><span class="sw" style="background:var(--sidebar)"></span>侧栏<span class="mono" data-l="#f7f7f8" data-d="#0d0d0d"></span></div>
+      <div class="sw-row"><span class="sw" style="background:var(--card)"></span>--surface 容器<span class="mono" data-l="#ffffff" data-d="#111111"></span></div>
+      <div class="sw-row"><span class="sw" style="background:var(--muted)"></span>--surface-3 hover / 选中<span class="mono" data-l="#f4f4f5" data-d="#161616"></span></div>
+      <div class="sw-row"><span class="sw" style="background:var(--border)"></span>--line 细线<span class="mono" data-l="#e4e4e7" data-d="#1f1f1f"></span></div>
+      <div class="sw-row"><span class="sw" style="background:var(--foreground)"></span>--ink 正文<span class="mono" data-l="#27272a" data-d="#f5f5f5"></span></div>
+      <div class="sw-row"><span class="sw" style="background:var(--muted-fg)"></span>--ink-3 次要<span class="mono" data-l="#71717b" data-d="#818181"></span></div>
+    </div>
+    <div class="panel">
+      <h3>仅有的颜色</h3>
+      <div class="sw-row"><span class="sw" style="background:var(--accent)"></span>--accent 主按钮 / 焦点 / 开关<span class="mono" id="accHex"></span></div>
+      <div class="sw-row"><span class="sw" style="background:var(--ok)"></span>正常（只用于圆点）<span class="mono">#10b981</span></div>
+      <div class="sw-row"><span class="sw" style="background:var(--warn)"></span>限流 / 冷却<span class="mono">#fe9a00</span></div>
+      <div class="sw-row"><span class="sw" style="background:var(--err)"></span>错误 / 鉴权失败<span class="mono">#fb414a</span></div>
+      <div class="sw-row"><span class="sw" style="background:var(--idle)"></span>停用<span class="mono">= ink-5</span></div>
+      <div class="compo" style="margin:14px 0 0">
+        <button class="btn primary">主按钮</button><button class="btn">次按钮</button><button class="btn ghost">幽灵</button><button class="switch on"></button>
+      </div>
+    </div>
+    <div class="panel">
+      <h3>规则</h3>
+      <ul class="rules">
+        <li>彩色只用于 <b>主按钮、焦点 / 开关、状态圆点</b>；进度条、占比条一律灰色，超过 85% 才变橙。</li>
+        <li>状态 = 6px 圆点 + 灰字，<b>不用彩色底的 pill</b>。</li>
+        <li><b>界面内没有边框与分隔线</b>：分组靠 36px 留白 + 灰色小标题；行靠悬停 / 选中的圆角灰底；需要区分区域时只换底色（如日志详情与侧栏同色）。</li>
+        <li>页面标题放进 48px 顶栏（13px），不再用大标题 + 副标题。</li>
+        <li>次按钮、输入框、筛选 = 灰底无框；焦点时才出现强调色细环。</li>
+        <li>圆角 6 / 10，无投影（只有弹层有）。</li>
+        <li>数字、时间、模型名用等宽字体。</li>
+      </ul>
+    </div>
+  </div>
+</div>
+
+<script>
+  const root = document.documentElement;
+  function bindSeg(id, attr) {
+    const btns = document.querySelectorAll('#' + id + ' button');
+    const set = v => { root.dataset[attr] = v; btns.forEach(b => b.classList.toggle('on', b.dataset.v === v)); syncHex(); };
+    btns.forEach(b => b.addEventListener('click', () => set(b.dataset.v)));
+    return set;
+  }
+  function syncHex() {
+    const dark = root.dataset.mode === 'dark';
+    document.querySelectorAll('[data-l]').forEach(el => el.textContent = dark ? el.dataset.d : el.dataset.l);
+    document.getElementById('accHex').textContent = getComputedStyle(root).getPropertyValue('--accent').trim();
+  }
+  const setMode = bindSeg('modeSeg', 'mode');
+  bindSeg('accSeg', 'accent');
+  document.getElementById('sideMode').addEventListener('click', () => setMode(root.dataset.mode === 'dark' ? 'light' : 'dark'));
+  syncHex();
+
+  document.querySelectorAll('.nav-item').forEach(item => item.addEventListener('click', () => {
+    document.querySelectorAll('.nav-item').forEach(n => n.classList.remove('active'));
+    item.classList.add('active');
+    document.querySelectorAll('.screen').forEach(s => s.classList.toggle('on', s.id === 's-' + item.dataset.go));
+  }));
+</script>
+</body>
+</html>

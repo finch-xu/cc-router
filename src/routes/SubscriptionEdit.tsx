@@ -61,6 +61,7 @@ import { normalizeSchedules, schedulesEqual, validateRules } from "@/lib/slotSch
 import { lastErrorText, testResultText } from "@/lib/backendText";
 import { providerName } from "@/lib/providerText";
 import { UrlParamFields, urlParamErrors } from "@/components/UrlParamFields";
+import { RebuildConnectionBanner } from "@/components/subscriptions/RebuildConnectionBanner";
 import { errorText } from "@/lib/errorText";
 
 /** 请求头编辑器的行 → 预览用的名值表 (与保存时同样 trim、丢弃空名)。 */
@@ -348,6 +349,8 @@ export function SubscriptionEditPage() {
                 )}
               </div>
             )}
+
+            <RebuildConnectionBanner sub={sub} />
 
             <Card>
               <CardHeader>

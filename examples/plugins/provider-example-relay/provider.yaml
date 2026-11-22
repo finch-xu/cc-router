@@ -1,0 +1,38 @@
+# 厂商插件 = 一份与 src-tauri/providers/*.yaml 同格式的描述符。
+# 与内置描述符的区别:
+#   - 顶层 id 会被替换成 plugin:<清单 id>, 这里写什么都行;
+#   - 上屏文字可以只写部分语言, 缺的按 en → zh → zh-Hant → ja 补齐;
+#   - URL 只能是 https (或指向本机的 http), host 里不能有占位符;
+#   - 不支持 OAuth 类鉴权。
+id: example-relay
+display_name: { zh: 示例中转站, zh-Hant: 範例中轉站, en: Example Relay, ja: サンプル中継サービス }
+description:
+  zh: 虚构的 Anthropic 兼容中转站，用来演示厂商插件。
+  en: A fictional Anthropic-compatible relay used to demonstrate provider plugins.
+category: aggregator
+compatibility: untested
+homepage: https://example.com
+auth:
+  type: api_key
+  header_name: Authorization
+  header_format: bearer
+endpoints:
+  - id: main
+    label: { zh: 主线路, en: Main }
+    base_url: https://api.example.com/anthropic
+    messages_path: /v1/messages
+default_endpoint: main
+model_discovery:
+  enabled: true
+  url: https://api.example.com/v1/models
+  example_models: [claude-sonnet-4-5]
+# new-api 系中转站的余额接口: quota 以 500000 为 1 美元
+balance_discovery:
+  url: https://api.example.com/api/user/self
+  parser: json
+  json:
+    remaining: "$.data.quota"
+    used: "$.data.used_quota"
+    divisor: 500000
+    unit: USD
+    low_below: 5

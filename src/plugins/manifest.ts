@@ -3,12 +3,21 @@
  * 社区仓库的 CI 也直接 import 本文件。零依赖。
  */
 
+import { safeHttpsUrl } from "./links";
+
 export const MANIFEST_VERSION = 1;
 export const MANIFEST_FILE = "cc-router-plugin.json";
 
 /** 本版 app 能加载的插件类型。旧版 app 遇到新类型只报 unsupported_type, 不会尝试加载。 */
-export const SUPPORTED_TYPES = ["theme", "receipt"] as const;
+export const SUPPORTED_TYPES = ["theme", "receipt", "provider"] as const;
 export type PluginType = (typeof SUPPORTED_TYPES)[number];
+
+/**
+ * 系统插件: 在代理里执行, 内容由 Rust (`cc-router-plugin-spec`) 校验, 前端只展示暂存结果里的
+ * `system` (问题 / 能力摘要 / 能力差异)。与 Rust `plugin::SYSTEM_TYPES` 一致。
+ */
+export const SYSTEM_TYPES: readonly PluginType[] = ["provider"];
+export const isSystemType = (t: string): boolean => (SYSTEM_TYPES as readonly string[]).includes(t);
 
 /** 内置主题 / 画风的名字不能当插件 id, 避免设置里出现两个「简洁」 */
 export const RESERVED_IDS = ["classic", "sketch", "win2000", "win2k", "quiet", "sparrow", "plain", "cc-router"];
@@ -34,7 +43,13 @@ export type IssueCode =
   | "not_in_assets"
   | "wrong_file_kind"
   | "duplicate"
-  | "too_many";
+  | "too_many"
+  /** 系统插件 (Rust 校验): URL 不是 https, 也不是指向本机的 http */
+  | "insecure_url"
+  /** 系统插件: URL 的 host 里有占位符 */
+  | "host_placeholder"
+  /** 厂商插件: 不允许的鉴权类型 (OAuth 类只能内置) */
+  | "auth_type_not_allowed";
 
 export interface Issue {
   /** 出问题的位置, 如 `assets[2]`、`light.colors.canvas` */
@@ -157,19 +172,22 @@ export function validateManifest(
   const author = raw.author;
   if (typeof author !== "string" || !author.trim() || author.length > 80) issues.push({ path: "author", code: author === undefined ? "missing" : "invalid_value" });
   if (raw.license !== undefined && (typeof raw.license !== "string" || raw.license.length > 64)) issues.push({ path: "license", code: "invalid_value" });
-  if (raw.homepage !== undefined && (typeof raw.homepage !== "string" || !/^https:\/\/[^\s"'<>]+$/.test(raw.homepage))) {
-    issues.push({ path: "homepage", code: "invalid_value", detail: "https URL" });
+  if (raw.homepage !== undefined && safeHttpsUrl(raw.homepage) === undefined) {
+    issues.push({ path: "homepage", code: "invalid_value", detail: "https URL, at most 300 characters" });
   }
 
   const entry = raw.entry;
   if (!isSafePath(entry)) issues.push({ path: "entry", code: entry === undefined ? "missing" : "bad_path" });
-  else if (extOf(entry) !== "json") issues.push({ path: "entry", code: "wrong_file_kind", detail: "entry must be a .json file" });
+  else if (type === "provider") {
+    if (!["yaml", "yml", "json"].includes(extOf(entry))) issues.push({ path: "entry", code: "wrong_file_kind", detail: "entry must be a .yaml / .yml / .json file" });
+  } else if (extOf(entry) !== "json") issues.push({ path: "entry", code: "wrong_file_kind", detail: "entry must be a .json file" });
 
   const assets: string[] = [];
   if (raw.assets !== undefined) {
     if (!Array.isArray(raw.assets)) issues.push({ path: "assets", code: "invalid_type" });
     else {
       if (raw.assets.length > MAX_ASSETS) issues.push({ path: "assets", code: "too_many", detail: `max ${MAX_ASSETS}` });
+      if (typeof type === "string" && isSystemType(type) && raw.assets.length > 0) issues.push({ path: "assets", code: "too_many", detail: "system plugins cannot ship assets" });
       raw.assets.forEach((a, i) => {
         if (!isSafePath(a)) issues.push({ path: `assets[${i}]`, code: "bad_path" });
         else if (![...IMAGE_EXTS, ...FONT_EXTS, ...TEXT_EXTS].includes(extOf(a))) issues.push({ path: `assets[${i}]`, code: "wrong_file_kind", detail: a });

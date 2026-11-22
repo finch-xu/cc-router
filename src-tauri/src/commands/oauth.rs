@@ -135,8 +135,8 @@ pub async fn create_chatgpt_oauth_subscription(
     state: State<'_, AppState>,
     input: CreateChatGptOAuthSubscriptionInput,
 ) -> AppResult<SubscriptionDto> {
-    let provider = state
-        .providers
+    let registry = state.providers();
+    let provider = registry
         .get(&input.provider_id)
         .ok_or_else(|| AppError::ProviderNotFound(input.provider_id.clone()))?;
 
@@ -223,7 +223,7 @@ pub async fn create_chatgpt_oauth_subscription(
     }
 
     let guard = rt.read().await;
-    Ok(SubscriptionDto::from_runtime(&guard, vec![], &state.providers))
+    Ok(SubscriptionDto::from_runtime(&guard, vec![], &state.providers()))
 }
 
 /// 撤销订阅的 OAuth 缓存 (前端在 disconnect / 删除订阅时调).
@@ -407,8 +407,8 @@ pub async fn create_kiro_subscription(
     state: State<'_, AppState>,
     input: CreateKiroSubscriptionInput,
 ) -> AppResult<SubscriptionDto> {
-    let provider = state
-        .providers
+    let registry = state.providers();
+    let provider = registry
         .get(&input.provider_id)
         .ok_or_else(|| AppError::ProviderNotFound(input.provider_id.clone()))?;
     if !matches!(provider.auth.auth_type, AuthType::KiroOauth) {
@@ -502,7 +502,7 @@ pub async fn create_kiro_subscription(
         subs.insert(id, rt.clone());
     }
     let guard = rt.read().await;
-    Ok(SubscriptionDto::from_runtime(&guard, vec![], &state.providers))
+    Ok(SubscriptionDto::from_runtime(&guard, vec![], &state.providers()))
 }
 
 #[tauri::command]

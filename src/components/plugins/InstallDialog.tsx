@@ -13,20 +13,38 @@ import { checkThemePackage, PluginThemeError, type CheckedTheme } from "@/plugin
 import { checkReceiptPackage, type CheckedReceipt } from "@/plugins/receipt/apply";
 import { sampleReceiptDto } from "@/plugins/receipt/fields";
 import { themeCss } from "@/plugins/theme/css";
-import { localized, type Issue } from "@/plugins/manifest";
+import { isSystemType, localized, validateManifest, type Issue, type Manifest } from "@/plugins/manifest";
+import { CapabilitySummary } from "./CapabilitySummary";
+import { pluginLinks } from "@/plugins/links";
+import { runtime } from "@/runtime";
 import { version as APP_VERSION } from "../../../package.json";
-import type { InstalledPlugin, StagedPlugin } from "@/types";
+import type { InstalledPlugin, PluginCheckResult, StagedPlugin } from "@/types";
 
 const BIG_PACKAGE = 8 * 1024 * 1024;
+
+/** 系统插件 (厂商等): 清单在前端校验, 内容由 Rust 校验 (暂存结果里的 `system`) */
+interface CheckedSystem {
+  manifest: Manifest;
+  warnings: Issue[];
+  system: PluginCheckResult;
+}
 
 type Checked =
   | { kind: "theme"; ok: CheckedTheme }
   | { kind: "receipt"; ok: CheckedReceipt }
+  | { kind: "system"; ok: CheckedSystem }
   | { kind: "error"; issues: Issue[]; message: string };
 
 function check(staged: StagedPlugin): Checked {
   try {
     const type = (staged.manifest as { type?: unknown } | null)?.type;
+    if (typeof type === "string" && isSystemType(type)) {
+      const { manifest, errors, warnings } = validateManifest(staged.manifest, APP_VERSION);
+      if (!manifest) return { kind: "error", issues: errors, message: "" };
+      if (!staged.system) return { kind: "error", issues: [], message: "missing Rust check result" };
+      if (!staged.system.ok) return { kind: "error", issues: staged.system.issues, message: "" };
+      return { kind: "system", ok: { manifest, warnings, system: staged.system } };
+    }
     if (type === "receipt") return { kind: "receipt", ok: checkReceiptPackage(staged.manifest, staged.entry, staged.texts) };
     return { kind: "theme", ok: checkThemePackage(staged.manifest, staged.entry) };
   } catch (e) {
@@ -114,12 +132,22 @@ export function InstallDialog({
   }
 
   function startUsing(rec: InstalledPlugin) {
-    if (rec.plugin_type === "receipt") navigate(`/receipts?theme=plugin:${rec.id}`);
+    if (rec.plugin_type === "provider") navigate(`/subscriptions/new?provider=${encodeURIComponent(`plugin:${rec.id}`)}`);
+    else if (rec.plugin_type === "receipt") navigate(`/receipts?theme=plugin:${rec.id}`);
     else setThemeId(`plugin:${rec.id}`);
     close();
   }
 
   const m = ok?.manifest;
+  const links = staged
+    ? pluginLinks({
+        homepage: m?.homepage,
+        repo: staged.source.kind === "local" ? null : staged.source.location,
+        commit: staged.source.commit,
+        path: staged.source.path,
+      })
+    : {};
+  const open = (url: string) => () => void runtime.openExternal(url).catch(() => {});
   const name = m ? localized(m.name, locale) : staged ? String((staged.manifest as { id?: unknown })?.id ?? "") : "";
   const warnings = ok ? (checked as { ok: { warnings: Issue[] } }).ok.warnings : [];
   const alreadyInUse = installed && installed.plugin_type === "theme" && themeId === `plugin:${installed.id}`;
@@ -148,13 +176,35 @@ export function InstallDialog({
                     <dd>{m.license}</dd>
                   </>
                 )}
+                {links.homepage && (
+                  <>
+                    <dt>{t("plugins.install.homepage")}</dt>
+                    <dd>
+                      <button className="pg-link" type="button" onClick={open(links.homepage)}>
+                        {links.homepage}
+                      </button>
+                    </dd>
+                  </>
+                )}
               </>
             )}
             <dt>{t("plugins.install.source")}</dt>
-            <dd className="mono">{sourceText(t, communitySha256 ? { ...staged.source, kind: "community" } : staged.source)}</dd>
+            <dd className="mono">
+              {links.source ? (
+                <button className="pg-link" type="button" title={links.source} onClick={open(links.source)}>
+                  {sourceText(t, communitySha256 ? { ...staged.source, kind: "community" } : staged.source)}
+                </button>
+              ) : (
+                sourceText(t, communitySha256 ? { ...staged.source, kind: "community" } : staged.source)
+              )}
+            </dd>
             <dt>{t("plugins.install.size")}</dt>
             <dd>{fmtBytes(staged.total_size)}</dd>
           </dl>
+        )}
+
+        {checked?.kind === "system" && checked.ok.system.capabilities && !installed && (
+          <CapabilitySummary capabilities={checked.ok.system.capabilities} diff={checked.ok.system.diff} />
         )}
 
         {sample && !installed && (
@@ -175,7 +225,9 @@ export function InstallDialog({
               </div>
             )}
             {staged && ok && staged.source.kind === "github" && !communitySha256 && (
-              <div className="pg-alert warn">{t("plugins.install.unreviewed")}</div>
+              <div className="pg-alert warn">
+                {checked?.kind === "system" ? t("plugins.install.unreviewedProvider") : t("plugins.install.unreviewed")}
+              </div>
             )}
             {staged?.installed && ok && (
               <div className="pg-alert info">
@@ -202,7 +254,7 @@ export function InstallDialog({
               </button>
               {!alreadyInUse && (
                 <button className="btn primary" type="button" onClick={() => startUsing(installed)}>
-                  {t("plugins.btn.useNow")}
+                  {installed.plugin_type === "provider" ? t("plugins.btn.addSubscription") : t("plugins.btn.useNow")}
                 </button>
               )}
             </>

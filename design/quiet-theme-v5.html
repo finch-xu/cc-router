@@ -1,0 +1,668 @@
+<!doctype html>
+<html lang="zh-CN" data-mode="light">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>简洁主题 v5 设计稿</title>
+<style>
+/* ============================================================
+ * cc-router「简洁」主题 v5 —— 基于 main (v6.7.0) 现有页面重绘
+ * 配色取自 T3 Code; 规则:
+ *   1. 界面内不画区块边框 / 行分隔线: 分组靠留白 + 小标题, 行靠悬停底色, 区域靠底色深浅
+ *   2. 彩色只出现在: 主按钮、焦点 / 开关 / 选中滑块、状态圆点
+ *   3. 状态 = 圆点 + 灰字; 进度 / 占比条一律灰色
+ *   4. 页面标题进 48px 顶栏, 页内 tab 跟在标题后面
+ * ============================================================ */
+:root {
+  --bg:        #fcfcfc;
+  --sidebar:   #f6f6f7;
+  --raised:    #f4f4f5;   /* hover / 选中 / 次按钮 / 输入框 */
+  --raised-2:  #ebebed;
+  --line:      #e4e4e7;   /* 只给弹层和窗口外框用 */
+  --ink:       #27272a;
+  --ink-2:     #52525b;
+  --ink-3:     #71717b;
+  --ink-4:     #a1a1aa;
+  --accent:    #1b4ed8;
+  --accent-soft: color-mix(in srgb, var(--accent) 12%, transparent);
+  --ok: #10b981; --warn: #f59e0b; --err: #ef4444; --idle: #a1a1aa;
+  --font: Inter, -apple-system, BlinkMacSystemFont, "Segoe UI Variable Text", "Segoe UI", Roboto, "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", "Noto Sans SC", system-ui, sans-serif;
+  --mono: "JetBrains Mono", ui-monospace, "SF Mono", Menlo, "Cascadia Mono", Consolas, monospace;
+}
+html[data-mode="dark"] {
+  --bg:        #0a0a0a;
+  --sidebar:   #0e0e0e;
+  --raised:    #161616;
+  --raised-2:  #1f1f1f;
+  --line:      #1f1f1f;
+  --ink:       #f5f5f5;
+  --ink-2:     #c4c4c4;
+  --ink-3:     #818181;
+  --ink-4:     #565656;
+  --accent:    #346bf1;
+  --accent-soft: color-mix(in srgb, var(--accent) 20%, transparent);
+  --warn: #fe9a00; --err: #fb414a; --idle: #565656;
+}
+html[data-accent="coral"] { --accent: #c2492f; }
+html[data-accent="coral"][data-mode="dark"] { --accent: #e5664a; }
+
+* { box-sizing: border-box; }
+html, body { margin: 0; }
+body { background: var(--bg); color: var(--ink); font: 13px/1.5 var(--font); -webkit-font-smoothing: antialiased; }
+button, select, input { font: inherit; color: inherit; }
+button { cursor: pointer; }
+.mono { font-family: var(--mono); font-size: 12px; }
+.num { font-variant-numeric: tabular-nums; }
+.c2 { color: var(--ink-2); } .c3 { color: var(--ink-3); } .c4 { color: var(--ink-4); }
+.r { text-align: right; }
+svg.i { width: 15px; height: 15px; flex: none; stroke: currentColor; fill: none; stroke-width: 1.6; stroke-linecap: round; stroke-linejoin: round; }
+
+/* ---------- 设计稿外框 ---------- */
+.doc { max-width: 1320px; margin: 0 auto; padding: 36px 24px 72px; }
+.doc-head { display: flex; justify-content: space-between; align-items: flex-end; gap: 24px; flex-wrap: wrap; margin-bottom: 22px; }
+.doc-head h1 { margin: 0 0 4px; font-size: 18px; font-weight: 600; }
+.doc-head p { margin: 0; color: var(--ink-3); max-width: 720px; }
+.doc-ctrl { display: flex; gap: 12px; }
+.window { height: 820px; display: grid; grid-template-columns: 212px 1fr; border-radius: 12px; overflow: hidden; background: var(--bg); box-shadow: 0 0 0 1px var(--line), 0 30px 60px -30px rgb(0 0 0 / 30%); }
+
+/* ---------- 侧栏 (与现有 Sidebar.tsx 一致的条目) ---------- */
+.sidebar { background: var(--sidebar); display: flex; flex-direction: column; padding: 14px 8px 10px; min-height: 0; }
+.brand { display: flex; align-items: center; gap: 10px; padding: 4px 10px 18px; }
+.brand img { width: 26px; height: 26px; image-rendering: pixelated; }
+.brand b { display: block; font-size: 13px; font-weight: 600; line-height: 1.2; }
+.brand small { color: var(--ink-3); font-size: 11px; }
+.nav-item { display: flex; align-items: center; gap: 10px; width: 100%; height: 30px; padding: 0 10px; border: 0; background: none; border-radius: 6px; color: var(--ink-3); text-align: left; transition: background 120ms, color 120ms; }
+.nav-item:hover { background: var(--raised); color: var(--ink); }
+.nav-item.active { background: var(--raised-2); color: var(--ink); }
+.nav-item .end { margin-left: auto; font: 11px var(--mono); color: var(--ink-4); }
+.nav-gap { height: 12px; }
+.side-foot { margin-top: auto; display: flex; flex-direction: column; gap: 2px; }
+.side-tools { display: flex; gap: 2px; padding: 4px 4px 0; }
+.icon-btn { width: 28px; height: 28px; display: inline-grid; place-items: center; border: 0; background: none; border-radius: 6px; color: var(--ink-3); }
+.icon-btn:hover { background: var(--raised); color: var(--ink); }
+.dot { width: 6px; height: 6px; border-radius: 50%; background: var(--idle); display: inline-block; flex: none; }
+.dot.ok { background: var(--ok); } .dot.warn { background: var(--warn); } .dot.err { background: var(--err); } .dot.acc { background: var(--accent); }
+
+/* ---------- 主区 ---------- */
+.main { display: flex; flex-direction: column; min-width: 0; min-height: 0; }
+.screen { display: none; flex: 1; min-height: 0; flex-direction: column; }
+.screen.on { display: flex; }
+.topbar { height: 48px; flex: none; display: flex; align-items: center; gap: 4px; padding: 0 24px; }
+.topbar h1 { margin: 0 14px 0 0; font-size: 13px; font-weight: 600; }
+.topbar .actions { margin-left: auto; display: flex; gap: 6px; align-items: center; }
+.tab { border: 0; background: none; height: 28px; padding: 0 10px; border-radius: 6px; color: var(--ink-3); font-size: 12.5px; display: inline-flex; align-items: center; gap: 6px; }
+.tab:hover { color: var(--ink); background: var(--raised); }
+.tab.on { color: var(--ink); background: var(--raised-2); }
+.scroll { flex: 1; overflow: auto; min-height: 0; }
+.content { padding: 8px 24px 48px; max-width: 1040px; }
+.lede { color: var(--ink-3); margin: 0 0 4px; max-width: 640px; }
+
+.btn { display: inline-flex; align-items: center; gap: 6px; height: 28px; padding: 0 10px; border: 0; border-radius: 6px; background: var(--raised); color: var(--ink-2); font-size: 12.5px; white-space: nowrap; }
+.btn:hover { background: var(--raised-2); color: var(--ink); }
+.btn.primary { background: var(--accent); color: #fff; }
+.btn.primary:hover { filter: brightness(1.08); }
+.btn.ghost { background: none; color: var(--ink-3); }
+.btn.ghost:hover { background: var(--raised); color: var(--ink); }
+.btn.xs { height: 24px; padding: 0 8px; font-size: 12px; }
+.seg { display: inline-flex; gap: 2px; }
+.seg button { border: 0; background: none; height: 26px; padding: 0 10px; border-radius: 6px; color: var(--ink-3); font-size: 12px; }
+.seg button:hover { color: var(--ink); }
+.seg button.on { background: var(--raised-2); color: var(--ink); }
+.select { display: inline-flex; align-items: center; gap: 6px; height: 28px; padding: 0 8px 0 10px; border: 0; border-radius: 6px; background: var(--raised); color: var(--ink-2); font-size: 12.5px; }
+.select::after { content: ""; width: 5px; height: 5px; border-right: 1.4px solid var(--ink-3); border-bottom: 1.4px solid var(--ink-3); transform: rotate(45deg) translateY(-2px); margin-left: 4px; }
+.field { display: inline-flex; align-items: center; height: 28px; padding: 0 10px; border-radius: 6px; background: var(--raised); font: 12px var(--mono); color: var(--ink); }
+.switch { width: 30px; height: 18px; border-radius: 99px; border: 0; background: var(--raised-2); position: relative; flex: none; }
+.switch::after { content: ""; position: absolute; top: 2px; left: 2px; width: 14px; height: 14px; border-radius: 50%; background: #fff; box-shadow: 0 1px 2px rgb(0 0 0 / 25%); transition: transform 180ms cubic-bezier(.2,.8,.2,1); }
+.switch.on { background: var(--accent); }
+.switch.on::after { transform: translateX(12px); }
+
+.sec { margin-top: 32px; }
+.sec:first-child { margin-top: 8px; }
+.sec-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; min-height: 28px; margin-bottom: 6px; }
+.sec-head h2 { margin: 0; font-size: 12px; font-weight: 500; color: var(--ink-3); }
+.sec-head .note { color: var(--ink-4); font-size: 12px; }
+
+/* 无框表格: 行圆角悬停, 表头灰字 */
+.tbl { width: calc(100% + 20px); margin: 0 -10px; border-collapse: separate; border-spacing: 0; }
+.tbl th { text-align: left; font-weight: 400; font-size: 11.5px; color: var(--ink-4); padding: 6px 10px; white-space: nowrap; }
+.tbl td { padding: 0 10px; height: 40px; white-space: nowrap; }
+.tbl tbody tr td:first-child { border-radius: 8px 0 0 8px; }
+.tbl tbody tr td:last-child { border-radius: 0 8px 8px 0; }
+.tbl tbody tr:hover td { background: var(--raised); }
+.tbl .act { opacity: 0; transition: opacity 120ms; }
+.tbl tr:hover .act { opacity: 1; }
+.tbl.tall td { height: 48px; }
+.status { display: inline-flex; align-items: center; gap: 7px; color: var(--ink-2); }
+.status small { font: 11px var(--mono); color: var(--ink-3); }
+.plogo { width: 22px; height: 22px; border-radius: 6px; background: var(--raised-2); color: var(--ink-2); display: inline-grid; place-items: center; font: 600 10.5px var(--font); flex: none; }
+.who { display: flex; align-items: center; gap: 10px; }
+.who .t b { font-weight: 500; }
+.who .t small { display: block; color: var(--ink-3); font-size: 11.5px; line-height: 1.3; }
+.region { color: var(--ink-4); font-size: 11.5px; margin-left: 6px; font-weight: 400; }
+.bar { height: 3px; border-radius: 2px; background: var(--raised-2); overflow: hidden; }
+.bar i { display: block; height: 100%; background: var(--ink-3); }
+
+/* ---------- 实时路由: 拓扑 ---------- */
+.topo { position: relative; height: 300px; margin: 0 -8px; }
+.topo svg.lines { position: absolute; inset: 0; width: 100%; height: 100%; overflow: visible; }
+.topo .col-label { position: absolute; top: 0; font-size: 11.5px; color: var(--ink-4); }
+.client { position: absolute; left: 8px; width: 150px; height: 34px; display: flex; align-items: center; gap: 9px; padding: 0 10px; border-radius: 8px; color: var(--ink-3); }
+.client.live { color: var(--ink); background: var(--raised); }
+.client .n { margin-left: auto; font: 11px var(--mono); color: var(--ink-4); }
+.hub { position: absolute; left: 50%; top: 50%; transform: translate(-50%, -42%); text-align: center; }
+.hub .mark { width: 60px; height: 60px; border-radius: 16px; background: var(--raised); display: grid; place-items: center; margin: 0 auto 8px; }
+.hub .mark img { width: 40px; height: 40px; image-rendering: pixelated; }
+.hub b { font-size: 12.5px; font-weight: 600; display: block; }
+.hub small { color: var(--ink-3); font: 11px var(--mono); }
+.up { position: absolute; right: 8px; width: 200px; height: 40px; display: flex; align-items: center; gap: 9px; padding: 0 10px; border-radius: 8px; }
+.up .t { line-height: 1.25; }
+.up .t b { font-weight: 500; display: block; }
+.up .t small { color: var(--ink-3); font-size: 11.5px; display: inline-flex; align-items: center; gap: 5px; }
+
+/* ---------- 虚拟模型 ---------- */
+.clock { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; padding: 10px 12px; margin: 0 -12px; border-radius: 10px; background: var(--sidebar); }
+.days { display: inline-flex; gap: 2px; }
+.days button { width: 26px; height: 26px; border: 0; background: none; border-radius: 6px; color: var(--ink-3); font-size: 12px; }
+.days button.on { background: var(--raised-2); color: var(--ink); }
+.range { flex: 1; min-width: 160px; height: 3px; border-radius: 2px; background: var(--raised-2); position: relative; }
+.range i { position: absolute; left: 0; top: 0; bottom: 0; width: 55%; background: var(--accent); border-radius: inherit; }
+.range b { position: absolute; left: 55%; top: 50%; width: 12px; height: 12px; border-radius: 50%; background: #fff; box-shadow: 0 0 0 1px var(--line), 0 1px 3px rgb(0 0 0 / 25%); transform: translate(-50%, -50%); }
+.vm { margin-top: 30px; }
+.vm-head { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+.vm-head .name { font: 600 13px var(--mono); }
+.vm-head .desc { color: var(--ink-3); font-size: 12px; }
+.vm-head .state { margin-left: auto; }
+.vm-warn { color: var(--ink-3); font-size: 12px; margin: 4px 0 6px; }
+.vm-grid { display: grid; grid-template-columns: 120px 1fr 1fr 150px 1fr; column-gap: 16px; align-items: center; }
+.vm-grid .h { color: var(--ink-4); font-size: 11.5px; padding: 6px 0 2px; }
+.vm-src { grid-row: span 3; align-self: center; font: 12.5px var(--mono); color: var(--ink-2); }
+.vm-row { display: contents; }
+.vm-row > div { height: 40px; display: flex; align-items: center; gap: 8px; }
+.vm-sub .ord { font: 11px var(--mono); color: var(--ink-4); width: 12px; }
+.vm-sub .grip { color: var(--ink-4); cursor: grab; }
+.vm-model small { color: var(--ink-4); font-size: 11.5px; margin-left: 6px; }
+.week { display: flex; gap: 3px; }
+.week i { width: 16px; height: 16px; border-radius: 4px; background: var(--raised); font: 10px var(--font); font-style: normal; color: var(--ink-4); display: grid; place-items: center; }
+.week i.now { background: var(--raised-2); color: var(--ink); }
+.day { position: relative; flex: 1; height: 4px; border-radius: 2px; background: var(--ink-4); opacity: .55; }
+.day::after { content: ""; position: absolute; left: 55%; top: -4px; bottom: -4px; width: 1.5px; background: var(--accent); }
+.add-row { color: var(--ink-3); }
+
+/* ---------- 请求日志 ---------- */
+.toolbar { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; margin-bottom: 10px; }
+.toolbar .spacer { flex: 1; }
+.pager { display: flex; align-items: center; justify-content: space-between; margin-top: 12px; color: var(--ink-3); font-size: 12px; }
+
+/* ---------- 统计 ---------- */
+.kpis { display: grid; grid-template-columns: repeat(4, 1fr); gap: 20px 24px; }
+.kpi .l { color: var(--ink-3); font-size: 12px; }
+.kpi .v { font-size: 22px; font-weight: 600; letter-spacing: -0.01em; font-variant-numeric: tabular-nums; margin-top: 2px; }
+.kpi .s { color: var(--ink-4); font: 11px var(--mono); }
+.heat { display: grid; grid-template-rows: repeat(7, 10px); grid-auto-flow: column; grid-auto-columns: 1fr; gap: 3px; overflow: hidden; }
+.heat i { border-radius: 2px; background: var(--raised); }
+.heat i.l1 { background: color-mix(in srgb, var(--ink) 18%, var(--bg)); }
+.heat i.l2 { background: color-mix(in srgb, var(--ink) 38%, var(--bg)); }
+.heat i.l3 { background: color-mix(in srgb, var(--ink) 62%, var(--bg)); }
+.chart { height: 160px; display: flex; align-items: flex-end; gap: 10px; padding-top: 8px; }
+.chart .b { flex: 1; max-width: 36px; margin: 0 auto; display: flex; flex-direction: column-reverse; gap: 2px; }
+.chart .b i { display: block; border-radius: 2px; }
+.chart .b i.ok { background: color-mix(in srgb, var(--ink) 28%, var(--bg)); }
+.chart .b i.bad { background: var(--err); opacity: .8; }
+.axis { display: flex; justify-content: space-between; color: var(--ink-4); font: 10.5px var(--mono); margin-top: 6px; }
+.legend { display: flex; gap: 14px; color: var(--ink-3); font-size: 11.5px; }
+.legend span::before { content: ""; display: inline-block; width: 8px; height: 8px; border-radius: 2px; margin-right: 6px; background: var(--c); vertical-align: -1px; }
+.two { display: grid; grid-template-columns: 1.4fr 1fr; gap: 40px; }
+
+/* ---------- 设置 / 指南 ---------- */
+.set { max-width: 760px; }
+.set-row { display: grid; grid-template-columns: 1fr minmax(180px, auto); gap: 32px; align-items: center; padding: 12px 10px; margin: 0 -10px; border-radius: 8px; }
+.set-row:hover { background: color-mix(in srgb, var(--raised) 60%, transparent); }
+.set-row b { display: block; font-weight: 500; }
+.set-row small { display: block; color: var(--ink-3); font-size: 12px; margin-top: 2px; max-width: 420px; }
+.set-row > :last-child { justify-self: end; }
+.kv { display: grid; grid-template-columns: 140px 1fr auto; column-gap: 16px; }
+.kv > * { height: 38px; display: flex; align-items: center; }
+.kv dt { color: var(--ink-3); }
+.kv dd { margin: 0; }
+.ep { display: grid; grid-template-columns: 48px 200px 1fr; column-gap: 12px; }
+.ep > * { height: 34px; display: flex; align-items: center; }
+.ep .m { font: 11px var(--mono); color: var(--ink-3); }
+
+/* ---------- token 区 ---------- */
+.doc-h2 { margin: 44px 0 12px; font-size: 13px; font-weight: 600; display: flex; gap: 10px; align-items: baseline; }
+.doc-h2 span { color: var(--ink-3); font-weight: 400; }
+.tok { display: grid; grid-template-columns: repeat(3, 1fr); gap: 14px; }
+.tok > div { padding: 18px; background: var(--sidebar); border-radius: 12px; }
+.tok h3 { margin: 0 0 10px; font-size: 12.5px; font-weight: 600; }
+.sw-row { display: grid; grid-template-columns: 26px 1fr auto; gap: 10px; align-items: center; padding: 3px 0; font-size: 12px; }
+.sw { width: 26px; height: 18px; border-radius: 4px; box-shadow: inset 0 0 0 1px rgb(128 128 128 / 20%); }
+.rules { margin: 0; padding-left: 18px; color: var(--ink-2); }
+.rules li { margin: 5px 0; }
+.rules code { font: 11.5px var(--mono); background: var(--raised); padding: 1px 5px; border-radius: 4px; }
+
+@media (max-width: 960px) {
+  .window { grid-template-columns: 1fr; height: auto; }
+  .sidebar { display: none; }
+  .kpis { grid-template-columns: repeat(2, 1fr); }
+  .two, .tok { grid-template-columns: 1fr; }
+  .topo { display: none; }
+  .scroll { overflow-x: auto; }
+  .content { padding: 8px 16px 32px; }
+}
+</style>
+</head>
+<body>
+<svg width="0" height="0" style="position:absolute"><defs>
+  <symbol id="book" viewBox="0 0 24 24"><path d="M2 4h7a3 3 0 0 1 3 3v13a2 2 0 0 0-2-2H2zM22 4h-7a3 3 0 0 0-3 3v13a2 2 0 0 1 2-2h8z"/></symbol>
+  <symbol id="activity" viewBox="0 0 24 24"><path d="M22 12h-4l-3 9L9 3l-3 9H2"/></symbol>
+  <symbol id="layers" viewBox="0 0 24 24"><path d="m12 2 10 5-10 5L2 7z"/><path d="m2 17 10 5 10-5M2 12l10 5 10-5"/></symbol>
+  <symbol id="key" viewBox="0 0 24 24"><circle cx="7.5" cy="15.5" r="4.5"/><path d="m10.7 12.3 9.8-9.8M17 6l3 3M14 9l2 2"/></symbol>
+  <symbol id="scroll" viewBox="0 0 24 24"><path d="M15 12h-5M15 8h-5M19 17V5a2 2 0 0 0-2-2H4"/><path d="M8 21h12a2 2 0 0 0 2-2v-1a1 1 0 0 0-1-1H11a1 1 0 0 0-1 1v1a2 2 0 1 1-4 0V5a2 2 0 1 0-4 0v2a1 1 0 0 0 1 1h3"/></symbol>
+  <symbol id="i-chart" viewBox="0 0 24 24"><path d="M3 3v18h18"/><path d="M7 15v2M11 10v7M15 12v5M19 6v11"/></symbol>
+  <symbol id="receipt" viewBox="0 0 24 24"><path d="M4 2v20l2-1 2 1 2-1 2 1 2-1 2 1 2-1 2 1V2l-2 1-2-1-2 1-2-1-2 1-2-1-2 1z"/><path d="M16 8h-6a2 2 0 1 0 0 4h4a2 2 0 1 1 0 4H8M12 17.5v-11"/></symbol>
+  <symbol id="refresh" viewBox="0 0 24 24"><path d="M21 12a9 9 0 0 1-15 6.7L3 16M3 12a9 9 0 0 1 15-6.7L21 8"/><path d="M21 3v5h-5M3 21v-5h5"/></symbol>
+  <symbol id="db" viewBox="0 0 24 24"><ellipse cx="12" cy="5" rx="9" ry="3"/><path d="M3 5v14a9 3 0 0 0 18 0V5M3 12a9 3 0 0 0 18 0"/></symbol>
+  <symbol id="gear" viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M12 2v3M12 19v3M4.2 4.2l2.1 2.1M17.7 17.7l2.1 2.1M2 12h3M19 12h3M4.2 19.8l2.1-2.1M17.7 6.3l2.1-2.1"/></symbol>
+  <symbol id="info" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><path d="M12 16v-4M12 8h.01"/></symbol>
+  <symbol id="party" viewBox="0 0 24 24"><path d="M5.8 11.3 2 22l10.7-3.8M4 3h.01M22 8h.01M15 2h.01M22 20h.01M22 2l-2.2.8a2.9 2.9 0 0 0-1.9 3.2c.1.9-.6 1.6-1.4 1.6h-.4c-.9 0-1.6.6-1.8 1.4L14 10"/><path d="m22 13-.8-.3a2.6 2.6 0 0 0-3.1 1.2c-.4.6-1.1 1-1.9.9h-.6M11 2l.3.8a2.6 2.6 0 0 1-1.2 3.1c-.6.4-1 1.1-.9 1.9V8"/><path d="M11 13c1.9 1.9 2.8 4.1 2 4.9s-3 0-4.9-2-2.8-4.1-2-4.9 3 0 4.9 2z"/></symbol>
+  <symbol id="sunmoon" viewBox="0 0 24 24"><path d="M12 8a2.8 2.8 0 0 0 4 4 4 4 0 1 1-4-4M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2"/></symbol>
+  <symbol id="palette" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 3a9 9 0 0 0 0 18z" fill="currentColor" stroke="none"/></symbol>
+  <symbol id="plus" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></symbol>
+  <symbol id="copy" viewBox="0 0 24 24"><rect x="9" y="9" width="12" height="12" rx="2"/><path d="M5 15V5a2 2 0 0 1 2-2h10"/></symbol>
+  <symbol id="dl" viewBox="0 0 24 24"><path d="M12 3v12m0 0-4-4m4 4 4-4M4 21h16"/></symbol>
+  <symbol id="clock" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></symbol>
+  <symbol id="grip" viewBox="0 0 24 24"><circle cx="9" cy="6" r=".6"/><circle cx="9" cy="12" r=".6"/><circle cx="9" cy="18" r=".6"/><circle cx="15" cy="6" r=".6"/><circle cx="15" cy="12" r=".6"/><circle cx="15" cy="18" r=".6"/></symbol>
+  <symbol id="x" viewBox="0 0 24 24"><path d="M18 6 6 18M6 6l12 12"/></symbol>
+  <symbol id="term" viewBox="0 0 24 24"><path d="m4 17 6-6-6-6M12 19h8"/></symbol>
+  <symbol id="more" viewBox="0 0 24 24"><circle cx="5" cy="12" r=".8"/><circle cx="12" cy="12" r=".8"/><circle cx="19" cy="12" r=".8"/></symbol>
+</defs></svg>
+
+<div class="doc">
+  <header class="doc-head">
+    <div>
+      <h1>「简洁」主题 v5 · 基于 main 现有页面</h1>
+      <p>页面结构、条目、字段与 v6.7.0 现有界面一一对应（实时路由拓扑、虚拟模型路由图与时刻、订阅表、请求日志 12 列、统计、设置分页、接入指南），只换外观：T3 Code 配色、无边框无分隔线、单一强调色。</p>
+    </div>
+    <div class="doc-ctrl">
+      <div class="seg" id="accSeg"><button class="on" data-v="blue">蓝</button><button data-v="coral">珊瑚</button></div>
+      <div class="seg" id="modeSeg"><button class="on" data-v="light">浅色</button><button data-v="dark">暗色</button></div>
+    </div>
+  </header>
+
+  <div class="window">
+    <aside class="sidebar">
+      <div class="brand"><img src="data:image/png;base64,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" alt=""><div><b>cc-router</b><small>多订阅聚合代理</small></div></div>
+      <button class="nav-item" data-go="guide"><svg class="i"><use href="#book"/></svg>接入指南</button>
+      <button class="nav-item active" data-go="live"><svg class="i"><use href="#activity"/></svg>实时路由<span class="dot ok" style="margin-left:auto" title="代理运行中"></span></button>
+      <button class="nav-item" data-go="vm"><svg class="i"><use href="#layers"/></svg>虚拟模型<span class="end">6</span></button>
+      <button class="nav-item" data-go="subs"><svg class="i"><use href="#key"/></svg>订阅管理<span class="end">4</span></button>
+      <div class="nav-gap"></div>
+      <button class="nav-item" data-go="logs"><svg class="i"><use href="#scroll"/></svg>请求日志</button>
+      <button class="nav-item" data-go="stats"><svg class="i"><use href="#i-chart"/></svg>数据统计</button>
+      <button class="nav-item" data-go="stats"><svg class="i"><use href="#receipt"/></svg>用量小票</button>
+      <div class="nav-gap"></div>
+      <button class="nav-item" data-go="settings"><svg class="i"><use href="#refresh"/></svg>检查更新</button>
+      <button class="nav-item" data-go="settings"><svg class="i"><use href="#db"/></svg>备份与迁移</button>
+      <button class="nav-item" data-go="settings"><svg class="i"><use href="#gear"/></svg>设置</button>
+      <button class="nav-item" data-go="settings"><svg class="i"><use href="#info"/></svg>关于</button>
+      <div class="side-foot">
+        <button class="nav-item"><svg class="i"><use href="#party"/></svg>更新内容<span class="end">v6.7.0</span></button>
+        <div class="side-tools">
+          <button class="icon-btn" id="sideMode" title="明暗模式"><svg class="i"><use href="#sunmoon"/></svg></button>
+          <button class="icon-btn" title="界面主题"><svg class="i"><use href="#palette"/></svg></button>
+        </div>
+      </div>
+    </aside>
+
+    <main class="main">
+      <!-- ================= 实时路由 ================= -->
+      <section class="screen on" id="s-live">
+        <div class="topbar"><h1>实时路由</h1><span class="c3" style="font-size:12px">4 槽位 + 1 兜底 · 4 家在用</span></div>
+        <div class="scroll"><div class="content">
+          <div class="topo" id="topo">
+            <span class="col-label" style="left:18px">客户端 · AI Agent 工具</span>
+            <span class="col-label" style="right:18px">上游 · 厂商订阅</span>
+            <svg class="lines" id="topoLines"></svg>
+            <div class="client live" style="top:44px"><svg class="i"><use href="#term"/></svg>Claude<span class="n">2</span></div>
+            <div class="client" style="top:104px"><svg class="i"><use href="#term"/></svg>Codex</div>
+            <div class="client" style="top:164px"><svg class="i"><use href="#term"/></svg>OpenCode</div>
+            <div class="client" style="top:224px"><svg class="i"><use href="#term"/></svg>Others</div>
+            <div class="hub"><div class="mark"><img src="data:image/png;base64,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" alt=""></div><b>cc-router</b><small>127.0.0.1:23456</small></div>
+            <div class="up" style="top:34px"><span class="plogo">A</span><div class="t"><b>Anthropic</b><small><span class="dot ok"></span>正常</small></div></div>
+            <div class="up" style="top:94px"><span class="plogo">Z</span><div class="t"><b>智谱 GLM</b><small><span class="dot warn"></span>限流 · 42s</small></div></div>
+            <div class="up" style="top:154px"><span class="plogo">K</span><div class="t"><b>Moonshot Kimi</b><small><span class="dot ok"></span>正常</small></div></div>
+            <div class="up" style="top:214px"><span class="plogo">D</span><div class="t"><b>DeepSeek</b><small><span class="dot err"></span>凭证失效</small></div></div>
+          </div>
+
+          <div class="sec">
+            <div class="sec-head"><h2>客户端接入</h2><span class="note">被动流量检测：保留期内真的发过请求的客户端</span></div>
+            <table class="tbl">
+              <thead><tr><th>客户端</th><th>最近请求</th><th class="r">请求数</th><th class="r">Token 数</th></tr></thead>
+              <tbody class="num">
+                <tr><td><span class="who"><svg class="i c3"><use href="#term"/></svg><b style="font-weight:500">Claude</b></span></td><td class="c2">刚刚</td><td class="r mono">1,284</td><td class="r mono">48.2M</td></tr>
+                <tr><td style="padding-left:35px" class="c2">Claude Code</td><td class="c2">刚刚</td><td class="r mono c2">1,271</td><td class="r mono c2">47.9M</td></tr>
+                <tr><td style="padding-left:35px" class="c2">Claude Desktop</td><td class="c3">3 小时前</td><td class="r mono c2">13</td><td class="r mono c2">0.3M</td></tr>
+                <tr><td style="padding-left:35px" class="c3">Anthropic Python SDK</td><td class="c4">—</td><td class="r mono c4">0</td><td class="r mono c4">0</td></tr>
+                <tr><td style="padding-left:35px" class="c3">Anthropic JS SDK</td><td class="c4">—</td><td class="r mono c4">0</td><td class="r mono c4">0</td></tr>
+                <tr><td><span class="who"><svg class="i c4"><use href="#term"/></svg><span class="c3">Codex</span></span></td><td class="c4">—</td><td class="r mono c4">0</td><td class="r mono c4">0</td></tr>
+                <tr><td><span class="who"><svg class="i c4"><use href="#term"/></svg><span class="c3">OpenCode</span></span></td><td class="c4">—</td><td class="r mono c4">0</td><td class="r mono c4">0</td></tr>
+                <tr><td><span class="who"><svg class="i c4"><use href="#term"/></svg><span class="c3">Others</span></span></td><td class="c4">—</td><td class="r mono c4">0</td><td class="r mono c4">0</td></tr>
+              </tbody>
+            </table>
+            <p class="c4" style="font-size:12px;margin:12px 0 0">请求日志设为永久保留，检测范围即全部历史记录。</p>
+          </div>
+        </div></div>
+      </section>
+
+      <!-- ================= 虚拟模型 ================= -->
+      <section class="screen" id="s-vm">
+        <div class="topbar"><h1>虚拟模型</h1><button class="tab on">内置</button><button class="tab">自定义</button></div>
+        <div class="scroll"><div class="content">
+          <p class="lede">每个虚拟模型是一张路由图：虚拟模型 → 订阅（按顺序）→ 真实模型，真实模型旁写着它在什么时段生效。</p>
+          <div class="sec">
+            <div class="clock">
+              <span class="c3" style="font-size:12px">查看时刻</span>
+              <button class="btn xs"><svg class="i" style="width:13px;height:13px"><use href="#clock"/></svg>现在</button>
+              <div class="days"><button>一</button><button>二</button><button>三</button><button>四</button><button class="on">五</button><button>六</button><button>日</button></div>
+              <div class="range"><i></i><b></b></div>
+              <span class="mono">周五 13:16</span>
+              <span class="c4" style="font-size:11.5px">按运行 cc-router 的电脑的时间</span>
+            </div>
+          </div>
+          <div id="vmList"></div>
+        </div></div>
+      </section>
+
+      <!-- ================= 订阅管理 ================= -->
+      <section class="screen" id="s-subs">
+        <div class="topbar"><h1>订阅管理</h1><span class="c3 mono">4</span>
+          <div class="actions"><button class="btn primary"><svg class="i"><use href="#plus"/></svg>添加订阅</button></div></div>
+        <div class="scroll"><div class="content">
+          <p class="lede">每个订阅对应一个厂商的 API Key，状态实时反映健康检查结果。</p>
+          <div class="sec">
+            <table class="tbl tall">
+              <thead><tr><th style="width:120px">状态</th><th>厂商</th><th style="width:200px">限额</th><th>引用</th><th>更新时间</th><th></th></tr></thead>
+              <tbody id="subRows"></tbody>
+            </table>
+          </div>
+        </div></div>
+      </section>
+
+      <!-- ================= 请求日志 ================= -->
+      <section class="screen" id="s-logs">
+        <div class="topbar"><h1>请求日志</h1><button class="tab on">请求</button><button class="tab">订阅事件</button><button class="tab">系统异常</button>
+          <div class="actions"><button class="btn ghost"><svg class="i"><use href="#dl"/></svg>导出 CSV</button><button class="btn ghost"><svg class="i"><use href="#refresh"/></svg>刷新</button></div></div>
+        <div class="scroll"><div class="content" style="max-width:none">
+          <div class="toolbar">
+            <button class="select">全部虚拟模型</button><button class="select">全部厂商</button><button class="select">全部状态</button><button class="select">全部客户端</button>
+            <span class="spacer"></span><span class="c3 mono" style="font-size:11.5px">128 条 · 第 1 / 3 页</span>
+          </div>
+          <table class="tbl">
+            <thead><tr><th>时间</th><th>状态</th><th>客户端</th><th>虚拟模型</th><th>真实模型</th><th>响应模型</th><th>厂商</th><th class="r">输入</th><th class="r">输出</th><th class="r">速度</th><th class="r">首字</th><th class="r">耗时</th></tr></thead>
+            <tbody id="logRows" class="num"></tbody>
+          </table>
+          <div class="pager"><span class="mono" style="font-size:11.5px">128 条 · 第 1 / 3 页</span><span style="display:flex;gap:6px"><button class="btn xs" disabled style="opacity:.5">上一页</button><button class="btn xs">下一页</button></span></div>
+        </div></div>
+      </section>
+
+      <!-- ================= 数据统计 ================= -->
+      <section class="screen" id="s-stats">
+        <div class="topbar"><h1>数据统计</h1>
+          <div class="seg" style="margin-left:6px"><button>今天</button><button class="on">近 7 天</button><button>近 30 天</button><button>近 90 天</button><button>全部</button></div>
+          <div class="actions"><button class="btn ghost"><svg class="i"><use href="#refresh"/></svg>刷新</button></div></div>
+        <div class="scroll"><div class="content">
+          <div class="sec">
+            <div class="sec-head"><h2>全年 Token 用量</h2><span class="note">近 365 天每日输入 + 输出，不受下方时间范围影响</span></div>
+            <div class="heat" id="heat"></div>
+          </div>
+          <div class="sec">
+            <div class="sec-head"><h2>时段分析 · 近 7 天</h2></div>
+            <div class="kpis">
+              <div class="kpi"><div class="l">总请求数</div><div class="v">8,416</div><div class="s">8,331 ✓ · 85 ✕</div></div>
+              <div class="kpi"><div class="l">成功率</div><div class="v">99.0%</div><div class="s">85 失败 / 8,416</div></div>
+              <div class="kpi"><div class="l">平均耗时</div><div class="v">6.21s</div><div class="s">P95 14.8s</div></div>
+              <div class="kpi"><div class="l">总 Token</div><div class="v">312M</div><div class="s">输入 298M · 输出 14M</div></div>
+              <div class="kpi"><div class="l">缓存读取占比</div><div class="v">86%</div><div class="s">缓存读 257M · 写 18M</div></div>
+              <div class="kpi"><div class="l">工具调用</div><div class="v">5,902</div><div class="s">4,113 次请求发起过调用</div></div>
+              <div class="kpi"><div class="l">工具调用轮次占比</div><div class="v">49%</div><div class="s">4,113 / 8,331 次成功请求</div></div>
+            </div>
+          </div>
+          <div class="sec two">
+            <div>
+              <div class="sec-head"><h2>请求趋势</h2><div class="legend"><span style="--c:color-mix(in srgb, var(--ink) 28%, var(--bg))">成功</span><span style="--c:var(--err)">失败</span></div></div>
+              <div class="chart" id="chart"></div>
+              <div class="axis"><span>11/14</span><span>11/15</span><span>11/16</span><span>11/17</span><span>11/18</span><span>11/19</span><span>11/20</span></div>
+            </div>
+            <div>
+              <div class="sec-head"><h2>虚拟模型份额</h2><div class="seg"><button class="on">请求数</button><button>Token</button></div></div>
+              <table class="tbl">
+                <tbody class="num">
+                  <tr><td class="mono">model-sonnet</td><td style="width:40%"><div class="bar"><i style="width:55%"></i></div></td><td class="r mono c2">55%</td></tr>
+                  <tr><td class="mono">model-opus</td><td><div class="bar"><i style="width:33%"></i></div></td><td class="r mono c2">33%</td></tr>
+                  <tr><td class="mono">model-haiku</td><td><div class="bar"><i style="width:10%"></i></div></td><td class="r mono c2">10%</td></tr>
+                  <tr><td class="mono">model-fallback</td><td><div class="bar"><i style="width:2%"></i></div></td><td class="r mono c2">2%</td></tr>
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </div></div>
+      </section>
+
+      <!-- ================= 设置 ================= -->
+      <section class="screen" id="s-settings">
+        <div class="topbar"><h1>设置</h1><button class="tab on">通用</button><button class="tab">代理</button><button class="tab">安全与访问</button><button class="tab">Web &amp; TUI</button><button class="tab">备份与迁移</button><button class="tab">高级</button></div>
+        <div class="scroll"><div class="content set">
+          <div class="sec">
+            <div class="sec-head"><h2>语言</h2></div>
+            <div class="set-row"><div><b>界面语言</b><small>「跟随系统」会读取系统语言：简体中文、繁體中文（台湾 / 香港 / 澳门）、日本語，其他为 English。</small></div><button class="select">简体中文</button></div>
+            <div class="set-row"><div><b>新手引导</b><small>重新走一遍语言、订阅和接入设置。</small></div><button class="btn">重新打开</button></div>
+            <div class="set-row"><div><b>开机自启动</b></div><button class="switch"></button></div>
+            <div class="set-row"><div><b>更新源</b></div><button class="select">中国大陆</button></div>
+            <div class="set-row"><div><b>自动检查更新</b><small>启动时查询一次新版本。关闭后只在你手动检查时联网查询。</small></div><button class="switch on"></button></div>
+          </div>
+          <div class="sec">
+            <div class="sec-head"><h2>外观</h2></div>
+            <div class="set-row"><div><b>界面主题</b><small>简洁是默认主题；手绘是速写本风格；经典是改版前的样式；Win2000 是复古风格。</small></div>
+              <div class="seg"><button class="on">简洁</button><button>手绘</button><button>经典</button><button>Win2000</button></div></div>
+            <div class="set-row"><div><b>明暗模式</b></div><div class="seg" id="modeSeg2"><button>跟随系统</button><button class="on" data-v="light">浅色</button><button data-v="dark">暗色</button></div></div>
+          </div>
+        </div></div>
+      </section>
+
+      <!-- ================= 接入指南 ================= -->
+      <section class="screen" id="s-guide">
+        <div class="topbar"><h1>接入指南</h1><button class="tab on">基本信息</button><button class="tab">通用接入</button><button class="tab">Claude Code</button><button class="tab">Codex</button><button class="tab">cc-switch</button><button class="tab">OpenClaw</button><button class="tab">Hermes Agent</button><button class="tab">OpenCode</button></div>
+        <div class="scroll"><div class="content" style="max-width:820px">
+          <p class="lede">把 cc-router 作为 Anthropic Messages 兼容端点接入各类客户端。</p>
+          <div class="sec">
+            <div class="sec-head"><h2>接入信息</h2><button class="btn ghost xs">去设置</button></div>
+            <dl class="kv">
+              <dt>接入地址 · HTTP</dt><dd class="mono">http://127.0.0.1:23456</dd><dd><button class="btn ghost xs"><svg class="i" style="width:13px;height:13px"><use href="#copy"/></svg>复制</button></dd>
+              <dt>鉴权 Token</dt><dd class="mono">0b2686bc••••••••••••a7da</dd><dd><button class="btn ghost xs"><svg class="i" style="width:13px;height:13px"><use href="#copy"/></svg>复制</button></dd>
+              <dt>监听地址</dt><dd>127.0.0.1 <span class="c3" style="margin-left:6px">仅本机</span></dd><dd></dd>
+              <dt>CORS Allow-Origin</dt><dd class="mono">*</dd><dd></dd>
+            </dl>
+          </div>
+          <div class="sec">
+            <div class="sec-head"><h2>API 入口</h2><span class="note">三协议并行</span></div>
+            <div class="ep">
+              <span class="m">POST</span><span class="mono">/v1/messages</span><span class="c3">Anthropic Messages</span>
+              <span class="m">POST</span><span class="mono">/v1/responses</span><span class="c3">OpenAI Responses</span>
+              <span class="m">POST</span><span class="mono">/v1/chat/completions</span><span class="c3">OpenAI Chat Completions</span>
+              <span class="m">POST</span><span class="mono">/v1/systemone</span><span class="c3">Jev 决策协议（System One），只调度 model-jev</span>
+              <span class="m">GET</span><span class="mono">/v1/models</span><span class="c3">虚拟模型列表</span>
+              <span class="m">GET</span><span class="mono">/health</span><span class="c3">健康检查</span>
+            </div>
+          </div>
+          <div class="sec">
+            <div class="sec-head"><h2>虚拟模型映射</h2></div>
+            <table class="tbl"><thead><tr><th>Claude Code 环境变量</th><th>虚拟模型</th><th>此刻首选</th></tr></thead><tbody>
+              <tr><td class="mono c2">ANTHROPIC_DEFAULT_FABLE_MODEL</td><td class="mono">model-fable</td><td>Anthropic 主号</td></tr>
+              <tr><td class="mono c2">ANTHROPIC_DEFAULT_OPUS_MODEL</td><td class="mono">model-opus</td><td>Anthropic 主号</td></tr>
+              <tr><td class="mono c2">ANTHROPIC_DEFAULT_SONNET_MODEL</td><td class="mono">model-sonnet</td><td>DeepSeek</td></tr>
+              <tr><td class="mono c2">ANTHROPIC_DEFAULT_HAIKU_MODEL</td><td class="mono">model-haiku</td><td>Kimi 国际版</td></tr>
+            </tbody></table>
+          </div>
+        </div></div>
+      </section>
+    </main>
+  </div>
+
+  <div class="doc-h2">Token 与规则 <span>落地到 src/themes/quiet.css；变量名沿用 --bg / --surface-* / --line / --ink-* / --accent</span></div>
+  <div class="tok">
+    <div>
+      <h3>灰阶（浅 / 暗）</h3>
+      <div class="sw-row"><span class="sw" style="background:var(--bg)"></span>--bg 画布<span class="mono c3">#fcfcfc / #0a0a0a</span></div>
+      <div class="sw-row"><span class="sw" style="background:var(--sidebar)"></span>--surface-2 侧栏 / 面板<span class="mono c3">#f6f6f7 / #0e0e0e</span></div>
+      <div class="sw-row"><span class="sw" style="background:var(--raised)"></span>--surface-3 悬停 / 控件<span class="mono c3">#f4f4f5 / #161616</span></div>
+      <div class="sw-row"><span class="sw" style="background:var(--raised-2)"></span>选中 / 开关底<span class="mono c3">#ebebed / #1f1f1f</span></div>
+      <div class="sw-row"><span class="sw" style="background:var(--ink)"></span>--ink 正文<span class="mono c3">#27272a / #f5f5f5</span></div>
+      <div class="sw-row"><span class="sw" style="background:var(--ink-3)"></span>--ink-3 次要<span class="mono c3">#71717b / #818181</span></div>
+    </div>
+    <div>
+      <h3>颜色只用在这里</h3>
+      <div class="sw-row"><span class="sw" style="background:var(--accent)"></span>强调色：主按钮 / 开关 / 滑块 / 焦点<span class="mono c3" id="accHex"></span></div>
+      <div class="sw-row"><span class="sw" style="background:var(--ok)"></span>正常（圆点）<span class="mono c3">#10b981</span></div>
+      <div class="sw-row"><span class="sw" style="background:var(--warn)"></span>限流 / 冷却<span class="mono c3">#f59e0b</span></div>
+      <div class="sw-row"><span class="sw" style="background:var(--err)"></span>失败 / 凭证失效<span class="mono c3">#ef4444</span></div>
+      <div style="display:flex;gap:8px;margin-top:14px;align-items:center"><button class="btn primary">主按钮</button><button class="btn">次按钮</button><button class="btn ghost">幽灵</button><button class="switch on"></button></div>
+    </div>
+    <div>
+      <h3>与现在「简洁」的差异</h3>
+      <ul class="rules">
+        <li>侧栏选中：黑底白字 → 浅灰底；条目按「路由 / 观测 / 系统」留白分组，不加标题。</li>
+        <li>页面大标题 + 副标题 → 48px 顶栏小标题；页内 tab（日志、设置、指南）并进顶栏。</li>
+        <li>卡片、表格外框、行分隔线、虚线框全部去掉，行靠悬停底色。</li>
+        <li>状态彩色胶囊（「● 失败」「401」）→ 圆点 + 灰字 + 等宽状态码。</li>
+        <li>路由图：彩色虚线 / 便签 → 灰色细线，有流量的连线才加深。</li>
+        <li>虚拟模型：红色 503 警告框 → 圆点 + 一行灰字；星期色块统一灰阶。</li>
+      </ul>
+    </div>
+  </div>
+</div>
+
+<script>
+const $ = s => document.querySelector(s);
+const root = document.documentElement;
+
+/* ---- 订阅 ---- */
+const subs = [
+  ['ok','正常','A','Anthropic','全球','Anthropic 主号','34%','fable · opus · sonnet','13:16'],
+  ['warn','限流 <small>42s</small>','Z','智谱 GLM','中国','智谱 GLM 包月','88%','fable · opus','13:02'],
+  ['ok','正常','K','Moonshot Kimi','全球','Kimi 国际版',null,'fable · opus · haiku','昨天'],
+  ['err','凭证失效','D','DeepSeek','全球','DeepSeek',null,'sonnet · haiku','11/18'],
+];
+$('#subRows').innerHTML = subs.map(s => `<tr>
+  <td><span class="status"><span class="dot ${s[0]}"></span>${s[1]}</span></td>
+  <td><span class="who"><span class="plogo">${s[2]}</span><span class="t"><b>${s[3]}</b><span class="region">${s[4]}</span><small>${s[5]}</small></span></span></td>
+  <td>${s[6] ? `<div style="display:grid;grid-template-columns:1fr 34px;gap:8px;align-items:center"><div class="bar"><i style="width:${s[6]};${parseInt(s[6])>85?'background:var(--warn)':''}"></i></div><span class="mono c3" style="font-size:11px">${s[6]}</span></div>` : '<span class="c4">未设限额</span>'}</td>
+  <td class="mono c3" style="font-size:11.5px">${s[7]}</td>
+  <td class="mono c3">${s[8]}</td>
+  <td class="r"><span class="act"><button class="btn ghost xs">查看</button><button class="btn ghost xs">复制订阅</button></span></td></tr>`).join('');
+
+/* ---- 日志 ---- */
+const logs = [
+  ['13:16:42','ok','200','Claude Code','model-opus','claude-opus-4-7','claude-opus-4-7','A','Anthropic','42.1k','812','61 t/s','1.42s','14.9s'],
+  ['13:16:31','ok','200','Claude Code','model-sonnet','deepseek-v4','deepseek-v4','D','DeepSeek','18.4k','341','44 t/s','0.96s','8.21s'],
+  ['13:16:27','warn','429','Claude Code','model-opus','glm-5.1','—','Z','智谱 GLM','0','0','—','—','0.31s'],
+  ['13:16:12','ok','200','Claude Code','model-haiku','kimi-k3-turbo','kimi-k3-turbo','K','Moonshot Kimi','6.1k','122','88 t/s','0.40s','1.80s'],
+  ['13:15:58','err','401','Claude Code','model-sonnet','deepseek-v4','—','D','DeepSeek','0','0','—','—','0.28s'],
+  ['13:15:40','ok','200','Claude Desktop','model-opus','claude-opus-4-7','claude-opus-4-7','A','Anthropic','22.7k','530','57 t/s','1.20s','9.48s'],
+  ['13:15:02','ok','200','Claude Code','model-fallback','gpt-5.5','gpt-5.5','K','Moonshot Kimi','11.3k','207','39 t/s','2.11s','5.66s'],
+  ['13:14:51','ok','200','Claude Code','model-opus','claude-opus-4-7','claude-opus-4-7','A','Anthropic','9.8k','96','63 t/s','1.31s','4.11s'],
+];
+$('#logRows').innerHTML = logs.map(l => `<tr>
+  <td class="mono c3">${l[0]}</td>
+  <td><span class="status"><span class="dot ${l[1]}"></span><span class="mono">${l[2]}</span></span></td>
+  <td class="c2">${l[3]}</td><td class="mono">${l[4]}</td><td class="mono c2">${l[5]}</td><td class="mono c3">${l[6]}</td>
+  <td><span class="who"><span class="plogo" style="width:18px;height:18px;font-size:9.5px;border-radius:5px">${l[7]}</span>${l[8]}</span></td>
+  <td class="r mono c2">${l[9]}</td><td class="r mono c2">${l[10]}</td><td class="r mono c3">${l[11]}</td><td class="r mono c3">${l[12]}</td><td class="r mono">${l[13]}</td></tr>`).join('');
+
+/* ---- 虚拟模型 ---- */
+const vms = [
+  ['model-fable','最强 · Hardest tasks','顺序',['Anthropic 主号','智谱 GLM 包月','Kimi 国际版'],['claude-opus-4-7','glm-5.1','kimi-k3'],0],
+  ['model-opus','高级任务 · Plan Mode','顺序',['Anthropic 主号','智谱 GLM 包月','Kimi 国际版'],['claude-opus-4-7','glm-5.1','kimi-k3'],0],
+  ['model-sonnet','主对话 · Default chat','轮询',['DeepSeek','Anthropic 主号'],['deepseek-v4','claude-sonnet-5'],-1],
+  ['model-haiku','小任务 · Tool calls','会话亲和',['Kimi 国际版','DeepSeek'],['kimi-k3-turbo','deepseek-v4'],0],
+];
+$('#vmList').innerHTML = vms.map(v => {
+  const rows = v[3].map((s,i) => {
+    const first = (v[5] === 0 && i === 0) || (v[5] === -1 && i === 1);
+    const tag = v[5] === -1 && i === 0 ? '<small>凭证失效 · 此刻不参与</small>' : first ? '<small style="color:var(--ink-2)">此刻首选</small>' : '<small>备选</small>';
+    return `<div class="vm-row">
+      <div class="vm-sub"><svg class="i grip"><use href="#grip"/></svg><span class="ord">${i+1}</span><span class="dot ${v[5]===-1&&i===0?'err':'ok'}"></span>${s}</div>
+      <div class="vm-model"><span class="mono">${v[4][i]}</span>${tag}</div>
+      <div><span class="week">${['一','二','三','四','五','六','日'].map((d,j)=>`<i class="${j===4?'now':''}">${d}</i>`).join('')}</span></div>
+      <div><span class="day"></span></div></div>`;
+  }).join('');
+  return `<div class="vm">
+    <div class="vm-head"><span class="name">${v[0]}</span><span class="desc">${v[1]}</span>
+      <div class="seg">${['顺序','轮询','会话亲和'].map(m=>`<button class="${m===v[2]?'on':''}">${m}</button>`).join('')}</div>
+      <span class="state status"><span class="dot ok"></span>此刻可用 · 全天有订阅</span></div>
+    <div class="vm-grid">
+      <span></span><span class="h">订阅 · 顺序即优先级</span><span class="h">真实模型 · 生效时段</span><span class="h">星期</span><span class="h">周五 0–24 时</span>
+      <div class="vm-src" style="grid-row:span ${v[3].length + 1}">${v[0]}</div>
+      ${rows}
+      <div class="vm-row"><div class="add-row"><button class="btn ghost xs"><svg class="i" style="width:12px;height:12px"><use href="#plus"/></svg>添加订阅</button></div><div></div><div></div><div></div></div>
+    </div></div>`;
+}).join('') + `<div class="vm">
+    <div class="vm-head"><span class="name">model-fallback</span><span class="desc">兜底 · Unknown models</span>
+      <div class="seg"><button class="on">顺序</button><button>轮询</button><button>会话亲和</button></div>
+      <span class="state status"><span class="dot"></span>还没有绑定订阅</span></div>
+    <div class="vm-warn">没有绑定时，不匹配前四个槽位的请求会返回 503。 <button class="btn ghost xs"><svg class="i" style="width:12px;height:12px"><use href="#plus"/></svg>添加订阅</button></div></div>`;
+
+/* ---- 统计 ---- */
+let h = '';
+for (let i = 0; i < 53 * 7; i++) {
+  const r = Math.random(), recent = i > 53 * 7 - 70;
+  h += `<i class="${recent ? (r > .6 ? 'l3' : r > .3 ? 'l2' : 'l1') : r > .93 ? 'l1' : ''}"></i>`;
+}
+$('#heat').innerHTML = h;
+$('#chart').innerHTML = [980, 1120, 1260, 1050, 1390, 1480, 1136].map((v, i) => {
+  const bad = [8, 12, 30, 6, 11, 9, 9][i];
+  return `<div class="b"><i class="ok" style="height:${v / 1500 * 140}px"></i><i class="bad" style="height:${Math.max(2, bad / 1500 * 140 * 4)}px"></i></div>`;
+}).join('');
+
+/* ---- 拓扑连线 ---- */
+function drawTopo() {
+  const box = $('#topo'), svg = $('#topoLines');
+  const W = box.clientWidth, H = box.clientHeight;
+  if (!W) return;
+  const hub = { x: W / 2, y: H / 2 + 6 };
+  const L = [61, 121, 181, 241].map((y, i) => ({ x: 158, y, live: i === 0 }));
+  const R = [54, 114, 174, 234].map((y, i) => ({ x: W - 208, y, live: i < 3, warn: i === 1 }));
+  const curve = (a, b) => `M${a.x},${a.y} C${(a.x + b.x) / 2},${a.y} ${(a.x + b.x) / 2},${b.y} ${b.x},${b.y}`;
+  let p = '';
+  L.forEach(c => p += `<path d="${curve(c, { x: hub.x - 40, y: hub.y })}" stroke="${c.live ? 'var(--ink-3)' : 'var(--raised-2)'}" stroke-width="${c.live ? 1.5 : 1}" fill="none"/>`);
+  R.forEach(c => p += `<path d="${curve({ x: hub.x + 40, y: hub.y }, c)}" stroke="${c.live ? 'var(--ink-3)' : 'var(--raised-2)'}" stroke-width="${c.live ? 1.5 : 1}" fill="none" ${c.warn ? 'stroke-dasharray="3 3"' : ''}/>`);
+  p += `<circle r="2.5" fill="var(--accent)"><animateMotion dur="1.6s" repeatCount="indefinite" path="${curve(L[0], { x: hub.x - 40, y: hub.y })}"/></circle>`;
+  p += `<circle r="2.5" fill="var(--accent)"><animateMotion dur="1.6s" repeatCount="indefinite" path="${curve({ x: hub.x + 40, y: hub.y }, R[0])}"/></circle>`;
+  svg.innerHTML = matchMedia('(prefers-reduced-motion: reduce)').matches ? p.replace(/<circle[\s\S]*?<\/circle>/g, '') : p;
+}
+
+/* ---- 切换 ---- */
+function setMode(v) {
+  root.dataset.mode = v;
+  document.querySelectorAll('#modeSeg button, #modeSeg2 button[data-v]').forEach(b => b.classList.toggle('on', b.dataset.v === v));
+  $('#accHex').textContent = getComputedStyle(root).getPropertyValue('--accent').trim();
+}
+document.querySelectorAll('#modeSeg button, #modeSeg2 button[data-v]').forEach(b => b.onclick = () => setMode(b.dataset.v));
+$('#sideMode').onclick = () => setMode(root.dataset.mode === 'dark' ? 'light' : 'dark');
+document.querySelectorAll('#accSeg button').forEach(b => b.onclick = () => {
+  root.dataset.accent = b.dataset.v;
+  document.querySelectorAll('#accSeg button').forEach(x => x.classList.toggle('on', x === b));
+  setMode(root.dataset.mode);
+});
+document.querySelectorAll('.nav-item[data-go]').forEach(n => n.onclick = () => {
+  document.querySelectorAll('.nav-item').forEach(x => x.classList.toggle('active', x === n));
+  document.querySelectorAll('.screen').forEach(s => s.classList.toggle('on', s.id === 's-' + n.dataset.go));
+  if (n.dataset.go === 'live') drawTopo();
+});
+const q = new URLSearchParams(location.search);
+if (q.get('mode')) setMode(q.get('mode')); else setMode(matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light');
+if (q.get('page')) document.querySelector(`.nav-item[data-go="${q.get('page')}"]`)?.click();
+drawTopo();
+addEventListener('resize', drawTopo);
+</script>
+</body>
+</html>

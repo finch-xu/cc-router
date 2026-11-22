@@ -1,0 +1,17 @@
+{
+  "manifest": 1,
+  "id": "provider-example-relay",
+  "type": "provider",
+  "version": "1.0.0",
+  "name": { "zh": "示例中转站", "zh-Hant": "範例中轉站", "en": "Example Relay", "ja": "サンプル中継サービス" },
+  "description": {
+    "zh": "厂商插件的写法示范：一份与内置厂商同格式的 provider.yaml。域名是虚构的 example.com，装上也连不通。",
+    "zh-Hant": "廠商外掛的寫法示範：一份與內建廠商同格式的 provider.yaml。網域是虛構的 example.com，裝上也連不通。",
+    "en": "Shows how to write a provider plugin: a provider.yaml in the same format as built-in providers. The domain is the fictional example.com, so it will not actually connect.",
+    "ja": "プロバイダープラグインの書き方の見本：内蔵プロバイダーと同じ形式の provider.yaml。ドメインは架空の example.com なので、実際には接続できません。"
+  },
+  "author": "cc-router",
+  "license": "MIT",
+  "entry": "provider.yaml",
+  "assets": []
+}

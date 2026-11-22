@@ -140,6 +140,19 @@ fn receipt_item_visible(vm: VirtualModelName, has_items: bool) -> bool {
     has_items || !vm.is_jev()
 }
 
+/// SQL 的 `COALESCE(订阅快照名, provider_id)` 在订阅已删时退到 id; 插件厂商的 id 是 `plugin:<id>`,
+/// 不能直接上屏: 插件还装着就用它的中文名, 否则显示「<id>（已卸载的插件）」。小票刻意读中文 (见 CLAUDE.md)。
+fn display_name_or_plugin_fallback(name: String, registry: &crate::provider::registry::ProviderRegistry) -> String {
+    use crate::provider::registry::PLUGIN_PROVIDER_PREFIX;
+    match name.strip_prefix(PLUGIN_PROVIDER_PREFIX) {
+        Some(plugin_id) => registry
+            .get(&name)
+            .map(|p| p.display_name.zh.clone())
+            .unwrap_or_else(|| format!("{plugin_id}（已卸载的插件）")),
+        None => name,
+    }
+}
+
 #[tauri::command]
 pub async fn get_receipt_summary(
     state: State<'_, AppState>,
@@ -204,6 +217,7 @@ pub async fn get_receipt_summary(
     let mut buckets: std::collections::HashMap<String, Vec<ReceiptSubItemDto>> =
         std::collections::HashMap::new();
 
+    let registry = state.providers();
     for r in rows {
         let totals = ReceiptTotalsDto {
             request_count: r.try_get("request_count")?,
@@ -216,7 +230,7 @@ pub async fn get_receipt_summary(
             subscription_id: r.try_get("subscription_id")?,
             subscription_display_name: r.try_get("subscription_display_name")?,
             provider_id: r.try_get("provider_id")?,
-            provider_display_name: r.try_get("provider_display_name")?,
+            provider_display_name: display_name_or_plugin_fallback(r.try_get("provider_display_name")?, &registry),
             real_model_name: r.try_get("real_model_name")?,
             totals,
         };
@@ -376,5 +390,17 @@ mod tests {
         assert!(!receipt_item_visible(VirtualModelName::Jev, false));
         assert!(receipt_item_visible(VirtualModelName::Jev, true));
         assert!(receipt_item_visible(VirtualModelName::Haiku, false), "四档主消费项空也返回");
+    }
+}
+
+#[cfg(test)]
+mod plugin_name_tests {
+    use super::*;
+
+    #[test]
+    fn plugin_ids_never_reach_the_receipt_raw() {
+        let reg = crate::provider::registry::ProviderRegistry::default();
+        assert_eq!(display_name_or_plugin_fallback("DeepSeek".into(), &reg), "DeepSeek");
+        assert_eq!(display_name_or_plugin_fallback("plugin:relay".into(), &reg), "relay（已卸载的插件）");
     }
 }

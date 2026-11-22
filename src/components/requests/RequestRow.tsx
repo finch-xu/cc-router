@@ -12,6 +12,7 @@
 import { Fragment, type ReactNode } from "react";
 import { ArrowRight } from "lucide-react";
 import { ProviderLogo } from "@/components/ProviderLogo";
+import { customProviderLabel } from "@/lib/providerLabels";
 import type { SessionInfo } from "@/components/live/useLiveSessions";
 import type { TFunction } from "@/i18n";
 import {
@@ -214,7 +215,7 @@ export function RequestRow(props: RequestRowProps) {
           <span className="m">{r.virtual_model}</span>
           <ArrowRight size={12} />
           <ProviderLogo iconId={sub?.provider_icon} size={16} />
-          <span className="s">{sub?.display_name ?? r.provider_id}</span>
+          <span className="s">{sub?.display_name ?? customProviderLabel(r.provider_id, t) ?? r.provider_id}</span>
         </div>
         <div className="l2">
           {ok ? (

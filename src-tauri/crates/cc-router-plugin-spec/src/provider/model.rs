@@ -385,6 +385,35 @@ pub struct BalanceDiscovery {
     pub parser: BalanceParser,
     #[serde(default = "default_balance_cache_ttl")]
     pub cache_ttl_minutes: u32,
+    /// `parser: json` 的取值规则 (声明式, 厂商插件与内置 yaml 都能用); 其它 parser 不许写。
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub json: Option<JsonBalanceSpec>,
+}
+
+/// `parser: json`: 用 JSON 路径子集从余额接口的响应里取值。路径语法见 [`crate::balance_json`]。
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(deny_unknown_fields)]
+pub struct JsonBalanceSpec {
+    /// 剩余额度 (必填)
+    pub remaining: String,
+    /// 已用额度; 有则 hint 显示「已用 X」
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub used: Option<String>,
+    /// 账户是否可用 (布尔字段)
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub available: Option<String>,
+    /// 数值都除以它 (new-api 系的 quota 单位换算); 必须为正
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub divisor: Option<f64>,
+    /// `USD` / `CNY` / `tokens` / `credits`
+    pub unit: String,
+    /// 剩余低于它显示为 Low; 低于 0 恒为 Critical
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub low_below: Option<f64>,
+}
+
+impl JsonBalanceSpec {
+    pub const UNITS: &'static [&'static str] = &["USD", "CNY", "tokens", "credits"];
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Default)]
@@ -395,15 +424,6 @@ pub enum BalanceHttpMethod {
     Post,
 }
 
-impl BalanceHttpMethod {
-    pub fn as_reqwest(self) -> reqwest::Method {
-        match self {
-            Self::Get => reqwest::Method::GET,
-            Self::Post => reqwest::Method::POST,
-        }
-    }
-}
-
 /// Known parsers. yaml load fails (via serde) if a provider declares an unknown
 /// parser — moves the error from runtime "refresh balance" click to app startup.
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
@@ -411,6 +431,8 @@ impl BalanceHttpMethod {
 pub enum BalanceParser {
     Deepseek,
     Openrouter,
+    /// 声明式: 规则写在 `BalanceDiscovery.json`
+    Json,
 }
 
 fn default_balance_cache_ttl() -> u32 {

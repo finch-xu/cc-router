@@ -140,6 +140,8 @@ pub fn run() {
             commands::subscriptions::create_subscription,
             commands::subscriptions::clone_subscription,
             commands::subscriptions::update_subscription,
+            commands::subscriptions::preview_subscription_rebuild,
+            commands::subscriptions::rebuild_subscription_connection,
             commands::subscriptions::update_subscription_key,
             commands::subscriptions::delete_subscription,
             commands::subscriptions::set_subscription_enabled,
@@ -228,6 +230,8 @@ pub fn run() {
             commands::plugins::install_staged_plugin,
             commands::plugins::discard_staged_plugin,
             commands::plugins::uninstall_plugin,
+            commands::plugins::enable_plugin,
+            commands::plugins::disable_plugin,
             commands::plugins::fetch_community_index,
             commands::tui::tui_launch_info,
             commands::tui::install_tui_command,
@@ -339,7 +343,7 @@ async fn bootstrap(
 
     let state = AppState {
         db: pool,
-        providers: Arc::new(providers),
+        providers: Arc::new(std::sync::RwLock::new(Arc::new(provider::registry::ProviderRegistry::builtin(providers)))),
         subscriptions: subscriptions_arc,
         route_edits: Default::default(),
         virtual_models: Arc::new(RwLock::new(virtual_models)),
@@ -372,6 +376,11 @@ async fn bootstrap(
 
     // 7b. 网页界面事件桥: Tauri emit → broadcast (SSE 订阅方在 proxy/web/events.rs)
     proxy::web::events::install_bridge(&handle, state.ui_events.clone());
+
+    // 7b. 厂商插件进注册表 (要在代理启动前: 插件厂商订阅的请求会读注册表)。失败不 fatal, 只是没有插件厂商。
+    if let Err(e) = plugins::runtime::rebuild_registry(&state).await {
+        tracing::warn!(error = %e, "加载厂商插件失败");
+    }
 
     // 8. 启动代理. 失败不 fatal: 界面显示「未运行」与原因, 用户可点「启动代理服务」重试.
     let proxy_state = state.clone();

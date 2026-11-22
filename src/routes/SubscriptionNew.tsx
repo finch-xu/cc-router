@@ -772,14 +772,14 @@ export function SubscriptionNewPage() {
                     </SelectTrigger>
                     <SelectContent>
                       {(() => {
-                        const firstParty =
-                          providers.data?.filter(
-                            (p) => (p.category ?? "first_party") === "first_party",
-                          ) ?? [];
-                        const secondParty =
-                          providers.data?.filter((p) => p.category === "second_party") ?? [];
-                        const aggregators =
-                          providers.data?.filter((p) => p.category === "aggregator") ?? [];
+                        // 厂商插件单独成组 (不混进内置厂商的分类里), 带「插件」小标
+                        const builtin = providers.data?.filter((p) => !p.plugin) ?? [];
+                        const pluginProviders = providers.data?.filter((p) => p.plugin) ?? [];
+                        const firstParty = builtin.filter(
+                          (p) => (p.category ?? "first_party") === "first_party",
+                        );
+                        const secondParty = builtin.filter((p) => p.category === "second_party");
+                        const aggregators = builtin.filter((p) => p.category === "aggregator");
                         return (
                           <>
                             <SelectGroup>
@@ -817,6 +817,22 @@ export function SubscriptionNewPage() {
                                       <ProviderLogo iconId={p.icon} size={20} />
                                       {p.display_name}
                                     <ProviderCapabilityTags caps={providerCapabilities(p)} />
+                                    </span>
+                                  </SelectItem>
+                                ))}
+                              </SelectGroup>
+                            )}
+                            {pluginProviders.length > 0 && (
+                              <SelectGroup>
+                                <SelectLabel>{t("subscriptionNew.group.plugin")}</SelectLabel>
+                                {pluginProviders.map((p) => (
+                                  <SelectItem key={p.id} value={p.id}>
+                                    <span style={{ display: "flex", alignItems: "center", gap: 8, width: "100%" }}>
+                                      <ProviderLogo iconId={p.icon} size={20} />
+                                      {p.display_name}
+                                      <span className="pill" style={{ marginLeft: "auto" }}>
+                                        {t("subscriptionNew.pluginTag")}
+                                      </span>
                                     </span>
                                   </SelectItem>
                                 ))}
