@@ -257,6 +257,9 @@ pub struct SubscriptionPatch {
     pub url_params: Option<BTreeMap<String, String>>,
     /// 自定义订阅: 改连接信息。内置订阅传该字段会被拒绝。
     pub connection: Option<ConnectionPatch>,
+    /// 包月 / 按量 (只影响计价插件的费用口径)
+    #[serde(default)]
+    pub billing: Option<crate::subscription::model::Billing>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -380,6 +383,7 @@ pub async fn create_subscription(
                 model_slots: input.model_slots,
                 slot_efforts: SlotEfforts::default(),
                 slot_schedules: Default::default(),
+                billing: Default::default(),
                 token_quotas: TokenQuotas::default(),
                 enabled: true,
                 is_auth_failed: false,
@@ -444,6 +448,7 @@ pub async fn create_subscription(
                 model_slots,
                 slot_efforts: SlotEfforts::default(),
                 slot_schedules: Default::default(),
+                billing: Default::default(),
                 token_quotas: TokenQuotas::default(),
                 enabled: true,
                 is_auth_failed: false,
@@ -649,6 +654,9 @@ pub async fn update_subscription(
         }
         if let Some(v) = patch.extra_headers {
             guard.row.extra_headers = v;
+        }
+        if let Some(v) = patch.billing {
+            guard.row.billing = v;
         }
         if let Some((eid, snap)) = resnapshot {
             guard.row.endpoint_id = eid;

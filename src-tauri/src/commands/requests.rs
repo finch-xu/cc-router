@@ -456,6 +456,9 @@ pub struct RequestDetailDto {
     pub request: RequestLogDto,
     /// 同一次入站请求的全部尝试 (含本条), 按时间正序; 老记录没有 trace_id 时只有本条
     pub attempts: Vec<RequestSummary>,
+    /// 按当前价格表估算的费用 (没有启用的计价插件 / 没有匹配的价格 → None)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub cost: Option<crate::plugins::pricing::CostLine>,
 }
 
 /// 详情页: 一条请求的完整字段 + 同 trace 的全部尝试。找不到返回 None
@@ -485,7 +488,26 @@ pub async fn get_request_detail(state: State<'_, AppState>, id: String) -> AppRe
         }
         None => vec![request.summary.clone()],
     };
-    Ok(Some(RequestDetailDto { request, attempts }))
+    let cost = {
+        let pricing = state.pricing();
+        let ctx = crate::plugins::pricing::subscription_contexts(&state).await;
+        let (auth_type, billing) = ctx.get(&request.subscription_id).copied().unzip();
+        let n = |v: Option<i64>| v.unwrap_or(0).max(0) as u64;
+        crate::plugins::pricing::cost_of(
+            &pricing,
+            &request.provider_id,
+            &request.real_model_name,
+            auth_type,
+            billing.unwrap_or_default(),
+            crate::plugins::pricing::Tokens {
+                input_raw: n(request.input_tokens),
+                output: n(request.output_tokens),
+                cache_read: n(request.cache_read_tokens),
+                cache_write: n(request.cache_creation_tokens),
+            },
+        )
+    };
+    Ok(Some(RequestDetailDto { request, attempts, cost }))
 }
 
 /// 同一会话里时间上最接近 `around_ms` 的请求 (前后各最多 `radius` 条), 按时间正序。

@@ -68,11 +68,20 @@ pub struct ProviderCapabilities {
     pub endpoints: usize,
 }
 
+/// 计价插件: 币种、条目数、覆盖的厂商 (含 `*`)。只影响费用显示, 不碰请求。
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct PricingCapabilities {
+    pub currency: String,
+    pub rules: usize,
+    pub providers: Vec<String>,
+}
+
 /// 由插件内容推导出的「这个插件会做什么」(不是作者声明的, 作者没法少报)。
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum Capabilities {
     Provider(ProviderCapabilities),
+    Pricing(PricingCapabilities),
 }
 
 /// 与本机已装版本相比的能力变化 (更新确认框用)。
@@ -95,6 +104,8 @@ impl CapabilityDiff {
                     auth_type_changed: o.auth_type != n.auth_type,
                 }
             }
+            // 计价插件不连网也不改请求, 没有「能力扩大」可言; 类型变了的情况不会出现 (同 id 同类型才比)
+            _ => Self::default(),
         }
     }
 

@@ -47,10 +47,10 @@ pub async fn list_plugins(state: State<'_, AppState>) -> AppResult<Vec<Installed
         .collect())
 }
 
-/// 系统插件装 / 卸 / 启停之后: 重建运行时 (厂商注册表) 并通知各端。
+/// 系统插件装 / 卸 / 启停之后: 重建运行时 (厂商注册表 + 计价注册表) 并通知各端。
 async fn after_change(state: &AppState) {
-    if let Err(e) = runtime::rebuild_registry(state).await {
-        tracing::warn!(error = %e, "插件变更后重建厂商注册表失败");
+    if let Err(e) = runtime::rebuild_runtime(state).await {
+        tracing::warn!(error = %e, "插件变更后重建系统插件运行时失败");
     }
     let _ = state.app_handle.emit(CHANGED_EVENT, ());
 }

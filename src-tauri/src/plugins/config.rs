@@ -21,7 +21,7 @@ pub struct PluginConfig {
 /// 装上后、用户还没切换过时是否生效。厂商 / 计价是被动的 (只是多一个选项 / 只影响显示), 默认生效;
 /// 规则 / 通知会改请求或往外发, 默认停用 (P2 / P3 加进来时在这里登记)。
 pub fn default_enabled(plugin_type: &str) -> bool {
-    matches!(plugin_type, "provider")
+    matches!(plugin_type, "provider" | "pricing")
 }
 
 pub async fn load_all(pool: &SqlitePool) -> AppResult<HashMap<String, PluginConfig>> {

@@ -24,6 +24,8 @@ pub struct AppState {
     pub db: sqlx::SqlitePool,
     /// 厂商注册表 (内置 + 厂商插件)。读用 [`AppState::providers`], 装 / 卸 / 启停插件时整体替换。
     pub providers: Arc<std::sync::RwLock<Arc<ProviderRegistry>>>,
+    /// 计价注册表 (已启用的计价插件)。读用 [`AppState::pricing`], 与厂商注册表同时重建。
+    pub pricing: Arc<std::sync::RwLock<Arc<crate::plugins::pricing::PricingRegistry>>>,
     pub subscriptions: Arc<RwLock<HashMap<Uuid, Arc<RwLock<SubscriptionRuntime>>>>>,
     /// Serializes route writes, subscription removal, and backup imports across SQLite and memory.
     pub route_edits: Arc<tokio::sync::Mutex<()>>,
@@ -67,6 +69,15 @@ impl AppState {
     /// 当前厂商注册表的快照。
     pub fn providers(&self) -> Arc<ProviderRegistry> {
         self.providers.read().unwrap_or_else(|e| e.into_inner()).clone()
+    }
+
+    /// 当前计价注册表的快照 (空 = 没有启用的计价插件, 界面不显示任何费用)。
+    pub fn pricing(&self) -> Arc<crate::plugins::pricing::PricingRegistry> {
+        self.pricing.read().unwrap_or_else(|e| e.into_inner()).clone()
+    }
+
+    pub fn set_pricing(&self, registry: crate::plugins::pricing::PricingRegistry) {
+        *self.pricing.write().unwrap_or_else(|e| e.into_inner()) = Arc::new(registry);
     }
 
     /// 整体替换厂商注册表 (装 / 卸 / 启停厂商插件后)。

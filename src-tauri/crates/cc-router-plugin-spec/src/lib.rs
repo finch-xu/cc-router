@@ -7,6 +7,7 @@
 pub mod balance_json;
 pub mod check;
 pub mod plugin;
+pub mod pricing_plugin;
 pub mod provider;
 pub mod provider_plugin;
 

@@ -177,6 +177,7 @@ web_commands! {
     get_live_requests(since_ms: Option<i64>) => crate::observability::live_feed::get_live_requests(app, st, args.since_ms).await,
     // statistics / receipts / events
     get_overall_stats(range: StatsRange) => commands::statistics::get_overall_stats(st, args.range).await,
+    get_cost_summary(range: StatsRange) => commands::statistics::get_cost_summary(st, args.range).await,
     get_daily_series(range: StatsRange) => commands::statistics::get_daily_series(st, args.range).await,
     get_breakdown(range: StatsRange, by: BreakdownBy) => commands::statistics::get_breakdown(st, args.range, args.by).await,
     get_token_heatmap(days: u32) => commands::statistics::get_token_heatmap(st, args.days).await,

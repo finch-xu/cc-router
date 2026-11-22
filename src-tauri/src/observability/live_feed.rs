@@ -71,7 +71,7 @@ pub struct RequestSummary {
 
 /// 未命中缓存的输入。Anthropic 透传的 input 本来就不含缓存; 其余协议的 input 是含缓存的总数
 /// (同 session_monitor::proxy_input)。订阅已删时 auth 未知, 按透传处理。
-fn uncached_input(auth: Option<AuthType>, raw: u64, read: u64, write: u64) -> u64 {
+pub(crate) fn uncached_input(auth: Option<AuthType>, raw: u64, read: u64, write: u64) -> u64 {
     match auth {
         Some(AuthType::ApiKey) | None => raw,
         Some(_) => raw.saturating_sub(read + write),

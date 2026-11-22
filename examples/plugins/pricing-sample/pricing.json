@@ -1,0 +1,9 @@
+{
+  "pricingApi": 1,
+  "currency": "USD",
+  "per": 1000000,
+  "prices": [
+    { "provider": "plugin:provider-example-relay", "model": "claude-sonnet-4-5", "input": 1.5, "output": 7.5, "cache_read": 0.15, "cache_write": 1.875 },
+    { "provider": "*", "model": "example-model-*", "input": 0.5, "output": 2, "cache_read": 0.05 }
+  ]
+}
