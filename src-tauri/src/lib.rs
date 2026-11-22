@@ -127,6 +127,8 @@ pub fn run() {
             if let Err(e) = tray::setup(app, tray::TrayLocale::from_pref(&lang_pref)) {
                 error!(?e, "tray setup failed");
             }
+            // 系统桌面通知点击回调 (唤回主窗口并跳到事件对应的页面)
+            notify::setup_desktop_click_handler(app.handle());
 
             Ok(())
         })
@@ -239,6 +241,8 @@ pub fn run() {
             commands::plugins::test_notifier_plugin,
             commands::plugins::list_notifier_deliveries,
             commands::plugins::test_desktop_notification,
+            commands::plugins::reorder_plugins,
+            commands::plugins::dry_run_rules_plugin,
             commands::plugins::fetch_community_index,
             commands::tui::tui_launch_info,
             commands::tui::install_tui_command,

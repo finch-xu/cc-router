@@ -120,6 +120,23 @@ impl NotifyEvent {
         }
     }
 
+    /// 点击系统桌面通知时要跳转的前端页面 (复用托盘的 `tray::navigate`)。
+    pub fn route_path(&self) -> &'static str {
+        match self {
+            Self::SubscriptionAuthFailed { .. }
+            | Self::SubscriptionCooldown { .. }
+            | Self::SubscriptionRecovered { .. }
+            | Self::SubscriptionQuotaReached { .. }
+            | Self::SubscriptionQuotaWarning { .. }
+            | Self::SubscriptionBalanceLow { .. } => "/subscriptions",
+            Self::RequestsAllFailed { .. } => "/request-logs",
+            Self::ProxyStopped { .. } => "/settings",
+            Self::UpdateAvailable { .. } => "/updates",
+            Self::UsageDailySummary { .. } => "/statistics",
+            Self::Test => "/settings",
+        }
+    }
+
     /// 10 分钟去重键 (同类事件按订阅 / 虚拟模型 / 版本分桶)。
     pub fn dedupe_key(&self) -> String {
         match self {
@@ -269,6 +286,8 @@ pub struct Limiter {
     last_sent: HashMap<(String, String, String), Instant>,
     /// `plugin_id -> 最近 1 小时内的发送时刻`
     hourly: HashMap<String, VecDeque<Instant>>,
+    /// `(target, virtual_model) -> 去重窗口内被合并的 `requests.all_failed` 失败次数`
+    pending_all_failed: HashMap<(String, String), u64>,
 }
 
 impl Limiter {
@@ -292,6 +311,30 @@ impl Limiter {
         }
         self.last_sent.insert(key, now);
         true
+    }
+
+    /// 带 `requests.all_failed` 10 分钟计数合并的放行检查:
+    /// - 对 `requests.all_failed`: 去重期内累加失败次数并返回 `None`; 下次放行时连同本次一并返回累计次数。
+    /// - 其他事件: 放行返回 `Some(1)`, 拦截返回 `None`。
+    pub fn allow_event(&mut self, target: &str, event: &NotifyEvent, enforce_hourly: bool, now: Instant) -> Option<u64> {
+        if matches!(event, NotifyEvent::Test) {
+            return Some(1);
+        }
+        let allowed = self.allow(target, event.kind(), &event.dedupe_key(), enforce_hourly, now);
+        match event {
+            NotifyEvent::RequestsAllFailed { virtual_model, count } => {
+                let k = (target.to_string(), virtual_model.clone());
+                if allowed {
+                    let pending = self.pending_all_failed.remove(&k).unwrap_or(0);
+                    Some(pending.saturating_add(*count))
+                } else {
+                    let entry = self.pending_all_failed.entry(k).or_insert(0);
+                    *entry = entry.saturating_add(*count);
+                    None
+                }
+            }
+            _ => allowed.then_some(1),
+        }
     }
 }
 
@@ -352,14 +395,11 @@ impl NotifyHub {
             .unwrap_or_default()
     }
 
-    fn allow(&self, target: &str, event: &NotifyEvent, enforce_hourly: bool) -> bool {
-        if matches!(event, NotifyEvent::Test) {
-            return true;
-        }
+    fn allow_event(&self, target: &str, event: &NotifyEvent, enforce_hourly: bool) -> Option<u64> {
         self.limiter
             .lock()
             .unwrap_or_else(|e| e.into_inner())
-            .allow(target, event.kind(), &event.dedupe_key(), enforce_hourly, Instant::now())
+            .allow_event(target, event, enforce_hourly, Instant::now())
     }
 }
 
@@ -442,13 +482,28 @@ pub async fn send_to_plugin(
 }
 
 /// 发送一条内置系统桌面通知 (使用 `tauri-plugin-notification`)。
-pub fn send_desktop(app: &AppHandle, title: &str, body: &str) -> Result<(), String> {
-    app.notification()
-        .builder()
-        .title(title)
-        .body(body)
-        .show()
-        .map_err(|e| e.to_string())
+/// 传入 `route` 时, 用户点击通知会唤回主窗口并跳到对应页面 (见 [`setup_desktop_click_handler`])。
+pub fn send_desktop(app: &AppHandle, title: &str, body: &str, route: Option<&str>) -> Result<(), String> {
+    let mut b = app.notification().builder().title(title).body(body).auto_cancel();
+    if let Some(r) = route {
+        b = b.extra("route", r);
+    }
+    b.show().map_err(|e| e.to_string())
+}
+
+/// 注册桌面通知点击回调: 点通知唤回主窗口并跳到 `extra.route` (复用托盘的 `tray::navigate`)。
+pub fn setup_desktop_click_handler(app: &AppHandle) {
+    let handle = app.clone();
+    if let Err(e) = app.notification().on_action(move |performed| {
+        let route = performed
+            .notification()
+            .and_then(|n| n.extra().get("route"))
+            .and_then(Value::as_str)
+            .unwrap_or("/");
+        crate::tray::navigate(&handle, route);
+    }) {
+        warn!(error = %e, "注册系统通知点击回调失败");
+    }
 }
 
 fn parse_hhmm(s: &str) -> Option<(u32, u32)> {
@@ -589,6 +644,16 @@ async fn build_daily_summary_event(state: &AppState) -> crate::error::AppResult<
     })
 }
 
+fn with_coalesced_count(event: &NotifyEvent, count: u64) -> NotifyEvent {
+    match event {
+        NotifyEvent::RequestsAllFailed { virtual_model, .. } => NotifyEvent::RequestsAllFailed {
+            virtual_model: virtual_model.clone(),
+            count,
+        },
+        other => other.clone(),
+    }
+}
+
 async fn dispatch_event(state: &AppState, event: NotifyEvent) {
     let (locale, desktop_on, desktop_events) = {
         let s = state.settings.read().await;
@@ -601,13 +666,13 @@ async fn dispatch_event(state: &AppState, event: NotifyEvent) {
     let kind = event.kind();
 
     // 1. 内置系统桌面通知 (设计 §7.5)
-    if desktop_on
-        && (matches!(event, NotifyEvent::Test) || desktop_events.iter().any(|e| e == kind))
-        && state.notify.allow("desktop", &event, false)
-    {
-        let (title, body) = event.render_default(locale);
-        if let Err(e) = send_desktop(&state.app_handle, &title, &body) {
-            warn!(event = kind, error = %e, "发送系统桌面通知失败");
+    if desktop_on && (matches!(event, NotifyEvent::Test) || desktop_events.iter().any(|e| e == kind)) {
+        if let Some(cnt) = state.notify.allow_event("desktop", &event, false) {
+            let eff = with_coalesced_count(&event, cnt);
+            let (title, body) = eff.render_default(locale);
+            if let Err(e) = send_desktop(&state.app_handle, &title, &body, Some(eff.route_path())) {
+                warn!(event = kind, error = %e, "发送系统桌面通知失败");
+            }
         }
     }
 
@@ -616,18 +681,18 @@ async fn dispatch_event(state: &AppState, event: NotifyEvent) {
     if plugins.is_empty() {
         return;
     }
-    let ctx = event.template_context(locale);
     for p in plugins.plugins() {
         if !matches!(event, NotifyEvent::Test) && !p.plugin.events.iter().any(|e| e == kind) {
             continue;
         }
         let target = format!("plugin:{}", p.plugin_id);
-        if !state.notify.allow(&target, &event, true) {
+        let Some(cnt) = state.notify.allow_event(&target, &event, true) else {
             continue;
-        }
+        };
+        let eff = with_coalesced_count(&event, cnt);
+        let ctx_clone = eff.template_context(locale);
         let client = state.http_client.clone();
         let loaded = p.clone();
-        let ctx_clone = ctx.clone();
         let notify = state.notify.clone();
         let kind_str = kind.to_string();
         tokio::spawn(async move {
@@ -667,6 +732,23 @@ mod tests {
         assert!(!lim2.allow("plugin:b", "test", "overflow", true, t0 + Duration::from_secs(60)));
         // 满 1 小时窗口滑动后恢复
         assert!(lim2.allow("plugin:b", "test", "after", true, t0 + HOUR));
+    }
+
+    #[test]
+    fn limiter_coalesces_all_failed_counts_across_dedupe_window() {
+        let mut lim = Limiter::default();
+        let t0 = Instant::now();
+        let ev = NotifyEvent::RequestsAllFailed { virtual_model: "model-opus".into(), count: 1 };
+        // 第一次立即放行, count = 1
+        assert_eq!(lim.allow_event("desktop", &ev, false, t0), Some(1));
+        // 10 分钟内再失败 3 次均被拦截但累计计数
+        for s in [10, 60, 120] {
+            assert_eq!(lim.allow_event("desktop", &ev, false, t0 + Duration::from_secs(s)), None);
+        }
+        // 满 10 分钟后再次失败 → 带上窗口内累计的 3 次 + 本次 1 次 = 4
+        assert_eq!(lim.allow_event("desktop", &ev, false, t0 + DEDUPE_WINDOW), Some(4));
+        // 再过 10 分钟单次失败 → 已清零, 返回 1
+        assert_eq!(lim.allow_event("desktop", &ev, false, t0 + DEDUPE_WINDOW * 2), Some(1));
     }
 
     #[tokio::test]

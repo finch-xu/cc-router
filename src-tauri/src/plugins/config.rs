@@ -88,6 +88,25 @@ pub async fn set_params(
     Ok(())
 }
 
+pub async fn set_priorities(pool: &SqlitePool, items: &[(String, String, i64)]) -> AppResult<()> {
+    let mut tx = pool.begin().await?;
+    let now = Utc::now().timestamp_millis();
+    for (plugin_id, plugin_type, priority) in items {
+        sqlx::query(
+            "INSERT INTO plugin_configs (plugin_id, enabled, priority, updated_at) VALUES (?, ?, ?, ?)
+             ON CONFLICT(plugin_id) DO UPDATE SET priority = excluded.priority, updated_at = excluded.updated_at",
+        )
+        .bind(plugin_id)
+        .bind(default_enabled(plugin_type) as i64)
+        .bind(*priority)
+        .bind(now)
+        .execute(&mut *tx)
+        .await?;
+    }
+    tx.commit().await?;
+    Ok(())
+}
+
 pub async fn delete(pool: &SqlitePool, plugin_id: &str) -> AppResult<()> {
     sqlx::query("DELETE FROM plugin_configs WHERE plugin_id = ?").bind(plugin_id).execute(pool).await?;
     Ok(())
@@ -134,5 +153,22 @@ mod tests {
         delete(&pool, "relay").await.unwrap();
         delete(&pool, "r").await.unwrap();
         assert!(load_all(&pool).await.unwrap().is_empty());
+
+        // 批量设优先级保留已有 enabled / params, 首次写入沿用类型默认值
+        set_enabled(&pool, "r1", true).await.unwrap();
+        set_priorities(
+            &pool,
+            &[
+                ("r1".into(), "rules".into(), 20),
+                ("r2".into(), "rules".into(), 10),
+            ],
+        )
+        .await
+        .unwrap();
+        let c = load_all(&pool).await.unwrap();
+        assert_eq!(c["r1"].priority, 20);
+        assert!(c["r1"].enabled, "保留已启用状态");
+        assert_eq!(c["r2"].priority, 10);
+        assert!(!c["r2"].enabled, "首次写入沿用 rules 默认停用");
     }
 }

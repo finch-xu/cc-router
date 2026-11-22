@@ -6,7 +6,7 @@ import { useT } from "@/i18n";
 import { errorText } from "@/lib/errorText";
 import { localized, type LocalizedText } from "@/plugins/manifest";
 import { runtime } from "@/runtime";
-import type { InstalledPlugin, NotifierDeliveryRecord, RuleParamDecl } from "@/types";
+import type { InstalledPlugin, NotifierDeliveryRecord, RuleParamDecl, RulesDryRunResult } from "@/types";
 
 const VIRTUAL_MODEL_OPTIONS = [
   { value: "fable", label: "model-fable" },
@@ -96,6 +96,7 @@ export function ParamsDialog({
   const { t, locale } = useT();
   const isDesktop = runtime.kind === "desktop";
   const isNotifier = plugin?.plugin_type === "notifier";
+  const isRules = plugin?.plugin_type === "rules";
   const secretsSet = new Set(plugin?.secret_params_set ?? []);
   const [draft, setDraft] = useState<Record<string, string | boolean>>({});
   const [clearedSecrets, setClearedSecrets] = useState<Record<string, boolean>>({});
@@ -103,6 +104,8 @@ export function ParamsDialog({
   const [testing, setTesting] = useState(false);
   const [testResult, setTestResult] = useState<NotifierDeliveryRecord | null>(null);
   const [deliveries, setDeliveries] = useState<NotifierDeliveryRecord[]>([]);
+  const [dryRunning, setDryRunning] = useState(false);
+  const [dryRunResult, setDryRunResult] = useState<RulesDryRunResult | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
@@ -112,6 +115,8 @@ export function ParamsDialog({
     setBusy(false);
     setTesting(false);
     setTestResult(null);
+    setDryRunning(false);
+    setDryRunResult(null);
     if (plugin && plugin.plugin_type === "notifier") {
       api.listNotifierDeliveries(plugin.id).then(setDeliveries).catch(() => setDeliveries([]));
     } else {
@@ -163,6 +168,25 @@ export function ParamsDialog({
       setError(errorText(e));
     } finally {
       setTesting(false);
+    }
+  }
+
+  async function runDryRun() {
+    if (!plugin || !isRules) return;
+    const built = buildPayload(decls, draft, clearedSecrets);
+    if (!built.ok) {
+      setError(t("plugins.params.invalidNumber", { field: built.field }));
+      return;
+    }
+    setDryRunning(true);
+    setError(null);
+    try {
+      const res = await api.dryRunRulesPlugin(plugin.id, built.data, 50);
+      setDryRunResult(res);
+    } catch (e) {
+      setError(errorText(e));
+    } finally {
+      setDryRunning(false);
     }
   }
 
@@ -311,24 +335,76 @@ export function ParamsDialog({
               </div>
             )}
 
+            {isRules && dryRunResult && (
+              <div className="pg-deliveries">
+                <div className="pg-deliveries-title">
+                  {dryRunResult.total_checked === 0
+                    ? t("plugins.dryRun.empty")
+                    : t("plugins.dryRun.summary", {
+                        total: dryRunResult.total_checked,
+                        matched: dryRunResult.matched_count,
+                        unknown: dryRunResult.unknown_count,
+                      })}
+                </div>
+                {dryRunResult.rule_counts.length > 0 && dryRunResult.total_checked > 0 && (
+                  <div className="pg-tags" style={{ marginBottom: 8 }}>
+                    {dryRunResult.rule_counts.map((rc) => (
+                      <span key={rc.rule_id} className="pg-tag">
+                        <code>{rc.rule_id}</code> · {t("plugins.dryRun.matched")} {rc.matched}
+                        {rc.unknown > 0 ? ` · ${t("plugins.dryRun.unknown")} ${rc.unknown}` : ""}
+                      </span>
+                    ))}
+                  </div>
+                )}
+                {dryRunResult.samples.length > 0 && (
+                  <ul className="pg-deliveries-list">
+                    {dryRunResult.samples.slice(0, 6).map((s) => (
+                      <li key={s.request_id}>
+                        <span className="pg-deliv-time mono">{new Date(s.timestamp_ms).toLocaleTimeString()}</span>
+                        <span className="pg-deliv-ev">
+                          <code>{s.virtual_model}</code> · {s.purpose}
+                          {s.redirect_to ? ` → ${t("plugins.dryRun.redirect", { target: `model-${s.redirect_to}` })}` : ""}
+                          {s.rejected ? ` · ${t("plugins.dryRun.rejected")}` : ""}
+                          {s.unknown_fields.length > 0
+                            ? ` (${t("plugins.dryRun.unknownFields", { fields: s.unknown_fields.join(", ") })})`
+                            : ""}
+                        </span>
+                        <span className={s.status === "matched" ? "pg-badge ok" : "pg-badge warn"}>
+                          {s.status === "matched" ? s.matched_rules.join(", ") : t("plugins.dryRun.unknown")}
+                        </span>
+                      </li>
+                    ))}
+                  </ul>
+                )}
+              </div>
+            )}
+
             {error && <div className="pg-alert err">{error}</div>}
 
             <DialogFooter>
+              {isRules && (
+                <button className="btn" type="button" onClick={() => void runDryRun()} disabled={busy || testing || dryRunning}>
+                  {dryRunning && <Spinner />}
+                  {t("plugins.dryRun.btn")}
+                </button>
+              )}
               {isNotifier && isDesktop && (
-                <button className="btn" type="button" onClick={() => void saveAndTest()} disabled={busy || testing}>
+                <button className="btn" type="button" onClick={() => void saveAndTest()} disabled={busy || testing || dryRunning}>
                   {testing && <Spinner />}
                   {t("plugins.notifier.sendTest")}
                 </button>
               )}
-              <button className="btn" type="button" onClick={onClose} disabled={busy || testing}>
+              <button className="btn" type="button" onClick={onClose} disabled={busy || testing || dryRunning}>
                 {t("common.cancel")}
               </button>
-              <button className={promptEnable && !plugin.enabled && isDesktop ? "btn" : "btn primary"} type="button" onClick={() => void submit(false)} disabled={busy || testing}>
-                {busy && <Spinner />}
-                {t("common.save")}
-              </button>
+              {decls.length > 0 && (
+                <button className={promptEnable && !plugin.enabled && isDesktop ? "btn" : "btn primary"} type="button" onClick={() => void submit(false)} disabled={busy || testing || dryRunning}>
+                  {busy && <Spinner />}
+                  {t("common.save")}
+                </button>
+              )}
               {!plugin.enabled && isDesktop && (
-                <button className="btn primary" type="button" onClick={() => void submit(true)} disabled={busy || testing}>
+                <button className="btn primary" type="button" onClick={() => void submit(true)} disabled={busy || testing || dryRunning}>
                   {busy && <Spinner />}
                   {t("plugins.params.saveAndEnable")}
                 </button>

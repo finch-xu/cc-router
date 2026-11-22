@@ -12,9 +12,12 @@ use cc_router_plugin_spec::notifier_plugin::{
     check_notifier_param_value, resolve_notifier_params, NotifierParamDecl, NotifierParamKind, NotifierPlugin,
 };
 use cc_router_plugin_spec::plugin::{check_system, is_system_type, SystemPlugin};
+use cc_router_plugin_spec::rules_engine::{dry_run_plugin, Facts, LoadedRules, PartialBodyFacts};
 use cc_router_plugin_spec::rules_plugin::{check_param_value, resolve_params, ParamDecl, RulesPlugin};
+use chrono::{Datelike, Local, TimeZone, Timelike, Utc};
 use serde::Serialize;
 use serde_json::{Map, Value};
+use sqlx::Row;
 use tauri::{Emitter, State};
 
 use crate::db::paths;
@@ -42,6 +45,7 @@ pub struct InstalledPluginView {
     #[serde(flatten)]
     pub record: InstalledPlugin,
     pub enabled: bool,
+    pub priority: i64,
     pub params: Map<String, Value>,
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub param_decls: Vec<Value>,
@@ -230,10 +234,11 @@ pub async fn list_plugins(state: State<'_, AppState>) -> AppResult<Vec<Installed
         Ok((list, decls))
     })
     .await?;
-    Ok(list
+    let mut views: Vec<InstalledPluginView> = list
         .into_iter()
         .map(|record| {
             let enabled = !is_system_type(&record.plugin_type) || config::is_enabled(&configs, &record.id, &record.plugin_type);
+            let priority = configs.get(&record.id).map(|c| c.priority).unwrap_or(0);
             let raw_params = configs.get(&record.id).map(|c| config::parse_params(&c.params)).unwrap_or_default();
             match decls_by_id.get(&record.id) {
                 Some(LoadedDecls::Rules(decls)) => {
@@ -245,6 +250,7 @@ pub async fn list_plugins(state: State<'_, AppState>) -> AppResult<Vec<Installed
                     InstalledPluginView {
                         record,
                         enabled,
+                        priority,
                         params: raw_params,
                         param_decls,
                         missing_params,
@@ -261,6 +267,7 @@ pub async fn list_plugins(state: State<'_, AppState>) -> AppResult<Vec<Installed
                     InstalledPluginView {
                         record,
                         enabled,
+                        priority,
                         params,
                         param_decls,
                         missing_params,
@@ -273,6 +280,7 @@ pub async fn list_plugins(state: State<'_, AppState>) -> AppResult<Vec<Installed
                     InstalledPluginView {
                         record,
                         enabled,
+                        priority,
                         params,
                         param_decls: Vec::new(),
                         missing_params: Vec::new(),
@@ -281,7 +289,10 @@ pub async fn list_plugins(state: State<'_, AppState>) -> AppResult<Vec<Installed
                 }
             }
         })
-        .collect())
+        .collect();
+    // 优先级高的排在前面 (与 PricingRegistry / RulesRegistry 的匹配顺序一致)
+    views.sort_by(|a, b| b.priority.cmp(&a.priority).then_with(|| a.record.id.cmp(&b.record.id)));
+    Ok(views)
 }
 
 /// 系统插件装 / 卸 / 启停 / 改参数之后: 重建运行时 (厂商 + 计价 + 规则 + 通知注册表) 并通知各端。
@@ -408,7 +419,236 @@ pub async fn list_notifier_deliveries(state: State<'_, AppState>, id: String) ->
 pub async fn test_desktop_notification(state: State<'_, AppState>) -> AppResult<()> {
     let locale = TrayLocale::from_pref(&state.settings.read().await.preferred_language);
     let (title, body) = NotifyEvent::Test.render_default(locale);
-    crate::notify::send_desktop(&state.app_handle, &title, &body).map_err(AppError::Internal)
+    crate::notify::send_desktop(&state.app_handle, &title, &body, Some("/settings")).map_err(AppError::Internal)
+}
+
+/// 调整同类系统插件 (`pricing` / `rules`) 的优先级顺序: `ordered_ids[0]` 优先级最高。
+/// 会改变计价覆盖或规则执行顺序, 仅桌面端开放 (网页端是拒绝桩)。
+#[tauri::command]
+pub async fn reorder_plugins(
+    state: State<'_, AppState>,
+    plugin_type: String,
+    ordered_ids: Vec<String>,
+) -> AppResult<()> {
+    if !matches!(plugin_type.as_str(), "pricing" | "rules") {
+        return Err(AppError::BadRequest("只有计价与规则插件支持调整优先级".into()));
+    }
+    let dir = paths::app_data_dir(&state.app_handle)?;
+    let installed = blocking(move || store::list(&dir)).await?;
+    let valid_ids: std::collections::HashSet<String> = installed
+        .into_iter()
+        .filter(|p| p.plugin_type == plugin_type)
+        .map(|p| p.id)
+        .collect();
+    let mut seen = std::collections::HashSet::new();
+    for id in &ordered_ids {
+        if !valid_ids.contains(id) {
+            return Err(AppError::BadRequest(format!("插件 {id} 不存在或类型不匹配")));
+        }
+        if !seen.insert(id.clone()) {
+            return Err(AppError::BadRequest(format!("重复的插件 id: {id}")));
+        }
+    }
+    let total = ordered_ids.len() as i64;
+    let items: Vec<(String, String, i64)> = ordered_ids
+        .into_iter()
+        .enumerate()
+        .map(|(idx, id)| (id, plugin_type.clone(), (total - idx as i64) * 10))
+        .collect();
+    config::set_priorities(&state.db, &items).await?;
+    after_change(&state).await;
+    Ok(())
+}
+
+#[derive(Debug, Serialize)]
+pub struct RuleDryRunCount {
+    pub rule_id: String,
+    pub matched: usize,
+    pub unknown: usize,
+}
+
+#[derive(Debug, Serialize)]
+pub struct DryRunSample {
+    pub request_id: String,
+    pub timestamp_ms: i64,
+    pub virtual_model: String,
+    pub purpose: String,
+    pub client_tool: String,
+    /// `"matched"` 或 `"unknown"` (至少一条规则命中或因缺少 body 条件无法判断)
+    pub status: &'static str,
+    pub matched_rules: Vec<String>,
+    pub unknown_rules: Vec<String>,
+    pub unknown_fields: Vec<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub redirect_to: Option<String>,
+    pub rejected: bool,
+}
+
+#[derive(Debug, Serialize)]
+pub struct RulesDryRunResult {
+    pub total_checked: usize,
+    pub matched_count: usize,
+    pub unknown_count: usize,
+    pub rule_counts: Vec<RuleDryRunCount>,
+    pub samples: Vec<DryRunSample>,
+}
+
+/// 规则插件「试运行」(设计 §6.7): 抽最近 N 条请求日志, 按日志已有列模拟匹配并标注依赖 body 的「无法判断」条件。
+/// 纯只读, 网页界面与未启用插件均可调用; `params` 传入时优先用表单草稿, 省略则用已保存参数。
+#[tauri::command]
+pub async fn dry_run_rules_plugin(
+    state: State<'_, AppState>,
+    id: String,
+    params: Option<Map<String, Value>>,
+    limit: Option<u32>,
+) -> AppResult<RulesDryRunResult> {
+    let rec = installed_system_plugin(&state, &id).await?;
+    if rec.plugin_type != "rules" {
+        return Err(AppError::BadRequest("只有规则插件支持试运行".into()));
+    }
+    let dir = paths::app_data_dir(&state.app_handle)?;
+    let id_owned = id.clone();
+    let plugin = blocking(move || read_rules_plugin(&dir, &id_owned)).await?;
+    let user_params = match params {
+        Some(p) => validate_params_update(&plugin.params, &p, false)?,
+        None => {
+            let configs = config::load_all(&state.db).await?;
+            configs.get(&id).map(|c| config::parse_params(&c.params)).unwrap_or_default()
+        }
+    };
+    let resolved = validate_rules_enable(&plugin.params, &user_params)?;
+    let loaded = LoadedRules {
+        plugin_id: id,
+        version: rec.version,
+        plugin,
+        params: resolved,
+    };
+
+    let lim = limit.unwrap_or(50).clamp(1, 200) as i64;
+    let rows = sqlx::query(
+        "SELECT id, timestamp, virtual_model_name, real_model_name, is_streaming,
+                client_tool, entry_kind, tools_offered_count, purpose_kind, purpose_guessed
+         FROM requests
+         ORDER BY timestamp DESC
+         LIMIT ?",
+    )
+    .bind(lim)
+    .fetch_all(&state.db)
+    .await?;
+
+    let mut rule_stats: HashMap<String, (usize, usize)> = loaded
+        .plugin
+        .rules
+        .iter()
+        .map(|r| (r.id.clone(), (0, 0)))
+        .collect();
+    let mut matched_count = 0usize;
+    let mut unknown_count = 0usize;
+    let mut samples = Vec::new();
+
+    for r in &rows {
+        let req_id: String = r.try_get("id").unwrap_or_default();
+        let ts_ms: i64 = r.try_get("timestamp").unwrap_or(0);
+        let vm_raw: String = r.try_get("virtual_model_name").unwrap_or_default();
+        let real_model: String = r.try_get("real_model_name").unwrap_or_default();
+        let is_streaming = r.try_get::<i64, _>("is_streaming").unwrap_or(0) != 0;
+        let client_tool = r
+            .try_get::<Option<String>, _>("client_tool")
+            .unwrap_or(None)
+            .unwrap_or_else(|| "unknown".into());
+        let entry_kind = r
+            .try_get::<Option<String>, _>("entry_kind")
+            .unwrap_or(None)
+            .unwrap_or_else(|| "messages".into());
+        let tools_offered: Option<i64> = r.try_get("tools_offered_count").unwrap_or(None);
+        let purpose = r
+            .try_get::<Option<String>, _>("purpose_kind")
+            .unwrap_or(None)
+            .unwrap_or_else(|| "unknown".into());
+        let purpose_guessed = r.try_get::<Option<i64>, _>("purpose_guessed").unwrap_or(None).unwrap_or(0) != 0;
+
+        let vm_short = vm_raw.strip_prefix("model-").unwrap_or(&vm_raw);
+        let model_req = if vm_short == "fallback" { real_model.as_str() } else { vm_raw.as_str() };
+        let local_dt = Utc
+            .timestamp_millis_opt(ts_ms)
+            .single()
+            .unwrap_or_else(Utc::now)
+            .with_timezone(&Local);
+        let facts = Facts {
+            purpose: &purpose,
+            purpose_guessed,
+            virtual_model: vm_short,
+            client_tool: &client_tool,
+            entry: &entry_kind,
+            model: model_req,
+            weekday: local_dt.weekday().number_from_monday() as u8,
+            minute: (local_dt.hour() * 60 + local_dt.minute()) as u16,
+        };
+        let partial = PartialBodyFacts {
+            stream: Some(is_streaming),
+            has_tools: tools_offered.map(|c| c > 0),
+            has_images: None,
+            thinking: None,
+            approx_input_tokens: None,
+        };
+
+        let eval = dry_run_plugin(&loaded, &facts, &partial);
+        for rid in &eval.matched_rules {
+            if let Some(s) = rule_stats.get_mut(rid) {
+                s.0 += 1;
+            }
+        }
+        for rid in &eval.unknown_rules {
+            if let Some(s) = rule_stats.get_mut(rid) {
+                s.1 += 1;
+            }
+        }
+
+        let status = if !eval.matched_rules.is_empty() {
+            matched_count += 1;
+            Some("matched")
+        } else if !eval.unknown_rules.is_empty() {
+            unknown_count += 1;
+            Some("unknown")
+        } else {
+            None
+        };
+        if let Some(status) = status {
+            if samples.len() < 15 {
+                samples.push(DryRunSample {
+                    request_id: req_id,
+                    timestamp_ms: ts_ms,
+                    virtual_model: vm_raw,
+                    purpose,
+                    client_tool,
+                    status,
+                    matched_rules: eval.matched_rules,
+                    unknown_rules: eval.unknown_rules,
+                    unknown_fields: eval.unknown_fields,
+                    redirect_to: eval.redirect_to,
+                    rejected: eval.rejected,
+                });
+            }
+        }
+    }
+
+    let rule_counts = loaded
+        .plugin
+        .rules
+        .iter()
+        .map(|r| {
+            let (m, u) = rule_stats.get(&r.id).copied().unwrap_or((0, 0));
+            RuleDryRunCount { rule_id: r.id.clone(), matched: m, unknown: u }
+        })
+        .collect();
+
+    Ok(RulesDryRunResult {
+        total_checked: rows.len(),
+        matched_count,
+        unknown_count,
+        rule_counts,
+        samples,
+    })
 }
 
 #[tauri::command]
