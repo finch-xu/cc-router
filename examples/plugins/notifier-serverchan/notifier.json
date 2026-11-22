@@ -1,0 +1,25 @@
+{
+  "notifierApi": 1,
+  "params": [
+    { "id": "sendkey", "type": "secret",
+      "label": { "zh": "SendKey", "zh-Hant": "SendKey", "en": "SendKey", "ja": "SendKey" } }
+  ],
+  "events": [
+    "subscription.auth_failed",
+    "subscription.quota_reached",
+    "requests.all_failed",
+    "proxy.stopped",
+    "usage.daily_summary"
+  ],
+  "request": {
+    "method": "POST",
+    "url": "https://sctapi.ftqq.com/{{params.sendkey}}.send",
+    "body": {
+      "type": "form",
+      "fields": {
+        "title": "{{title}}",
+        "desp": "{{body}}"
+      }
+    }
+  }
+}

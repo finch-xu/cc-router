@@ -83,6 +83,7 @@ pub enum Capabilities {
     Provider(ProviderCapabilities),
     Pricing(PricingCapabilities),
     Rules(crate::rules_plugin::RulesCapabilities),
+    Notifier(crate::notifier_plugin::NotifierCapabilities),
 }
 
 /// 与本机已装版本相比的能力变化 (更新确认框用)。
@@ -93,6 +94,9 @@ pub struct CapabilityDiff {
     pub auth_type_changed: bool,
     /// 规则插件: 新版本多出来的钩子 / 动作 (`route` / `reject` / `redact` …)
     pub added_actions: Vec<String>,
+    /// 通知插件: 新版本多订阅的事件 / 多引用的事件字段
+    pub added_events: Vec<String>,
+    pub added_fields: Vec<String>,
 }
 
 impl CapabilityDiff {
@@ -105,7 +109,7 @@ impl CapabilityDiff {
                     added_hosts: nh.iter().filter(|h| !oh.contains(h)).cloned().collect(),
                     removed_hosts: oh.iter().filter(|h| !nh.contains(h)).cloned().collect(),
                     auth_type_changed: o.auth_type != n.auth_type,
-                    added_actions: Vec::new(),
+                    ..Self::default()
                 }
             }
             (Capabilities::Rules(o), Capabilities::Rules(n)) => {
@@ -117,6 +121,13 @@ impl CapabilityDiff {
                 }
                 Self { added_actions: added, ..Self::default() }
             }
+            (Capabilities::Notifier(o), Capabilities::Notifier(n)) => Self {
+                added_hosts: n.hosts.iter().filter(|h| !o.hosts.contains(h)).cloned().collect(),
+                removed_hosts: o.hosts.iter().filter(|h| !n.hosts.contains(h)).cloned().collect(),
+                added_events: n.events.iter().filter(|e| !o.events.contains(e)).cloned().collect(),
+                added_fields: n.fields.iter().filter(|f| !o.fields.contains(f)).cloned().collect(),
+                ..Self::default()
+            },
             // 计价插件不连网也不改请求, 没有「能力扩大」可言; 类型变了的情况不会出现 (同 id 同类型才比)
             _ => Self::default(),
         }
@@ -124,7 +135,11 @@ impl CapabilityDiff {
 
     /// 能力是否扩大 (启用中的规则 / 通知插件更新后据此自动停用)
     pub fn expands(&self) -> bool {
-        !self.added_hosts.is_empty() || self.auth_type_changed || !self.added_actions.is_empty()
+        !self.added_hosts.is_empty()
+            || self.auth_type_changed
+            || !self.added_actions.is_empty()
+            || !self.added_events.is_empty()
+            || !self.added_fields.is_empty()
     }
 }
 

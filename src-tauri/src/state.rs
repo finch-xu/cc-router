@@ -28,6 +28,10 @@ pub struct AppState {
     pub pricing: Arc<std::sync::RwLock<Arc<crate::plugins::pricing::PricingRegistry>>>,
     /// 规则注册表 (已启用的规则插件 + 已解析参数)。读用 [`AppState::rules`], 与厂商 / 计价注册表同时重建。
     pub rules: Arc<std::sync::RwLock<Arc<crate::plugins::rules::RulesRegistry>>>,
+    /// 通知插件注册表 (已启用的通知插件 + 已解析参数)。读用 [`AppState::notifiers`], 随 `rebuild_runtime` 重建。
+    pub notifiers: Arc<std::sync::RwLock<Arc<crate::plugins::notifier::NotifierRegistry>>>,
+    /// 通知投递中心 (通知插件 + 内置桌面通知共用去重、限流与内存发送记录)。
+    pub notify: Arc<crate::notify::NotifyHub>,
     pub subscriptions: Arc<RwLock<HashMap<Uuid, Arc<RwLock<SubscriptionRuntime>>>>>,
     /// Serializes route writes, subscription removal, and backup imports across SQLite and memory.
     pub route_edits: Arc<tokio::sync::Mutex<()>>,
@@ -89,6 +93,15 @@ impl AppState {
 
     pub fn set_rules(&self, registry: crate::plugins::rules::RulesRegistry) {
         *self.rules.write().unwrap_or_else(|e| e.into_inner()) = Arc::new(registry);
+    }
+
+    /// 当前通知插件注册表的快照。
+    pub fn notifiers(&self) -> Arc<crate::plugins::notifier::NotifierRegistry> {
+        self.notifiers.read().unwrap_or_else(|e| e.into_inner()).clone()
+    }
+
+    pub fn set_notifiers(&self, registry: crate::plugins::notifier::NotifierRegistry) {
+        *self.notifiers.write().unwrap_or_else(|e| e.into_inner()) = Arc::new(registry);
     }
 
     /// 整体替换厂商注册表 (装 / 卸 / 启停厂商插件后)。

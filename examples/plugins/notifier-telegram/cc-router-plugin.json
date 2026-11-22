@@ -1,0 +1,17 @@
+{
+  "manifest": 1,
+  "id": "notifier-telegram",
+  "type": "notifier",
+  "version": "1.0.0",
+  "name": { "zh": "Telegram 机器人", "zh-Hant": "Telegram 機器人", "en": "Telegram Bot", "ja": "Telegram Bot" },
+  "description": {
+    "zh": "通过 Telegram Bot API 发送 cc-router 告警与每日汇总。",
+    "zh-Hant": "透過 Telegram Bot API 發送 cc-router 警示與每日摘要。",
+    "en": "Send cc-router alerts and daily summaries via Telegram Bot API.",
+    "ja": "Telegram Bot API で cc-router のアラートや日次サマリーを送信します。"
+  },
+  "author": "cc-router",
+  "license": "MIT",
+  "entry": "notifier.json",
+  "assets": []
+}

@@ -8,7 +8,7 @@ use std::sync::Arc;
 
 use chrono::{DateTime, Days, Local, NaiveDate, NaiveTime, TimeZone, Utc};
 use sqlx::SqlitePool;
-use tauri::{AppHandle, Emitter};
+use tauri::{AppHandle, Emitter, Manager};
 use tokio::sync::{mpsc, RwLock};
 use tokio::time::{interval, Duration};
 use tracing::{debug, warn};
@@ -201,6 +201,14 @@ const FLUSH_SIZE: usize = 50;
 const FLUSH_INTERVAL: Duration = Duration::from_secs(5);
 const BUFFER_MAX: usize = 1000;
 
+#[derive(Debug, Clone, Copy, Default)]
+pub struct QuotaCrossing {
+    /// 首次跨过 100% 限额的周期 `(period, used, limit)`
+    pub reached: Option<(QuotaPeriod, u64, u64)>,
+    /// 首次跨过 80% 预警线 (且未到 100%) 的周期 `(period, used, limit, percent)`
+    pub warning: Option<(QuotaPeriod, u64, u64, u64)>,
+}
+
 /// Add one finished request's usage to the subscription's in-memory quota buckets.
 /// Returns the first period that crossed its limit *because of this entry* (for one-shot alerting).
 pub fn apply_entry_to_quota(
@@ -208,20 +216,48 @@ pub fn apply_entry_to_quota(
     entry: &RequestLogEntry,
     now: DateTime<Utc>,
 ) -> Option<QuotaPeriod> {
+    apply_entry_to_quota_detailed(rt, entry, now).reached.map(|(p, _, _)| p)
+}
+
+pub fn apply_entry_to_quota_detailed(
+    rt: &mut SubscriptionRuntime,
+    entry: &RequestLogEntry,
+    now: DateTime<Utc>,
+) -> QuotaCrossing {
     let input = entry.upstream_input_tokens.unwrap_or(0) as u64;
     let output = entry.upstream_output_tokens.unwrap_or(0) as u64;
     let cc = entry.upstream_cache_creation.unwrap_or(0) as u64;
     let cr = entry.upstream_cache_read.unwrap_or(0) as u64;
     if input + output + cc + cr == 0 {
-        return None;
+        return QuotaCrossing::default();
     }
-    let before = rt.row.token_quotas.first_exceeded(&rt.quota_usage, now);
+    let before_exceeded = rt.row.token_quotas.first_exceeded(&rt.quota_usage, now);
+    let before_used: [u64; 4] = crate::subscription::quota::ALL_PERIODS
+        .map(|p| rt.quota_usage.effective(p, now).total());
     rt.quota_usage.add(now, input, output, cc, cr);
-    let after = rt.row.token_quotas.first_exceeded(&rt.quota_usage, now);
-    match (before, after) {
-        (None, Some(p)) => Some(p),
+    let after_exceeded = rt.row.token_quotas.first_exceeded(&rt.quota_usage, now);
+    let reached = match (before_exceeded, after_exceeded) {
+        (None, Some(p)) => rt
+            .row
+            .token_quotas
+            .limit(p)
+            .map(|limit| (p, rt.quota_usage.effective(p, now).total(), limit)),
         _ => None,
+    };
+    let mut warning = None;
+    for (idx, p) in crate::subscription::quota::ALL_PERIODS.into_iter().enumerate() {
+        let Some(limit) = rt.row.token_quotas.limit(p).filter(|&l| l > 0) else {
+            continue;
+        };
+        let prev = before_used[idx];
+        let curr = rt.quota_usage.effective(p, now).total();
+        if curr < limit && prev.saturating_mul(100) / limit < 80 && curr.saturating_mul(100) / limit >= 80 {
+            let pct = (curr.saturating_mul(100) / limit).min(99);
+            warning = Some((p, curr, limit, pct));
+            break;
+        }
     }
+    QuotaCrossing { reached, warning }
 }
 
 pub async fn run_consumer(
@@ -244,14 +280,22 @@ pub async fn run_consumer(
                         let mut auth_type = None;
                         if let Some(rt) = rt {
                             let now = Utc::now();
-                            let crossed = {
+                            let crossing = {
                                 let mut g = rt.write().await;
                                 auth_type = Some(g.row.auth_type);
-                                apply_entry_to_quota(&mut g, &entry, now)
+                                apply_entry_to_quota_detailed(&mut g, &entry, now)
                             };
                             dirty.insert(entry.subscription_id);
-                            if let Some(period) = crossed {
-                                let display_name = rt.read().await.row.display_name.clone();
+                            if let Some((period, used, limit)) = crossing.reached {
+                                let (display_name, provider_name) = {
+                                    let g = rt.read().await;
+                                    let p = if g.row.provider_display_name.is_empty() {
+                                        g.row.provider_id.clone()
+                                    } else {
+                                        g.row.provider_display_name.clone()
+                                    };
+                                    (g.row.display_name.clone(), p)
+                                };
                                 let ev = EventEntry {
                                     id: Uuid::new_v4(),
                                     timestamp_ms: now.timestamp_millis(),
@@ -270,6 +314,37 @@ pub async fn run_consumer(
                                     serde_json::json!({ "subscription_id": entry.subscription_id.to_string(), "period": period.as_str() }),
                                 ) {
                                     warn!(?e, subscription_id = %entry.subscription_id, "quota_reached 事件投递失败");
+                                }
+                                if let Some(st) = app.try_state::<crate::state::AppState>() {
+                                    st.notify.emit(crate::notify::NotifyEvent::SubscriptionQuotaReached {
+                                        subscription_id: entry.subscription_id.to_string(),
+                                        subscription_name: display_name,
+                                        provider_name,
+                                        period: period.as_str().to_string(),
+                                        used,
+                                        limit,
+                                    });
+                                }
+                            } else if let Some((period, used, limit, percent)) = crossing.warning {
+                                if let Some(st) = app.try_state::<crate::state::AppState>() {
+                                    let (display_name, provider_name) = {
+                                        let g = rt.read().await;
+                                        let p = if g.row.provider_display_name.is_empty() {
+                                            g.row.provider_id.clone()
+                                        } else {
+                                            g.row.provider_display_name.clone()
+                                        };
+                                        (g.row.display_name.clone(), p)
+                                    };
+                                    st.notify.emit(crate::notify::NotifyEvent::SubscriptionQuotaWarning {
+                                        subscription_id: entry.subscription_id.to_string(),
+                                        subscription_name: display_name,
+                                        provider_name,
+                                        period: period.as_str().to_string(),
+                                        used,
+                                        limit,
+                                        percent,
+                                    });
                                 }
                             }
                         }

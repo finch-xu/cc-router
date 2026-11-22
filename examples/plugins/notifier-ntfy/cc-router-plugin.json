@@ -1,0 +1,17 @@
+{
+  "manifest": 1,
+  "id": "notifier-ntfy",
+  "type": "notifier",
+  "version": "1.0.0",
+  "name": { "zh": "ntfy 推送", "zh-Hant": "ntfy 推播", "en": "ntfy", "ja": "ntfy 通知" },
+  "description": {
+    "zh": "通过 ntfy.sh 或自建 ntfy 服务器接收 cc-router 异常与每日汇总推送。",
+    "zh-Hant": "透過 ntfy.sh 或自建 ntfy 伺服器接收 cc-router 異常與每日摘要推播。",
+    "en": "Send cc-router alerts and daily summaries to ntfy.sh or a self-hosted ntfy server.",
+    "ja": "ntfy.sh またはセルフホストの ntfy サーバーに cc-router のアラートや日次サマリーを送信します。"
+  },
+  "author": "cc-router",
+  "license": "MIT",
+  "entry": "notifier.json",
+  "assets": []
+}

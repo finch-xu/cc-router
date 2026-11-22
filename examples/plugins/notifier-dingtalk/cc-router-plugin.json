@@ -1,0 +1,17 @@
+{
+  "manifest": 1,
+  "id": "notifier-dingtalk",
+  "type": "notifier",
+  "version": "1.0.0",
+  "name": { "zh": "钉钉机器人", "zh-Hant": "釘釘機器人", "en": "DingTalk Bot", "ja": "DingTalk Bot" },
+  "description": {
+    "zh": "通过钉钉群自定义机器人接收 cc-router 告警。",
+    "zh-Hant": "透過釘釘群自訂機器人接收 cc-router 警示。",
+    "en": "Send cc-router alerts to a DingTalk custom robot.",
+    "ja": "DingTalk のカスタムボットに cc-router のアラートを送信します。"
+  },
+  "author": "cc-router",
+  "license": "MIT",
+  "entry": "notifier.json",
+  "assets": []
+}

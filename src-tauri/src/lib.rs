@@ -8,6 +8,7 @@ pub mod commands;
 pub mod db;
 pub mod error;
 pub mod integrations;
+pub mod notify;
 pub mod session_monitor;
 pub mod oauth;
 pub mod plugins;
@@ -85,6 +86,7 @@ pub fn run() {
             None,
         ))
         .plugin(tauri_plugin_os::init())
+        .plugin(tauri_plugin_notification::init())
         .setup(|app| {
             // 日志初始化
             let app_data_dir = app
@@ -234,6 +236,9 @@ pub fn run() {
             commands::plugins::enable_plugin,
             commands::plugins::disable_plugin,
             commands::plugins::set_plugin_params,
+            commands::plugins::test_notifier_plugin,
+            commands::plugins::list_notifier_deliveries,
+            commands::plugins::test_desktop_notification,
             commands::plugins::fetch_community_index,
             commands::tui::tui_launch_info,
             commands::tui::install_tui_command,
@@ -342,12 +347,15 @@ async fn bootstrap(
 
     let chatgpt_oauth = Arc::new(oauth::chatgpt::ChatGptOAuthManager::new(pool.clone()));
     let kiro_oauth = Arc::new(oauth::kiro::KiroOAuthManager::new(pool.clone()));
+    let (notify_hub, notify_rx) = notify::NotifyHub::new();
 
     let state = AppState {
         db: pool,
         providers: Arc::new(std::sync::RwLock::new(Arc::new(provider::registry::ProviderRegistry::builtin(providers)))),
         pricing: Default::default(),
         rules: Default::default(),
+        notifiers: Default::default(),
+        notify: notify_hub,
         subscriptions: subscriptions_arc,
         route_edits: Default::default(),
         virtual_models: Arc::new(RwLock::new(virtual_models)),
@@ -386,6 +394,12 @@ async fn bootstrap(
     if let Err(e) = plugins::runtime::rebuild_runtime(&state).await {
         tracing::warn!(error = %e, "加载系统插件失败");
     }
+
+    // 7c. 通知后台消费端 (通知插件 + 内置桌面通知 + 每日汇总定时器)
+    let notify_state = state.clone();
+    tauri::async_runtime::spawn(async move {
+        notify::run_worker(notify_state, notify_rx).await;
+    });
 
     // 8. 启动代理. 失败不 fatal: 界面显示「未运行」与原因, 用户可点「启动代理服务」重试.
     let proxy_state = state.clone();

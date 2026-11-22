@@ -40,6 +40,7 @@ tauri-plugin-autostart = "2.7.0"
 # 该函数是 sys_locale 的纯封装, 不依赖 plugin 注册, 但 plugin 保留着以便前端随时取 OS 信息.
 # 注: 该 plugin 的 MSRV 曾是本 crate rust-version 的来源 (1.77.2), 2.4 起随 tauri 一起升到 1.90.
 tauri-plugin-os = "2.4.0"
+tauri-plugin-notification = "2.8.1"
 tauri-plugin-single-instance = "2.5.5"
 
 # 发版说明的版本比较; 已是 tauri 的传递依赖, 提升为直接依赖不引入新包

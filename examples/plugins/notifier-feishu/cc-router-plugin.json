@@ -1,0 +1,17 @@
+{
+  "manifest": 1,
+  "id": "notifier-feishu",
+  "type": "notifier",
+  "version": "1.0.0",
+  "name": { "zh": "飞书机器人", "zh-Hant": "飛書機器人", "en": "Feishu Bot", "ja": "Feishu Bot" },
+  "description": {
+    "zh": "通过飞书自定义群机器人 Webhook 接收 cc-router 状态通知。",
+    "zh-Hant": "透過飛書自訂群機器人 Webhook 接收 cc-router 狀態通知。",
+    "en": "Send cc-router alerts to a Feishu group webhook bot.",
+    "ja": "Feishu グループのカスタム Webhook ボットに cc-router の通知を送信します。"
+  },
+  "author": "cc-router",
+  "license": "MIT",
+  "entry": "notifier.json",
+  "assets": []
+}

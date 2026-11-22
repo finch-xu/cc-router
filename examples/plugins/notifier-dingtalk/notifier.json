@@ -1,0 +1,25 @@
+{
+  "notifierApi": 1,
+  "params": [
+    { "id": "access_token", "type": "secret",
+      "label": { "zh": "access_token", "zh-Hant": "access_token", "en": "access_token", "ja": "access_token" } }
+  ],
+  "events": [
+    "subscription.auth_failed",
+    "subscription.quota_reached",
+    "requests.all_failed",
+    "proxy.stopped",
+    "usage.daily_summary"
+  ],
+  "request": {
+    "method": "POST",
+    "url": "https://oapi.dingtalk.com/robot/send?access_token={{params.access_token}}",
+    "body": {
+      "type": "json",
+      "template": {
+        "msgtype": "text",
+        "text": { "content": "[cc-router] {{title}}\n{{body}}" }
+      }
+    }
+  }
+}

@@ -1,0 +1,17 @@
+{
+  "manifest": 1,
+  "id": "notifier-serverchan",
+  "type": "notifier",
+  "version": "1.0.0",
+  "name": { "zh": "Server 酱", "zh-Hant": "Server 醬", "en": "ServerChan", "ja": "ServerChan" },
+  "description": {
+    "zh": "通过 Server 酱将订阅失效、限额与每日汇总推送到微信。",
+    "zh-Hant": "透過 Server 醬將訂閱失效、限額與每日摘要推播到微信。",
+    "en": "Deliver cc-router alerts to WeChat via ServerChan.",
+    "ja": "ServerChan 経由で cc-router の通知を配信します。"
+  },
+  "author": "cc-router",
+  "license": "MIT",
+  "entry": "notifier.json",
+  "assets": []
+}

@@ -6,6 +6,8 @@
 
 pub mod balance_json;
 pub mod check;
+pub mod notifier_plugin;
+pub mod notifier_template;
 pub mod plugin;
 pub mod pricing_plugin;
 pub mod provider;

@@ -1094,6 +1094,32 @@ pub async fn refresh_subscription_balance(
                 let mut guard = rt.write().await;
                 guard.balance_cache = Some(snapshot.clone());
             }
+            let low_entry = snapshot
+                .entries
+                .iter()
+                .find(|e| matches!(e.severity, crate::subscription::model::BalanceSeverity::Critical))
+                .or_else(|| {
+                    snapshot
+                        .entries
+                        .iter()
+                        .find(|e| matches!(e.severity, crate::subscription::model::BalanceSeverity::Low))
+                });
+            if let Some(entry) = low_entry {
+                let provider_name = if row.provider_display_name.is_empty() {
+                    row.provider_id.clone()
+                } else {
+                    row.provider_display_name.clone()
+                };
+                state
+                    .notify
+                    .emit(crate::notify::NotifyEvent::SubscriptionBalanceLow {
+                        subscription_id: row.id.to_string(),
+                        subscription_name: row.display_name.clone(),
+                        provider_name,
+                        remaining: entry.value_text.clone(),
+                        unit: entry.unit.clone(),
+                    });
+            }
             Ok(RefreshBalanceResult::Success {
                 snapshot,
                 fetched_at,

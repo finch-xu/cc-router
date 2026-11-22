@@ -1,0 +1,24 @@
+{
+  "notifierApi": 1,
+  "params": [
+    { "id": "webhook_url", "type": "base_url",
+      "label": { "zh": "Incoming Webhook URL", "zh-Hant": "Incoming Webhook URL", "en": "Incoming Webhook URL", "ja": "Incoming Webhook URL" } }
+  ],
+  "events": [
+    "subscription.auth_failed",
+    "subscription.quota_reached",
+    "requests.all_failed",
+    "proxy.stopped",
+    "usage.daily_summary"
+  ],
+  "request": {
+    "method": "POST",
+    "url": "{{params.webhook_url}}",
+    "body": {
+      "type": "json",
+      "template": {
+        "text": "*{{title}}*\n{{body}}"
+      }
+    }
+  }
+}
