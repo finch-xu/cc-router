@@ -1,0 +1,54 @@
+/* ============================================================
+ * 插件页 (pg-*)。与实时路由 / 订阅页同一做法: 只读各主题共有的 token,
+ * 卡片 / 按钮 / 标签复用全局 .card / .btn / .pill / .sb-chip, 圆角随主题走。
+ * ============================================================ */
+
+.pg-page { display: flex; flex-direction: column; gap: 16px; }
+.pg-actions { display: flex; gap: 8px; flex-wrap: wrap; }
+.pg-toolbar { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.pg-toolbar .input { max-width: 260px; }
+.pg-note { font-size: 12.5px; color: var(--ink-3); padding: 10px 12px; border-radius: var(--r-md); background: var(--surface-2); }
+.pg-note a, .pg-link { color: var(--accent-ink); cursor: pointer; text-decoration: underline; text-underline-offset: 2px; background: none; border: none; padding: 0; font: inherit; }
+
+/* 社区卡片网格 */
+.pg-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); gap: 14px; }
+.pg-card { display: flex; flex-direction: column; overflow: hidden; padding: 0; cursor: pointer; text-align: left; transition: box-shadow 0.15s ease; }
+.pg-card:hover { box-shadow: 0 0 0 1.5px var(--accent-line); }
+.pg-card:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.pg-shot { aspect-ratio: 16 / 10; width: 100%; object-fit: cover; display: block; background: var(--surface-3); }
+.pg-shot.empty { display: grid; place-items: center; color: var(--ink-4); }
+.pg-card-body { padding: 12px 14px 14px; display: flex; flex-direction: column; gap: 6px; min-width: 0; }
+.pg-title { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.pg-title img { width: 22px; height: 22px; border-radius: 6px; flex: none; }
+.pg-title b { font-size: 13.5px; font-weight: 600; color: var(--ink); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.pg-by { font-size: 11.5px; color: var(--ink-4); }
+.pg-desc { font-size: 12.5px; color: var(--ink-3); line-height: 1.45; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+.pg-tags { display: flex; gap: 4px; flex-wrap: wrap; }
+.pg-tag { font-size: 10.5px; padding: 1px 6px; border-radius: 5px; background: var(--surface-3); color: var(--ink-3); }
+.pg-badge { font-size: 10.5px; font-weight: 600; padding: 1px 7px; border-radius: 6px; background: var(--surface-3); color: var(--ink-3); flex: none; }
+.pg-badge.ok { background: var(--ok-bg, var(--surface-3)); color: var(--ok); }
+.pg-badge.acc { background: var(--accent-bg); color: var(--accent-ink); }
+.pg-badge.err { background: var(--err-bg); color: var(--err); }
+
+/* 已安装列表 */
+.pg-list { display: flex; flex-direction: column; gap: 8px; }
+.pg-row { display: flex; align-items: center; gap: 12px; padding: 12px 14px; flex-wrap: wrap; }
+.pg-row-main { flex: 1; min-width: 200px; display: flex; flex-direction: column; gap: 3px; }
+.pg-row-main .pg-title b { font-size: 13.5px; }
+.pg-meta { font-size: 11.5px; color: var(--ink-4); display: flex; gap: 8px; flex-wrap: wrap; }
+.pg-meta .mono { font-size: 11px; }
+.pg-row-actions { display: flex; gap: 6px; flex-wrap: wrap; }
+
+/* 详情 / 安装确认 */
+.pg-shots { display: flex; gap: 8px; overflow-x: auto; padding-bottom: 4px; }
+.pg-shots img { height: 150px; border-radius: var(--r-md); flex: none; background: var(--surface-3); }
+.pg-facts { display: grid; grid-template-columns: max-content 1fr; gap: 4px 14px; font-size: 12.5px; margin: 10px 0; }
+.pg-facts dt { color: var(--ink-4); }
+.pg-facts dd { margin: 0; color: var(--ink-2); min-width: 0; overflow-wrap: anywhere; }
+.pg-alert { font-size: 12.5px; line-height: 1.5; padding: 9px 11px; border-radius: var(--r-md); margin-top: 8px; }
+.pg-alert.warn { background: color-mix(in srgb, var(--warn) 12%, var(--surface)); color: var(--ink-2); }
+.pg-alert.err { background: var(--err-bg); color: var(--ink-2); }
+.pg-alert.info { background: var(--surface-2); color: var(--ink-3); }
+.pg-issues { margin: 6px 0 0; padding-left: 18px; font-size: 12px; }
+.pg-issues li { margin: 2px 0; }
+.pg-issues code { font-family: var(--font-mono); font-size: 11.5px; }

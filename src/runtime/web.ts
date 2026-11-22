@@ -112,6 +112,9 @@ export const webRuntime: Runtime = {
   pickSavePath: () => {
     throw new Error("pickSavePath is desktop-only");
   },
+  pickFolder: () => {
+    throw new Error("pickFolder is desktop-only");
+  },
   downloadText: (filename, text, mime) => downloadBlob(filename, new Blob([text], { type: mime })),
   downloadBytes: (filename, bytes, mime) => downloadBlob(filename, new Blob([bytes], { type: mime })),
   openDownloadsDir: async () => {},

@@ -14,6 +14,7 @@ import {
   Moon,
   Palette,
   PartyPopper,
+  Puzzle,
   Receipt,
   RefreshCw,
   ScrollText,
@@ -49,6 +50,7 @@ const PLAIN_ICONS: Record<SidebarIconName, LucideIcon> = {
   logs: ScrollText,
   stats: BarChart3,
   receipts: Receipt,
+  plugins: Puzzle,
   updates: RefreshCw,
   backup: DatabaseBackup,
   settings: SettingsIcon,
@@ -128,6 +130,7 @@ export function Sidebar() {
     { to: "/request-logs", label: t("sidebar.nav.requestLogs"), icon: "logs" },
     { to: "/statistics", label: t("sidebar.nav.statistics"), icon: "stats" },
     { to: "/receipts", label: t("sidebar.nav.receipts"), icon: "receipts" },
+    { to: "/plugins", label: t("sidebar.nav.plugins"), icon: "plugins" },
     {
       to: "/updates",
       label: t("sidebar.nav.updates"),

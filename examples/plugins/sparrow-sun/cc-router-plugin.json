@@ -1,0 +1,17 @@
+{
+  "manifest": 1,
+  "id": "sparrow-sun",
+  "type": "theme",
+  "version": "1.0.0",
+  "name": { "zh": "晒太阳的麻雀", "zh-Hant": "曬太陽的麻雀", "en": "Sunbathing Sparrow", "ja": "日向ぼっこのスズメ" },
+  "description": {
+    "zh": "内置「麻雀」主题的插件版，示范 theme.json 的写法。",
+    "zh-Hant": "內建「麻雀」主題的外掛版，示範 theme.json 的寫法。",
+    "en": "Plugin version of the built-in Sparrow theme, showing how to write a theme.json.",
+    "ja": "内蔵テーマ「スズメ」のプラグイン版。theme.json の書き方の見本です。"
+  },
+  "author": "cc-router",
+  "license": "MIT",
+  "entry": "theme.json",
+  "assets": []
+}

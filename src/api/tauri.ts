@@ -3,6 +3,9 @@ import { runtime } from "@/runtime";
 
 const invoke = runtime.invoke;
 import type {
+  InstalledPlugin,
+  PluginContent,
+  StagedPlugin,
   RequestHeaders,
   HeaderPreview,
   HeaderPolicy,
@@ -247,6 +250,17 @@ export const api = {
   /** 仅桌面端可用; 网页端后端直接拒绝 */
   installTuiCommand: () => invoke<TuiInstallOutcome>("install_tui_command"),
   uninstallTuiCommand: () => invoke<TuiInstallOutcome>("uninstall_tui_command"),
+
+  // plugins (下载 / 安装 / 卸载仅桌面端; 网页端后端直接拒绝)
+  listPlugins: () => invoke<InstalledPlugin[]>("list_plugins"),
+  loadPlugin: (id: string) => invoke<PluginContent>("load_plugin", { id }),
+  stagePluginFromGithub: (link: string) => invoke<StagedPlugin>("stage_plugin_from_github", { link }),
+  stagePluginFromDir: (path: string) => invoke<StagedPlugin>("stage_plugin_from_dir", { path }),
+  installStagedPlugin: (stagingId: string, communitySha256?: string) =>
+    invoke<InstalledPlugin>("install_staged_plugin", { stagingId, communitySha256: communitySha256 ?? null }),
+  discardStagedPlugin: (stagingId: string) => invoke<void>("discard_staged_plugin", { stagingId }),
+  uninstallPlugin: (id: string) => invoke<void>("uninstall_plugin", { id }),
+  fetchCommunityIndex: () => invoke<unknown>("fetch_community_index"),
 
   // onboarding
   getOnboardingState: () => invoke<OnboardingState>("get_onboarding_state"),

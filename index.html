@@ -22,12 +22,25 @@
           if (dark) root.classList.add("dark");
           var saved = localStorage.getItem("cc-router-ui-theme");
           if (saved === "classic" || saved === "win2000" || saved === "sketch" || saved === "quiet" || saved === "sparrow") theme = saved;
+          // 主题插件 plugin:<id>: 先注入上次缓存的 token 样式 (键名见 src/plugins/theme/apply.ts)
+          var m = /^plugin:([a-z0-9][a-z0-9-]{1,39})$/.exec(saved || "");
+          if (m) {
+            var cached = JSON.parse(localStorage.getItem("cc-router-plugin-theme-css") || "null");
+            if (cached && cached.id === m[1] && typeof cached.css === "string") {
+              theme = "plugin";
+              var st = document.createElement("style");
+              st.id = "ccr-plugin-theme";
+              st.textContent = cached.css;
+              document.head.appendChild(st);
+              root.setAttribute("data-theme", "quiet ccr-" + m[1]);
+            }
+          }
         } catch (e) {}
-        // 继承主题: sparrow 建在 quiet 之上 (见 src/themes/index.ts 的 base)
-        root.setAttribute("data-theme", theme === "sparrow" ? "quiet sparrow" : theme);
+        // 继承主题: sparrow / 插件主题建在 quiet 之上 (见 src/themes/index.ts 的 base)
+        if (theme !== "plugin") root.setAttribute("data-theme", theme === "sparrow" ? "quiet sparrow" : theme);
         root.setAttribute(
           "data-art",
-          { sketch: "sketch", classic: "plain", win2000: "plain win2k", quiet: "plain", sparrow: "plain" }[theme]
+          { sketch: "sketch", classic: "plain", win2000: "plain win2k", quiet: "plain", sparrow: "plain", plugin: "plain" }[theme]
         );
       })();
     </script>

@@ -9,8 +9,9 @@
  *   - 状态色: 嫩叶绿 / 喙角琥珀 / 莓红 (莓红偏粉, 与姜橙拉开)
  * 文字色对其底色均 ≥ 4.5:1。
  *
- * 规则: 这里只写 token, 不写选择器规则 —— 这是将来第三方主题插件的写法,
- * 「麻雀」是第一个按这个约定写的主题。
+ * 规则: 这里只写 token, 不写选择器规则 —— 与第三方主题插件同一写法。
+ * 插件版在 examples/plugins/sparrow-sun/theme.json, `pnpm check:plugins` 会用主题生成器
+ * 把它翻成 CSS 并与本文件逐项比对 (两边必须一致, 证明公开 token 表够用)。
  * 浅色块里出现的每个 token, 深色块里都要再写一次: 本文件排在 quiet.css 之后,
  * 浅色块会盖掉 quiet 的深色值, 漏写的 token 在深色模式下会沿用浅色值。
  * ============================================================ */
@@ -39,8 +40,6 @@
   --on-accent:   #ffffff;
 
   --flow:        #1a78b8;   /* 水花蓝 */
-  --flow-bright: #3fa6e6;
-  --flow-bg:     #e3f2fc;
 
   --ok:      #1a804a;
   --ok-bg:   #e3f5ea;
@@ -51,17 +50,14 @@
 
   --q-edge:  rgb(90 55 20 / 8%);
 
-  --rf-client-flow: color-mix(in srgb, var(--flow) 60%, var(--surface));
-  --rf-up-flow:     color-mix(in srgb, var(--flow) 60%, var(--surface));
-
   --background: 39 100% 97%;
   --foreground: 25 29% 13%;
   --card: 0 0% 100%;
   --popover: 0 0% 100%;
   --primary: 20 74% 42%;
   --primary-foreground: 0 0% 100%;
-  --secondary: 39 67% 92%;
-  --muted: 39 67% 92%;
+  --secondary: 37 72% 94%;
+  --muted: 37 72% 94%;
   --muted-foreground: 32 15% 38%;
   --accent-foreground: 20 79% 34%;
   --border: 37 47% 85%;
@@ -93,8 +89,6 @@
   --on-accent:   #1f1712;   /* 亮橙底上用深字, 白字只有 2:1 */
 
   --flow:        #5cb8ef;
-  --flow-bright: #8fd0f7;
-  --flow-bg:     rgb(92 184 239 / 14%);
 
   --ok:      #6fd39a;
   --ok-bg:   rgb(111 211 154 / 13%);
@@ -105,15 +99,12 @@
 
   --q-edge:  rgb(255 235 210 / 7%);
 
-  --rf-client-flow: color-mix(in srgb, var(--flow) 60%, var(--surface));
-  --rf-up-flow:     color-mix(in srgb, var(--flow) 60%, var(--surface));
-
   --background: 27 22% 10%;
   --foreground: 35 70% 95%;
   --card: 28 22% 14%;
   --popover: 28 21% 16%;
   --primary: 23 100% 68%;
-  --primary-foreground: 25 29% 9%;
+  --primary-foreground: 23 27% 10%;
   --secondary: 30 22% 16%;
   --muted: 30 22% 16%;
   --muted-foreground: 34 18% 65%;

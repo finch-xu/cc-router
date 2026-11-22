@@ -148,7 +148,7 @@
 :where([data-theme~="quiet"]) .sidebar { background: var(--surface-2); border-right: none; }
 :where([data-theme~="quiet"]) .brand { border-bottom: none; margin-bottom: 8px; }
 :where([data-theme~="quiet"]) .brand-name { font-size: 14px; font-weight: 650; letter-spacing: -0.01em; }
-:where([data-theme~="quiet"]) .nav-item { padding: 6px 10px; color: var(--ink-2); border-radius: 9px; }
+:where([data-theme~="quiet"]) .nav-item { padding: 6px 10px; color: var(--ink-2); border-radius: var(--q-r-ctl, 9px); }
 :where([data-theme~="quiet"]) .nav-item .nav-icon { color: var(--ink-3); }
 :where([data-theme~="quiet"]) .nav-item:hover { background: var(--q-hover, rgb(41 37 36 / 5%)); color: var(--ink); }
 .dark:where([data-theme~="quiet"]) .nav-item:hover { background: var(--q-hover, rgb(255 255 255 / 5%)); }
@@ -173,7 +173,7 @@
 :where([data-theme~="quiet"]) .card {
   background: var(--surface);
   border: none;
-  border-radius: 16px;
+  border-radius: var(--q-r-card, 16px);
   box-shadow: var(--q-sh-card);
 }
 :where([data-theme~="quiet"]) .card-title { font-size: 14px; font-weight: 620; }
@@ -182,13 +182,13 @@
 :where([data-theme~="quiet"]) .slot-card:nth-child(even),
 :where([data-theme~="quiet"]) .slot-card.wide {
   border: none;
-  border-radius: 16px;
+  border-radius: var(--q-r-card, 16px);
   background: var(--surface);
   box-shadow: var(--q-sh-card);
 }
 :where([data-theme~="quiet"]) .stats-section {
   border: none;
-  border-radius: 16px;
+  border-radius: var(--q-r-card, 16px);
   background: var(--surface);
   box-shadow: var(--q-sh-card);
 }
@@ -204,7 +204,7 @@
   border: none;
   background: #1c1917;
   color: #e7e5e4;
-  border-radius: 12px;
+  border-radius: var(--q-r-ctl, 12px);
 }
 .dark:where([data-theme~="quiet"]) .codeblock { background: #0f0e0d; }
 :where([data-theme~="quiet"]) .codeblock .copy { border: none; background: rgb(255 255 255 / 10%); color: #fff; }
@@ -213,9 +213,9 @@
 :where([data-theme~="quiet"]) .danger-card {
   background: var(--err-bg);
   border: none;
-  border-radius: 14px;
+  border-radius: var(--q-r-card, 14px);
 }
-:where([data-theme~="quiet"]) .alert { border: none; border-radius: 12px; background: var(--surface-3); color: var(--ink-2); }
+:where([data-theme~="quiet"]) .alert { border: none; border-radius: var(--q-r-ctl, 12px); background: var(--surface-3); color: var(--ink-2); }
 :where([data-theme~="quiet"]) .alert.warn { background: var(--q-warn-bg); color: var(--ink-2); }
 :where([data-theme~="quiet"]) .alert.err { background: var(--err-bg); color: var(--ink-2); }
 :where([data-theme~="quiet"]) .app-mark,
@@ -231,7 +231,7 @@
 :where([data-theme~="quiet"]) .card.section > .card-head .card-title { font-size: 15px; }
 :where([data-theme~="quiet"]) .card.section > .card-body {
   background: var(--surface);
-  border-radius: 14px;
+  border-radius: var(--q-r-card, 14px);
   box-shadow: 0 0 0 1px var(--q-hair);
   padding: 14px 18px;
 }
@@ -258,7 +258,7 @@
   background: var(--surface);
   color: var(--ink-2);
   font-weight: 500;
-  border-radius: 9px;
+  border-radius: var(--q-r-ctl, 9px);
   box-shadow: 0 0 0 1px var(--line-2);
 }
 :where([data-theme~="quiet"]) .btn:hover { background: var(--surface-3); border-color: transparent; color: var(--ink); }
@@ -287,7 +287,7 @@
 :where([data-theme~="quiet"]) .btn.ghost { border: 1px solid transparent; background: transparent; color: var(--ink-3); box-shadow: none; }
 :where([data-theme~="quiet"]) .btn.ghost:hover { border-color: transparent; background: var(--surface-3); color: var(--ink); }
 :where([data-theme~="quiet"]) .btn.bare { background: transparent; box-shadow: none; }
-:where([data-theme~="quiet"]) .lrc-btn-dark { border: none; border-radius: 9px; }
+:where([data-theme~="quiet"]) .lrc-btn-dark { border: none; border-radius: var(--q-r-ctl, 9px); }
 
 /* ---------- 状态: 正常 = 绿点灰字; 异常 = 淡色底标签 ---------- */
 :where([data-theme~="quiet"]) .pill {
@@ -320,7 +320,7 @@
 :where([data-theme~="quiet"]) .select {
   background: var(--surface);
   border: 1px solid var(--line-2);
-  border-radius: 9px;
+  border-radius: var(--q-r-ctl, 9px);
 }
 :where([data-theme~="quiet"]) :is(.input, .select):hover:not(:disabled):not(:focus) { border-color: var(--ink-5); background: var(--surface); }
 :where([data-theme~="quiet"]) .input:focus,
@@ -338,7 +338,7 @@
 :where([data-theme~="quiet"]) .seg-tabs {
   background: var(--surface-3);
   border: none;
-  border-radius: 10px;
+  border-radius: var(--q-r-ctl, 10px);
   padding: 3px;
   gap: 2px;
 }
@@ -365,7 +365,7 @@
   max-width: 100%;
   border-bottom: none;
   background: var(--surface-3);
-  border-radius: 10px;
+  border-radius: var(--q-r-ctl, 10px);
   padding: 3px;
   gap: 2px;
   margin-bottom: 20px;
@@ -387,7 +387,7 @@
 :where([data-theme~="quiet"]) button[role="combobox"] {
   background: var(--surface);
   border-color: var(--line-2);
-  border-radius: 9px;
+  border-radius: var(--q-r-ctl, 9px);
 }
 :where([data-theme~="quiet"]) button[role="combobox"]:hover { border-color: var(--ink-5); }
 :where([data-theme~="quiet"]) button[role="combobox"]:focus {
@@ -415,7 +415,7 @@
 :where([data-theme~="quiet"]) .stat {
   background: var(--surface);
   border: none;
-  border-radius: 16px;
+  border-radius: var(--q-r-card, 16px);
   box-shadow: var(--q-sh-card);
   padding: 18px 20px;
 }
@@ -434,18 +434,18 @@
 /* ---------- 接入指南: 接入信息是本页主卡 ---------- */
 :where([data-theme~="quiet"]) .page-flow > .lrc-flush-split:first-child {
   background: var(--surface);
-  border-radius: 20px;
+  border-radius: var(--q-r-card, 20px);
   box-shadow: var(--q-sh-hero);
   margin-bottom: 12px;
 }
 :where([data-theme~="quiet"]) .lrc-access-value {
   border: none;
   background: var(--surface-3);
-  border-radius: 9px;
+  border-radius: var(--q-r-ctl, 9px);
   color: var(--ink);
   font-weight: 550;
 }
-:where([data-theme~="quiet"]) .lrc-access-copy { border: none; background: var(--surface); box-shadow: 0 0 0 1px var(--line-2); border-radius: 9px; }
+:where([data-theme~="quiet"]) .lrc-access-copy { border: none; background: var(--surface); box-shadow: 0 0 0 1px var(--line-2); border-radius: var(--q-r-ctl, 9px); }
 :where([data-theme~="quiet"]) .lrc-access-copy:hover { background: var(--surface-3); }
 :where([data-theme~="quiet"]) .lrc-api-row { border-bottom: none; }
 :where([data-theme~="quiet"]) .lrc-api-method {
@@ -462,20 +462,20 @@
 :where([data-theme~="quiet"]) .lrc-vm-map-col {
   --c-line: var(--q-hair);
   border: none;
-  border-radius: 12px;
+  border-radius: var(--q-r-ctl, 12px);
   background: var(--surface);
   box-shadow: var(--q-sh-card);
 }
 :where([data-theme~="quiet"]) .lrc-vm-map-col.router { --c-line: var(--accent-line); background: var(--accent-bg); box-shadow: none; }
 :where([data-theme~="quiet"]) .lrc-vm-map-row.fallback { border-top: 1px solid var(--c-line); }
-:where([data-theme~="quiet"]) .lrc-readonly-note { border: none; background: var(--surface-3); border-radius: 12px; }
+:where([data-theme~="quiet"]) .lrc-readonly-note { border: none; background: var(--surface-3); border-radius: var(--q-r-ctl, 12px); }
 
 /* ---------- 虚拟模型: 每个虚拟模型一张卡, 此刻首选整行珊瑚底 ---------- */
 :where([data-theme~="quiet"]) .vm-time {
   background: var(--surface);
   border: none;
   box-shadow: var(--q-sh-card);
-  border-radius: 12px;
+  border-radius: var(--q-r-ctl, 12px);
   padding: 6px 12px;
 }
 :where([data-theme~="quiet"]) .vm-time-title { font-family: inherit; font-size: 12.5px; color: var(--ink-3); }
@@ -490,7 +490,7 @@
 }
 :where([data-theme~="quiet"]) .vm-time-days {
   background: var(--surface-3);
-  border-radius: 9px;
+  border-radius: var(--q-r-ctl, 9px);
   padding: 2px;
 }
 :where([data-theme~="quiet"]) .vm-time-days button {
@@ -543,7 +543,7 @@
 :where([data-theme~="quiet"]) .vm-gap {
   background: var(--q-warn-bg);
   border: none;
-  border-radius: 10px;
+  border-radius: var(--q-r-ctl, 10px);
   padding: 8px 12px;
   color: var(--ink-2);
 }
@@ -551,21 +551,21 @@
 :where([data-theme~="quiet"]) .vrm-vm {
   background: var(--surface-3);
   border: none;
-  border-radius: 12px;
+  border-radius: var(--q-r-ctl, 12px);
   font-weight: 600;
 }
 :where([data-theme~="quiet"]) .vrm-sub,
 :where([data-theme~="quiet"]) .vrm-sub.on {
   border: none;
   background: var(--surface-3);
-  border-radius: 10px;
+  border-radius: var(--q-r-ctl, 10px);
   box-shadow: none;
 }
 :where([data-theme~="quiet"]) .vrm-sub.first {
   border: none;
   background: var(--accent-bg);
   box-shadow: none;
-  border-radius: 10px;
+  border-radius: var(--q-r-ctl, 10px);
 }
 :where([data-theme~="quiet"]) .vrm-sub.first .vrm-sub-name { color: var(--ink); font-weight: 550; }
 :where([data-theme~="quiet"]) .vrm-sub.first .vrm-idx { color: var(--accent-ink); font-weight: 600; }
@@ -615,7 +615,7 @@
   border: none;
   background: transparent;
   color: var(--ink-3);
-  border-radius: 9px;
+  border-radius: var(--q-r-ctl, 9px);
 }
 :where([data-theme~="quiet"]) .vrm-add:hover { background: var(--surface-3); color: var(--ink); }
 
@@ -632,6 +632,6 @@
 .dark:where([data-theme~="quiet"]) .toggle.on::after { box-shadow: none !important; }
 
 /* ---------- 弹窗 ---------- */
-:where([data-theme~="quiet"]) .cc-dialog { border: none; box-shadow: var(--shadow-pop); background: var(--q-pop); border-radius: 16px; }
-:where([data-theme~="quiet"]) .stats-tooltip { border: none; box-shadow: var(--shadow-pop); background: var(--q-pop); border-radius: 10px; }
+:where([data-theme~="quiet"]) .cc-dialog { border: none; box-shadow: var(--shadow-pop); background: var(--q-pop); border-radius: var(--q-r-card, 16px); }
+:where([data-theme~="quiet"]) .stats-tooltip { border: none; box-shadow: var(--shadow-pop); background: var(--q-pop); border-radius: var(--q-r-ctl, 10px); }
 }

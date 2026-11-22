@@ -12,6 +12,7 @@ import { LogsPage } from "@/routes/Logs";
 import { RequestDetailPage } from "@/routes/RequestDetail";
 import { StatisticsPage } from "@/routes/Statistics";
 import { ReceiptsPage } from "@/routes/Receipts";
+import { PluginsPage } from "@/routes/Plugins";
 import { AboutPage } from "@/routes/About";
 import { GuidePage } from "@/routes/Guide";
 import { useSubscriptionEventBridge } from "@/hooks/useSubscriptions";
@@ -51,6 +52,7 @@ function AppInner() {
         <Route path="/request-logs/:id" element={<RequestDetailPage />} />
         <Route path="/statistics" element={<StatisticsPage />} />
         <Route path="/receipts" element={<ReceiptsPage />} />
+        <Route path="/plugins" element={<PluginsPage />} />
         <Route path="/guide" element={<GuidePage />} />
         <Route path="/updates" element={<UpdatesPage />} />
         <Route path="/settings" element={<SettingsPage />} />

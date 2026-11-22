@@ -6,6 +6,8 @@ export interface Runtime {
   copyText(text: string): Promise<void>;
   /** 桌面: 系统保存对话框, 返回用户选的路径 (取消 → null); web: 抛错 (调用方应先判 kind) */
   pickSavePath(opts: { defaultName: string; filters: { name: string; extensions: string[] }[] }): Promise<string | null>;
+  /** 桌面: 系统选择文件夹对话框 (取消 → null); web: 抛错 (调用方应先判 kind) */
+  pickFolder(): Promise<string | null>;
   /** web: 触发浏览器下载; 桌面: 抛错 (调用方应先判 kind) */
   downloadText(filename: string, text: string, mime: string): void;
   /** web: 触发浏览器下载二进制内容; 桌面: 抛错 (调用方应先判 kind) */

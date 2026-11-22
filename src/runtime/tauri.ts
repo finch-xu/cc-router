@@ -4,7 +4,7 @@ import { getCurrentWindow } from "@tauri-apps/api/window";
 import { downloadDir } from "@tauri-apps/api/path";
 import { open as openShell } from "@tauri-apps/plugin-shell";
 import { writeText } from "@tauri-apps/plugin-clipboard-manager";
-import { save } from "@tauri-apps/plugin-dialog";
+import { open as openDialog, save } from "@tauri-apps/plugin-dialog";
 import { platform } from "@tauri-apps/plugin-os";
 import type { Runtime } from "./types";
 
@@ -26,6 +26,10 @@ export const tauriRuntime: Runtime = {
   pickSavePath: async ({ defaultName, filters }) => {
     const p = await save({ defaultPath: defaultName, filters });
     return p ?? null;
+  },
+  pickFolder: async () => {
+    const p = await openDialog({ directory: true, multiple: false });
+    return typeof p === "string" ? p : null;
   },
   downloadText: () => {
     throw new Error("downloadText is web-only");
