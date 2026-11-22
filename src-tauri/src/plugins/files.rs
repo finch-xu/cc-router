@@ -33,12 +33,28 @@ pub fn mime_of(p: &str) -> Option<&'static str> {
         "woff" => "font/woff",
         "ttf" => "font/ttf",
         "otf" => "font/otf",
+        // 文本资源 (小票模板 / 样式): 原文交给前端校验, 不转 data URL
+        "html" => "text/html",
+        "css" => "text/css",
         _ => return None,
     })
 }
 
 /// 内容与扩展名是否一致; SVG 另做安全检查。返回给用户看的原因。
+pub fn is_text_asset(p: &str) -> bool {
+    matches!(ext_of(p).as_str(), "html" | "css")
+}
+
+/// 文本资源上限: 模板 / 样式不该很大
+pub const MAX_TEXT_BYTES: usize = 256 * 1024;
+
 pub fn check_asset(path: &str, bytes: &[u8]) -> Result<(), String> {
+    if is_text_asset(path) {
+        if bytes.len() > MAX_TEXT_BYTES {
+            return Err(format!("{path}: 超过 256 KB"));
+        }
+        return std::str::from_utf8(bytes).map(|_| ()).map_err(|_| format!("{path}: 不是 UTF-8 文本"));
+    }
     let ok = match ext_of(path).as_str() {
         "png" => bytes.starts_with(b"\x89PNG\r\n\x1a\n"),
         "jpg" | "jpeg" => bytes.starts_with(&[0xFF, 0xD8, 0xFF]),
@@ -140,6 +156,9 @@ mod tests {
         assert!(check_asset("a.woff2", b"wOF2....").is_ok());
         assert!(check_asset("a.woff2", b"<svg>").is_err());
         assert!(check_asset("a.exe", b"MZ").is_err());
+        assert!(check_asset("t.html", "<div>小票</div>".as_bytes()).is_ok());
+        assert!(check_asset("s.css", b"\xff\xfe").is_err());
+        assert!(check_asset("s.css", &vec![b'a'; MAX_TEXT_BYTES + 1]).is_err());
     }
 
     #[test]

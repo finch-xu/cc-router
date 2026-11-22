@@ -18,7 +18,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use uuid::Uuid;
 
-use super::files::{check_asset, data_url, is_safe_path, package_hash};
+use super::files::{check_asset, data_url, is_safe_path, is_text_asset, package_hash};
 use super::{is_valid_id, parse_manifest, ManifestCore, PluginSource, SourceKind, MANIFEST_FILE, MAX_ENTRY_BYTES, MAX_FILE_BYTES, MAX_MANIFEST_BYTES, MAX_TOTAL_BYTES};
 use crate::error::{AppError, AppResult};
 
@@ -46,6 +46,8 @@ pub struct StagedPlugin {
     /// 入口文件文本 (主题 = theme.json)
     pub entry: String,
     pub assets: Vec<AssetInfo>,
+    /// 文本资源 (html / css) 原文: 前端在确认框里校验与预览
+    pub texts: BTreeMap<String, String>,
     pub total_size: u64,
     pub sha256: String,
     pub source: PluginSource,
@@ -70,8 +72,10 @@ pub struct InstalledPlugin {
 pub struct PluginContent {
     pub manifest: Value,
     pub entry: String,
-    /// 资源路径 → data URL
+    /// 二进制资源路径 → data URL
     pub assets: BTreeMap<String, String>,
+    /// 文本资源 (html / css) 路径 → 原文
+    pub texts: BTreeMap<String, String>,
 }
 
 struct Staged {
@@ -125,6 +129,7 @@ pub fn stage(app_data_dir: &Path, files: Files, source: PluginSource) -> AppResu
     let entry = String::from_utf8(entry_bytes.clone()).map_err(|_| AppError::BadRequest(format!("{} 不是 UTF-8 文本", core.entry)))?;
     let mut total = 0u64;
     let mut assets = Vec::new();
+    let mut texts = BTreeMap::new();
     for (path, bytes) in &files {
         if !is_safe_path(path) {
             return Err(AppError::BadRequest(format!("不合法的文件路径: {path}")));
@@ -137,6 +142,9 @@ pub fn stage(app_data_dir: &Path, files: Files, source: PluginSource) -> AppResu
         if core.assets.contains(path) {
             check_asset(path, bytes).map_err(AppError::BadRequest)?;
             assets.push(AssetInfo { path: path.clone(), size: bytes.len() as u64 });
+            if is_text_asset(path) {
+                texts.insert(path.clone(), String::from_utf8_lossy(bytes).into_owned());
+            }
         }
     }
     for a in &core.assets {
@@ -164,6 +172,7 @@ pub fn stage(app_data_dir: &Path, files: Files, source: PluginSource) -> AppResu
         manifest: manifest.clone(),
         entry,
         assets,
+        texts,
         total_size: total,
         sha256: sha256.clone(),
         source: source.clone(),
@@ -286,14 +295,17 @@ pub fn load(app_data_dir: &Path, id: &str) -> AppResult<PluginContent> {
     }
     let entry = std::fs::read_to_string(dir.join(&core.entry))?;
     let mut assets = BTreeMap::new();
+    let mut texts = BTreeMap::new();
     for a in &core.assets {
         let bytes = std::fs::read(dir.join(a))?;
         check_asset(a, &bytes).map_err(AppError::BadRequest)?;
-        if let Some(url) = data_url(a, &bytes) {
+        if is_text_asset(a) {
+            texts.insert(a.clone(), String::from_utf8_lossy(&bytes).into_owned());
+        } else if let Some(url) = data_url(a, &bytes) {
             assets.insert(a.clone(), url);
         }
     }
-    Ok(PluginContent { manifest, entry, assets })
+    Ok(PluginContent { manifest, entry, assets, texts })
 }
 
 pub fn uninstall(app_data_dir: &Path, id: &str) -> AppResult<()> {
@@ -340,6 +352,7 @@ mod tests {
 
         let content = load(app, "demo-a").unwrap();
         assert!(content.assets["assets/p.png"].starts_with("data:image/png;base64,"));
+        assert!(content.texts.is_empty());
 
         // 覆盖安装: 暂存时能看到已装的版本, 装完仍只有一份
         let s2 = stage(app, pkg("demo-a", &[]), local(app)).unwrap();
@@ -351,6 +364,21 @@ mod tests {
         uninstall(app, "demo-a").unwrap();
         assert!(list(app).unwrap().is_empty());
         assert!(load(app, "demo-a").is_err());
+    }
+
+    #[test]
+    fn text_assets_come_back_as_text() {
+        let tmp = tempfile::tempdir().unwrap();
+        let app = tmp.path();
+        let mut f = pkg("demo-r", &[("t.html", "<div>{{receipt.no}}</div>".as_bytes()), ("s.css", b".a{color:red}")]);
+        let m = String::from_utf8(f[MANIFEST_FILE].clone()).unwrap().replace(r#""type":"theme""#, r#""type":"receipt""#);
+        f.insert(MANIFEST_FILE.into(), m.into_bytes());
+        let s = stage(app, f, local(app)).unwrap();
+        assert_eq!(s.texts["t.html"], "<div>{{receipt.no}}</div>");
+        install(app, &s.staging_id, None).unwrap();
+        let c = load(app, "demo-r").unwrap();
+        assert_eq!(c.texts["s.css"], ".a{color:red}");
+        assert!(c.assets.is_empty(), "文本资源不转 data URL");
     }
 
     #[test]

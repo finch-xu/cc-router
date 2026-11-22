@@ -7,7 +7,7 @@ export const MANIFEST_VERSION = 1;
 export const MANIFEST_FILE = "cc-router-plugin.json";
 
 /** 本版 app 能加载的插件类型。旧版 app 遇到新类型只报 unsupported_type, 不会尝试加载。 */
-export const SUPPORTED_TYPES = ["theme"] as const;
+export const SUPPORTED_TYPES = ["theme", "receipt"] as const;
 export type PluginType = (typeof SUPPORTED_TYPES)[number];
 
 /** 内置主题 / 画风的名字不能当插件 id, 避免设置里出现两个「简洁」 */
@@ -16,6 +16,8 @@ export const RESERVED_IDS = ["classic", "sketch", "win2000", "win2k", "quiet", "
 export const MAX_ASSETS = 128;
 export const IMAGE_EXTS = ["png", "jpg", "jpeg", "webp", "gif", "svg"];
 export const FONT_EXTS = ["woff2", "woff", "ttf", "otf"];
+/** 文本资源: 只给小票插件用 (模板 / 样式) */
+export const TEXT_EXTS = ["html", "css"];
 export const LANGS = ["zh", "zh-Hant", "en", "ja"] as const;
 export type Lang = (typeof LANGS)[number];
 
@@ -161,7 +163,7 @@ export function validateManifest(
 
   const entry = raw.entry;
   if (!isSafePath(entry)) issues.push({ path: "entry", code: entry === undefined ? "missing" : "bad_path" });
-  else if (type === "theme" && extOf(entry) !== "json") issues.push({ path: "entry", code: "wrong_file_kind", detail: "theme entry must be a .json file" });
+  else if (extOf(entry) !== "json") issues.push({ path: "entry", code: "wrong_file_kind", detail: "entry must be a .json file" });
 
   const assets: string[] = [];
   if (raw.assets !== undefined) {
@@ -170,7 +172,8 @@ export function validateManifest(
       if (raw.assets.length > MAX_ASSETS) issues.push({ path: "assets", code: "too_many", detail: `max ${MAX_ASSETS}` });
       raw.assets.forEach((a, i) => {
         if (!isSafePath(a)) issues.push({ path: `assets[${i}]`, code: "bad_path" });
-        else if (![...IMAGE_EXTS, ...FONT_EXTS].includes(extOf(a))) issues.push({ path: `assets[${i}]`, code: "wrong_file_kind", detail: a });
+        else if (![...IMAGE_EXTS, ...FONT_EXTS, ...TEXT_EXTS].includes(extOf(a))) issues.push({ path: `assets[${i}]`, code: "wrong_file_kind", detail: a });
+        else if (type !== "receipt" && TEXT_EXTS.includes(extOf(a))) issues.push({ path: `assets[${i}]`, code: "wrong_file_kind", detail: `${a}: html / css only in receipt plugins` });
         else if (assets.includes(a) || a === entry) issues.push({ path: `assets[${i}]`, code: "duplicate", detail: a });
         else assets.push(a);
       });

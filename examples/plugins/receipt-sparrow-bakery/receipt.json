@@ -1,0 +1,7 @@
+{
+  "receiptApi": 1,
+  "template": "template.html",
+  "style": "style.css",
+  "width": 340,
+  "paper": "#fffaf1"
+}

@@ -1,5 +1,6 @@
 import { useMemo, useState } from "react";
-import { ExternalLink, FolderOpen, Link2, Palette, Puzzle } from "lucide-react";
+import { ExternalLink, FolderOpen, Link2, Palette, Puzzle, Receipt } from "lucide-react";
+import { useNavigate } from "react-router";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { EmptyState } from "@/components/EmptyState";
 import { Spinner } from "@/components/Spinner";
@@ -18,6 +19,7 @@ import { localized, type LocalizedText } from "@/plugins/manifest";
 import type { InstalledPlugin, StagedPlugin } from "@/types";
 
 type Tab = "community" | "installed";
+type Kind = "all" | "theme" | "receipt";
 
 /** 清单原文里的名字 / 介绍 (已安装列表用; 内容在安装时已校验过) */
 function manifestText(m: unknown, key: "name" | "description"): LocalizedText | undefined {
@@ -35,6 +37,8 @@ export function PluginsPage() {
   const [tab, setTab] = useState<Tab>(isDesktop ? "community" : "installed");
   const [query, setQuery] = useState("");
   const [tag, setTag] = useState<string | null>(null);
+  const [kind, setKind] = useState<Kind>("all");
+  const navigate = useNavigate();
   const [linkOpen, setLinkOpen] = useState(false);
   const [staged, setStaged] = useState<{ s: StagedPlugin; sha?: string } | null>(null);
   const [detail, setDetail] = useState<CommunityEntry | null>(null);
@@ -48,12 +52,14 @@ export function PluginsPage() {
     const q = query.trim().toLowerCase();
     return (community.data ?? []).filter((e) => {
       if (e.revoked) return false;
+      if (kind !== "all" && e.type !== kind) return false;
       if (tag && !e.tags.includes(tag)) return false;
       if (!q) return true;
       const hay = [localized(e.name, locale), localized(e.description, locale), e.author, e.id, ...e.tags].join(" ").toLowerCase();
       return hay.includes(q);
     });
-  }, [community.data, query, tag, locale]);
+  }, [community.data, query, tag, locale, kind]);
+  const installedList = (installed.data ?? []).filter((p) => kind === "all" || p.plugin_type === kind);
   const allTags = useMemo(() => [...new Set((community.data ?? []).flatMap((e) => e.tags))].sort(), [community.data]);
 
   async function stage(run: () => Promise<StagedPlugin>, key: string, sha?: string) {
@@ -133,6 +139,13 @@ export function PluginsPage() {
             ))}
           </div>
         )}
+        <div className="sb-chips" role="tablist">
+          {(["all", "theme", "receipt"] as const).map((k) => (
+            <button key={k} type="button" role="tab" aria-selected={kind === k} className={"sb-chip" + (kind === k ? " active" : "")} onClick={() => setKind(k)}>
+              {k === "all" ? t("plugins.kind.all") : t(`plugins.type.${k}`)}
+            </button>
+          ))}
+        </div>
         {tab === "community" && (
           <>
             <input className="input" placeholder={t("plugins.search")} value={query} onChange={(e) => setQuery(e.target.value)} />
@@ -171,9 +184,7 @@ export function PluginsPage() {
                   {e.screenshots[0] ? (
                     <img className="pg-shot" src={e.screenshots[0]} alt="" loading="lazy" />
                   ) : (
-                    <div className="pg-shot empty">
-                      <Palette size={22} />
-                    </div>
+                    <div className="pg-shot empty">{e.type === "receipt" ? <Receipt size={22} /> : <Palette size={22} />}</div>
                   )}
                   <div className="pg-card-body">
                     <div className="pg-title">
@@ -182,7 +193,7 @@ export function PluginsPage() {
                       {badgeFor(e.id, e)}
                     </div>
                     <div className="pg-by">
-                      {e.author} · v{e.latest.version}
+                      {t(`plugins.type.${e.type}`)} · {e.author} · v{e.latest.version}
                     </div>
                     {e.description && <div className="pg-desc">{localized(e.description, locale)}</div>}
                     {e.tags.length > 0 && (
@@ -204,9 +215,9 @@ export function PluginsPage() {
 
       {tab === "installed" && (
         <>
-          {installed.data && installed.data.length === 0 && <EmptyState icon={Puzzle} message={t("plugins.installed.empty")} />}
+          {installed.data && installedList.length === 0 && <EmptyState icon={Puzzle} message={t("plugins.installed.empty")} />}
           <div className="pg-list">
-            {(installed.data ?? []).map((p) => {
+            {installedList.map((p) => {
               const e = communityById.get(p.id);
               const inUse = themeId === `plugin:${p.id}`;
               const canUpdate = isDesktop && e && p.source.kind === "community" && hasUpdate(p.version, e);
@@ -220,6 +231,7 @@ export function PluginsPage() {
                       {revoked && <span className="pg-badge err">{t("plugins.badge.revoked")}</span>}
                     </div>
                     <div className="pg-meta">
+                      <span>{t(`plugins.type.${p.plugin_type}`)}</span>
                       <span>v{p.version}</span>
                       <span>{fmtBytes(p.size)}</span>
                       <span className="mono">{sourceText(t, p.source)}</span>
@@ -230,6 +242,11 @@ export function PluginsPage() {
                     {canUpdate && (
                       <button className="btn sm" type="button" disabled={busyId !== null} onClick={() => installFromCommunity(e)}>
                         {busyId === p.id ? <Spinner /> : null} {t("plugins.btn.update")} v{e.latest.version}
+                      </button>
+                    )}
+                    {p.plugin_type === "receipt" && (
+                      <button className="btn sm primary" type="button" onClick={() => navigate(`/receipts?theme=plugin:${p.id}`)}>
+                        {t("plugins.btn.openReceipt")}
                       </button>
                     )}
                     {p.plugin_type === "theme" && (

@@ -1,21 +1,41 @@
 import { useEffect, useMemo, useState } from "react";
+import { useNavigate } from "react-router";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Spinner } from "@/components/Spinner";
+import { PluginSlip, pluginReceiptCss } from "@/components/receipts/PluginSlip";
 import { api } from "@/api/tauri";
 import { useT } from "@/i18n";
 import { useTheme } from "@/hooks/useTheme";
 import { errorText } from "@/lib/errorText";
 import { fmtBytes, sourceText } from "./format";
 import { IssueList } from "./IssueList";
-import { checkThemePackage, PluginThemeError } from "@/plugins/theme/apply";
+import { checkThemePackage, PluginThemeError, type CheckedTheme } from "@/plugins/theme/apply";
+import { checkReceiptPackage, type CheckedReceipt } from "@/plugins/receipt/apply";
+import { sampleReceiptDto } from "@/plugins/receipt/fields";
 import { themeCss } from "@/plugins/theme/css";
 import { localized, type Issue } from "@/plugins/manifest";
+import { version as APP_VERSION } from "../../../package.json";
 import type { InstalledPlugin, StagedPlugin } from "@/types";
 
 const BIG_PACKAGE = 8 * 1024 * 1024;
 
+type Checked =
+  | { kind: "theme"; ok: CheckedTheme }
+  | { kind: "receipt"; ok: CheckedReceipt }
+  | { kind: "error"; issues: Issue[]; message: string };
+
+function check(staged: StagedPlugin): Checked {
+  try {
+    const type = (staged.manifest as { type?: unknown } | null)?.type;
+    if (type === "receipt") return { kind: "receipt", ok: checkReceiptPackage(staged.manifest, staged.entry, staged.texts) };
+    return { kind: "theme", ok: checkThemePackage(staged.manifest, staged.entry) };
+  } catch (e) {
+    return { kind: "error", issues: e instanceof PluginThemeError ? e.issues : [], message: errorText(e) };
+  }
+}
+
 /**
- * 安装确认框: 暂存好的包 → 前端校验 → 显示来源 / 大小 / 警告 → 试穿 / 安装 / 取消。
+ * 安装确认框: 暂存好的包 → 前端校验 → 显示来源 / 大小 / 警告 → 试穿 (主题) 或样例预览 (小票) → 安装。
  * 关闭 (未安装) 时丢弃暂存; 试穿只在框开着时生效。
  */
 export function InstallDialog({
@@ -29,19 +49,14 @@ export function InstallDialog({
   onClose: () => void;
 }) {
   const { t, locale } = useT();
+  const navigate = useNavigate();
   const { preview, setPreview, setThemeId, themeId } = useTheme();
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [installed, setInstalled] = useState<InstalledPlugin | null>(null);
 
-  const checked = useMemo(() => {
-    if (!staged) return null;
-    try {
-      return { ok: checkThemePackage(staged.manifest, staged.entry), issues: [] as Issue[] };
-    } catch (e) {
-      return { ok: null, issues: e instanceof PluginThemeError ? e.issues : [], message: errorText(e) };
-    }
-  }, [staged]);
+  const checked = useMemo(() => (staged ? check(staged) : null), [staged]);
+  const ok = checked && checked.kind !== "error" ? checked.ok : null;
 
   useEffect(() => {
     setError(null);
@@ -49,13 +64,26 @@ export function InstallDialog({
     setBusy(false);
   }, [staged]);
 
-  const pluginId = checked?.ok?.manifest.id ?? null;
+  const pluginId = ok?.manifest.id ?? null;
   const tryingOn = !!pluginId && preview?.pluginId === pluginId;
 
   // 框关掉 / 换了包: 结束试穿
   useEffect(() => {
     return () => setPreview(null);
   }, [staged, setPreview]);
+
+  // 小票样例预览 (自带字体安装前拿不到, 预览用回退字体)
+  const sample = useMemo(() => {
+    if (checked?.kind !== "receipt") return null;
+    const id = checked.ok.manifest.id;
+    return {
+      id,
+      receipt: checked.ok.receipt,
+      css: pluginReceiptCss(id, checked.ok.receipt, () => null),
+      dto: sampleReceiptDto(),
+      ctx: { port: 23456, version: APP_VERSION, deletedLabel: t("receipts.slip.deletedSub") },
+    };
+  }, [checked, t]);
 
   function close() {
     if (busy) return;
@@ -65,7 +93,7 @@ export function InstallDialog({
   }
 
   function toggleTryOn() {
-    if (!checked?.ok || !pluginId) return;
+    if (checked?.kind !== "theme" || !pluginId) return;
     if (tryingOn) setPreview(null);
     else setPreview({ pluginId, css: themeCss(pluginId, checked.ok.theme, () => null).full });
   }
@@ -85,9 +113,16 @@ export function InstallDialog({
     }
   }
 
-  const m = checked?.ok?.manifest;
-  const name = m ? localized(m.name, locale) : (staged ? String((staged.manifest as { id?: unknown })?.id ?? "") : "");
-  const warnings = checked?.ok?.warnings ?? [];
+  function startUsing(rec: InstalledPlugin) {
+    if (rec.plugin_type === "receipt") navigate(`/receipts?theme=plugin:${rec.id}`);
+    else setThemeId(`plugin:${rec.id}`);
+    close();
+  }
+
+  const m = ok?.manifest;
+  const name = m ? localized(m.name, locale) : staged ? String((staged.manifest as { id?: unknown })?.id ?? "") : "";
+  const warnings = ok ? (checked as { ok: { warnings: Issue[] } }).ok.warnings : [];
+  const alreadyInUse = installed && installed.plugin_type === "theme" && themeId === `plugin:${installed.id}`;
 
   return (
     <Dialog open={!!staged} onOpenChange={(v) => !v && close()}>
@@ -101,6 +136,8 @@ export function InstallDialog({
           <dl className="pg-facts">
             {m && (
               <>
+                <dt>{t("plugins.install.type")}</dt>
+                <dd>{t(`plugins.type.${m.type}`)}</dd>
                 <dt>{t("plugins.install.version")}</dt>
                 <dd>{m.version}</dd>
                 <dt>{t("plugins.install.author")}</dt>
@@ -120,20 +157,27 @@ export function InstallDialog({
           </dl>
         )}
 
+        {sample && !installed && (
+          <div className="pg-receipt-preview">
+            <div className="pg-receipt-preview-label">{t("plugins.install.receiptPreview")}</div>
+            <PluginSlip pluginId={sample.id} receipt={sample.receipt} css={sample.css} dto={sample.dto} ctx={sample.ctx} />
+          </div>
+        )}
+
         {installed ? (
           <div className="pg-alert info">{t("plugins.install.done", { name })}</div>
         ) : (
           <>
-            {checked && !checked.ok && (
+            {checked?.kind === "error" && (
               <div className="pg-alert err">
                 {t("plugins.install.invalid", { count: Math.max(checked.issues.length, 1) })}
                 {checked.issues.length > 0 ? <IssueList issues={checked.issues} /> : <div>{checked.message}</div>}
               </div>
             )}
-            {staged && checked?.ok && staged.source.kind === "github" && !communitySha256 && (
+            {staged && ok && staged.source.kind === "github" && !communitySha256 && (
               <div className="pg-alert warn">{t("plugins.install.unreviewed")}</div>
             )}
-            {staged?.installed && checked?.ok && (
+            {staged?.installed && ok && (
               <div className="pg-alert info">
                 {t("plugins.install.replaces", { version: staged.installed.version, source: sourceText(t, staged.installed.source) })}
               </div>
@@ -156,15 +200,8 @@ export function InstallDialog({
               <button className="btn" type="button" onClick={close}>
                 {t("plugins.btn.done")}
               </button>
-              {themeId !== `plugin:${installed.id}` && (
-                <button
-                  className="btn primary"
-                  type="button"
-                  onClick={() => {
-                    setThemeId(`plugin:${installed.id}`);
-                    close();
-                  }}
-                >
+              {!alreadyInUse && (
+                <button className="btn primary" type="button" onClick={() => startUsing(installed)}>
                   {t("plugins.btn.useNow")}
                 </button>
               )}
@@ -174,12 +211,12 @@ export function InstallDialog({
               <button className="btn" type="button" onClick={close} disabled={busy}>
                 {t("common.cancel")}
               </button>
-              {checked?.ok && (
+              {checked?.kind === "theme" && (
                 <button className="btn" type="button" onClick={toggleTryOn} disabled={busy}>
                   {tryingOn ? t("plugins.btn.stopTryOn") : t("plugins.btn.tryOn")}
                 </button>
               )}
-              <button className="btn primary" type="button" onClick={install} disabled={busy || !checked?.ok}>
+              <button className="btn primary" type="button" onClick={install} disabled={busy || !ok}>
                 {busy && <Spinner />}
                 {t("plugins.btn.install")}
               </button>

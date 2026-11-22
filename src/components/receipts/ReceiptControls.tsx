@@ -4,6 +4,9 @@ import { useT } from "@/i18n";
 import { useSubscriptions } from "@/hooks/useSubscriptions";
 import type { ReceiptRange, SubscriptionDto } from "@/types";
 import { isClassicTheme, type ReceiptDisplayOptions, type ReceiptTheme } from "./ReceiptSlip";
+import { Link } from "react-router";
+import { useInstalledPlugins } from "@/hooks/usePlugins";
+import { localized, type LocalizedText } from "@/plugins/manifest";
 
 /** 主题顺序: 经典两配色在前, 之后按设计稿 A-G 排列 */
 const RECEIPT_THEMES: ReceiptTheme[] = [
@@ -66,8 +69,10 @@ export function ReceiptControls({
   printAnimation,
   onPrintAnimationChange,
 }: Props) {
-  const { t } = useT();
+  const { t, locale } = useT();
   const subs = useSubscriptions();
+  const plugins = useInstalledPlugins();
+  const receiptPlugins = (plugins.data ?? []).filter((p) => p.plugin_type === "receipt");
 
   const subsList: SubscriptionDto[] = subs.data ?? [];
   // 主题小票是固定排版, 聚合视图/识别码/细项开关只对经典主题生效
@@ -159,6 +164,23 @@ export function ReceiptControls({
                 {t(`receipts.controls.display.theme.${m}`)}
               </button>
             ))}
+            {receiptPlugins.map((p) => {
+              const id = `plugin:${p.id}` as const;
+              return (
+                <button
+                  key={id}
+                  type="button"
+                  className={"range-tab" + (options.theme === id ? " active" : "")}
+                  onClick={() => onOptionsChange({ ...options, theme: id })}
+                  title={t("receipts.plugin.badge")}
+                >
+                  {localized((p.manifest as { name?: LocalizedText } | null)?.name, locale) || p.id}
+                </button>
+              );
+            })}
+          </div>
+          <div className="receipt-field-desc">
+            <Link to="/plugins">{t("receipts.plugin.more")}</Link>
           </div>
           <div className="receipt-field-desc">
             {t("receipts.controls.display.theme.desc")}

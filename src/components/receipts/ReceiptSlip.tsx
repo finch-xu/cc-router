@@ -32,6 +32,9 @@ import { PharmacySlip } from "./themes/PharmacySlip";
 import { DinerCheckSlip } from "./themes/DinerCheckSlip";
 import { CarLabelSlip } from "./themes/CarLabelSlip";
 import type { ThemeSlipProps } from "./themes/shared";
+import { PluginSlip } from "./PluginSlip";
+import { usePluginReceipt } from "@/plugins/receipt/apply";
+import { errorText } from "@/lib/errorText";
 
 const SITE_URL = "https://ccrouter.app";
 const SITE_LABEL = "ccrouter.app";
@@ -45,6 +48,8 @@ export type ReceiptColorMode = "mono" | "color";
  */
 export type ReceiptTheme =
   | ReceiptColorMode
+  /** 已安装的小票插件 */
+  | `plugin:${string}`
   | "jp_konbini"
   | "us_grocery"
   | "de_discount"
@@ -56,6 +61,25 @@ export type ReceiptTheme =
 export function isClassicTheme(theme: ReceiptTheme): theme is ReceiptColorMode {
   return theme === "mono" || theme === "color";
 }
+
+export function receiptPluginIdOf(theme: ReceiptTheme): string | null {
+  return theme.startsWith("plugin:") ? theme.slice("plugin:".length) : null;
+}
+
+/** 第三方小票: 读插件 → 校验 → 渲染; 读不到时给一句说明, 不让整页报错 */
+const PluginReceiptHost = forwardRef<HTMLDivElement, { pluginId: string; dto: ReceiptDto; port: number }>(
+  function PluginReceiptHost({ pluginId, dto, port }, ref) {
+    const { t } = useT();
+    const q = usePluginReceipt(pluginId);
+    const ctx = useMemo(() => ({ port, version: VERSION, deletedLabel: t("receipts.slip.deletedSub") }), [port, t]);
+    if (q.data) return <PluginSlip ref={ref} pluginId={pluginId} receipt={q.data.receipt} css={q.data.css} dto={dto} ctx={ctx} />;
+    return (
+      <div ref={ref} style={{ width: 360, padding: 20, fontSize: 12, color: "var(--ink-3)" }}>
+        {q.isError ? t("receipts.plugin.failed", { error: errorText(q.error) }) : t("common.loading")}
+      </div>
+    );
+  },
+);
 
 const THEME_SLIPS: Record<
   Exclude<ReceiptTheme, ReceiptColorMode>,
@@ -180,12 +204,17 @@ export const ReceiptSlip = forwardRef<HTMLDivElement, Props>(function ReceiptSli
   const settings = useSettings();
   const vms = useVirtualModels();
 
+  const pluginId = receiptPluginIdOf(options.theme);
+  if (pluginId) {
+    return <PluginReceiptHost ref={ref} pluginId={pluginId} dto={dto} port={settings.data?.proxy_port ?? 23456} />;
+  }
+
   if (!isClassicTheme(options.theme)) {
     const port = settings.data?.proxy_port ?? 23456;
     const modes = new Set((vms.data ?? []).map((v) => v.mode));
     const sched =
       modes.size === 1 ? [...modes][0] : modes.size === 0 ? "—" : "mixed";
-    const Slip = THEME_SLIPS[options.theme];
+    const Slip = THEME_SLIPS[options.theme as keyof typeof THEME_SLIPS];
     return (
       <div ref={ref} style={{ width: 360 }}>
         <Slip dto={dto} port={port} sched={sched} />

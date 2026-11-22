@@ -7,7 +7,7 @@ import receiptFontsCss from "@/receipt-fonts.css?inline";
 const FILE_PREFIX = "cc-router-receipt";
 
 /** 各主题实际使用的 webfont family; 经典主题走系统字体不需要内嵌 */
-const THEME_FONT_FAMILIES: Record<ReceiptTheme, string[]> = {
+const THEME_FONT_FAMILIES: Record<Exclude<ReceiptTheme, `plugin:${string}`>, string[]> = {
   mono: [],
   color: [],
   jp_konbini: ["DotGothic16"],
@@ -25,8 +25,14 @@ const THEME_FONT_FAMILIES: Record<ReceiptTheme, string[]> = {
  * 必须自带这些规则, 否则主题字体整体回退系统字体。字体文件仍指公共 CDN
  * (导出的 HTML 无 CSP), 打开时有网即加载, 离线回退系统字体。
  */
-function fontFaceCssFor(theme: ReceiptTheme): string {
-  const families = THEME_FONT_FAMILIES[theme] ?? [];
+/** 内置小票用到的 CDN 字体; 插件小票的 CSS 也可以直接用这些名字 */
+export const RECEIPT_CDN_FONTS = [...new Set(Object.values(THEME_FONT_FAMILIES).flat())];
+
+function fontFaceCssFor(theme: ReceiptTheme, el: HTMLElement): string {
+  // 插件小票: 按它的样式里实际出现的字体名挑 (自带字体已以 data URL 内嵌在外壳的 <style> 里)
+  const families = theme.startsWith("plugin:")
+    ? RECEIPT_CDN_FONTS.filter((f) => (el.querySelector("style")?.textContent ?? "").includes(f))
+    : (THEME_FONT_FAMILIES[theme as keyof typeof THEME_FONT_FAMILIES] ?? []);
   if (families.length === 0) return "";
   const blocks: string[] = [];
   const parts = receiptFontsCss.split("@font-face");
@@ -121,7 +127,7 @@ export async function exportHtml(
     logo.setAttribute("src", inline ?? PUBLIC_LOGO_URL);
   }
 
-  const fontCss = fontFaceCssFor(theme);
+  const fontCss = fontFaceCssFor(theme, el);
   const html = `<!doctype html>
 <html lang="zh">
 <head>
