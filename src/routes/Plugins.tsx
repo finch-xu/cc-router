@@ -1,5 +1,5 @@
 import { useMemo, useState } from "react";
-import { Bell, Coins, ExternalLink, FolderOpen, Link2, Palette, Plug, Puzzle, Receipt, SlidersHorizontal } from "lucide-react";
+import { ArrowDown, ArrowUp, Bell, Coins, ExternalLink, FolderOpen, Link2, Palette, Plug, Puzzle, Receipt, SlidersHorizontal } from "lucide-react";
 import Github from "@lobehub/icons/es/Github";
 import { useNavigate } from "react-router";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
@@ -141,6 +141,32 @@ export function PluginsPage() {
       setBusyId(null);
     }
   }
+
+  async function movePriority(pluginType: "pricing" | "rules", id: string, delta: -1 | 1) {
+    const ids = (installed.data ?? []).filter((x) => x.plugin_type === pluginType).map((x) => x.id);
+    const idx = ids.indexOf(id);
+    const target = idx + delta;
+    if (idx < 0 || target < 0 || target >= ids.length) return;
+    const next = [...ids];
+    [next[idx], next[target]] = [next[target], next[idx]];
+    setBusyId(id);
+    setError(null);
+    try {
+      await api.reorderPlugins(pluginType, next);
+    } catch (e) {
+      setError(errorText(e));
+    } finally {
+      setBusyId(null);
+    }
+  }
+
+  const orderedByType = useMemo(() => {
+    const all = installed.data ?? [];
+    return {
+      pricing: all.filter((x) => x.plugin_type === "pricing").map((x) => x.id),
+      rules: all.filter((x) => x.plugin_type === "rules").map((x) => x.id),
+    };
+  }, [installed.data]);
 
   const presentKinds = new Set<string>([
     ...(community.data ?? []).map((e) => e.type),
@@ -366,7 +392,35 @@ export function PluginsPage() {
                         {t("plugins.btn.addSubscription")}
                       </button>
                     )}
-                    {(p.plugin_type === "notifier" || (p.param_decls && p.param_decls.length > 0)) && (
+                    {isDesktop && (p.plugin_type === "pricing" || p.plugin_type === "rules") && orderedByType[p.plugin_type].length > 1 && (() => {
+                      const list = orderedByType[p.plugin_type as "pricing" | "rules"];
+                      const idx = list.indexOf(p.id);
+                      return (
+                        <>
+                          <button
+                            className="btn sm"
+                            type="button"
+                            title={t("plugins.btn.moveUp")}
+                            aria-label={t("plugins.btn.moveUp")}
+                            disabled={busyId !== null || idx <= 0}
+                            onClick={() => void movePriority(p.plugin_type as "pricing" | "rules", p.id, -1)}
+                          >
+                            <ArrowUp size={12} />
+                          </button>
+                          <button
+                            className="btn sm"
+                            type="button"
+                            title={t("plugins.btn.moveDown")}
+                            aria-label={t("plugins.btn.moveDown")}
+                            disabled={busyId !== null || idx < 0 || idx >= list.length - 1}
+                            onClick={() => void movePriority(p.plugin_type as "pricing" | "rules", p.id, 1)}
+                          >
+                            <ArrowDown size={12} />
+                          </button>
+                        </>
+                      );
+                    })()}
+                    {(p.plugin_type === "rules" || p.plugin_type === "notifier" || (p.param_decls && p.param_decls.length > 0)) && (
                       <button
                         className="btn sm"
                         type="button"

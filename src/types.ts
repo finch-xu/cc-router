@@ -1488,6 +1488,34 @@ export interface NotifierDeliveryRecord {
   error: string | null;
 }
 
+export interface RuleDryRunCount {
+  rule_id: string;
+  matched: number;
+  unknown: number;
+}
+
+export interface DryRunSample {
+  request_id: string;
+  timestamp_ms: number;
+  virtual_model: string;
+  purpose: string;
+  client_tool: string;
+  status: "matched" | "unknown";
+  matched_rules: string[];
+  unknown_rules: string[];
+  unknown_fields: string[];
+  redirect_to?: string;
+  rejected: boolean;
+}
+
+export interface RulesDryRunResult {
+  total_checked: number;
+  matched_count: number;
+  unknown_count: number;
+  rule_counts: RuleDryRunCount[];
+  samples: DryRunSample[];
+}
+
 export interface InstalledPlugin {
   id: string;
   plugin_type: string;
@@ -1500,6 +1528,8 @@ export interface InstalledPlugin {
   size: number;
   /** 系统插件 (厂商等) 是否生效; 主题 / 小票恒为 true */
   enabled: boolean;
+  /** 优先级 (数字越大越先匹配, 用于 pricing / rules) */
+  priority?: number;
   /** 用户已保存的参数 (非参数化插件为 `{}`; 通知插件不含 secret 明文) */
   params?: Record<string, unknown>;
   /** 规则 / 通知插件声明的参数表 */

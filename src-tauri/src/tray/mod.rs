@@ -186,7 +186,7 @@ fn show_main_window(app: &AppHandle) {
 }
 
 /// 呼出主窗口并让前端切到 `path`。窗口隐藏时网页并没销毁, 事件照样送达。
-fn navigate(app: &AppHandle, path: &str) {
+pub(crate) fn navigate(app: &AppHandle, path: &str) {
     show_main_window(app);
     if let Err(e) = app.emit_to("main", NAVIGATE_EVENT, path) {
         warn!(error = %e, path, "tray navigate emit failed");

@@ -159,6 +159,152 @@ fn matches(w: &When, f: &Facts, b: &BodyFacts, params: &Map<String, Value>) -> b
         && w.param.as_ref().is_none_or(|id| params.get(id).and_then(Value::as_bool).unwrap_or(false))
 }
 
+/// 试运行时只能从请求日志列推出来的部分 body 事实; 拿不到的字段为 `None` (命中前标记为「无法判断」)。
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct PartialBodyFacts {
+    pub stream: Option<bool>,
+    pub has_tools: Option<bool>,
+    pub has_images: Option<bool>,
+    pub thinking: Option<bool>,
+    pub approx_input_tokens: Option<u64>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum RuleDryRunOutcome {
+    NotMatched,
+    Matched,
+    Unknown { fields: Vec<&'static str> },
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct DryRunEval {
+    pub matched_rules: Vec<String>,
+    pub unknown_rules: Vec<String>,
+    pub unknown_fields: Vec<String>,
+    pub redirect_to: Option<String>,
+    pub rejected: bool,
+}
+
+/// 针对历史请求日志的规则试运行匹配:
+/// - 只要任一已知条件不满足 → `NotMatched`;
+/// - 所有已知条件都满足但有依赖 body 的条件拿不到值 → `Unknown { fields }`;
+/// - 全部满足 → `Matched`。
+pub fn dry_run_rule(w: &When, f: &Facts, b: &PartialBodyFacts, params: &Map<String, Value>) -> RuleDryRunOutcome {
+    let in_list = |list: &Option<Vec<String>>, v: &str| list.as_ref().is_none_or(|l| l.iter().any(|x| x == v));
+    let flag = |want: Option<bool>, have: bool| want.is_none_or(|x| x == have);
+    if !(in_list(&w.purpose, f.purpose)
+        && flag(w.purpose_guessed, f.purpose_guessed)
+        && in_list(&w.virtual_model, f.virtual_model)
+        && in_list(&w.client_tool, f.client_tool)
+        && in_list(&w.entry, f.entry)
+        && w.model_requested.as_ref().is_none_or(|p| glob_match(p, f.model))
+        && w.time.as_ref().is_none_or(|t| time_matches(t, f.weekday, f.minute))
+        && w.param.as_ref().is_none_or(|id| params.get(id).and_then(Value::as_bool).unwrap_or(false)))
+    {
+        return RuleDryRunOutcome::NotMatched;
+    }
+
+    let mut unknown = Vec::new();
+    let mut check_bool = |want: Option<bool>, have: Option<bool>, name: &'static str| -> bool {
+        let Some(expected) = want else { return true };
+        match have {
+            Some(actual) => actual == expected,
+            None => {
+                unknown.push(name);
+                true
+            }
+        }
+    };
+    if !check_bool(w.stream, b.stream, "stream") {
+        return RuleDryRunOutcome::NotMatched;
+    }
+    if !check_bool(w.has_tools, b.has_tools, "has_tools") {
+        return RuleDryRunOutcome::NotMatched;
+    }
+    if !check_bool(w.has_images, b.has_images, "has_images") {
+        return RuleDryRunOutcome::NotMatched;
+    }
+    if !check_bool(w.thinking, b.thinking, "thinking") {
+        return RuleDryRunOutcome::NotMatched;
+    }
+    if let Some((gt, lt)) = w.approx_input_tokens {
+        match b.approx_input_tokens {
+            Some(actual) => {
+                if !(gt.is_none_or(|g| actual > g) && lt.is_none_or(|l| actual < l)) {
+                    return RuleDryRunOutcome::NotMatched;
+                }
+            }
+            None => unknown.push("approx_input_tokens"),
+        }
+    }
+
+    if unknown.is_empty() {
+        RuleDryRunOutcome::Matched
+    } else {
+        RuleDryRunOutcome::Unknown { fields: unknown }
+    }
+}
+
+/// 用历史请求日志的一行事实试运行单个规则插件 (不产生任何副作用)。
+pub fn dry_run_plugin(plugin: &LoadedRules, facts: &Facts, body: &PartialBodyFacts) -> DryRunEval {
+    let mut out = DryRunEval::default();
+    let push_unknown_fields = |fields: Vec<&'static str>, dst: &mut Vec<String>| {
+        for f in fields {
+            if !dst.iter().any(|x| x == f) {
+                dst.push(f.to_string());
+            }
+        }
+    };
+
+    for rule in plugin.plugin.rules.iter().filter(|r| r.hook == Hook::Route) {
+        match dry_run_rule(&rule.when, facts, body, &plugin.params) {
+            RuleDryRunOutcome::NotMatched => {}
+            RuleDryRunOutcome::Unknown { fields } => {
+                out.unknown_rules.push(rule.id.clone());
+                push_unknown_fields(fields, &mut out.unknown_fields);
+            }
+            RuleDryRunOutcome::Matched => {
+                match route_actions(rule, &plugin.params) {
+                    Ok(RouteDecision::UseVirtualModel(vm)) => {
+                        out.matched_rules.push(rule.id.clone());
+                        out.redirect_to = Some(vm);
+                        break;
+                    }
+                    Ok(RouteDecision::Reject(_)) => {
+                        out.matched_rules.push(rule.id.clone());
+                        out.rejected = true;
+                        return out;
+                    }
+                    _ => {}
+                }
+            }
+        }
+    }
+
+    let req_facts = Facts {
+        virtual_model: out.redirect_to.as_deref().unwrap_or(facts.virtual_model),
+        ..facts.clone()
+    };
+    for rule in plugin.plugin.rules.iter().filter(|r| r.hook == Hook::Request) {
+        match dry_run_rule(&rule.when, &req_facts, body, &plugin.params) {
+            RuleDryRunOutcome::NotMatched => {}
+            RuleDryRunOutcome::Unknown { fields } => {
+                out.unknown_rules.push(rule.id.clone());
+                push_unknown_fields(fields, &mut out.unknown_fields);
+            }
+            RuleDryRunOutcome::Matched => {
+                out.matched_rules.push(rule.id.clone());
+                if rule.actions.iter().any(|a| matches!(a, Action::Reject(_))) {
+                    out.rejected = true;
+                    break;
+                }
+            }
+        }
+    }
+
+    out
+}
+
 /// 把字符串里的 `{{params.x}}` 换成参数值。引用了不存在的参数 → Err。
 fn render(s: &str, params: &Map<String, Value>) -> Result<String, String> {
     let mut out = s.to_string();
@@ -600,5 +746,36 @@ mod tests {
             "system": "abcd", "messages": [{ "role": "user", "content": [{ "type": "text", "text": "efgh" }, { "type": "image" }] }]
         }));
         assert_eq!(b, BodyFacts { stream: true, has_tools: true, has_images: true, thinking: true, approx_input_tokens: 2 });
+    }
+
+    #[test]
+    fn dry_run_distinguishes_matched_not_matched_and_unknown_body_conditions() {
+        let src = r#"{
+            "rulesApi": 1,
+            "params": [{ "id": "cheap", "type": "virtual_model", "label": "Cheap", "default": "haiku" }],
+            "rules": [
+                { "id": "side", "hook": "route", "when": { "purpose": ["title"], "virtual_model": ["opus"] },
+                  "do": [{ "use_virtual_model": "{{params.cheap}}" }] },
+                { "id": "img-guard", "hook": "request", "when": { "virtual_model": ["haiku"], "has_images": true },
+                  "do": [{ "reject": { "message": "no images" } }] },
+                { "id": "long-req", "hook": "request", "when": { "approx_input_tokens": { "gt": 50000 } },
+                  "do": [{ "system_append": { "text": "short" } }] }
+            ]
+        }"#;
+        let p = load(src, json!({ "cheap": "haiku" }));
+        let partial = PartialBodyFacts { stream: Some(true), has_tools: Some(false), ..Default::default() };
+
+        let ev = dry_run_plugin(&p, &facts("title", "opus"), &partial);
+        assert_eq!(ev.matched_rules, vec!["side"]);
+        assert_eq!(ev.redirect_to.as_deref(), Some("haiku"));
+        assert_eq!(ev.unknown_rules, vec!["img-guard", "long-req"]);
+        assert_eq!(ev.unknown_fields, vec!["has_images", "approx_input_tokens"]);
+        assert!(!ev.rejected);
+
+        // 已知条件 (virtual_model = opus, 但 side 未命中) 不满足 → img-guard 是 NotMatched 而不是 Unknown
+        let ev2 = dry_run_plugin(&p, &facts("main", "opus"), &partial);
+        assert!(ev2.matched_rules.is_empty());
+        assert_eq!(ev2.unknown_rules, vec!["long-req"]);
+        assert_eq!(ev2.unknown_fields, vec!["approx_input_tokens"]);
     }
 }

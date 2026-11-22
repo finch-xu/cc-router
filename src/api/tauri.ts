@@ -278,6 +278,16 @@ export const api = {
   listNotifierDeliveries: (id: string) => invoke<import("@/types").NotifierDeliveryRecord[]>("list_notifier_deliveries", { id }),
   /** 发送系统桌面测试通知 (仅桌面端; 网页端拒绝) */
   testDesktopNotification: () => invoke<void>("test_desktop_notification"),
+  /** 调整计价 / 规则插件的优先级顺序 (仅桌面端; 网页端拒绝) */
+  reorderPlugins: (pluginType: "pricing" | "rules", orderedIds: string[]) =>
+    invoke<void>("reorder_plugins", { pluginType, orderedIds }),
+  /** 规则插件试运行 (抽最近 N 条请求日志模拟匹配, 纯只读) */
+  dryRunRulesPlugin: (id: string, params?: Record<string, unknown>, limit?: number) =>
+    invoke<import("@/types").RulesDryRunResult>("dry_run_rules_plugin", {
+      id,
+      params: params ?? null,
+      limit: limit ?? null,
+    }),
   fetchCommunityIndex: () => invoke<unknown>("fetch_community_index"),
 
   // onboarding
