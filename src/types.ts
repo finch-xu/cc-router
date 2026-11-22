@@ -659,6 +659,12 @@ export interface Settings {
   auto_check_updates: boolean;
   /** 上次关闭「更新内容」弹窗时的 app 版本; null = 从没有此功能的老版本升上来。只读, 由 mark_release_notes_seen 写 */
   last_seen_release_notes: string | null;
+  /** 是否开启内置系统桌面通知, 默认 false */
+  desktop_notifications_enabled: boolean;
+  /** 开启系统桌面通知时订阅的事件列表 */
+  desktop_notification_events: string[];
+  /** 每日用量汇总触发时间 (本地时间 HH:MM, 默认 "21:00") */
+  daily_summary_time: string;
 }
 
 export type UpdateSource = "international" | "china";
@@ -687,6 +693,9 @@ export interface SettingsPatch {
   tui_enabled?: boolean;
   receipt_print_animation?: boolean;
   auto_check_updates?: boolean;
+  desktop_notifications_enabled?: boolean;
+  desktop_notification_events?: string[];
+  daily_summary_time?: string;
   // 注意: auth_token 不在 patch 里,必须通过 generateNewToken() 改
 }
 
@@ -1463,11 +1472,21 @@ export interface PluginSource {
 }
 
 export type RuleParamDecl =
-  | { id: string; type: "string"; label: import("@/plugins/manifest").LocalizedText; default?: string }
-  | { id: string; type: "number"; label: import("@/plugins/manifest").LocalizedText; default?: number }
-  | { id: string; type: "bool"; label: import("@/plugins/manifest").LocalizedText; default?: boolean }
-  | { id: string; type: "enum"; values: string[]; label: import("@/plugins/manifest").LocalizedText; default?: string }
-  | { id: string; type: "virtual_model"; label: import("@/plugins/manifest").LocalizedText; default?: string };
+  | { id: string; type: "string"; label: import("@/plugins/manifest").LocalizedText; default?: string; optional?: boolean }
+  | { id: string; type: "number"; label: import("@/plugins/manifest").LocalizedText; default?: number; optional?: boolean }
+  | { id: string; type: "bool"; label: import("@/plugins/manifest").LocalizedText; default?: boolean; optional?: boolean }
+  | { id: string; type: "enum"; values: string[]; label: import("@/plugins/manifest").LocalizedText; default?: string; optional?: boolean }
+  | { id: string; type: "virtual_model"; label: import("@/plugins/manifest").LocalizedText; default?: string; optional?: boolean }
+  | { id: string; type: "base_url"; label: import("@/plugins/manifest").LocalizedText; default?: string; optional?: boolean }
+  | { id: string; type: "secret"; label: import("@/plugins/manifest").LocalizedText; optional?: boolean };
+
+export interface NotifierDeliveryRecord {
+  timestamp_ms: number;
+  event: string;
+  ok: boolean;
+  http_status: number | null;
+  error: string | null;
+}
 
 export interface InstalledPlugin {
   id: string;
@@ -1481,12 +1500,14 @@ export interface InstalledPlugin {
   size: number;
   /** 系统插件 (厂商等) 是否生效; 主题 / 小票恒为 true */
   enabled: boolean;
-  /** 用户已保存的参数 (非参数化插件为 `{}`) */
+  /** 用户已保存的参数 (非参数化插件为 `{}`; 通知插件不含 secret 明文) */
   params?: Record<string, unknown>;
-  /** 规则插件声明的参数表 */
+  /** 规则 / 通知插件声明的参数表 */
   param_decls?: RuleParamDecl[];
   /** 启用前缺少的必填参数 id */
   missing_params?: string[];
+  /** 通知插件中已保存值的 secret 参数 id (永不回传明文) */
+  secret_params_set?: string[];
 }
 
 export interface PluginContent {
@@ -1545,6 +1566,18 @@ export type PluginCapabilities =
       redirects_to: string[];
       rules: number;
       params: RuleParamDecl[];
+    }
+  | {
+      kind: "notifier";
+      /** 会连接的固定域名 (或 base_url 默认域名) */
+      hosts: string[];
+      /** 由用户填写服务器地址的 base_url 参数 id */
+      base_url_params: string[];
+      /** 订阅的事件名 */
+      events: string[];
+      /** 模板引用的事件字段 */
+      fields: string[];
+      params: RuleParamDecl[];
     };
 
 export interface PluginCapabilityDiff {
@@ -1552,6 +1585,8 @@ export interface PluginCapabilityDiff {
   removed_hosts: string[];
   auth_type_changed: boolean;
   added_actions?: string[];
+  added_events?: string[];
+  added_fields?: string[];
 }
 
 /** 对齐 Rust `subscription::rebuild::RebuildPreview` */

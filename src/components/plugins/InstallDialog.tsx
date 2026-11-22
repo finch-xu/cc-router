@@ -137,7 +137,7 @@ export function InstallDialog({
   function startUsing(rec: InstalledPlugin) {
     if (rec.plugin_type === "provider") navigate(`/subscriptions/new?provider=${encodeURIComponent(`plugin:${rec.id}`)}`);
     else if (rec.plugin_type === "pricing") navigate("/statistics");
-    else if (rec.plugin_type === "rules") onConfigureRules?.(rec.id);
+    else if (rec.plugin_type === "rules" || rec.plugin_type === "notifier") onConfigureRules?.(rec.id);
     else if (rec.plugin_type === "receipt") navigate(`/receipts?theme=plugin:${rec.id}`);
     else setThemeId(`plugin:${rec.id}`);
     close();
@@ -228,6 +228,12 @@ export function InstallDialog({
                 {t("plugins.install.rulesDisabledHint")}
               </>
             )}
+            {installed.plugin_type === "notifier" && (
+              <>
+                {" "}
+                {t("plugins.install.notifierDisabledHint")}
+              </>
+            )}
           </div>
         ) : (
           <>
@@ -245,7 +251,9 @@ export function InstallDialog({
                     ? t("plugins.install.unreviewedPricing")
                     : checked.ok.manifest.type === "rules"
                       ? t("plugins.install.unreviewedRules")
-                      : t("plugins.install.unreviewedProvider")}
+                      : checked.ok.manifest.type === "notifier"
+                        ? t("plugins.install.unreviewedNotifier")
+                        : t("plugins.install.unreviewedProvider")}
               </div>
             )}
             {staged?.installed && ok && (
@@ -277,7 +285,7 @@ export function InstallDialog({
                     ? t("plugins.btn.addSubscription")
                     : installed.plugin_type === "pricing"
                       ? t("plugins.btn.viewCosts")
-                      : installed.plugin_type === "rules"
+                      : installed.plugin_type === "rules" || installed.plugin_type === "notifier"
                         ? t("plugins.btn.configure")
                         : t("plugins.btn.useNow")}
                 </button>
