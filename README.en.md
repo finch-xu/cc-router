@@ -26,6 +26,21 @@
   <a href="https://ccrouter.app" target="_blank" rel="noopener">🌐 Official Site ccrouter.app</a>
 </p>
 
+<table align="center">
+  <tr>
+    <td align="center" valign="middle">
+      <a href="https://github.com/finch-xu/cc-router-community" target="_blank" rel="noopener">
+        <img src="assets/sparrow-bakery.svg" alt="Sparrow Bakery" width="220" />
+      </a>
+    </td>
+    <td align="left" valign="middle">
+      <strong>Sparrow Bakery · cc-router Community Creator Hub</strong><br />
+      The plugin store catalog and community creator hub for data-only UI themes, receipt themes, and AI plugin-building skills.<br />
+      <a href="https://github.com/finch-xu/cc-router-community" target="_blank" rel="noopener">https://github.com/finch-xu/cc-router-community</a>
+    </td>
+  </tr>
+</table>
+
 A locally-running LLM aggregation gateway with a desktop GUI, zero-code setup: bundle your scattered `Token Plan`, `Coding Plan`, and LLM API quotas into a single virtual Plan, and plug it into Claude Code, Claude Desktop App, OpenClaw, OpenCode, Codex and more —— save money! save tokens! 100% local!
 
 > ⚠️ Notice: this tool only switches between subscription plans you already own. Request bodies are passed through almost verbatim — no reverse engineering, no jailbreak, no circumvention. You are responsible for complying with each plan's terms of service. cc-router is intended for use with coding tools like Claude Code only; do not use it for anything else.

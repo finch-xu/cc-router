@@ -26,6 +26,21 @@
   <a href="https://ccrouter.app" target="_blank" rel="noopener">🌐 公式サイト ccrouter.app</a>
 </p>
 
+<table align="center">
+  <tr>
+    <td align="center" valign="middle">
+      <a href="https://github.com/finch-xu/cc-router-community" target="_blank" rel="noopener">
+        <img src="assets/sparrow-bakery.svg" alt="Sparrow Bakery" width="220" />
+      </a>
+    </td>
+    <td align="left" valign="middle">
+      <strong>スズメベーカリー · cc-router コミュニティ創作センター</strong><br />
+      UIテーマ・利用レシートなどのデータ専用プラグインを集めたプラグインストアカタログ＆コミュニティ創作センター（AI 制作キット同梱）。<br />
+      <a href="https://github.com/finch-xu/cc-router-community" target="_blank" rel="noopener">https://github.com/finch-xu/cc-router-community</a>
+    </td>
+  </tr>
+</table>
+
 ローカルで動く LLM 集約ゲートウェイ。GUI デスクトップアプリ、ノーコードで導入。バラバラの `Token Plan`、`Coding Plan`、LLM API クォータを 1 つの仮想 Plan にまとめ、Claude Code、Claude Desktop App、OpenClaw、OpenCode、Codex などのツールにワンクリックで接続——コスト削減！トークン節約！完全ローカル動作！
 
 > ⚠️ 注意: 本ツールは「すでに保有しているサブスクリプションプラン間の自動切り替え」のみを目的としています。リクエストボディはほぼそのまま透過するだけで、リバースエンジニアリングや脱獄、回避行為は一切含みません。各プランの利用規約は利用者ご自身で遵守してください。Claude Code などのコーディングツール用途専用であり、それ以外の用途には使用しないでください。

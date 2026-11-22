@@ -26,6 +26,21 @@
   <a href="https://ccrouter.app" target="_blank" rel="noopener">🌐 官方网站ccrouter.app</a>
 </p>
 
+<table align="center">
+  <tr>
+    <td align="center" valign="middle">
+      <a href="https://github.com/finch-xu/cc-router-community" target="_blank" rel="noopener">
+        <img src="assets/sparrow-bakery.svg" alt="Sparrow Bakery" width="220" />
+      </a>
+    </td>
+    <td align="left" valign="middle">
+      <strong>麻雀面包坊 · cc-router 社区创作中心</strong><br />
+      插件商店目录与社区创作中心，汇聚界面主题、用量小票等纯数据插件与 AI 制作工具包。<br />
+      <a href="https://github.com/finch-xu/cc-router-community" target="_blank" rel="noopener">https://github.com/finch-xu/cc-router-community</a>
+    </td>
+  </tr>
+</table>
+
 本地运行的大模型聚合网关，GUI桌面端app，零代码部署，把零散的 `Token Plan`、`Coding Plan`、大模型 API 额度聚合成一个虚拟 Plan，一键接入 Claude Code、Claude Desktop App、OpenClaw、OpenCode、Codex 等工具 —— 省钱！省 Token！完全本地运行！
 
 > 注意⚠️ 本工具仅限于自动切换订阅套餐，请求体几乎完全透传，不涉及逆向、不涉及破解等操作。用户需自行遵守每个编程套餐的使用规则。此工具只能用于 Claude Code 等编程工具，切勿用于其他用途。
