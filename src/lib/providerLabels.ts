@@ -43,6 +43,8 @@ export function customProviderLabel(
   providerId: string,
   t: (key: string) => string,
 ): string | undefined {
+  // 厂商插件的 id 是 `plugin:<插件 id>`, 不直接上屏 (订阅已删 / 插件已卸载时会走到这里)
+  if (providerId.startsWith("plugin:")) return `${providerId.slice("plugin:".length)}${t("providerLabels.pluginSuffix")}`;
   const meta = metaOf(providerId);
   return meta ? t(meta.labelKey) : undefined;
 }

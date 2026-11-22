@@ -73,3 +73,13 @@
 .pg-receipt-preview > .pg-receipt-preview-label { font-size: 11.5px; color: var(--ink-4); margin-bottom: 8px; }
 .pg-receipt-preview > div:last-child { margin: 0 auto; }
 .pg-issues code { font-family: var(--font-mono); font-size: 11.5px; }
+
+/* 系统插件的能力摘要 (CapabilitySummary) */
+.pg-badge.warn { background: color-mix(in srgb, var(--warn) 16%, var(--surface)); color: var(--ink-2); }
+.pg-caps { margin: 10px 0 2px; font-size: 12.5px; }
+.pg-caps-title { color: var(--ink-3); margin-bottom: 4px; }
+.pg-caps-list { margin: 0; padding: 0; list-style: none; display: flex; flex-direction: column; gap: 4px; }
+.pg-caps-list li { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; min-width: 0; }
+.pg-caps-list code { font-family: var(--font-mono); font-size: 12px; color: var(--ink); overflow-wrap: anywhere; }
+.pg-caps-use { color: var(--ink-4); font-size: 11.5px; }
+.pg-chip-sep { width: 1px; align-self: stretch; margin: 4px 4px; background: var(--line, var(--surface-3)); }

@@ -181,6 +181,8 @@ export interface ProviderInfo {
    */
   translations: Record<"zh-Hant" | "en" | "ja", ProviderText>;
   url_params: UrlParamInfo[];
+  /** 来自厂商插件时的插件信息 (内置厂商没有这个字段) */
+  plugin?: { id: string; version: string; source_kind: PluginSourceKind };
 }
 
 export interface ProviderText {
@@ -323,7 +325,9 @@ export interface BalanceEntry {
 /** 对齐 Rust `BalanceDetail`; 金额为字符串, 标签恒为「余额 (unit)」 */
 export type BalanceDetail =
   | { code: "topup_granted"; topped_up: string; granted: string }
-  | { code: "topup_used"; topped_up: string; used: string };
+  | { code: "topup_used"; topped_up: string; used: string }
+  /** 声明式 `parser: json` (厂商插件等): 只有剩余额度, 可选已用 */
+  | { code: "remaining"; used?: string };
 
 /** 余额快照. 异构 provider 响应在 Rust 翻译后的 UI-ready 结构. */
 export interface BalanceSnapshot {
@@ -409,6 +413,8 @@ export interface SubscriptionDto {
   provider_names?: LocalizedText;
   provider_icon: string;
   is_user_defined: boolean;
+  /** 厂商描述已更新, 可以「按新描述重建连接」 */
+  connection_outdated?: boolean;
   /** api_key 是否非空 (DTO 不带 Key 本身); 导入时缺 Key 的订阅据此提示「待填写 API Key」 */
   has_api_key: boolean;
 
@@ -1412,6 +1418,8 @@ export interface InstalledPlugin {
   sha256: string;
   installed_at: number;
   size: number;
+  /** 系统插件 (厂商等) 是否生效; 主题 / 小票恒为 true */
+  enabled: boolean;
 }
 
 export interface PluginContent {
@@ -1434,4 +1442,45 @@ export interface StagedPlugin {
   sha256: string;
   source: PluginSource;
   installed: InstalledPlugin | null;
+  /** 系统插件的 Rust 校验结果; 主题 / 小票没有 (由前端校验) */
+  system?: PluginCheckResult;
 }
+
+/** 对齐 Rust `cc_router_plugin_spec::check::CheckResult` */
+export interface PluginCheckResult {
+  ok: boolean;
+  issues: import("@/plugins/manifest").Issue[];
+  capabilities?: PluginCapabilities;
+  /** 与本机已装版本相比的能力变化 */
+  diff?: PluginCapabilityDiff;
+}
+
+export type PluginCapabilities = {
+  kind: "provider";
+  auth_type: AuthType;
+  /** 会收到 API Key 的 host, 按字典序 */
+  key_hosts: { host: string; used_for: ("messages" | "models" | "balance")[]; differs_from_messages: boolean }[];
+  endpoints: number;
+};
+
+export interface PluginCapabilityDiff {
+  added_hosts: string[];
+  removed_hosts: string[];
+  auth_type_changed: boolean;
+}
+
+/** 对齐 Rust `subscription::rebuild::RebuildPreview` */
+export interface RebuildPreview {
+  status: "up_to_date" | "changed" | "blocked";
+  changes: { field: RebuildField; old: string; new: string }[];
+  reason?: "user_defined" | "oauth" | "provider_missing" | "endpoint_missing" | "params_invalid" | "auth_changed" | "protocol_changed";
+}
+
+export type RebuildField =
+  | "base_url"
+  | "messages_path"
+  | "required_headers"
+  | "auth_header"
+  | "forward_headers"
+  | "model_discovery_url"
+  | "balance";

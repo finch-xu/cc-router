@@ -1,5 +1,5 @@
 import { useMemo, useState } from "react";
-import { ExternalLink, FolderOpen, Link2, Palette, Puzzle, Receipt } from "lucide-react";
+import { ExternalLink, FolderOpen, Link2, Palette, Plug, Puzzle, Receipt } from "lucide-react";
 import Github from "@lobehub/icons/es/Github";
 import { useNavigate } from "react-router";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
@@ -17,12 +17,16 @@ import { useCommunityIndex, useInstalledPlugins } from "@/hooks/usePlugins";
 import { errorText } from "@/lib/errorText";
 import { runtime } from "@/runtime";
 import { COMMUNITY_URL, entryLink, hasUpdate, type CommunityEntry } from "@/plugins/community";
-import { localized, type LocalizedText } from "@/plugins/manifest";
+import { isSystemType, localized, type LocalizedText } from "@/plugins/manifest";
+import { useSubscriptions } from "@/hooks/useSubscriptions";
 import { pluginLinks, type PluginLinks } from "@/plugins/links";
 import type { InstalledPlugin, StagedPlugin } from "@/types";
 
 type Tab = "community" | "installed";
-type Kind = "all" | "theme" | "receipt";
+type Kind = "all" | "theme" | "receipt" | "provider";
+/** 类型 chip 分两组: 外观 (主题 / 小票) 与功能 (系统插件)。某类型两边都没有条目就不显示 */
+const LOOK_KINDS = ["theme", "receipt"] as const;
+const FEATURE_KINDS = ["provider"] as const;
 
 /** 清单原文里的名字 / 介绍 (已安装列表用; 内容在安装时已校验过) */
 function manifestText(m: unknown, key: "name" | "description"): LocalizedText | undefined {
@@ -46,6 +50,7 @@ export function PluginsPage() {
   const { t, locale } = useT();
   const isDesktop = runtime.kind === "desktop";
   const installed = useInstalledPlugins();
+  const subscriptions = useSubscriptions();
   const community = useCommunityIndex(isDesktop);
   const { themeId, setThemeId } = useTheme();
 
@@ -103,7 +108,10 @@ export function PluginsPage() {
     setBusyId(`__confirm:${p.id}`);
     setError(null);
     try {
-      if (!(await runtime.confirm(t("plugins.uninstall.confirm", { name })))) return;
+      const inUse =
+        p.plugin_type === "provider" ? (subscriptions.data ?? []).filter((s) => s.provider_id === `plugin:${p.id}`).length : 0;
+      const message = inUse > 0 ? t("plugins.uninstall.confirmProvider", { name, count: inUse }) : t("plugins.uninstall.confirm", { name });
+      if (!(await runtime.confirm(message))) return;
       setBusyId(p.id);
       if (themeId === `plugin:${p.id}`) setThemeId("quiet");
       await api.uninstallPlugin(p.id);
@@ -113,6 +121,26 @@ export function PluginsPage() {
       setBusyId(null);
     }
   }
+
+  async function toggleEnabled(p: InstalledPlugin) {
+    setBusyId(p.id);
+    setError(null);
+    try {
+      if (p.enabled) await api.disablePlugin(p.id);
+      else await api.enablePlugin(p.id);
+    } catch (e) {
+      setError(errorText(e));
+    } finally {
+      setBusyId(null);
+    }
+  }
+
+  const presentKinds = new Set<string>([
+    ...(community.data ?? []).map((e) => e.type),
+    ...(installed.data ?? []).map((p) => p.plugin_type),
+  ]);
+  const lookKinds = LOOK_KINDS.filter((k) => presentKinds.has(k));
+  const featureKinds = FEATURE_KINDS.filter((k) => presentKinds.has(k));
 
   const badgeFor = (id: string, e?: CommunityEntry) => {
     const ins = installedById.get(id);
@@ -178,10 +206,15 @@ export function PluginsPage() {
           </div>
         )}
         <div className="sb-chips" role="tablist">
-          {(["all", "theme", "receipt"] as const).map((k) => (
-            <button key={k} type="button" role="tab" aria-selected={kind === k} className={"sb-chip" + (kind === k ? " active" : "")} onClick={() => setKind(k)}>
-              {k === "all" ? t("plugins.kind.all") : t(`plugins.type.${k}`)}
-            </button>
+          {(["all", ...lookKinds, ...featureKinds] as Kind[]).map((k, i) => (
+            <span key={k} style={{ display: "contents" }}>
+              {i > 0 && i === 1 + lookKinds.length && featureKinds.length > 0 && lookKinds.length > 0 && (
+                <span className="pg-chip-sep" aria-hidden="true" />
+              )}
+              <button type="button" role="tab" aria-selected={kind === k} className={"sb-chip" + (kind === k ? " active" : "")} onClick={() => setKind(k)}>
+                {k === "all" ? t("plugins.kind.all") : t(`plugins.type.${k}`)}
+              </button>
+            </span>
           ))}
         </div>
         {tab === "community" && (
@@ -222,7 +255,9 @@ export function PluginsPage() {
                   {e.screenshots[0] ? (
                     <img className="pg-shot" src={e.screenshots[0]} alt="" loading="lazy" />
                   ) : (
-                    <div className="pg-shot empty">{e.type === "receipt" ? <Receipt size={22} /> : <Palette size={22} />}</div>
+                    <div className="pg-shot empty">
+                      {e.type === "receipt" ? <Receipt size={22} /> : e.type === "provider" ? <Plug size={22} /> : <Palette size={22} />}
+                    </div>
                   )}
                   <div className="pg-card-body">
                     <div className="pg-title">
@@ -268,6 +303,7 @@ export function PluginsPage() {
                       <b>{localized(manifestText(p.manifest, "name"), locale) || p.id}</b>
                       {p.source.kind === "community" && <span className="src-tag">{t("plugins.source.community")}</span>}
                       {inUse && <span className="pg-badge acc">{t("plugins.badge.current")}</span>}
+                      {isSystemType(p.plugin_type) && !p.enabled && <span className="pg-badge">{t("plugins.badge.disabled")}</span>}
                       {revoked && <span className="pg-badge err">{t("plugins.badge.revoked")}</span>}
                     </div>
                     <div className="pg-meta">
@@ -297,6 +333,20 @@ export function PluginsPage() {
                     {p.plugin_type === "receipt" && (
                       <button className="btn sm primary" type="button" onClick={() => navigate(`/receipts?theme=plugin:${p.id}`)}>
                         {t("plugins.btn.openReceipt")}
+                      </button>
+                    )}
+                    {p.plugin_type === "provider" && p.enabled && (
+                      <button
+                        className="btn sm primary"
+                        type="button"
+                        onClick={() => navigate(`/subscriptions/new?provider=${encodeURIComponent(`plugin:${p.id}`)}`)}
+                      >
+                        {t("plugins.btn.addSubscription")}
+                      </button>
+                    )}
+                    {isSystemType(p.plugin_type) && (isDesktop || p.enabled) && (
+                      <button className="btn sm" type="button" disabled={busyId !== null} onClick={() => toggleEnabled(p)}>
+                        {busyId === p.id ? <Spinner /> : null} {p.enabled ? t("plugins.btn.disable") : t("plugins.btn.enable")}
                       </button>
                     )}
                     {p.plugin_type === "theme" && (

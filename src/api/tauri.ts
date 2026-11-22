@@ -4,6 +4,7 @@ import { runtime } from "@/runtime";
 const invoke = runtime.invoke;
 import type {
   InstalledPlugin,
+  RebuildPreview,
   PluginContent,
   StagedPlugin,
   RequestHeaders,
@@ -87,6 +88,9 @@ export const api = {
     invoke<SubscriptionDto>("create_subscription", { input }),
   updateSubscription: (id: string, patch: SubscriptionPatch) =>
     invoke<SubscriptionDto>("update_subscription", { id, patch }),
+  /** 厂商描述 (内置 yaml / 厂商插件) 更新后: 预览 / 执行「按新描述重建连接」 */
+  previewSubscriptionRebuild: (id: string) => invoke<RebuildPreview>("preview_subscription_rebuild", { id }),
+  rebuildSubscriptionConnection: (id: string) => invoke<SubscriptionDto>("rebuild_subscription_connection", { id }),
   updateSubscriptionKey: (id: string, newKey: string) =>
     invoke<void>("update_subscription_key", { id, newKey }),
   deleteSubscription: (id: string) =>
@@ -260,6 +264,9 @@ export const api = {
     invoke<InstalledPlugin>("install_staged_plugin", { stagingId, communitySha256: communitySha256 ?? null }),
   discardStagedPlugin: (stagingId: string) => invoke<void>("discard_staged_plugin", { stagingId }),
   uninstallPlugin: (id: string) => invoke<void>("uninstall_plugin", { id }),
+  /** 启用系统插件: 仅桌面端 (网页端拒绝); 停用两边都能用 */
+  enablePlugin: (id: string) => invoke<void>("enable_plugin", { id }),
+  disablePlugin: (id: string) => invoke<void>("disable_plugin", { id }),
   fetchCommunityIndex: () => invoke<unknown>("fetch_community_index"),
 
   // onboarding
