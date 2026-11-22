@@ -865,3 +865,113 @@ mod tests {
         assert_eq!((y.total_requests, y.tool_use_request_count), (1, 1));
     }
 }
+
+/// 统计页的费用卡片 (设计 §5): 按当前价格表从 `receipt_stats_daily` 现算。
+#[derive(Debug, Serialize)]
+pub struct CostSummaryDto {
+    /// 有没有启用的计价插件; false 时界面不显示任何费用, 只给一行「安装计价插件后显示费用」
+    pub has_pricing: bool,
+    pub totals: crate::plugins::pricing::CostTotals,
+    /// 按订阅, 按真实花费 + 等价费用 (各币种合计成 micros 的绝对值) 降序
+    pub by_subscription: Vec<SubscriptionCostDto>,
+    /// 没有匹配价格的 (厂商, 模型), 按请求数降序
+    pub unpriced: Vec<UnpricedModelDto>,
+    pub priced_requests: i64,
+    pub total_requests: i64,
+    /// 参与计价的插件 (按优先级), 界面写明价格来自哪里
+    pub sources: Vec<crate::plugins::pricing::PricingSource>,
+}
+
+#[derive(Debug, Serialize)]
+pub struct SubscriptionCostDto {
+    pub subscription_id: String,
+    /// None = 订阅已删除
+    pub display_name: Option<String>,
+    pub totals: crate::plugins::pricing::CostTotals,
+}
+
+#[derive(Debug, Serialize)]
+pub struct UnpricedModelDto {
+    pub provider_id: String,
+    pub model: String,
+    pub requests: i64,
+}
+
+#[tauri::command]
+pub async fn get_cost_summary(state: State<'_, AppState>, range: StatsRange) -> AppResult<CostSummaryDto> {
+    use crate::plugins::pricing::{cost_of, subscription_contexts, CostTotals, Tokens};
+    use std::collections::HashMap;
+
+    let pricing = state.pricing();
+    let mut out = CostSummaryDto {
+        has_pricing: !pricing.is_empty(),
+        totals: CostTotals::default(),
+        by_subscription: Vec::new(),
+        unpriced: Vec::new(),
+        priced_requests: 0,
+        total_requests: 0,
+        sources: pricing.sources(),
+    };
+    if pricing.is_empty() {
+        return Ok(out);
+    }
+    let rows = sqlx::query(
+        "SELECT subscription_id, provider_id, real_model_name,
+                SUM(request_count) AS requests,
+                SUM(input_tokens) AS input_tokens, SUM(output_tokens) AS output_tokens,
+                SUM(cache_creation_tokens) AS cache_creation_tokens, SUM(cache_read_tokens) AS cache_read_tokens
+         FROM receipt_stats_daily
+         WHERE day >= ?
+         GROUP BY subscription_id, provider_id, real_model_name",
+    )
+    .bind(range.since_day())
+    .fetch_all(&state.db)
+    .await?;
+
+    let contexts = subscription_contexts(&state).await;
+    let names: HashMap<String, String> = {
+        let subs = state.subscriptions.read().await;
+        let mut m = HashMap::with_capacity(subs.len());
+        for (id, rt) in subs.iter() {
+            m.insert(id.to_string(), rt.read().await.row.display_name.clone());
+        }
+        m
+    };
+    let mut by_sub: HashMap<String, CostTotals> = HashMap::new();
+    let mut unpriced: HashMap<(String, String), i64> = HashMap::new();
+    for r in rows {
+        let sub: String = r.try_get("subscription_id")?;
+        let provider: String = r.try_get("provider_id")?;
+        let model: String = r.try_get("real_model_name")?;
+        let requests: i64 = r.try_get("requests")?;
+        let n = |k: &str| -> AppResult<u64> { Ok(r.try_get::<i64, _>(k)?.max(0) as u64) };
+        let tokens = Tokens {
+            input_raw: n("input_tokens")?,
+            output: n("output_tokens")?,
+            cache_read: n("cache_read_tokens")?,
+            cache_write: n("cache_creation_tokens")?,
+        };
+        out.total_requests += requests;
+        let (auth_type, billing) = contexts.get(&sub).copied().unzip();
+        match cost_of(&pricing, &provider, &model, auth_type, billing.unwrap_or_default(), tokens) {
+            Some(line) => {
+                out.priced_requests += requests;
+                out.totals.add(&line);
+                by_sub.entry(sub).or_default().add(&line);
+            }
+            None => *unpriced.entry((provider, model)).or_default() += requests,
+        }
+    }
+    let magnitude = |t: &CostTotals| t.usd_micros + t.cny_micros + t.equiv_usd_micros + t.equiv_cny_micros;
+    out.by_subscription = by_sub
+        .into_iter()
+        .map(|(id, totals)| SubscriptionCostDto { display_name: names.get(&id).cloned(), subscription_id: id, totals })
+        .collect();
+    out.by_subscription.sort_by(|a, b| magnitude(&b.totals).cmp(&magnitude(&a.totals)));
+    out.unpriced = unpriced
+        .into_iter()
+        .map(|((provider_id, model), requests)| UnpricedModelDto { provider_id, model, requests })
+        .collect();
+    out.unpriced.sort_by(|a, b| b.requests.cmp(&a.requests).then_with(|| a.model.cmp(&b.model)));
+    Ok(out)
+}

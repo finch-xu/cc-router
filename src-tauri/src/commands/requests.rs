@@ -74,6 +74,8 @@ pub struct RequestLogDto {
     pub summary: RequestSummary,
     /// 网络耗时分段 (proxy/net_timing.rs), 详情页耗时条用; 老日志各字段为 null。
     pub net: crate::proxy::net_timing::NetTimingFields,
+    /// 命中的规则插件记录 (JSON 数组), 老日志或未命中为 null。
+    pub plugins_applied: Option<String>,
 }
 
 #[derive(Debug, Serialize)]
@@ -198,7 +200,8 @@ fn build_filter_clause(filters: &RequestLogFilters) -> (String, Vec<Bind>) {
 /// 列表 / 详情共用的列: 详情字段 + 摘要字段 (重名列 SQLite 允许重复出现)。
 const DTO_COLUMNS: &str = "endpoint_id, is_streaming, upstream_response_body,
     client_user_agent, client_version, client_ip, entry_kind, downstream_http_version,
-    client_effort, effort_source, upstream_effort, tool_result_count, tool_use_count";
+    client_effort, effort_source, upstream_effort, tool_result_count, tool_use_count,
+    plugins_applied";
 
 fn dto_from_row(r: &sqlx::sqlite::SqliteRow, auth: &HashMap<String, AuthType>) -> RequestLogDto {
     RequestLogDto {
@@ -239,6 +242,7 @@ fn dto_from_row(r: &sqlx::sqlite::SqliteRow, auth: &HashMap<String, AuthType>) -
         tool_use_names: r.try_get("tool_use_names").ok(),
         summary: live_feed::from_row(r, auth),
         net: crate::proxy::net_timing::NetTimingFields::from_row(r),
+        plugins_applied: r.try_get("plugins_applied").ok(),
     }
 }
 
@@ -456,6 +460,9 @@ pub struct RequestDetailDto {
     pub request: RequestLogDto,
     /// 同一次入站请求的全部尝试 (含本条), 按时间正序; 老记录没有 trace_id 时只有本条
     pub attempts: Vec<RequestSummary>,
+    /// 按当前价格表估算的费用 (没有启用的计价插件 / 没有匹配的价格 → None)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub cost: Option<crate::plugins::pricing::CostLine>,
 }
 
 /// 详情页: 一条请求的完整字段 + 同 trace 的全部尝试。找不到返回 None
@@ -485,7 +492,26 @@ pub async fn get_request_detail(state: State<'_, AppState>, id: String) -> AppRe
         }
         None => vec![request.summary.clone()],
     };
-    Ok(Some(RequestDetailDto { request, attempts }))
+    let cost = {
+        let pricing = state.pricing();
+        let ctx = crate::plugins::pricing::subscription_contexts(&state).await;
+        let (auth_type, billing) = ctx.get(&request.subscription_id).copied().unzip();
+        let n = |v: Option<i64>| v.unwrap_or(0).max(0) as u64;
+        crate::plugins::pricing::cost_of(
+            &pricing,
+            &request.provider_id,
+            &request.real_model_name,
+            auth_type,
+            billing.unwrap_or_default(),
+            crate::plugins::pricing::Tokens {
+                input_raw: n(request.input_tokens),
+                output: n(request.output_tokens),
+                cache_read: n(request.cache_read_tokens),
+                cache_write: n(request.cache_creation_tokens),
+            },
+        )
+    };
+    Ok(Some(RequestDetailDto { request, attempts, cost }))
 }
 
 /// 同一会话里时间上最接近 `around_ms` 的请求 (前后各最多 `radius` 条), 按时间正序。

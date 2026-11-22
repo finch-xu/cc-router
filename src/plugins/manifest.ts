@@ -9,14 +9,14 @@ export const MANIFEST_VERSION = 1;
 export const MANIFEST_FILE = "cc-router-plugin.json";
 
 /** 本版 app 能加载的插件类型。旧版 app 遇到新类型只报 unsupported_type, 不会尝试加载。 */
-export const SUPPORTED_TYPES = ["theme", "receipt", "provider"] as const;
+export const SUPPORTED_TYPES = ["theme", "receipt", "provider", "pricing", "rules"] as const;
 export type PluginType = (typeof SUPPORTED_TYPES)[number];
 
 /**
  * 系统插件: 在代理里执行, 内容由 Rust (`cc-router-plugin-spec`) 校验, 前端只展示暂存结果里的
  * `system` (问题 / 能力摘要 / 能力差异)。与 Rust `plugin::SYSTEM_TYPES` 一致。
  */
-export const SYSTEM_TYPES: readonly PluginType[] = ["provider"];
+export const SYSTEM_TYPES: readonly PluginType[] = ["provider", "pricing", "rules"];
 export const isSystemType = (t: string): boolean => (SYSTEM_TYPES as readonly string[]).includes(t);
 
 /** 内置主题 / 画风的名字不能当插件 id, 避免设置里出现两个「简洁」 */

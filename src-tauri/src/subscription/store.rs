@@ -14,7 +14,7 @@ use crate::provider::model::{
     AuthHeaderFormat, AuthType, BalanceDiscovery, EndpointProtocol, ModelDiscovery, SystemoneWire,
 };
 use crate::subscription::model::{
-    BalanceSnapshot, ModelCache, ModelInfo, ModelSlots, OAuthMetadata, SlotEfforts,
+    BalanceSnapshot, Billing, ModelCache, ModelInfo, ModelSlots, OAuthMetadata, SlotEfforts,
     SubscriptionRow, SubscriptionRuntime,
 };
 use crate::subscription::quota::{QuotaBucket, QuotaPeriod, QuotaUsage, TokenQuotas, ALL_PERIODS};
@@ -40,7 +40,7 @@ pub async fn load_runtime(
                 model_discovery, balance_discovery,
                 provider_display_name, provider_icon, is_user_defined,
                 auth_type, oauth_metadata, slot_efforts, token_quotas, endpoint_protocol,
-                url_params, systemone_wire, slot_schedules
+                url_params, systemone_wire, slot_schedules, billing
          FROM subscriptions",
     )
     .fetch_all(pool)
@@ -176,8 +176,11 @@ fn row_to_row(row: &sqlx::sqlite::SqliteRow) -> AppResult<SubscriptionRow> {
             SlotSchedules::default()
         }
     };
+    // billing 列在 migration 033 加, DEFAULT 'metered'; 不认识的值按按量处理 (只影响费用的显示口径)
+    let billing = Billing::from_db(&row.try_get::<String, _>("billing")?);
     Ok(SubscriptionRow {
         id,
+        billing,
         provider_id: row.try_get("provider_id")?,
         endpoint_id: row.try_get("endpoint_id")?,
         display_name: row.try_get("display_name")?,
@@ -266,13 +269,13 @@ pub async fn insert_on(conn: &mut SqliteConnection, sub: &SubscriptionRow) -> Ap
             model_discovery, balance_discovery,
             provider_display_name, provider_icon, is_user_defined,
             auth_type, oauth_metadata, slot_efforts, token_quotas, endpoint_protocol,
-            url_params, systemone_wire, slot_schedules)
+            url_params, systemone_wire, slot_schedules, billing)
          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
                  ?, ?, ?, ?,
                  ?, ?, ?, ?, ?, ?,
                  ?, ?, ?,
                  ?, ?, ?, ?, ?,
-                 ?, ?, ?)",
+                 ?, ?, ?, ?)",
     )
     .bind(sub.id.to_string())
     .bind(&sub.provider_id)
@@ -311,6 +314,7 @@ pub async fn insert_on(conn: &mut SqliteConnection, sub: &SubscriptionRow) -> Ap
     .bind(url_params_json)
     .bind(sub.systemone_wire.as_str())
     .bind(slot_schedules_json)
+    .bind(sub.billing.as_str())
     .execute(&mut *conn)
     .await?;
     Ok(())
@@ -389,7 +393,7 @@ pub async fn update_row(pool: &SqlitePool, sub: &SubscriptionRow) -> AppResult<(
             model_discovery = ?, balance_discovery = ?,
             provider_display_name = ?, provider_icon = ?, is_user_defined = ?,
             url_params = ?, systemone_wire = ?,
-            slot_schedules = ?
+            slot_schedules = ?, billing = ?
          WHERE id = ?",
     )
     .bind(&sub.endpoint_id)
@@ -422,6 +426,7 @@ pub async fn update_row(pool: &SqlitePool, sub: &SubscriptionRow) -> AppResult<(
     .bind(url_params_json)
     .bind(sub.systemone_wire.as_str())
     .bind(slot_schedules_json)
+    .bind(sub.billing.as_str())
     .bind(sub.id.to_string())
     .execute(pool)
     .await?;

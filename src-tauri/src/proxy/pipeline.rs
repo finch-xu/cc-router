@@ -195,23 +195,67 @@ pub(crate) fn jev_only_via_systemone(vm_name: VirtualModelName) -> Option<Respon
 pub async fn dispatch(
     state: &AppState,
     model: &str,
-    request_body: Value,
+    mut request_body: Value,
     client_headers: HeaderMap,
     is_streaming: bool,
     ctx: &ClientContext,
 ) -> AppResult<Response> {
-    let vm_config = {
+    let mut vm_config = {
         let models = state.virtual_models.read().await;
         let Some(config) = crate::virtual_model::model::VirtualModelConfig::resolve(&models, model) else {
             return Ok(overloaded::response(VirtualModelName::Fallback, &[]));
         };
         config.clone()
     };
-    let vm_name = vm_config.name.clone();
-    let is_fallback = vm_name.is_fallback();
+    let mut vm_name = vm_config.name.clone();
     if let Some(resp) = jev_only_via_systemone(vm_name.clone()) {
         return Ok(resp);
     }
+
+    // 规则插件: route 钩子 (改道 / 拒绝) + request 钩子 (改 Anthropic 形态的 body, 只应用一次)。
+    // 任一插件求值出错只跳过该插件并记入 plugins_applied, 请求照常发出; reject 是唯一能让请求失败的动作。
+    let ctx_with_plugins: Option<ClientContext> = {
+        let rules = state.rules();
+        if rules.is_empty() {
+            None
+        } else {
+            let (weekday, minute) = crate::plugins::rules::local_weekday_minute();
+            let facts = cc_router_plugin_spec::rules_engine::Facts {
+                purpose: ctx.tools.purpose.kind.as_str(),
+                purpose_guessed: ctx.tools.purpose.guessed,
+                virtual_model: crate::plugins::rules::vm_short_name(&vm_name),
+                client_tool: ctx.info.tool.unwrap_or("unknown"),
+                entry: crate::plugins::rules::entry_rule_name(ctx.entry_kind),
+                model,
+                weekday,
+                minute,
+            };
+            match rules.evaluate_pipeline(facts, &mut request_body) {
+                crate::plugins::rules::PipelineRulesOutcome::Reject { message, .. } => {
+                    return Ok(crate::proxy::handler::error_response(
+                        StatusCode::BAD_REQUEST,
+                        "invalid_request_error",
+                        &message,
+                    ));
+                }
+                crate::plugins::rules::PipelineRulesOutcome::Continue { redirected_to, applied } => {
+                    if let Some(target_vm) = redirected_to {
+                        let models = state.virtual_models.read().await;
+                        if let Some(cfg) = models.get(&target_vm) {
+                            vm_config = cfg.clone();
+                            vm_name = vm_config.name.clone();
+                        }
+                    }
+                    crate::plugins::rules::serialize_applied(&applied).map(|json| ClientContext {
+                        plugins_applied: Some(json),
+                        ..ctx.clone()
+                    })
+                }
+            }
+        }
+    };
+    let ctx = ctx_with_plugins.as_ref().unwrap_or(ctx);
+    let is_fallback = vm_name.is_fallback();
     if vm_config.subscription_ids.is_empty() {
         return Ok(overloaded::response(vm_name.clone(), &[]));
     }
@@ -545,6 +589,7 @@ pub async fn dispatch(
                         tool_calls: ToolLogFields::request_only(&ctx.tools),
                         headers: ctx.header_log(),
                         net: ctx.net_log(),
+                        plugins_applied: ctx.plugins_applied.clone(),
                     };
                     let _ = state.request_log_tx.try_send(entry);
 
@@ -677,6 +722,7 @@ pub async fn dispatch(
                         tool_calls: ToolLogFields::request_only(&ctx.tools),
                         headers: ctx.header_log(),
                         net: ctx.net_log(),
+                        plugins_applied: ctx.plugins_applied.clone(),
                     };
                     let _ = state.request_log_tx.try_send(entry);
 
@@ -820,6 +866,7 @@ pub async fn dispatch(
                         tool_calls: ToolLogFields::request_only(&ctx.tools),
                         headers: ctx.header_log(),
                         net: ctx.net_log(),
+                        plugins_applied: ctx.plugins_applied.clone(),
                     };
                     let _ = state.request_log_tx.try_send(entry);
 
@@ -974,6 +1021,7 @@ pub async fn dispatch(
                         tool_calls: ToolLogFields::request_only(&ctx.tools),
                         headers: ctx.header_log(),
                         net: ctx.net_log(),
+                        plugins_applied: ctx.plugins_applied.clone(),
                     };
                     let _ = state.request_log_tx.try_send(entry);
 
@@ -1130,6 +1178,7 @@ pub async fn dispatch(
                         tool_calls: ToolLogFields::request_only(&ctx.tools),
                         headers: ctx.header_log(),
                         net: ctx.net_log(),
+                        plugins_applied: ctx.plugins_applied.clone(),
                     };
                     let _ = state.request_log_tx.try_send(entry);
 
@@ -1283,6 +1332,7 @@ pub async fn dispatch(
                         tool_calls: ToolLogFields::request_only(&ctx.tools),
                         headers: ctx.header_log(),
                         net: ctx.net_log(),
+                        plugins_applied: ctx.plugins_applied.clone(),
                     };
                     let _ = state.request_log_tx.try_send(entry);
 
@@ -1542,6 +1592,7 @@ pub async fn dispatch(
                     tool_calls,
                     headers: ctx.header_log(),
                     net: ctx.net_log(),
+                        plugins_applied: ctx.plugins_applied.clone(),
                 };
                 let _ = state.request_log_tx.try_send(entry);
 
@@ -1681,6 +1732,7 @@ pub async fn dispatch(
                             tool_calls: ToolLogFields::request_only(&ctx.tools),
                             headers: ctx.header_log(),
                             net: ctx.net_log(),
+                        plugins_applied: ctx.plugins_applied.clone(),
                         };
                         let _ = state.request_log_tx.try_send(entry);
 
@@ -1736,6 +1788,7 @@ pub async fn dispatch(
                             tool_calls: ToolLogFields::request_only(&ctx.tools),
                             headers: ctx.header_log(),
                             net: ctx.net_log(),
+                        plugins_applied: ctx.plugins_applied.clone(),
                         };
                         let _ = state.request_log_tx.try_send(entry);
                         retry_count += 1;
@@ -1874,6 +1927,7 @@ pub async fn dispatch(
                     tool_calls: ToolLogFields::request_only(&ctx.tools),
                     headers: ctx.header_log(),
                     net: ctx.net_log(),
+                        plugins_applied: ctx.plugins_applied.clone(),
                 };
                 let _ = state.request_log_tx.try_send(entry);
 

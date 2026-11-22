@@ -1,5 +1,5 @@
 import { useMemo, useState } from "react";
-import { ExternalLink, FolderOpen, Link2, Palette, Plug, Puzzle, Receipt } from "lucide-react";
+import { Coins, ExternalLink, FolderOpen, Link2, Palette, Plug, Puzzle, Receipt, SlidersHorizontal } from "lucide-react";
 import Github from "@lobehub/icons/es/Github";
 import { useNavigate } from "react-router";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
@@ -7,6 +7,7 @@ import { EmptyState } from "@/components/EmptyState";
 import { Spinner } from "@/components/Spinner";
 import { InstallDialog } from "@/components/plugins/InstallDialog";
 import { LinkDialog } from "@/components/plugins/LinkDialog";
+import { ParamsDialog } from "@/components/plugins/ParamsDialog";
 import { SparrowBakeryLogo } from "@/components/plugins/SparrowBakeryLogo";
 import { fmtBytes, sourceText } from "@/components/plugins/format";
 import "@/components/plugins/plugins.css";
@@ -23,10 +24,10 @@ import { pluginLinks, type PluginLinks } from "@/plugins/links";
 import type { InstalledPlugin, StagedPlugin } from "@/types";
 
 type Tab = "community" | "installed";
-type Kind = "all" | "theme" | "receipt" | "provider";
+type Kind = "all" | "theme" | "receipt" | "provider" | "pricing" | "rules";
 /** 类型 chip 分两组: 外观 (主题 / 小票) 与功能 (系统插件)。某类型两边都没有条目就不显示 */
 const LOOK_KINDS = ["theme", "receipt"] as const;
-const FEATURE_KINDS = ["provider"] as const;
+const FEATURE_KINDS = ["provider", "pricing", "rules"] as const;
 
 /** 清单原文里的名字 / 介绍 (已安装列表用; 内容在安装时已校验过) */
 function manifestText(m: unknown, key: "name" | "description"): LocalizedText | undefined {
@@ -62,6 +63,7 @@ export function PluginsPage() {
   const [linkOpen, setLinkOpen] = useState(false);
   const [staged, setStaged] = useState<{ s: StagedPlugin; sha?: string } | null>(null);
   const [detail, setDetail] = useState<CommunityEntry | null>(null);
+  const [editingParams, setEditingParams] = useState<{ id: string; promptEnable: boolean } | null>(null);
   const [busyId, setBusyId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
@@ -123,6 +125,11 @@ export function PluginsPage() {
   }
 
   async function toggleEnabled(p: InstalledPlugin) {
+    // 规则插件缺必填参数时直接打开参数对话框并提示, 避免白点一次再看报错
+    if (!p.enabled && p.missing_params && p.missing_params.length > 0) {
+      setEditingParams({ id: p.id, promptEnable: true });
+      return;
+    }
     setBusyId(p.id);
     setError(null);
     try {
@@ -256,7 +263,17 @@ export function PluginsPage() {
                     <img className="pg-shot" src={e.screenshots[0]} alt="" loading="lazy" />
                   ) : (
                     <div className="pg-shot empty">
-                      {e.type === "receipt" ? <Receipt size={22} /> : e.type === "provider" ? <Plug size={22} /> : <Palette size={22} />}
+                      {e.type === "receipt" ? (
+                        <Receipt size={22} />
+                      ) : e.type === "provider" ? (
+                        <Plug size={22} />
+                      ) : e.type === "pricing" ? (
+                        <Coins size={22} />
+                      ) : e.type === "rules" ? (
+                        <SlidersHorizontal size={22} />
+                      ) : (
+                        <Palette size={22} />
+                      )}
                     </div>
                   )}
                   <div className="pg-card-body">
@@ -304,6 +321,9 @@ export function PluginsPage() {
                       {p.source.kind === "community" && <span className="src-tag">{t("plugins.source.community")}</span>}
                       {inUse && <span className="pg-badge acc">{t("plugins.badge.current")}</span>}
                       {isSystemType(p.plugin_type) && !p.enabled && <span className="pg-badge">{t("plugins.badge.disabled")}</span>}
+                      {p.missing_params && p.missing_params.length > 0 && (
+                        <span className="pg-badge warn">{t("plugins.badge.needsSetup")}</span>
+                      )}
                       {revoked && <span className="pg-badge err">{t("plugins.badge.revoked")}</span>}
                     </div>
                     <div className="pg-meta">
@@ -342,6 +362,16 @@ export function PluginsPage() {
                         onClick={() => navigate(`/subscriptions/new?provider=${encodeURIComponent(`plugin:${p.id}`)}`)}
                       >
                         {t("plugins.btn.addSubscription")}
+                      </button>
+                    )}
+                    {p.param_decls && p.param_decls.length > 0 && (
+                      <button
+                        className="btn sm"
+                        type="button"
+                        disabled={busyId !== null}
+                        onClick={() => setEditingParams({ id: p.id, promptEnable: false })}
+                      >
+                        <SlidersHorizontal size={12} /> {t("plugins.btn.settings")}
                       </button>
                     )}
                     {isSystemType(p.plugin_type) && (isDesktop || p.enabled) && (
@@ -432,7 +462,24 @@ export function PluginsPage() {
       </Dialog>
 
       <LinkDialog open={linkOpen} onOpenChange={setLinkOpen} onStaged={(s) => setStaged({ s })} />
-      <InstallDialog staged={staged?.s ?? null} communitySha256={staged?.sha} onClose={() => setStaged(null)} />
+      <InstallDialog
+        staged={staged?.s ?? null}
+        communitySha256={staged?.sha}
+        onClose={() => setStaged(null)}
+        onConfigureRules={(id) => {
+          setTab("installed");
+          setKind("all");
+          const found = installedById.get(id);
+          if (found?.param_decls && found.param_decls.length > 0) {
+            setEditingParams({ id, promptEnable: true });
+          }
+        }}
+      />
+      <ParamsDialog
+        plugin={editingParams ? (installedById.get(editingParams.id) ?? null) : null}
+        promptEnable={editingParams?.promptEnable ?? false}
+        onClose={() => setEditingParams(null)}
+      />
     </div>
   );
 }

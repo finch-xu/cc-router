@@ -6,6 +6,7 @@
 use std::collections::HashMap;
 
 use chrono::Utc;
+use serde_json::{Map, Value};
 use sqlx::{Row, SqlitePool};
 
 use crate::error::AppResult;
@@ -14,14 +15,22 @@ use crate::error::AppResult;
 pub struct PluginConfig {
     pub enabled: bool,
     pub priority: i64,
-    /// JSON 文本 (P1 恒为 `{}`)
+    /// JSON 文本 (无参数插件为 `{}`)
     pub params: String,
+}
+
+/// 从 `plugin_configs.params` 解析出参数对象; 损坏 / 非对象时回退空表。
+pub fn parse_params(raw: &str) -> Map<String, Value> {
+    serde_json::from_str::<Value>(raw)
+        .ok()
+        .and_then(|v| v.as_object().cloned())
+        .unwrap_or_default()
 }
 
 /// 装上后、用户还没切换过时是否生效。厂商 / 计价是被动的 (只是多一个选项 / 只影响显示), 默认生效;
 /// 规则 / 通知会改请求或往外发, 默认停用 (P2 / P3 加进来时在这里登记)。
 pub fn default_enabled(plugin_type: &str) -> bool {
-    matches!(plugin_type, "provider")
+    matches!(plugin_type, "provider" | "pricing")
 }
 
 pub async fn load_all(pool: &SqlitePool) -> AppResult<HashMap<String, PluginConfig>> {
@@ -58,6 +67,27 @@ pub async fn set_enabled(pool: &SqlitePool, plugin_id: &str, enabled: bool) -> A
     Ok(())
 }
 
+/// 写入用户参数。首次插入时 `enabled` 沿用类型默认值 (`rules` 为停用), 已有行保持原启用状态不变。
+pub async fn set_params(
+    pool: &SqlitePool,
+    plugin_id: &str,
+    plugin_type: &str,
+    params: &Map<String, Value>,
+) -> AppResult<()> {
+    let json = serde_json::to_string(params)?;
+    sqlx::query(
+        "INSERT INTO plugin_configs (plugin_id, enabled, params, updated_at) VALUES (?, ?, ?, ?)
+         ON CONFLICT(plugin_id) DO UPDATE SET params = excluded.params, updated_at = excluded.updated_at",
+    )
+    .bind(plugin_id)
+    .bind(default_enabled(plugin_type) as i64)
+    .bind(json)
+    .bind(Utc::now().timestamp_millis())
+    .execute(pool)
+    .await?;
+    Ok(())
+}
+
 pub async fn delete(pool: &SqlitePool, plugin_id: &str) -> AppResult<()> {
     sqlx::query("DELETE FROM plugin_configs WHERE plugin_id = ?").bind(plugin_id).execute(pool).await?;
     Ok(())
@@ -78,7 +108,22 @@ mod tests {
         let pool = pool().await;
         let c = load_all(&pool).await.unwrap();
         assert!(is_enabled(&c, "relay", "provider"), "厂商插件默认生效");
-        assert!(!is_enabled(&c, "x", "rules-to-come"), "未登记类型默认停用");
+        assert!(!is_enabled(&c, "r", "rules"), "规则插件默认停用");
+
+        // 写参数不改变启用状态 (首次写入沿用默认值 false)
+        let mut p = Map::new();
+        p.insert("cheap".into(), Value::String("haiku".into()));
+        set_params(&pool, "r", "rules", &p).await.unwrap();
+        let c = load_all(&pool).await.unwrap();
+        assert!(!is_enabled(&c, "r", "rules"));
+        assert_eq!(parse_params(&c["r"].params).get("cheap").and_then(Value::as_str), Some("haiku"));
+
+        set_enabled(&pool, "r", true).await.unwrap();
+        p.insert("cheap".into(), Value::String("sonnet".into()));
+        set_params(&pool, "r", "rules", &p).await.unwrap();
+        let c = load_all(&pool).await.unwrap();
+        assert!(is_enabled(&c, "r", "rules"), "改参数保留已启用状态");
+        assert_eq!(parse_params(&c["r"].params).get("cheap").and_then(Value::as_str), Some("sonnet"));
 
         set_enabled(&pool, "relay", false).await.unwrap();
         let c = load_all(&pool).await.unwrap();
@@ -87,6 +132,7 @@ mod tests {
         assert!(is_enabled(&load_all(&pool).await.unwrap(), "relay", "provider"));
 
         delete(&pool, "relay").await.unwrap();
+        delete(&pool, "r").await.unwrap();
         assert!(load_all(&pool).await.unwrap().is_empty());
     }
 }

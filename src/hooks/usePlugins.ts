@@ -4,6 +4,8 @@ import { api } from "@/api/tauri";
 import { runtime } from "@/runtime";
 import { parseCommunityIndex } from "@/plugins/community";
 import { SUBSCRIPTIONS_KEY, SUBSCRIPTION_DETAIL_KEY } from "@/hooks/useSubscriptions";
+import { STATS_KEY } from "@/hooks/useStatistics";
+import { REQUESTS_KEY } from "@/hooks/useRequests";
 
 export const PLUGINS_KEY = ["plugins"] as const;
 export const COMMUNITY_INDEX_KEY = ["plugin-community-index"] as const;
@@ -18,6 +20,10 @@ export function useInstalledPlugins() {
       qc.invalidateQueries({ queryKey: ["providers"] });
       qc.invalidateQueries({ queryKey: SUBSCRIPTIONS_KEY });
       qc.invalidateQueries({ queryKey: SUBSCRIPTION_DETAIL_KEY });
+      // 计价插件变了: 费用卡片 / 小票 / 请求详情的费用跟着变
+      qc.invalidateQueries({ queryKey: [STATS_KEY] });
+      qc.invalidateQueries({ queryKey: ["receipts"] });
+      qc.invalidateQueries({ queryKey: [REQUESTS_KEY, "detail"] });
     });
     return () => {
       promise.then((un) => un()).catch(() => {});

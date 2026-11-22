@@ -48,6 +48,7 @@ import {
 import { useT } from "@/i18n";
 import type {
   AuthHeaderFormat,
+  Billing,
   ModelInfo,
   ModelSlots,
   RefreshModelListResult,
@@ -62,6 +63,7 @@ import { lastErrorText, testResultText } from "@/lib/backendText";
 import { providerName } from "@/lib/providerText";
 import { UrlParamFields, urlParamErrors } from "@/components/UrlParamFields";
 import { RebuildConnectionBanner } from "@/components/subscriptions/RebuildConnectionBanner";
+import { useInstalledPlugins } from "@/hooks/usePlugins";
 import { errorText } from "@/lib/errorText";
 
 /** 请求头编辑器的行 → 预览用的名值表 (与保存时同样 trim、丢弃空名)。 */
@@ -118,6 +120,10 @@ export function SubscriptionEditPage() {
   const [headerPolicy, setHeaderPolicy] = useState<HeaderPolicy>({ mode: "none", names: [] });
   /** 内置订阅的自定义请求头 (extra_headers); 自定义订阅继续编辑 required_headers */
   const [extraHeaders, setExtraHeaders] = useState<KeyValueRow[]>([]);
+  /** 包月 / 按量: 只影响计价插件的费用口径, 所以只在有启用的计价插件时显示 */
+  const [billing, setBilling] = useState<Billing>("metered");
+  const installedPlugins = useInstalledPlugins();
+  const hasPricing = (installedPlugins.data ?? []).some((p) => p.plugin_type === "pricing" && p.enabled);
 
   const [models, setModels] = useState<ModelInfo[] | null>(null);
   const [fetchingModels, setFetchingModels] = useState(false);
@@ -148,6 +154,7 @@ export function SubscriptionEditPage() {
       setAuthHeaderFormat(subQuery.data.auth_header_format);
       setProviderDisplayName(subQuery.data.provider_display_name);
       setHeaderPolicy(subQuery.data.header_policy ?? { mode: "none", names: [] });
+      setBilling(subQuery.data.billing ?? "metered");
       setExtraHeaders(
         Object.entries(subQuery.data.extra_headers ?? {}).map(([key, value]) => ({ key, value })),
       );
@@ -203,6 +210,7 @@ export function SubscriptionEditPage() {
       model_slots: slots,
       slot_efforts: slotEfforts,
     };
+    if (billing !== (sub.billing ?? "metered")) patch.billing = billing;
     // 仅透传订阅有透传策略 (翻译类订阅不渲染也不提交, 保持后端字段不变)
     if (sub.auth_type === "api_key" && !isSystemOne) {
       const nameErr = validateHeaderPolicyNames(headerPolicy.names);
@@ -493,6 +501,24 @@ export function SubscriptionEditPage() {
                         </Button>
                       </div>
                     </div>
+
+                    {hasPricing && (
+                      <div className="grid grid-cols-[120px_1fr] gap-3 items-center">
+                        <Label>{t("subscriptionEdit.billing.label")}</Label>
+                        <div className="space-y-1">
+                          <Select value={billing} onValueChange={(v) => setBilling(v as Billing)}>
+                            <SelectTrigger>
+                              <SelectValue />
+                            </SelectTrigger>
+                            <SelectContent>
+                              <SelectItem value="metered">{t("subscriptionEdit.billing.metered")}</SelectItem>
+                              <SelectItem value="flat">{t("subscriptionEdit.billing.flat")}</SelectItem>
+                            </SelectContent>
+                          </Select>
+                          <p className="text-xs text-muted-foreground">{t("subscriptionEdit.billing.hint")}</p>
+                        </div>
+                      </div>
+                    )}
 
                     {/* 内置订阅的自定义请求头 (自定义订阅在上方连接区编辑 required_headers) */}
                     {!isCustom && (

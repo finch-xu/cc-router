@@ -3,13 +3,14 @@
 use std::path::Path;
 
 use crate::check::{Capabilities, CheckResult, Issue, IssueCode};
+use crate::pricing_plugin::{self, PricingTable};
 use crate::provider_plugin::{self, ProviderPlugin};
 
 pub const MANIFEST_FILE: &str = "cc-router-plugin.json";
 
 /// 由 Rust 校验的系统插件类型。与前端 / 主 crate 的 `SUPPORTED_TYPES` 是不同的两张表:
 /// 那两张表是「app 能装哪些类型」, 这张是「其中哪些归 Rust 校验」。
-pub const SYSTEM_TYPES: &[&str] = &["provider"];
+pub const SYSTEM_TYPES: &[&str] = &["provider", "pricing", "rules"];
 /// 由 TS 校验的类型 (主题 / 小票): Rust 侧只认出来, 不校验内容。
 pub const TS_TYPES: &[&str] = &["theme", "receipt"];
 
@@ -21,6 +22,8 @@ pub fn is_system_type(t: &str) -> bool {
 #[derive(Debug, Clone)]
 pub enum SystemPlugin {
     Provider(ProviderPlugin),
+    Pricing(PricingTable),
+    Rules(crate::rules_plugin::RulesPlugin),
 }
 
 /// 校验一个系统插件的入口文件。`assets` 是清单里列出的资源 (系统插件第一期都不允许带资源)。
@@ -31,6 +34,14 @@ pub fn check_system(plugin_type: &str, plugin_id: &str, entry: &str, assets: &[S
     match plugin_type {
         "provider" => match provider_plugin::parse(entry, plugin_id) {
             Ok(p) => (CheckResult::passed(Capabilities::Provider(p.capabilities.clone())), Some(SystemPlugin::Provider(p))),
+            Err(issues) => (CheckResult::failed(issues), None),
+        },
+        "pricing" => match pricing_plugin::parse(entry) {
+            Ok((table, caps)) => (CheckResult::passed(Capabilities::Pricing(caps)), Some(SystemPlugin::Pricing(table))),
+            Err(issues) => (CheckResult::failed(issues), None),
+        },
+        "rules" => match crate::rules_plugin::parse(entry) {
+            Ok((plugin, caps)) => (CheckResult::passed(Capabilities::Rules(caps)), Some(SystemPlugin::Rules(plugin))),
             Err(issues) => (CheckResult::failed(issues), None),
         },
         other => (CheckResult::failed(vec![Issue::new("type", IssueCode::UnsupportedType).detail(other.to_string())]), None),

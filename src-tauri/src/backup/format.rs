@@ -51,6 +51,9 @@ pub struct ExportSubscription {
     pub slot_efforts: SlotEfforts,
     #[serde(default)]
     pub slot_schedules: SlotSchedules,
+    /// 包月 / 按量; 老文件没有 = 按量
+    #[serde(default)]
+    pub billing: crate::subscription::model::Billing,
     #[serde(default)]
     pub token_quotas: TokenQuotas,
     pub enabled: bool,
@@ -232,6 +235,7 @@ pub fn subscription_to_export(row: &SubscriptionRow) -> (ExportSubscription, Ext
         model_slots,
         slot_efforts,
         slot_schedules,
+        billing,
         token_quotas,
         enabled,
         is_auth_failed: _, // runtime state
@@ -276,6 +280,7 @@ pub fn subscription_to_export(row: &SubscriptionRow) -> (ExportSubscription, Ext
         model_slots: model_slots.clone(),
         slot_efforts: slot_efforts.clone(),
         slot_schedules: slot_schedules.clone(),
+        billing: *billing,
         token_quotas: token_quotas.clone(),
         enabled: *enabled,
         created_at: *created_at,
@@ -335,6 +340,7 @@ pub fn export_to_row(
         model_slots: sub.model_slots.clone(),
         slot_efforts: sub.slot_efforts.clone(),
         slot_schedules: sub.slot_schedules.clone(),
+        billing: sub.billing,
         token_quotas: sub.token_quotas.clone(),
         enabled,
         is_auth_failed: false,

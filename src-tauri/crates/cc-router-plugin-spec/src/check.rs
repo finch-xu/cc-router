@@ -68,11 +68,21 @@ pub struct ProviderCapabilities {
     pub endpoints: usize,
 }
 
+/// 计价插件: 币种、条目数、覆盖的厂商 (含 `*`)。只影响费用显示, 不碰请求。
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct PricingCapabilities {
+    pub currency: String,
+    pub rules: usize,
+    pub providers: Vec<String>,
+}
+
 /// 由插件内容推导出的「这个插件会做什么」(不是作者声明的, 作者没法少报)。
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum Capabilities {
     Provider(ProviderCapabilities),
+    Pricing(PricingCapabilities),
+    Rules(crate::rules_plugin::RulesCapabilities),
 }
 
 /// 与本机已装版本相比的能力变化 (更新确认框用)。
@@ -81,6 +91,8 @@ pub struct CapabilityDiff {
     pub added_hosts: Vec<String>,
     pub removed_hosts: Vec<String>,
     pub auth_type_changed: bool,
+    /// 规则插件: 新版本多出来的钩子 / 动作 (`route` / `reject` / `redact` …)
+    pub added_actions: Vec<String>,
 }
 
 impl CapabilityDiff {
@@ -93,14 +105,26 @@ impl CapabilityDiff {
                     added_hosts: nh.iter().filter(|h| !oh.contains(h)).cloned().collect(),
                     removed_hosts: oh.iter().filter(|h| !nh.contains(h)).cloned().collect(),
                     auth_type_changed: o.auth_type != n.auth_type,
+                    added_actions: Vec::new(),
                 }
             }
+            (Capabilities::Rules(o), Capabilities::Rules(n)) => {
+                let mut added: Vec<String> = n.actions.iter().filter(|a| !o.actions.contains(a)).map(|a| a.to_string()).collect();
+                for h in &n.hooks {
+                    if !o.hooks.contains(h) {
+                        added.push(format!("hook:{}", serde_json::to_value(h).ok().and_then(|v| v.as_str().map(str::to_string)).unwrap_or_default()));
+                    }
+                }
+                Self { added_actions: added, ..Self::default() }
+            }
+            // 计价插件不连网也不改请求, 没有「能力扩大」可言; 类型变了的情况不会出现 (同 id 同类型才比)
+            _ => Self::default(),
         }
     }
 
     /// 能力是否扩大 (启用中的规则 / 通知插件更新后据此自动停用)
     pub fn expands(&self) -> bool {
-        !self.added_hosts.is_empty() || self.auth_type_changed
+        !self.added_hosts.is_empty() || self.auth_type_changed || !self.added_actions.is_empty()
     }
 }
 

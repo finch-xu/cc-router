@@ -177,6 +177,7 @@ web_commands! {
     get_live_requests(since_ms: Option<i64>) => crate::observability::live_feed::get_live_requests(app, st, args.since_ms).await,
     // statistics / receipts / events
     get_overall_stats(range: StatsRange) => commands::statistics::get_overall_stats(st, args.range).await,
+    get_cost_summary(range: StatsRange) => commands::statistics::get_cost_summary(st, args.range).await,
     get_daily_series(range: StatsRange) => commands::statistics::get_daily_series(st, args.range).await,
     get_breakdown(range: StatsRange, by: BreakdownBy) => commands::statistics::get_breakdown(st, args.range, args.by).await,
     get_token_heatmap(days: u32) => commands::statistics::get_token_heatmap(st, args.days).await,
@@ -207,6 +208,7 @@ web_commands! {
     // 启用会改变 app 行为 (厂商出现在列表里 / 以后的规则改请求), 只在桌面; 停用是安全方向, 两边都开放
     enable_plugin(id: String) => Err::<(), AppError>(AppError::BadRequest(DESKTOP_ONLY.into())),
     disable_plugin(id: String) => commands::plugins::disable_plugin(st, args.id).await,
+    set_plugin_params(id: String, params: serde_json::Map<String, Value>) => commands::plugins::set_plugin_params(st, args.id, args.params).await,
     fetch_community_index() => Err::<(), AppError>(AppError::BadRequest(DESKTOP_ONLY.into())),
     // onboarding
     get_onboarding_state() => commands::onboarding::get_onboarding_state(st).await,

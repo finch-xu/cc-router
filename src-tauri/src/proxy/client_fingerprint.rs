@@ -178,6 +178,8 @@ pub struct ClientContext {
     /// 当前 attempt 的网络耗时 (proxy/net_timing.rs), 随 [`ClientContext::with_upstream_headers`]
     /// 一起生成; 入口处 / 未发送时为 None。
     pub net_timing: Option<crate::proxy::net_timing::NetTimingFields>,
+    /// 本次请求命中的规则插件记录 (JSON 数组, 见 `plugins/rules.rs`); 未命中或无规则插件为 None。
+    pub plugins_applied: Option<String>,
 }
 
 impl ClientContext {

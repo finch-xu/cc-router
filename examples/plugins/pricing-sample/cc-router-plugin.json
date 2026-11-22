@@ -1,0 +1,17 @@
+{
+  "manifest": 1,
+  "id": "pricing-sample",
+  "type": "pricing",
+  "version": "1.0.0",
+  "name": { "zh": "计价插件范例", "zh-Hant": "計價外掛範例", "en": "Pricing plugin sample", "ja": "料金プラグインの見本" },
+  "description": {
+    "zh": "计价插件的写法示范。价格是虚构的，只给作者参考，请不要安装来估算真实费用。",
+    "zh-Hant": "計價外掛的寫法示範。價格是虛構的，只給作者參考，請不要安裝來估算真實費用。",
+    "en": "Shows how to write a pricing plugin. The prices are made up for authors to copy — don't install it to estimate real costs.",
+    "ja": "料金プラグインの書き方の見本です。価格は架空のもので作者向けの参考です。実際の費用の見積もりには使わないでください。"
+  },
+  "author": "cc-router",
+  "license": "MIT",
+  "entry": "pricing.json",
+  "assets": []
+}

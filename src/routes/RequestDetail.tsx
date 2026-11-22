@@ -27,6 +27,7 @@ import {
 import { REQUESTS_KEY } from "@/hooks/useRequests";
 import { useSubscriptions } from "@/hooks/useSubscriptions";
 import { useT, type TFunction } from "@/i18n";
+import { formatCostLine } from "@/lib/cost";
 import { fmtNum, fmtRequestSeconds, fmtTime, fmtTokenSpeed } from "@/lib/format";
 import { isReturnedToClient } from "@/lib/headerSources";
 import { timingModel, type TimingSegKind } from "@/lib/requestTiming";
@@ -44,6 +45,7 @@ import { customProviderLabel, providerIconId } from "@/lib/providerLabels";
 import { providerName as localProviderName } from "@/lib/providerText";
 import { parseLogQuery, toFilters, toSearch } from "@/lib/requestLogQuery";
 import type {
+  AppliedPluginRule,
   HeaderPairs,
   OutboundHeaderRows,
   OutboundSource,
@@ -95,6 +97,16 @@ function namesTruncated(raw?: string | null): boolean {
     return Array.isArray(v) && v.includes(TOOL_NAME_TRUNCATED_MARKER);
   } catch {
     return false;
+  }
+}
+
+function parseAppliedPlugins(raw?: string | null): AppliedPluginRule[] {
+  if (!raw) return [];
+  try {
+    const v = JSON.parse(raw);
+    return Array.isArray(v) ? (v as AppliedPluginRule[]) : [];
+  } catch {
+    return [];
   }
 }
 
@@ -288,6 +300,7 @@ export function RequestDetailPage() {
   const hit = cacheHitRatio(parts);
   const ok = isOk(r);
   const p = purposeOf(r);
+  const appliedPlugins = parseAppliedPlugins(request.plugins_applied);
   const prettyBody = (() => {
     if (!request.upstream_response_body) return null;
     try {
@@ -310,6 +323,9 @@ export function RequestDetailPage() {
       `subscription: ${sub?.display_name ?? request.subscription_id}`,
       `real_model: ${request.real_model_name}`,
       `response_model: ${request.response_model_name ?? "—"}`,
+      ...(appliedPlugins.length > 0
+        ? [`plugins_applied: ${appliedPlugins.map((a) => `${a.plugin_id}@${a.version}[${a.rules.join(",")}${a.error ? ` err=${a.error}` : ""}]`).join("; ")}`]
+        : []),
       `effort: ${effortText(request)}`,
       `status: ${request.status}`,
       `http_status: ${request.http_status ?? "—"}`,
@@ -494,6 +510,22 @@ export function RequestDetailPage() {
                     )],
                     [t("requestLogs.detail.realModel"), mono(request.real_model_name)],
                     [t("requestLogs.detail.responseModel"), mono(request.response_model_name)],
+                    ...(appliedPlugins.length > 0
+                      ? [
+                          [
+                            t("requestLogs.detail.pluginsApplied"),
+                            <span className="rqd-chainline">
+                              {appliedPlugins.map((ap) => (
+                                <span key={`${ap.plugin_id}@${ap.version}`} className={"pill " + (ap.error ? "warn" : "tag")}>
+                                  <span className="mono">{ap.plugin_id}</span>
+                                  {ap.rules.length > 0 ? ` · ${ap.rules.join(", ")}` : ""}
+                                  {ap.error ? ` (${ap.error})` : ""}
+                                </span>
+                              ))}
+                            </span>,
+                          ] as [string, ReactNode],
+                        ]
+                      : []),
                   ]}
                 />
               </Section>
@@ -515,6 +547,12 @@ export function RequestDetailPage() {
                     <div><small><i style={{ background: "var(--rqd-tk-cw)" }} />{t("stats.daily.tokenTooltipCacheCreate")}</small><b>{fmtNum(parts.cacheWrite)}</b></div>
                     <div><small><i style={{ background: "var(--rqd-tk-in)" }} />{t("requestLogs.page.perf.uncached")}</small><b>{fmtNum(parts.input)}</b></div>
                     <div><small><i style={{ background: "var(--rqd-tk-out)" }} />{t("stats.daily.tokenTooltipOutput")}</small><b>{fmtNum(parts.output)}</b></div>
+                    {data?.cost && (
+                      <div title={t("requestLogs.page.perf.costSource", { plugin: data.cost.source.plugin_id, version: data.cost.source.version })}>
+                        <small>{data.cost.equivalent ? t("requestLogs.page.perf.costEquivalent") : t("requestLogs.page.perf.cost")}</small>
+                        <b>{formatCostLine(data.cost)}</b>
+                      </div>
+                    )}
                   </div>
                   <p className="rqd-note">
                     {hit != null && `${t("requestLogs.page.perf.cacheHit", { pct: Math.round(hit * 100) })} · `}

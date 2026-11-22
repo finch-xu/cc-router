@@ -365,6 +365,8 @@ export interface SubscriptionDto {
   token_quotas: TokenQuotas;
   /** 每槽位分时段模型规则。后端总是带这个 key (可以是 {})。 */
   slot_schedules: SlotSchedules;
+  /** 包月 / 按量 (计价插件的费用口径; 包月的费用显示为「等价按量费用」) */
+  billing?: Billing;
   /** 各槽位此刻生效的模型 (宿主机时钟求值), 四个 key 总是都在。 */
   slot_models_now: SlotModelsNow;
   /** 四周期用量快照, 固定按 daily/weekly/monthly/total 顺序返回 4 条。 */
@@ -534,6 +536,8 @@ export interface SubscriptionPatch {
   url_params?: Record<string, string>;
   /** 自定义订阅: 改连接信息 */
   connection?: ConnectionPatch;
+  /** 包月 / 按量 */
+  billing?: Billing;
 }
 
 export interface TestConnectionResult {
@@ -902,6 +906,16 @@ export interface RequestLogDto {
   summary: RequestSummary;
   /** 网络耗时分段 (proxy/net_timing.rs); 老日志各字段为 null */
   net: NetTiming;
+  /** 命中的规则插件记录 (JSON 数组); 老日志或未命中为 null */
+  plugins_applied?: string | null;
+}
+
+/** 规则插件对单条请求做过的操作 (`cc_router_plugin_spec::rules_engine::Applied`) */
+export interface AppliedPluginRule {
+  plugin_id: string;
+  version: string;
+  rules: string[];
+  error?: string;
 }
 
 /**
@@ -926,6 +940,42 @@ export interface NetTiming {
 export interface RequestDetailDto {
   request: RequestLogDto;
   attempts: RequestSummary[];
+  /** 按当前价格表估算 (没有计价插件 / 没有匹配价格时没有这个字段) */
+  cost?: CostLine;
+}
+
+export type Billing = "metered" | "flat";
+
+/** 对齐 Rust `plugins::pricing::CostLine`; micros = 该币种的百万分之一 */
+export interface CostLine {
+  currency: "USD" | "CNY";
+  micros: number;
+  /** 包月订阅: 「等价按量费用」, 不是真实花费 */
+  equivalent: boolean;
+  source: PricingSource;
+}
+
+export interface PricingSource {
+  plugin_id: string;
+  version: string;
+}
+
+/** 两种币种分开、真实花费与等价按量费用分开, 不换算不相加 */
+export interface CostTotals {
+  usd_micros: number;
+  cny_micros: number;
+  equiv_usd_micros: number;
+  equiv_cny_micros: number;
+}
+
+export interface CostSummaryDto {
+  has_pricing: boolean;
+  totals: CostTotals;
+  by_subscription: { subscription_id: string; display_name?: string; totals: CostTotals }[];
+  unpriced: { provider_id: string; model: string; requests: number }[];
+  priced_requests: number;
+  total_requests: number;
+  sources: PricingSource[];
 }
 
 export type RequestPurposeFilter = "main" | "agent" | "bg" | "fail";
@@ -1116,6 +1166,8 @@ export interface ReceiptSubItemDto {
   provider_display_name: string;
   real_model_name: string;
   totals: ReceiptTotalsDto;
+  /** 按当前价格表估算 (没有计价插件 / 没有匹配价格时没有) */
+  cost?: CostLine;
 }
 
 export interface ReceiptVirtualModelItemDto {
@@ -1135,6 +1187,8 @@ export interface ReceiptDto {
   /** 4 项 (fable/opus/sonnet/haiku, 顺序固定, 空也返回), 有 Jev 用量时末尾多一项 model-jev */
   items: ReceiptVirtualModelItemDto[];
   grand_total: ReceiptTotalsDto;
+  /** 费用合计; 没有启用的计价插件时没有这个字段 */
+  cost_totals?: CostTotals;
 }
 
 export type EventKind =
@@ -1408,6 +1462,13 @@ export interface PluginSource {
   commit: string | null;
 }
 
+export type RuleParamDecl =
+  | { id: string; type: "string"; label: import("@/plugins/manifest").LocalizedText; default?: string }
+  | { id: string; type: "number"; label: import("@/plugins/manifest").LocalizedText; default?: number }
+  | { id: string; type: "bool"; label: import("@/plugins/manifest").LocalizedText; default?: boolean }
+  | { id: string; type: "enum"; values: string[]; label: import("@/plugins/manifest").LocalizedText; default?: string }
+  | { id: string; type: "virtual_model"; label: import("@/plugins/manifest").LocalizedText; default?: string };
+
 export interface InstalledPlugin {
   id: string;
   plugin_type: string;
@@ -1420,6 +1481,12 @@ export interface InstalledPlugin {
   size: number;
   /** 系统插件 (厂商等) 是否生效; 主题 / 小票恒为 true */
   enabled: boolean;
+  /** 用户已保存的参数 (非参数化插件为 `{}`) */
+  params?: Record<string, unknown>;
+  /** 规则插件声明的参数表 */
+  param_decls?: RuleParamDecl[];
+  /** 启用前缺少的必填参数 id */
+  missing_params?: string[];
 }
 
 export interface PluginContent {
@@ -1455,18 +1522,36 @@ export interface PluginCheckResult {
   diff?: PluginCapabilityDiff;
 }
 
-export type PluginCapabilities = {
-  kind: "provider";
-  auth_type: AuthType;
-  /** 会收到 API Key 的 host, 按字典序 */
-  key_hosts: { host: string; used_for: ("messages" | "models" | "balance")[]; differs_from_messages: boolean }[];
-  endpoints: number;
-};
+export type PluginCapabilities =
+  | {
+      kind: "provider";
+      auth_type: AuthType;
+      /** 会收到 API Key 的 host, 按字典序 */
+      key_hosts: { host: string; used_for: ("messages" | "models" | "balance")[]; differs_from_messages: boolean }[];
+      endpoints: number;
+    }
+  | {
+      kind: "pricing";
+      currency: "USD" | "CNY";
+      rules: number;
+      /** 覆盖的厂商 id (含 `*`) */
+      providers: string[];
+    }
+  | {
+      kind: "rules";
+      hooks: ("route" | "request")[];
+      actions: string[];
+      /** 写死的虚拟模型短名, 或 `{{params.x}}` */
+      redirects_to: string[];
+      rules: number;
+      params: RuleParamDecl[];
+    };
 
 export interface PluginCapabilityDiff {
   added_hosts: string[];
   removed_hosts: string[];
   auth_type_changed: boolean;
+  added_actions?: string[];
 }
 
 /** 对齐 Rust `subscription::rebuild::RebuildPreview` */

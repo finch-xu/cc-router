@@ -233,6 +233,34 @@ pub struct ModelInfo {
     pub display_name: Option<String>,
 }
 
+/// 订阅怎么付费 (`subscriptions.billing`)。计价插件对两种都算费用, 包月的显示为「等价按量费用」,
+/// 不与按量订阅的真实花费相加。
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum Billing {
+    #[default]
+    Metered,
+    Flat,
+}
+
+impl Billing {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Metered => "metered",
+            Self::Flat => "flat",
+        }
+    }
+
+    /// 不认识的值按按量处理 (只影响费用口径, 不值得让订阅加载失败)。
+    pub fn from_db(s: &str) -> Self {
+        if s == "flat" {
+            Self::Flat
+        } else {
+            Self::Metered
+        }
+    }
+}
+
 /// 订阅的持久化字段。对应 `subscriptions` 表。
 ///
 /// snapshot 模型: 创建订阅时把 yaml 模板的连接信息全部拷贝下来,
@@ -259,6 +287,8 @@ pub struct SubscriptionRow {
     pub slot_schedules: SlotSchedules,
     /// 用户设的 token 限额 (cc-router 侧安全阀). 字段缺失 = 该周期不限.
     pub token_quotas: TokenQuotas,
+    /// 包月 / 按量 (migration 033)。只影响费用的显示口径: 包月订阅的费用算作「等价按量费用」。
+    pub billing: Billing,
     pub enabled: bool,
     pub is_auth_failed: bool,
     pub last_error_message: Option<String>,
@@ -580,6 +610,9 @@ pub struct SubscriptionDto {
     /// 每槽位分时段规则; 刻意不 skip: 前端声明为必填 (可以是 `{}`).
     #[serde(default)]
     pub slot_schedules: SlotSchedules,
+    /// 包月 / 按量 (计价插件的费用口径)
+    #[serde(default)]
+    pub billing: Billing,
     /// 各槽位此刻实际生效的模型 (按本机本地时间算), 供界面显示「当前生效」.
     #[serde(default)]
     pub slot_models_now: SlotModelsNow,
@@ -708,6 +741,7 @@ impl SubscriptionRow {
             },
             slot_efforts: SlotEfforts::default(),
             slot_schedules: SlotSchedules::default(),
+            billing: Billing::default(),
             token_quotas: TokenQuotas::default(),
             enabled: true,
             is_auth_failed: false,
@@ -749,6 +783,7 @@ impl SubscriptionDto {
             model_slots: rt.row.model_slots.clone(),
             slot_efforts: rt.row.slot_efforts.clone(),
             slot_schedules: rt.row.slot_schedules.clone(),
+            billing: rt.row.billing,
             slot_models_now: SlotModelsNow::of(&rt.row, WallClock::now()),
             token_quotas: rt.row.token_quotas.clone(),
             quota_usage: {

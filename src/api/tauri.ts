@@ -5,6 +5,7 @@ const invoke = runtime.invoke;
 import type {
   InstalledPlugin,
   RebuildPreview,
+  CostSummaryDto,
   PluginContent,
   StagedPlugin,
   RequestHeaders,
@@ -212,6 +213,8 @@ export const api = {
   // statistics (聚合表查询, 跨范围全局)
   getOverallStats: (range: StatsRange) =>
     invoke<OverallStatsDto>("get_overall_stats", { range }),
+  /** 统计页费用卡片: 按当前价格表现算 (没有计价插件时 has_pricing = false) */
+  getCostSummary: (range: StatsRange) => invoke<CostSummaryDto>("get_cost_summary", { range }),
   getDailySeries: (range: StatsRange) =>
     invoke<DailySeriesPointDto[]>("get_daily_series", { range }),
   getBreakdown: (range: StatsRange, by: BreakdownBy) =>
@@ -267,6 +270,8 @@ export const api = {
   /** 启用系统插件: 仅桌面端 (网页端拒绝); 停用两边都能用 */
   enablePlugin: (id: string) => invoke<void>("enable_plugin", { id }),
   disablePlugin: (id: string) => invoke<void>("disable_plugin", { id }),
+  /** 保存系统插件用户参数 (网页端也开放: 改参数本身不启用插件) */
+  setPluginParams: (id: string, params: Record<string, unknown>) => invoke<void>("set_plugin_params", { id, params }),
   fetchCommunityIndex: () => invoke<unknown>("fetch_community_index"),
 
   // onboarding

@@ -172,6 +172,7 @@ pub fn run() {
             commands::requests::get_client_activity,
             observability::live_feed::get_live_requests,
             commands::statistics::get_overall_stats,
+            commands::statistics::get_cost_summary,
             commands::statistics::get_daily_series,
             commands::statistics::get_breakdown,
             commands::statistics::get_token_heatmap,
@@ -232,6 +233,7 @@ pub fn run() {
             commands::plugins::uninstall_plugin,
             commands::plugins::enable_plugin,
             commands::plugins::disable_plugin,
+            commands::plugins::set_plugin_params,
             commands::plugins::fetch_community_index,
             commands::tui::tui_launch_info,
             commands::tui::install_tui_command,
@@ -344,6 +346,8 @@ async fn bootstrap(
     let state = AppState {
         db: pool,
         providers: Arc::new(std::sync::RwLock::new(Arc::new(provider::registry::ProviderRegistry::builtin(providers)))),
+        pricing: Default::default(),
+        rules: Default::default(),
         subscriptions: subscriptions_arc,
         route_edits: Default::default(),
         virtual_models: Arc::new(RwLock::new(virtual_models)),
@@ -377,9 +381,10 @@ async fn bootstrap(
     // 7b. 网页界面事件桥: Tauri emit → broadcast (SSE 订阅方在 proxy/web/events.rs)
     proxy::web::events::install_bridge(&handle, state.ui_events.clone());
 
-    // 7b. 厂商插件进注册表 (要在代理启动前: 插件厂商订阅的请求会读注册表)。失败不 fatal, 只是没有插件厂商。
-    if let Err(e) = plugins::runtime::rebuild_registry(&state).await {
-        tracing::warn!(error = %e, "加载厂商插件失败");
+    // 7b. 系统插件进运行时 (厂商注册表 + 计价注册表; 要在代理启动前: 插件厂商订阅的请求会读注册表)。
+    // 失败不 fatal, 只是没有插件厂商 / 没有价格。
+    if let Err(e) = plugins::runtime::rebuild_runtime(&state).await {
+        tracing::warn!(error = %e, "加载系统插件失败");
     }
 
     // 8. 启动代理. 失败不 fatal: 界面显示「未运行」与原因, 用户可点「启动代理服务」重试.

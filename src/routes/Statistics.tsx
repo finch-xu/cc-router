@@ -5,6 +5,7 @@ import { useT } from "@/i18n";
 import {
   STATS_KEY,
   useBreakdown,
+  useCostSummary,
   useDailySeries,
   useOverallStats,
   useRequestMix,
@@ -22,6 +23,7 @@ import {
   ToolTopCard,
 } from "@/components/stats/StatsBreakdowns";
 import { YearHeatmap } from "@/components/stats/YearHeatmap";
+import { CostCard } from "@/components/stats/CostCard";
 import { buildSeriesBuckets } from "@/components/stats/series";
 import "@/components/stats/stats-page.css";
 
@@ -53,6 +55,7 @@ export function StatisticsPage() {
   const bySub = useBreakdown(range, "subscription");
   const tools = useToolBreakdown(range, 10);
   const mix = useRequestMix(range);
+  const cost = useCostSummary(range);
   const subs = useSubscriptions();
 
   const isFetching = useIsFetching({ queryKey: [STATS_KEY] }) > 0;
@@ -114,6 +117,8 @@ export function StatisticsPage() {
         />
         <PurposeCard mix={mix.data} overall={overall.data} range={range} loading={mix.isFetching} errorText={err(mix.error)} />
       </div>
+
+      <CostCard data={cost.data} loading={cost.isFetching} errorText={err(cost.error)} />
 
       <SubscriptionPerformance
         items={bySub.data ?? []}
