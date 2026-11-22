@@ -1,4 +1,3 @@
-import { BarcodeSVG } from "../BarcodeSVG";
 import {
   Between,
   BetweenEllipsis,
@@ -6,12 +5,13 @@ import {
   SITE_URL,
   VERSION,
   fmtCountEn,
-  fmtTokEn,
   pct,
   totalTokensOf,
   utcParts,
   vmDisplay,
   type ThemeSlipProps,
+  useTok,
+  FooterCode,
 } from "./shared";
 
 const NAVY = "#14213d";
@@ -21,6 +21,7 @@ const OSWALD = "'Oswald', sans-serif";
 
 /** G · 窗贴标签风格: 分区排版 + TOKEN EFFICIENCY 大数字框 (派生指标提到 C 位)。 */
 export function CarLabelSlip({ dto, port }: ThemeSlipProps) {
+  const fmtTok = useTok("en");
   const issued = utcParts(dto.generated_at_ms);
   const start = utcParts(dto.range_start_ms);
   const end = utcParts(dto.range_end_ms);
@@ -97,7 +98,7 @@ export function CarLabelSlip({ dto, port }: ThemeSlipProps) {
                 }
                 right={
                   <span style={{ fontWeight: 600, color: tok === 0 ? "#9aa2b1" : undefined }}>
-                    {fmtTokEn(tok)}
+                    {fmtTok(tok)}
                   </span>
                 }
                 style={{ padding: "2px 0" }}
@@ -124,7 +125,7 @@ export function CarLabelSlip({ dto, port }: ThemeSlipProps) {
                     {fmtCountEn(sub.totals.request_count)} REQS
                   </>
                 }
-                right={<span style={{ fontWeight: 600 }}>{fmtTokEn(totalTokensOf(sub.totals))}</span>}
+                right={<span style={{ fontWeight: 600 }}>{fmtTok(totalTokensOf(sub.totals))}</span>}
                 style={{ padding: "2px 0" }}
               />
             ))
@@ -179,12 +180,12 @@ export function CarLabelSlip({ dto, port }: ThemeSlipProps) {
       <div style={{ margin: "12px 16px 0", background: "#f2f4f8", borderRadius: 4, padding: "10px 12px" }}>
         <Between
           left={<span style={{ fontFamily: OSWALD, fontWeight: 700, fontSize: 13, letterSpacing: 2 }}>TOTAL PERIOD USAGE</span>}
-          right={<span style={{ fontFamily: OSWALD, fontWeight: 700, fontSize: 24 }}>{fmtTokEn(grand)}</span>}
+          right={<span style={{ fontFamily: OSWALD, fontWeight: 700, fontSize: 24 }}>{fmtTok(grand)}</span>}
           style={{ alignItems: "baseline" }}
         />
         <div style={{ fontSize: 10, color: MUTED, marginTop: 3 }}>
-          IN {fmtTokEn(g.input_tokens)} &#183; OUT {fmtTokEn(g.output_tokens)} &#183; C+{" "}
-          {fmtTokEn(g.cache_creation_tokens)} &#183; C- {fmtTokEn(g.cache_read_tokens)}
+          IN {fmtTok(g.input_tokens)} &#183; OUT {fmtTok(g.output_tokens)} &#183; C+{" "}
+          {fmtTok(g.cache_creation_tokens)} &#183; C- {fmtTok(g.cache_read_tokens)}
         </div>
       </div>
 
@@ -201,7 +202,7 @@ export function CarLabelSlip({ dto, port }: ThemeSlipProps) {
           <br />
           {SITE_LABEL} &#183; v{VERSION}
         </div>
-        <BarcodeSVG value={SITE_URL} height={28} fgColor={NAVY} bgColor="#ffffff" />
+        <FooterCode value={SITE_URL} height={28} fgColor={NAVY} bgColor="#ffffff" />
       </div>
     </div>
   );

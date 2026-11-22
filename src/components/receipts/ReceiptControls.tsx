@@ -77,6 +77,11 @@ export function ReceiptControls({
   const subsList: SubscriptionDto[] = subs.data ?? [];
   // 主题小票是固定排版, 聚合视图/识别码/细项开关只对经典主题生效
   const classic = isClassicTheme(options.theme);
+  // 设置分三档 (数据是底座, 小票是展示层; 能用的设置都开放):
+  //  - 不牵动版式的 (底部识别码 / 紧凑 token): 所有小票都跟随
+  //  - 牵动版式的 (聚合视图 / 缓存行 / 请求数): 经典主题 + 插件小票 (模板拿到设置自己排); 内置主题是逐款设计的固定排版
+  //  - 品牌 logo: 只有经典主题 (插件模板里不能放图片)
+  const configurable = classic || options.theme.startsWith("plugin:");
 
   // 收集所有出现过的 provider — 来自订阅列表的 provider_id (含自定义 marker)
   const providerOptions = useMemo(() => {
@@ -175,6 +180,7 @@ export function ReceiptControls({
                   title={t("receipts.plugin.badge")}
                 >
                   {localized((p.manifest as { name?: LocalizedText } | null)?.name, locale) || p.id}
+                  {p.source.kind === "community" && <span className="src-tag">{t("plugins.source.community")}</span>}
                 </button>
               );
             })}
@@ -187,8 +193,8 @@ export function ReceiptControls({
           </div>
         </div>
 
-        <div className="receipt-field-row" style={classic ? undefined : { opacity: 0.45 }}>
-          <div>
+        <div className="receipt-field-row">
+          <div style={configurable ? undefined : { opacity: 0.45 }}>
             <div className="receipt-field-label">
               {t("receipts.controls.display.groupMode.label")}
             </div>
@@ -197,7 +203,7 @@ export function ReceiptControls({
                 <button
                   key={m}
                   type="button"
-                  disabled={!classic}
+                  disabled={!configurable}
                   className={"range-tab" + (options.groupMode === m ? " active" : "")}
                   onClick={() => onOptionsChange({ ...options, groupMode: m })}
                 >
@@ -218,7 +224,7 @@ export function ReceiptControls({
                 <button
                   key={s}
                   type="button"
-                  disabled={!classic}
+                  disabled={false}
                   className={"range-tab" + (options.footerCodeStyle === s ? " active" : "")}
                   onClick={() => onOptionsChange({ ...options, footerCodeStyle: s })}
                 >
@@ -234,7 +240,7 @@ export function ReceiptControls({
 
         <div
           className="receipt-check-grid"
-          style={{ marginTop: 12, ...(classic ? null : { opacity: 0.45 }) }}
+          style={{ marginTop: 12 }}
         >
           <CheckboxRow
             checked={options.showProviderLogo}
@@ -245,21 +251,21 @@ export function ReceiptControls({
           />
           <CheckboxRow
             checked={options.showCacheTokens}
-            disabled={!classic}
+            disabled={!configurable}
             label={t("receipts.controls.display.showCache")}
             desc={t("receipts.controls.display.showCacheDesc")}
             onChange={(v) => onOptionsChange({ ...options, showCacheTokens: v })}
           />
           <CheckboxRow
             checked={options.showRequestCounts}
-            disabled={!classic}
+            disabled={!configurable}
             label={t("receipts.controls.display.showCounts")}
             desc={t("receipts.controls.display.showCountsDesc")}
             onChange={(v) => onOptionsChange({ ...options, showRequestCounts: v })}
           />
           <CheckboxRow
             checked={options.compactTokens}
-            disabled={!classic}
+            disabled={false}
             label={t("receipts.controls.display.compactTokens")}
             desc={t("receipts.controls.display.compactTokensDesc")}
             onChange={(v) => onOptionsChange({ ...options, compactTokens: v })}
@@ -329,7 +335,7 @@ function CheckboxRow({
   disabled?: boolean;
 }) {
   return (
-    <label className="receipt-check" style={disabled ? { cursor: "default" } : undefined}>
+    <label className="receipt-check" style={disabled ? { cursor: "default", opacity: 0.45 } : undefined}>
       <input
         type="checkbox"
         checked={checked}

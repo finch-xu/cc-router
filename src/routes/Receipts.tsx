@@ -89,7 +89,8 @@ export function ReceiptsPage() {
     showProviderLogo: true,
     compactTokens: true,
     groupMode: "virtual_model",
-    footerCodeStyle: "qr",
+    // 默认条形码: 二维码分享到部分平台会被检测并屏蔽
+    footerCodeStyle: "barcode",
   });
   const [selectedSubs, setSelectedSubs] = useState<Set<string>>(new Set());
   const [selectedProviders, setSelectedProviders] = useState<Set<string>>(new Set());

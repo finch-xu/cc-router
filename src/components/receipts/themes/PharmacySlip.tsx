@@ -1,4 +1,3 @@
-import { BarcodeSVG } from "../BarcodeSVG";
 import type { ReceiptSubItemDto, ReceiptVirtualModelItemDto } from "@/types";
 import {
   Between,
@@ -7,13 +6,14 @@ import {
   VERSION,
   ZigzagPaper,
   fmtCountEn,
-  fmtTokEn,
   hasCache,
   subLabel,
   totalTokensOf,
   utcParts,
   vmDisplay,
   type ThemeSlipProps,
+  useTok,
+  FooterCode,
 } from "./shared";
 
 const INK = "#1b1b1b";
@@ -25,6 +25,7 @@ const MONO = "'IBM Plex Mono', monospace";
 
 /** E · 药房风格: 绿十字 + 卡片式分组; 文字全部用真实术语, 不用处方用语。 */
 export function PharmacySlip({ dto, port }: ThemeSlipProps) {
+  const tok = useTok("en");
   const issued = utcParts(dto.generated_at_ms);
   const start = utcParts(dto.range_start_ms);
   const end = utcParts(dto.range_end_ms);
@@ -90,7 +91,7 @@ export function PharmacySlip({ dto, port }: ThemeSlipProps) {
       <div style={{ background: "#f0f6f2", borderRadius: 4, padding: "10px 12px", marginTop: 12 }}>
         <Between
           left={<span style={{ fontWeight: 800, fontSize: 12, letterSpacing: 1, color: GREEN }}>TOTAL TOKENS</span>}
-          right={<span style={{ fontWeight: 800, fontSize: 19 }}>{fmtTokEn(totalTokensOf(g))}</span>}
+          right={<span style={{ fontWeight: 800, fontSize: 19 }}>{tok(totalTokensOf(g))}</span>}
           style={{ alignItems: "baseline" }}
         />
         <Between
@@ -99,8 +100,8 @@ export function PharmacySlip({ dto, port }: ThemeSlipProps) {
           style={{ fontSize: 10, color: MUTED, marginTop: 2 }}
         />
         <div style={{ fontFamily: MONO, fontSize: 10, color: MUTED, marginTop: 4 }}>
-          IN {fmtTokEn(g.input_tokens)} &#183; OUT {fmtTokEn(g.output_tokens)} &#183; C+{" "}
-          {fmtTokEn(g.cache_creation_tokens)} &#183; C- {fmtTokEn(g.cache_read_tokens)}
+          IN {tok(g.input_tokens)} &#183; OUT {tok(g.output_tokens)} &#183; C+{" "}
+          {tok(g.cache_creation_tokens)} &#183; C- {tok(g.cache_read_tokens)}
         </div>
       </div>
 
@@ -117,7 +118,7 @@ export function PharmacySlip({ dto, port }: ThemeSlipProps) {
             {issued.M}/{issued.D} {issued.h}:{issued.m}
           </span>
         </div>
-        <BarcodeSVG value={SITE_URL} height={30} fgColor={INK} bgColor="#ffffff" />
+        <FooterCode value={SITE_URL} height={30} fgColor={INK} bgColor="#ffffff" />
       </div>
 
       <div style={{ textAlign: "center", fontSize: 9, color: "#666666", marginTop: 10, letterSpacing: 0.5 }}>
@@ -128,6 +129,7 @@ export function PharmacySlip({ dto, port }: ThemeSlipProps) {
 }
 
 function SlotCard({ item, slot }: { item: ReceiptVirtualModelItemDto; slot: number }) {
+  const tok = useTok("en");
   const [first, ...rest] = item.sub_items;
   return (
     <div style={{ border: CARD_BORDER, borderRadius: 4, padding: "9px 10px", marginTop: 8 }}>
@@ -137,7 +139,7 @@ function SlotCard({ item, slot }: { item: ReceiptVirtualModelItemDto; slot: numb
             SLOT {slot} &#183; {vmDisplay(item.virtual_model_name)}
           </span>
         }
-        right={fmtTokEn(totalTokensOf(item.subtotal))}
+        right={tok(totalTokensOf(item.subtotal))}
         style={{ fontWeight: 800, fontSize: 12 }}
       />
       {!first ? (
@@ -163,6 +165,7 @@ function SlotCard({ item, slot }: { item: ReceiptVirtualModelItemDto; slot: numb
 }
 
 function SubLines({ sub }: { sub: ReceiptSubItemDto }) {
+  const tok = useTok("en");
   return (
     <div style={{ marginTop: 4 }}>
       <div
@@ -178,16 +181,16 @@ function SubLines({ sub }: { sub: ReceiptSubItemDto }) {
         {subLabel(sub, "DELETED SUBSCRIPTION").toUpperCase()}
       </div>
       <div style={{ fontSize: 10, color: MUTED }}>
-        {fmtTokEn(totalTokensOf(sub.totals))} TOKENS &#183;{" "}
+        {tok(totalTokensOf(sub.totals))} TOKENS &#183;{" "}
         {fmtCountEn(sub.totals.request_count)} REQUESTS
       </div>
       <div style={{ fontSize: 10, color: MUTED }}>
-        IN {fmtTokEn(sub.totals.input_tokens)} / OUT {fmtTokEn(sub.totals.output_tokens)}
+        IN {tok(sub.totals.input_tokens)} / OUT {tok(sub.totals.output_tokens)}
         {hasCache(sub.totals) && (
           <>
             {" "}
-            / C+ {fmtTokEn(sub.totals.cache_creation_tokens)} / C-{" "}
-            {fmtTokEn(sub.totals.cache_read_tokens)}
+            / C+ {tok(sub.totals.cache_creation_tokens)} / C-{" "}
+            {tok(sub.totals.cache_read_tokens)}
           </>
         )}
       </div>

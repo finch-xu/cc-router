@@ -2,7 +2,7 @@
   "manifest": 1,
   "id": "receipt-sparrow-bakery",
   "type": "receipt",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "name": { "zh": "麻雀面包房", "zh-Hant": "麻雀麵包房", "en": "Sparrow Bakery", "ja": "スズメベーカリー" },
   "description": {
     "zh": "每天新鲜出炉的 token。小票插件的写法示范：循环、条件、二维码、logo 与内置字体。",

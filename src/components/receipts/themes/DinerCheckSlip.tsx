@@ -6,10 +6,10 @@ import {
   VERSION,
   ZigzagPaper,
   fmtCountEn,
-  fmtTokEn,
   totalTokensOf,
   utcParts,
   type ThemeSlipProps,
+  useTok,
 } from "./shared";
 
 const PAPER = "#f3f6e9";
@@ -22,6 +22,7 @@ const OSWALD = "'Oswald', 'Arial Narrow', sans-serif";
 
 /** F · 点单纸风格: USAGE CHECK 红头 + 绿格纸 + 蓝笔手写; 元信息全是真实字段。 */
 export function DinerCheckSlip({ dto, port, sched }: ThemeSlipProps) {
+  const tok = useTok("en");
   const issued = utcParts(dto.generated_at_ms);
   const start = utcParts(dto.range_start_ms);
   const end = utcParts(dto.range_end_ms);
@@ -79,16 +80,16 @@ export function DinerCheckSlip({ dto, port, sched }: ThemeSlipProps) {
           left={`SUBTOTAL · ${fmtCountEn(g.request_count)} REQUESTS`}
           right={
             <span style={{ fontFamily: HAND, fontSize: 17, color: PEN }}>
-              {fmtTokEn(totalTokensOf(g))}
+              {tok(totalTokensOf(g))}
             </span>
           }
           style={{ fontSize: 11, letterSpacing: 1, color: "#444444", alignItems: "baseline" }}
         />
         <div style={{ fontSize: 10, color: PRINT, marginTop: 2 }}>
-          IN {fmtTokEn(g.input_tokens)} &#183; OUT {fmtTokEn(g.output_tokens)}
+          IN {tok(g.input_tokens)} &#183; OUT {tok(g.output_tokens)}
         </div>
         <div style={{ fontSize: 10, color: PRINT }}>
-          CACHE C+ {fmtTokEn(g.cache_creation_tokens)} &#183; C- {fmtTokEn(g.cache_read_tokens)}
+          CACHE C+ {tok(g.cache_creation_tokens)} &#183; C- {tok(g.cache_read_tokens)}
         </div>
 
         <div
@@ -117,7 +118,7 @@ export function DinerCheckSlip({ dto, port, sched }: ThemeSlipProps) {
               transform: "rotate(-3deg)",
             }}
           >
-            {fmtTokEn(totalTokensOf(g))}
+            {tok(totalTokensOf(g))}
           </span>
         </div>
       </div>
@@ -188,6 +189,7 @@ function HandRow({
 }
 
 function VmRows({ item }: { item: ReceiptVirtualModelItemDto }) {
+  const tok = useTok("en");
   if (item.sub_items.length === 0) {
     return (
       <HandRow
@@ -213,7 +215,7 @@ function VmRows({ item }: { item: ReceiptVirtualModelItemDto }) {
             <span style={{ fontSize: 14 }}>({first.provider_display_name})</span>
           </>
         }
-        right={fmtTokEn(totalTokensOf(first.totals))}
+        right={tok(totalTokensOf(first.totals))}
       />
       {rest.map((sub) => (
         <HandRow
@@ -224,7 +226,7 @@ function VmRows({ item }: { item: ReceiptVirtualModelItemDto }) {
               <span style={{ fontSize: 13 }}>({sub.provider_display_name})</span>
             </span>
           }
-          right={fmtTokEn(totalTokensOf(sub.totals))}
+          right={tok(totalTokensOf(sub.totals))}
           size={15}
         />
       ))}

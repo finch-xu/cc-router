@@ -1,4 +1,3 @@
-import { BarcodeSVG } from "../BarcodeSVG";
 import type { ReceiptVirtualModelItemDto } from "@/types";
 import {
   Between,
@@ -8,13 +7,14 @@ import {
   VERSION,
   ZigzagPaper,
   fmtCountEn,
-  fmtTokEn,
   hasCache,
   subLabel,
   totalTokensOf,
   utcParts,
   vmDisplay,
   type ThemeSlipProps,
+  useTok,
+  FooterCode,
 } from "./shared";
 
 const INK = "#1a1a1a";
@@ -24,6 +24,7 @@ const WEEKDAY_JA = ["日", "月", "火", "水", "木", "金", "土"];
 
 /** A · 日本コンビニ: DotGothic16 点阵字 + 領収書排版, レジ番号 = 代理端口。 */
 export function JpKonbiniSlip({ dto, port }: ThemeSlipProps) {
+  const tok = useTok("en");
   const issued = utcParts(dto.generated_at_ms);
   const start = utcParts(dto.range_start_ms);
   const end = utcParts(dto.range_end_ms);
@@ -80,30 +81,30 @@ export function JpKonbiniSlip({ dto, port }: ThemeSlipProps) {
       <Between left="お買上点数" right={`${fmtCountEn(g.request_count)}点`} style={{ fontSize: 12 }} />
       <Between
         left={<span style={{ fontSize: 15, letterSpacing: 4 }}>合　計</span>}
-        right={<span style={{ fontSize: 19 }}>{fmtTokEn(totalTokensOf(g))}</span>}
+        right={<span style={{ fontSize: 19 }}>{tok(totalTokensOf(g))}</span>}
         style={{ alignItems: "baseline", marginTop: 2 }}
       />
       <div style={{ marginTop: 4 }}>
         <Between
           left={<span style={{ paddingLeft: 12 }}>（内　入力）</span>}
-          right={fmtTokEn(g.input_tokens)}
+          right={tok(g.input_tokens)}
           style={{ fontSize: 11, color: SOFT }}
         />
         <Between
           left={<span style={{ paddingLeft: 12 }}>（内　出力）</span>}
-          right={fmtTokEn(g.output_tokens)}
+          right={tok(g.output_tokens)}
           style={{ fontSize: 11, color: SOFT }}
         />
         {anyCache && (
           <>
             <Between
               left={<span style={{ paddingLeft: 12 }}>（内　C+ 作成※）</span>}
-              right={fmtTokEn(g.cache_creation_tokens)}
+              right={tok(g.cache_creation_tokens)}
               style={{ fontSize: 11, color: SOFT }}
             />
             <Between
               left={<span style={{ paddingLeft: 12 }}>（内　C- 読取※）</span>}
-              right={fmtTokEn(g.cache_read_tokens)}
+              right={tok(g.cache_read_tokens)}
               style={{ fontSize: 11, color: SOFT }}
             />
           </>
@@ -122,7 +123,7 @@ export function JpKonbiniSlip({ dto, port }: ThemeSlipProps) {
       </div>
 
       <div style={{ display: "flex", flexDirection: "column", alignItems: "center", marginTop: 12 }}>
-        <BarcodeSVG value={SITE_URL} height={36} fgColor={INK} bgColor="#ffffff" />
+        <FooterCode value={SITE_URL} height={36} fgColor={INK} bgColor="#ffffff" />
         <div style={{ fontSize: 10, letterSpacing: 3, marginTop: 3 }}>RCPT-{dto.slip_no}</div>
       </div>
 
@@ -134,6 +135,7 @@ export function JpKonbiniSlip({ dto, port }: ThemeSlipProps) {
 }
 
 function VmBlock({ item, isLast }: { item: ReceiptVirtualModelItemDto; isLast: boolean }) {
+  const tok = useTok("en");
   const isEmpty = item.sub_items.length === 0;
   return (
     <div>
@@ -149,7 +151,7 @@ function VmBlock({ item, isLast }: { item: ReceiptVirtualModelItemDto; isLast: b
             <div key={`${sub.subscription_id}|${sub.real_model_name}`} style={{ marginTop: 2 }}>
               <BetweenEllipsis
                 left={`${sub.real_model_name}${hasCache(sub.totals) ? " ※" : ""}`}
-                right={fmtTokEn(totalTokensOf(sub.totals))}
+                right={tok(totalTokensOf(sub.totals))}
                 style={{ paddingLeft: 12 }}
               />
               <div
@@ -165,19 +167,19 @@ function VmBlock({ item, isLast }: { item: ReceiptVirtualModelItemDto; isLast: b
                 {`${sub.provider_display_name}／${subLabel(sub, "削除済み")}　${fmtCountEn(sub.totals.request_count)}点`}
               </div>
               <div style={{ paddingLeft: 24, fontSize: 11, color: SOFT }}>
-                入 {fmtTokEn(sub.totals.input_tokens)}　出 {fmtTokEn(sub.totals.output_tokens)}
+                入 {tok(sub.totals.input_tokens)}　出 {tok(sub.totals.output_tokens)}
               </div>
               {hasCache(sub.totals) && (
                 <div style={{ paddingLeft: 24, fontSize: 11, color: SOFT }}>
-                  C+ {fmtTokEn(sub.totals.cache_creation_tokens)}　C-{" "}
-                  {fmtTokEn(sub.totals.cache_read_tokens)}
+                  C+ {tok(sub.totals.cache_creation_tokens)}　C-{" "}
+                  {tok(sub.totals.cache_read_tokens)}
                 </div>
               )}
             </div>
           ))}
           <Between
             left={<span style={{ paddingLeft: 12 }}>小計</span>}
-            right={fmtTokEn(totalTokensOf(item.subtotal))}
+            right={tok(totalTokensOf(item.subtotal))}
             style={{ fontSize: 11, color: MUTED }}
           />
         </>

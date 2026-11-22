@@ -166,6 +166,7 @@ export function GeneralTab({ form }: { form: SettingsForm }) {
                   return (
                     <button key={p.id} type="button" className={themeId === id ? "on" : ""} onClick={() => setThemeId(id)} role="radio" aria-checked={themeId === id}>
                       {localized(name, locale) || p.id}
+                      {p.source.kind === "community" && <span className="src-tag">{t("plugins.source.community")}</span>}
                     </button>
                   );
                 })}
