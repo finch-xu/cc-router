@@ -361,6 +361,9 @@ pub async fn create_subscription(
             let provider = registry
                 .get(&provider_id)
                 .ok_or_else(|| AppError::ProviderNotFound(provider_id.clone()))?;
+            if !registry.is_selectable(&provider_id) {
+                return Err(AppError::BadRequest("这个厂商插件已停用, 请先在插件页启用".into()));
+            }
             let endpoint = provider
                 .endpoint(&endpoint_id)
                 .ok_or_else(|| AppError::EndpointNotFound(endpoint_id.clone()))?;
@@ -690,6 +693,65 @@ pub async fn update_subscription(
     let guard = rt.read().await;
     let referenced = refs.get(&id).cloned().unwrap_or_default();
     Ok(SubscriptionDto::from_runtime(&guard, referenced, &state.providers()))
+}
+
+/// 预览「按新描述重建连接」: 用当前注册表里的厂商描述重算连接快照, 列出与现有快照的差异。
+#[tauri::command]
+pub async fn preview_subscription_rebuild(
+    state: State<'_, AppState>,
+    id: String,
+) -> AppResult<crate::subscription::rebuild::RebuildPreview> {
+    let id = Uuid::parse_str(&id).map_err(|_| AppError::BadRequest("无效 id".into()))?;
+    let rt = state
+        .subscriptions
+        .read()
+        .await
+        .get(&id)
+        .cloned()
+        .ok_or_else(|| AppError::SubscriptionNotFound(id.to_string()))?;
+    let guard = rt.read().await;
+    Ok(crate::subscription::rebuild::preview(&guard.row, &state.providers()))
+}
+
+/// 按当前厂商描述重建订阅的连接快照 (内置 yaml / 厂商插件更新后)。没有变化时原样返回。
+#[tauri::command]
+pub async fn rebuild_subscription_connection(state: State<'_, AppState>, id: String) -> AppResult<SubscriptionDto> {
+    use crate::subscription::rebuild::{self, BlockedReason};
+    let id = Uuid::parse_str(&id).map_err(|_| AppError::BadRequest("无效 id".into()))?;
+    let rt = state
+        .subscriptions
+        .read()
+        .await
+        .get(&id)
+        .cloned()
+        .ok_or_else(|| AppError::SubscriptionNotFound(id.to_string()))?;
+    let registry = state.providers();
+    {
+        let mut guard = rt.write().await;
+        let (plan, changes) = rebuild::plan(&guard.row, &registry).map_err(|reason| {
+            AppError::BadRequest(
+                match reason {
+                    BlockedReason::UserDefined => "自定义订阅请直接编辑连接信息",
+                    BlockedReason::Oauth => "OAuth 订阅的连接由登录流程管理",
+                    BlockedReason::ProviderMissing => "找不到这个订阅的厂商 (插件可能已卸载)",
+                    BlockedReason::EndpointMissing => "新的厂商描述里没有这个端点了, 请改选端点",
+                    BlockedReason::ParamsInvalid => "订阅填写的参数不符合新的厂商描述, 请在编辑页重新填写",
+                    BlockedReason::AuthChanged => "新的厂商描述换了鉴权方式, 请新建订阅",
+                    BlockedReason::ProtocolChanged => "新的厂商描述换了端点协议, 请新建订阅",
+                }
+                .into(),
+            )
+        })?;
+        if !changes.is_empty() {
+            rebuild::apply(&mut guard.row, plan);
+            guard.row.updated_at = Utc::now();
+            store::update_row(&state.db, &guard.row).await?;
+        }
+    }
+    let refs = collect_references(&state).await;
+    let guard = rt.read().await;
+    let referenced = refs.get(&id).cloned().unwrap_or_default();
+    Ok(SubscriptionDto::from_runtime(&guard, referenced, &registry))
 }
 
 #[tauri::command]

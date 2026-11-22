@@ -643,6 +643,9 @@ pub struct SubscriptionDto {
     pub provider_names: Option<LocalizedText>,
     pub provider_icon: String,
     pub is_user_defined: bool,
+    /// 厂商描述 (内置 yaml 或厂商插件) 已更新, 与订阅的连接快照不一致, 可以「按新描述重建连接」。
+    #[serde(default)]
+    pub connection_outdated: bool,
     /// api_key 是否非空。DTO 不带 Key 本身; 前端据此提示「待填写 API Key」(导入时缺 Key 的订阅)。
     #[serde(default)]
     pub has_api_key: bool,
@@ -807,6 +810,7 @@ impl SubscriptionDto {
                 snapshot: s.clone(),
             }),
             provider_display_name: rt.row.provider_display_name.clone(),
+            connection_outdated: crate::subscription::rebuild::is_outdated(&rt.row, providers),
             provider_names: providers
                 .get(&rt.row.provider_id)
                 .filter(|_| !rt.row.is_user_defined)

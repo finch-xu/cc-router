@@ -6,6 +6,7 @@ use tauri::State;
 use crate::error::AppResult;
 use crate::provider::model::{Auth, Compatibility, EndpointProtocol, LocalizedText, ModelDiscovery, ProviderCategory};
 use crate::provider::Provider;
+use crate::plugins::SourceKind;
 use crate::state::AppState;
 
 /// 上屏文字字段 (`display_name` / `description` / `compatibility_notes` / 端点的 `label` / `description`)
@@ -29,6 +30,17 @@ pub struct ProviderInfo {
     pub model_discovery: ModelDiscovery,
     pub url_params: Vec<UrlParamInfo>,
     pub translations: ProviderTranslations,
+    /// 来自厂商插件时的插件信息 (内置厂商不带这个字段)。
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub plugin: Option<ProviderPluginInfo>,
+}
+
+#[derive(Debug, Serialize)]
+pub struct ProviderPluginInfo {
+    /// 插件 id (不带 `plugin:` 前缀)
+    pub id: String,
+    pub version: String,
+    pub source_kind: SourceKind,
 }
 
 /// A user-supplied URL placeholder (zh text; en / ja in `translations.*.url_params`).
@@ -166,6 +178,7 @@ impl From<&Provider> for ProviderInfo {
                 en: ProviderText::pick(p, |t| &t.en),
                 ja: ProviderText::pick(p, |t| &t.ja),
             },
+            plugin: None,
         }
     }
 }
@@ -173,7 +186,20 @@ impl From<&Provider> for ProviderInfo {
 #[tauri::command]
 pub async fn list_providers(state: State<'_, AppState>) -> AppResult<Vec<ProviderInfo>> {
     let registry = state.providers();
-    let mut out: Vec<ProviderInfo> = registry.values().map(ProviderInfo::from).collect();
+    // 停用的厂商插件不出现在「添加订阅」里 (仍在注册表中: 已有订阅要用)
+    let mut out: Vec<ProviderInfo> = registry
+        .values()
+        .filter(|p| registry.is_selectable(&p.id))
+        .map(|p| {
+            let mut info = ProviderInfo::from(p);
+            info.plugin = registry.plugin_meta(&p.id).map(|m| ProviderPluginInfo {
+                id: m.plugin_id.clone(),
+                version: m.version.clone(),
+                source_kind: m.source_kind,
+            });
+            info
+        })
+        .collect();
     // 四种界面语言都按英文名排, 顺序一致; 忽略大小写 (否则 `xAI` 会排到 `Zhipu` 后面)。
     out.sort_by_cached_key(|p| p.translations.en.display_name.to_lowercase());
     Ok(out)

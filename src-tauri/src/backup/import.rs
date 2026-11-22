@@ -673,6 +673,23 @@ mod tests {
         assert_eq!(got.required_headers.get("cf-aig-gateway-id").map(String::as_str), Some("gw-1"));
     }
 
+    /// 插件厂商的订阅导入到没装该插件的机器: 与「yaml 已删除的厂商」一样保留文件里的连接快照。
+    #[test]
+    fn plugin_provider_subscription_imports_without_the_plugin() {
+        let mut row = SubscriptionRow::test_fixture("plugin:relay", "main");
+        row.display_name = "Relay".into();
+        row.base_url = "https://api.example.com/anthropic".into();
+        row.messages_path = "/v1/messages".into();
+        row.api_key = "sk-r".into();
+        row.provider_display_name = "示例中转站".into();
+        let file = build_export(std::slice::from_ref(&row), &[], None, "7.1.0", Utc::now()).unwrap();
+        let got = &plan(&file, None, &empty_local(), Utc::now()).inserts[0];
+        assert_eq!(got.provider_id, "plugin:relay");
+        assert_eq!(got.base_url, row.base_url);
+        assert_eq!(got.messages_path, row.messages_path);
+        assert_eq!(got.provider_display_name, "示例中转站");
+    }
+
     #[test]
     fn existing_ids_are_skipped_and_bindings_only_append_new_ones() {
         let f = fixture(false);

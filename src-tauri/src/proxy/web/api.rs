@@ -126,6 +126,8 @@ web_commands! {
     create_subscription(input: CreateSubscriptionInput) => commands::subscriptions::create_subscription(st, args.input).await,
     preview_outbound_headers(subscription_id: String, header_policy: crate::subscription::header_policy::HeaderPolicy, headers: std::collections::BTreeMap<String, String>, auth_header_name: Option<String>, auth_header_format: Option<crate::provider::model::AuthHeaderFormat>) => commands::header_preview::preview_outbound_headers(st, args.subscription_id, args.header_policy, args.headers, args.auth_header_name, args.auth_header_format).await,
     update_subscription(id: String, patch: SubscriptionPatch) => commands::subscriptions::update_subscription(st, args.id, args.patch).await,
+    preview_subscription_rebuild(id: String) => commands::subscriptions::preview_subscription_rebuild(st, args.id).await,
+    rebuild_subscription_connection(id: String) => commands::subscriptions::rebuild_subscription_connection(st, args.id).await,
     update_subscription_key(id: String, new_key: String) => commands::subscriptions::update_subscription_key(st, args.id, args.new_key).await,
     delete_subscription(id: String) => commands::subscriptions::delete_subscription(st, args.id).await,
     set_subscription_enabled(id: String, enabled: bool) => commands::subscriptions::set_subscription_enabled(st, args.id, args.enabled).await,

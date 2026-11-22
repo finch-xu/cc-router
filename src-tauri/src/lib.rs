@@ -140,6 +140,8 @@ pub fn run() {
             commands::subscriptions::create_subscription,
             commands::subscriptions::clone_subscription,
             commands::subscriptions::update_subscription,
+            commands::subscriptions::preview_subscription_rebuild,
+            commands::subscriptions::rebuild_subscription_connection,
             commands::subscriptions::update_subscription_key,
             commands::subscriptions::delete_subscription,
             commands::subscriptions::set_subscription_enabled,
