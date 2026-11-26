@@ -1398,6 +1398,7 @@
   "live.purpose.guard": "安全チェック",
   "live.purpose.title": "タイトル生成",
   "live.purpose.fetch": "Web 要約",
+  "live.purpose.search": "Web 検索",
   "live.purpose.probe": "プローブ",
   "live.purpose.background": "バックグラウンド",
   "live.purpose.unknown": "不明",

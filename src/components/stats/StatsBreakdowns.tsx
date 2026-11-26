@@ -260,6 +260,7 @@ const PURPOSE_CHIP: Partial<Record<string, PurposeChip>> = {
   guard: "bg",
   title: "bg",
   fetch: "bg",
+  search: "bg",
   probe: "bg",
   background: "bg",
 };

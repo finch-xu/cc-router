@@ -37,7 +37,7 @@ pub struct Facts<'a> {
     pub minute: u16,
 }
 
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct BodyFacts {
     pub stream: bool,
     pub has_tools: bool,
@@ -45,6 +45,65 @@ pub struct BodyFacts {
     pub thinking: bool,
     /// system + messages 的文本字符数 ÷ 4 (粗估, 文档写明)
     pub approx_input_tokens: u64,
+    /// 见 [`offered_tool_types`]
+    pub tool_types: Vec<String>,
+    /// `tools[]` 的名字
+    pub tool_names: Vec<String>,
+    /// 见 [`forced_tool`]
+    pub tool_forced: Option<String>,
+    /// 见 [`previous_step_tools`]
+    pub prev_tools: Vec<String>,
+}
+
+/// 普通 (客户端自定义) 工具在 `tool_type` 条件里的类型名。
+pub const CUSTOM_TOOL_TYPE: &str = "custom";
+
+/// `tools[]` 里出现过的工具类型, 去重排序; 没写 `type` 的普通工具记为 [`CUSTOM_TOOL_TYPE`]。
+/// Anthropic 内置工具的 type 带版本日期 (`web_search_20250305`、`bash_20250124` …)。
+/// `tools` 缺失或不是数组 → None。
+pub fn offered_tool_types(body: &Value) -> Option<Vec<String>> {
+    let tools = body.get("tools").and_then(Value::as_array)?;
+    let mut out: Vec<String> = tools
+        .iter()
+        .map(|t| t.get("type").and_then(Value::as_str).unwrap_or(CUSTOM_TOOL_TYPE).to_string())
+        .collect();
+    out.sort_unstable();
+    out.dedup();
+    Some(out)
+}
+
+/// `tools[]` 里的工具名。
+pub fn offered_tool_names(body: &Value) -> Vec<String> {
+    body.get("tools")
+        .and_then(Value::as_array)
+        .map(|a| a.iter().filter_map(|t| t.get("name").and_then(Value::as_str)).map(str::to_string).collect())
+        .unwrap_or_default()
+}
+
+/// `tool_choice` 指定的工具名 (`{"type":"tool","name":…}`); 其余形态 → None。
+pub fn forced_tool(body: &Value) -> Option<String> {
+    let tc = body.get("tool_choice")?;
+    if tc.get("type").and_then(Value::as_str) != Some("tool") {
+        return None;
+    }
+    tc.get("name").and_then(Value::as_str).map(str::to_string)
+}
+
+/// 上一步模型调用了哪些工具: 最后一条是带 `tool_result` 的 user 消息时, 取它前面那条 assistant
+/// 的 `tool_use` / `server_tool_use` 名; 否则为空 (本轮第一步不算)。
+pub fn previous_step_tools(body: &Value) -> Vec<String> {
+    let msgs: &[Value] = body.get("messages").and_then(Value::as_array).map(Vec::as_slice).unwrap_or(&[]);
+    let role = |m: &Value, r: &str| m.get("role").and_then(Value::as_str) == Some(r);
+    let [.., prev, last] = msgs else { return Vec::new() };
+    let has_result = blocks(last.get("content")).any(|b| b.get("type").and_then(Value::as_str) == Some("tool_result"));
+    if !(role(last, "user") && has_result && role(prev, "assistant")) {
+        return Vec::new();
+    }
+    blocks(prev.get("content"))
+        .filter(|b| matches!(b.get("type").and_then(Value::as_str), Some("tool_use") | Some("server_tool_use")))
+        .filter_map(|b| b.get("name").and_then(Value::as_str))
+        .map(str::to_string)
+        .collect()
 }
 
 impl BodyFacts {
@@ -71,6 +130,10 @@ impl BodyFacts {
             has_images,
             thinking,
             approx_input_tokens: (chars / 4) as u64,
+            tool_types: offered_tool_types(body).unwrap_or_default(),
+            tool_names: offered_tool_names(body),
+            tool_forced: forced_tool(body),
+            prev_tools: previous_step_tools(body),
         }
     }
 }
@@ -139,6 +202,11 @@ fn glob_match(patterns: &[String], s: &str) -> bool {
     })
 }
 
+/// 列表条件: 任一值被任一模式匹配。
+fn any_glob(patterns: &Option<Vec<String>>, values: &[String]) -> bool {
+    patterns.as_ref().is_none_or(|p| values.iter().any(|v| glob_match(p, v)))
+}
+
 fn matches(w: &When, f: &Facts, b: &BodyFacts, params: &Map<String, Value>) -> bool {
     let in_list = |list: &Option<Vec<String>>, v: &str| list.as_ref().is_none_or(|l| l.iter().any(|x| x == v));
     let flag = |want: Option<bool>, have: bool| want.is_none_or(|x| x == have);
@@ -157,16 +225,24 @@ fn matches(w: &When, f: &Facts, b: &BodyFacts, params: &Map<String, Value>) -> b
         })
         && w.time.as_ref().is_none_or(|t| time_matches(t, f.weekday, f.minute))
         && w.param.as_ref().is_none_or(|id| params.get(id).and_then(Value::as_bool).unwrap_or(false))
+        && any_glob(&w.tool_type, &b.tool_types)
+        && any_glob(&w.tool_offered, &b.tool_names)
+        && any_glob(&w.tool_forced, b.tool_forced.as_slice())
+        && any_glob(&w.prev_tool, &b.prev_tools)
 }
 
 /// 试运行时只能从请求日志列推出来的部分 body 事实; 拿不到的字段为 `None` (命中前标记为「无法判断」)。
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct PartialBodyFacts {
     pub stream: Option<bool>,
     pub has_tools: Option<bool>,
     pub has_images: Option<bool>,
     pub thinking: Option<bool>,
     pub approx_input_tokens: Option<u64>,
+    pub tool_types: Option<Vec<String>>,
+    pub tool_names: Option<Vec<String>>,
+    pub tool_forced: Option<Option<String>>,
+    pub prev_tools: Option<Vec<String>>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -235,6 +311,22 @@ pub fn dry_run_rule(w: &When, f: &Facts, b: &PartialBodyFacts, params: &Map<Stri
                 }
             }
             None => unknown.push("approx_input_tokens"),
+        }
+    }
+    let lists: [(&Option<Vec<String>>, Option<&[String]>, &'static str); 4] = [
+        (&w.tool_type, b.tool_types.as_deref(), "tool_type"),
+        (&w.tool_offered, b.tool_names.as_deref(), "tool_offered"),
+        (&w.tool_forced, b.tool_forced.as_ref().map(Option::as_slice), "tool_forced"),
+        (&w.prev_tool, b.prev_tools.as_deref(), "prev_tool"),
+    ];
+    for (want, have, name) in lists {
+        if want.is_none() {
+            continue;
+        }
+        match have {
+            Some(values) if !any_glob(want, values) => return RuleDryRunOutcome::NotMatched,
+            Some(_) => {}
+            None => unknown.push(name),
         }
     }
 
@@ -745,7 +837,97 @@ mod tests {
             "stream": true, "tools": [{ "name": "x" }], "thinking": { "type": "enabled" },
             "system": "abcd", "messages": [{ "role": "user", "content": [{ "type": "text", "text": "efgh" }, { "type": "image" }] }]
         }));
-        assert_eq!(b, BodyFacts { stream: true, has_tools: true, has_images: true, thinking: true, approx_input_tokens: 2 });
+        assert_eq!(
+            b,
+            BodyFacts {
+                stream: true,
+                has_tools: true,
+                has_images: true,
+                thinking: true,
+                approx_input_tokens: 2,
+                tool_types: vec!["custom".into()],
+                tool_names: vec!["x".into()],
+                ..Default::default()
+            }
+        );
+    }
+
+    #[test]
+    fn tool_facts() {
+        let body = json!({
+            "tools": [
+                { "name": "Bash", "input_schema": {} },
+                { "type": "web_search_20250305", "name": "web_search" },
+                { "type": "custom", "name": "mcp__x" },
+                { "type": "web_search_20250305", "name": "web_search_2" }
+            ],
+            "tool_choice": { "type": "tool", "name": "web_search" },
+            "messages": [
+                { "role": "user", "content": "q" },
+                { "role": "assistant", "content": [
+                    { "type": "text", "text": "…" },
+                    { "type": "tool_use", "id": "a", "name": "mcp__shot__take", "input": {} },
+                    { "type": "server_tool_use", "id": "b", "name": "web_search", "input": {} }
+                ] },
+                { "role": "user", "content": [{ "type": "tool_result", "tool_use_id": "a", "content": "x" }] }
+            ]
+        });
+        let b = BodyFacts::of(&body);
+        assert_eq!(b.tool_types, vec!["custom", "web_search_20250305"]);
+        assert_eq!(b.tool_names, vec!["Bash", "web_search", "mcp__x", "web_search_2"]);
+        assert_eq!(b.tool_forced.as_deref(), Some("web_search"));
+        assert_eq!(b.prev_tools, vec!["mcp__shot__take", "web_search"]);
+        assert_eq!(offered_tool_types(&json!({ "messages": [] })), None);
+        assert!(forced_tool(&json!({ "tool_choice": { "type": "auto" } })).is_none());
+        // 最后一条不是 tool_result → 本轮第一步, 没有「上一步」
+        assert!(previous_step_tools(&json!({ "messages": [
+            { "role": "assistant", "content": [{ "type": "tool_use", "id": "a", "name": "Read", "input": {} }] },
+            { "role": "user", "content": "new question" }
+        ] })).is_empty());
+    }
+
+    #[test]
+    fn tool_conditions_route_requests() {
+        let src = r#"{"rulesApi":2,"params":[{"id":"t","type":"virtual_model","label":"T","default":"haiku"}],"rules":[
+            {"id":"search","hook":"route","when":{"tool_type":["web_search_*"]},"do":[{"use_virtual_model":"{{params.t}}"}]},
+            {"id":"after-shot","hook":"route","when":{"prev_tool":["mcp__shot__*"]},"do":[{"use_virtual_model":"opus"}]},
+            {"id":"forced","hook":"route","when":{"tool_forced":["Summarize"]},"do":[{"use_virtual_model":"sonnet"}]},
+            {"id":"offered","hook":"route","when":{"tool_offered":["mcp__browser__*"],"virtual_model":["fable"]},"do":[{"use_virtual_model":"sonnet"}]}]}"#;
+        let p = load(src, json!({ "t": "haiku" }));
+        let route = |body: Value, vm: &str| apply_route(std::slice::from_ref(&p), &facts("agent", vm), &body).0;
+        let search = json!({ "tools": [{ "type": "web_search_20250305", "name": "web_search" }], "messages": [] });
+        assert_eq!(route(search, "opus"), RouteDecision::UseVirtualModel("haiku".into()));
+        let cc_main = json!({ "tools": [{ "name": "WebSearch", "input_schema": {} }], "messages": [] });
+        assert_eq!(route(cc_main, "opus"), RouteDecision::Continue, "客户端自己的 WebSearch 工具不是服务端搜索");
+        let after = json!({ "messages": [
+            { "role": "assistant", "content": [{ "type": "tool_use", "id": "a", "name": "mcp__shot__take", "input": {} }] },
+            { "role": "user", "content": [{ "type": "tool_result", "tool_use_id": "a", "content": "x" }] }
+        ] });
+        assert_eq!(route(after, "sonnet"), RouteDecision::UseVirtualModel("opus".into()));
+        let forced = json!({ "tool_choice": { "type": "tool", "name": "Summarize" }, "messages": [] });
+        assert_eq!(route(forced, "opus"), RouteDecision::UseVirtualModel("sonnet".into()));
+        let browser = json!({ "tools": [{ "name": "mcp__browser__open" }], "messages": [] });
+        assert_eq!(route(browser.clone(), "fable"), RouteDecision::UseVirtualModel("sonnet".into()));
+        assert_eq!(route(browser, "opus"), RouteDecision::Continue);
+    }
+
+    #[test]
+    fn dry_run_tool_conditions() {
+        let src = r#"{"rulesApi":2,"rules":[
+            {"id":"search","hook":"route","when":{"tool_type":["web_search_*"]},"do":[{"use_virtual_model":"haiku"}]},
+            {"id":"after","hook":"route","when":{"prev_tool":["Read"]},"do":[{"use_virtual_model":"opus"}]},
+            {"id":"offered","hook":"request","when":{"tool_offered":["x"]},"do":[{"system_append":{"text":"x"}}]}]}"#;
+        let p = load(src, json!({}));
+        let known = PartialBodyFacts {
+            tool_types: Some(vec!["custom".into()]),
+            prev_tools: Some(vec!["Read".into()]),
+            ..Default::default()
+        };
+        let ev = dry_run_plugin(&p, &facts("main", "sonnet"), &known);
+        assert_eq!(ev.matched_rules, vec!["after"], "search 已知不命中, after 命中");
+        assert_eq!(ev.unknown_fields, vec!["tool_offered"], "工具名不落库, 只能判为无法判断");
+        let ev = dry_run_plugin(&p, &facts("main", "sonnet"), &PartialBodyFacts::default());
+        assert_eq!(ev.unknown_fields, vec!["tool_type", "prev_tool", "tool_offered"]);
     }
 
     #[test]

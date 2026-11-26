@@ -534,10 +534,10 @@ pub(crate) async fn flush_batch(
                 session_client, session_id, trace_id,
                 net_prep_ms, net_dns_ms, net_connect_ms, net_headers_ms,
                 net_conn_reused, net_via_proxy, net_remote_addr, net_upstream_stream,
-                plugins_applied)
+                plugins_applied, tools_offered_types)
              VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
                      ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
-                     ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                     ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
         )
         .bind(entry.id.to_string())
         .bind(entry.timestamp_ms)
@@ -595,6 +595,7 @@ pub(crate) async fn flush_batch(
         .bind(entry.net.remote_addr)
         .bind(entry.net.upstream_stream.map(i64::from))
         .bind(entry.plugins_applied)
+        .bind(entry.tool_calls.tools_offered_types)
         .execute(&mut *tx)
         .await;
         if let Err(e) = result {
@@ -920,6 +921,7 @@ mod tests {
         full.tool_calls = tally.fields(&RequestToolShape {
             tools_offered_count: Some(12),
             tool_result_count: Some(3),
+            tool_types: Some(vec!["custom".into(), "web_search_20250305".into()]),
             ..Default::default()
         });
         let full_id = full.id.to_string();
@@ -944,6 +946,9 @@ mod tests {
         assert_eq!(r.try_get::<Option<i64>, _>("tool_result_count").unwrap(), Some(3));
         assert_eq!(r.try_get::<Option<i64>, _>("tool_use_count").unwrap(), Some(2));
         assert_eq!(r.try_get::<Option<String>, _>("tool_use_names").unwrap().as_deref(), Some(r#"["Read","Bash"]"#));
+        let types: Option<String> = sqlx::query_scalar("SELECT tools_offered_types FROM requests WHERE id = ?")
+            .bind(&full_id).fetch_one(&pool).await.unwrap();
+        assert_eq!(types.as_deref(), Some(r#"["custom","web_search_20250305"]"#));
 
         let r = sqlx::query(
             "SELECT stop_reason, tools_offered_count, tool_use_count, tool_use_names FROM requests WHERE id = ?")

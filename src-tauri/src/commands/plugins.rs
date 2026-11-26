@@ -527,7 +527,8 @@ pub async fn dry_run_rules_plugin(
     let lim = limit.unwrap_or(50).clamp(1, 200) as i64;
     let rows = sqlx::query(
         "SELECT id, timestamp, virtual_model_name, real_model_name, is_streaming,
-                client_tool, entry_kind, tools_offered_count, purpose_kind, purpose_guessed
+                client_tool, entry_kind, tools_offered_count, purpose_kind, purpose_guessed,
+                purpose_prev_tools, tools_offered_types
          FROM requests
          ORDER BY timestamp DESC
          LIMIT ?",
@@ -561,10 +562,21 @@ pub async fn dry_run_rules_plugin(
             .unwrap_or(None)
             .unwrap_or_else(|| "messages".into());
         let tools_offered: Option<i64> = r.try_get("tools_offered_count").unwrap_or(None);
-        let purpose = r
-            .try_get::<Option<String>, _>("purpose_kind")
-            .unwrap_or(None)
-            .unwrap_or_else(|| "unknown".into());
+        let purpose_kind: Option<String> = r.try_get("purpose_kind").unwrap_or(None);
+        // purpose_kind 有值 = 这一行记录了用途 (migration 030 起); 此时 prev_tools 为 NULL 即「没有上一步工具」
+        let prev_tools: Option<Vec<String>> = purpose_kind.as_ref().map(|_| {
+            r.try_get::<Option<String>, _>("purpose_prev_tools")
+                .unwrap_or(None)
+                .and_then(|j| serde_json::from_str(&j).ok())
+                .unwrap_or_default()
+        });
+        // tools_offered_types 有值才知道; 请求没带 tools (count = 0 / NULL 且用途已记录) 也算知道: 空集合
+        let tool_types: Option<Vec<String>> = match r.try_get::<Option<String>, _>("tools_offered_types").unwrap_or(None) {
+            Some(j) => serde_json::from_str(&j).ok(),
+            None if tools_offered.is_none() && purpose_kind.is_some() => Some(Vec::new()),
+            None => None,
+        };
+        let purpose = purpose_kind.unwrap_or_else(|| "unknown".into());
         let purpose_guessed = r.try_get::<Option<i64>, _>("purpose_guessed").unwrap_or(None).unwrap_or(0) != 0;
 
         let vm_short = vm_raw.strip_prefix("model-").unwrap_or(&vm_raw);
@@ -590,6 +602,11 @@ pub async fn dry_run_rules_plugin(
             has_images: None,
             thinking: None,
             approx_input_tokens: None,
+            tool_types,
+            // 工具名与 tool_choice 不落库
+            tool_names: None,
+            tool_forced: None,
+            prev_tools,
         };
 
         let eval = dry_run_plugin(&loaded, &facts, &partial);

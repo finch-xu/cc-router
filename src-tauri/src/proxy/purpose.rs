@@ -27,6 +27,8 @@ pub enum PurposeKind {
     Title,
     /// WebFetch 结果摘要
     Fetch,
+    /// 服务端联网搜索 (`tools` 里有 `web_search_*` 类型的 Anthropic 内置工具; Claude Code 的 WebSearch 子请求)
+    Search,
     /// 连通 / 配额探测 (max_tokens = 1)
     Probe,
     /// 其他不带工具的后台小任务
@@ -37,9 +39,9 @@ pub enum PurposeKind {
 }
 
 impl PurposeKind {
-    pub const ALL: [Self; 9] = [
+    pub const ALL: [Self; 10] = [
         Self::Main, Self::Agent, Self::Compact, Self::Guard, Self::Title,
-        Self::Fetch, Self::Probe, Self::Background, Self::Unknown,
+        Self::Fetch, Self::Search, Self::Probe, Self::Background, Self::Unknown,
     ];
 
     /// 落库值, 与 serde 的 snake_case 相同。
@@ -51,6 +53,7 @@ impl PurposeKind {
             Self::Guard => "guard",
             Self::Title => "title",
             Self::Fetch => "fetch",
+            Self::Search => "search",
             Self::Probe => "probe",
             Self::Background => "background",
             Self::Unknown => "unknown",
@@ -144,19 +147,12 @@ pub fn classify(body: &Value, client_tool: Option<&str>) -> RequestPurpose {
         msgs[i + 1..].iter().filter(|m| is_role(m, "assistant")).count() as u32 + 1
     });
 
-    // 上一步工具: 最后一条是带 tool_result 的 user 消息时, 取它前面那条 assistant 的 tool_use 名
-    let mut prev_tools = Vec::new();
-    if let [.., prev, last] = msgs {
-        if is_role(last, "user") && has_tool_result(last) && is_role(prev, "assistant") {
-            prev_tools = blocks(&prev["content"])
-                .iter()
-                .filter(|b| matches!(b["type"].as_str(), Some("tool_use") | Some("server_tool_use")))
-                .filter_map(|b| b["name"].as_str())
-                .take(MAX_PREV_TOOLS)
-                .map(|n| n.chars().take(MAX_TOOL_NAME).collect())
-                .collect();
-        }
-    }
+    // 上一步工具: 与规则条件 `prev_tool` 同一个定义 (cc-router-plugin-spec::rules_engine)
+    let prev_tools: Vec<String> = cc_router_plugin_spec::rules_engine::previous_step_tools(body)
+        .into_iter()
+        .take(MAX_PREV_TOOLS)
+        .map(|n| n.chars().take(MAX_TOOL_NAME).collect())
+        .collect();
 
     let tool_names: Vec<&str> = body
         .get("tools")
@@ -170,8 +166,14 @@ pub fn classify(body: &Value, client_tool: Option<&str>) -> RequestPurpose {
         .map(|m| lower_text(&m["content"]))
         .unwrap_or_default();
 
+    let is_search = cc_router_plugin_spec::rules_engine::offered_tool_types(body)
+        .is_some_and(|types| types.iter().any(|t| t.starts_with("web_search_")));
+
     let (kind, guessed) = if contains_any(&last_user_text, COMPACT_MARKERS) {
         (PurposeKind::Compact, false)
+    } else if is_search {
+        // 看的是协议里的工具类型, 不是提示词指纹, 所以不算推断; 与客户端无关
+        (PurposeKind::Search, false)
     } else if is_claude_code(client_tool) {
         if body.get("max_tokens").and_then(Value::as_u64) == Some(1) {
             (PurposeKind::Probe, true)
@@ -236,6 +238,21 @@ mod tests {
         assert_eq!(p.turn, Some(2));
         assert_eq!(p.step, Some(3));
         assert_eq!(p.prev_tools, vec!["Bash", "Edit"]);
+    }
+
+    #[test]
+    fn server_web_search_tool_marks_a_search_request_for_any_client() {
+        let body = json!({
+            "tools": [{"type": "web_search_20250305", "name": "web_search", "max_uses": 8}],
+            "messages": [{"role": "user", "content": "Perform a web search for the query: rust"}]
+        });
+        for client in [Some("claude-code"), None] {
+            let p = classify(&body, client);
+            assert_eq!(p.kind, PurposeKind::Search);
+            assert!(!p.guessed);
+        }
+        let client_tool = cc(json!({"tools": [{"name": "WebSearch", "input_schema": {}}], "messages": [{"role": "user", "content": "x"}]}));
+        assert_ne!(client_tool.kind, PurposeKind::Search, "客户端自己的 WebSearch 工具不算");
     }
 
     #[test]

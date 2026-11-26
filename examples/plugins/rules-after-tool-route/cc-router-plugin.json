@@ -1,0 +1,17 @@
+{
+  "manifest": 1,
+  "id": "rules-after-tool-route",
+  "type": "rules",
+  "version": "1.0.0",
+  "name": { "zh": "截图之后换视觉模型", "zh-Hant": "截圖之後換視覺模型", "en": "Vision model after screenshots", "ja": "スクショの後は画像に強いモデルへ" },
+  "description": {
+    "zh": "示范 prev_tool 条件：某个工具（默认是浏览器类 MCP 的截图工具）返回结果后，这一步交给你选的虚拟模型处理。注意：中途换模型会让这一步的提示词缓存失效。",
+    "zh-Hant": "示範 prev_tool 條件：某個工具（預設是瀏覽器類 MCP 的截圖工具）回傳結果後，這一步交給你選的虛擬模型處理。注意：中途換模型會讓這一步的提示詞快取失效。",
+    "en": "Shows the prev_tool condition: after a tool returns (by default, screenshot tools from browser MCP servers), that step goes to a virtual model of your choice. Switching models mid-task loses the prompt cache for that step.",
+    "ja": "prev_tool 条件の見本：あるツール（既定はブラウザ系 MCP のスクリーンショット）が結果を返したら、その一手を選んだ仮想モデルに任せます。途中でモデルを替えるとその一手のプロンプトキャッシュは効きません。"
+  },
+  "author": "cc-router",
+  "license": "MIT",
+  "entry": "rules.json",
+  "assets": []
+}

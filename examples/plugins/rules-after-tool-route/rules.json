@@ -1,0 +1,15 @@
+{
+  "rulesApi": 2,
+  "params": [
+    { "id": "target", "type": "virtual_model", "default": "opus",
+      "label": { "zh": "这一步交给", "zh-Hant": "這一步交給", "en": "Send that step to", "ja": "その一手の送り先" } }
+  ],
+  "rules": [
+    {
+      "id": "after-screenshot",
+      "hook": "route",
+      "when": { "prev_tool": ["mcp__playwright__browser_take_screenshot", "mcp__chrome-devtools__take_screenshot"] },
+      "do": [ { "use_virtual_model": "{{params.target}}" } ]
+    }
+  ]
+}

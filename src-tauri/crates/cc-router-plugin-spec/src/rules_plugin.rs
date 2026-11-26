@@ -8,10 +8,14 @@ use serde_json::{Map, Value};
 
 use crate::check::{Issue, IssueCode};
 
-pub const RULES_API: u64 = 1;
+/// 当前最高的规则格式版本。2 新增工具条件 (`tool_type` / `tool_offered` / `tool_forced` / `prev_tool`);
+/// 1 仍然接受, 但用了 2 才有的条件要声明 2 —— 旧版 app 因此提示「需要更新」而不是「未知条件」。
+pub const RULES_API: u64 = 2;
+/// 每个条件键最早出现在哪个 `rulesApi` (没列出的都是 1)。
+const WHEN_KEYS_SINCE: &[(&str, u64)] = &[("tool_type", 2), ("tool_offered", 2), ("tool_forced", 2), ("prev_tool", 2)];
 /// 规则能改道到的虚拟模型 (`jev` 不在其中: `/v1/systemone` 不经过规则)。
 pub const VIRTUAL_MODELS: &[&str] = &["fable", "opus", "sonnet", "haiku", "fallback"];
-pub const PURPOSES: &[&str] = &["main", "agent", "compact", "guard", "title", "fetch", "probe", "background", "unknown"];
+pub const PURPOSES: &[&str] = &["main", "agent", "compact", "guard", "title", "fetch", "search", "probe", "background", "unknown"];
 pub const ENTRIES: &[&str] = &["messages", "responses", "chat_completions"];
 /// `set_param` / `clamp_param` 能动的请求参数。
 pub const PARAM_PATHS: &[&str] = &["temperature", "top_p", "top_k", "max_tokens", "thinking.budget_tokens"];
@@ -77,6 +81,14 @@ pub struct When {
     pub time: Option<Vec<TimeWindow>>,
     /// 引用一个布尔参数: 用户打开它时规则才生效 (让作者把可选功能做成开关)
     pub param: Option<String>,
+    /// `tools[]` 里任一工具的 `type` 匹配 (没写 type 的普通工具算 `custom`); 支持末尾 `*`
+    pub tool_type: Option<Vec<String>>,
+    /// `tools[]` 里任一工具的名字匹配; 支持末尾 `*`
+    pub tool_offered: Option<Vec<String>>,
+    /// `tool_choice` 指定的工具名匹配; 支持末尾 `*`
+    pub tool_forced: Option<Vec<String>>,
+    /// 上一步模型调用的工具 (本请求回传的是它们的结果) 任一匹配; 支持末尾 `*`
+    pub prev_tool: Option<Vec<String>>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
@@ -177,6 +189,8 @@ fn parse_hhmm(s: &str) -> Option<u16> {
 struct Ctx<'a> {
     issues: &'a mut Vec<Issue>,
     params: &'a [ParamDecl],
+    /// 插件声明的 `rulesApi` (缺失 / 非法时按当前版本, 那个错误另外报)
+    api: u64,
 }
 
 impl Ctx<'_> {
@@ -233,15 +247,17 @@ pub fn parse(entry: &str) -> Result<(RulesPlugin, RulesCapabilities), Vec<Issue>
         return Err(vec![Issue::new("", IssueCode::InvalidType).detail("top level must be an object")]);
     };
     let mut issues = Vec::new();
-    match obj.get("rulesApi").and_then(Value::as_u64) {
-        Some(RULES_API) => {}
+    let api = obj.get("rulesApi").and_then(Value::as_u64);
+    match api {
+        Some(1..=RULES_API) => {}
         Some(n) if n > RULES_API => issues.push(Issue::new("rulesApi", IssueCode::NeedsNewerApp).detail(n.to_string())),
         Some(_) => issues.push(Issue::new("rulesApi", IssueCode::UnsupportedVersion)),
         None => issues.push(Issue::new("rulesApi", IssueCode::Missing)),
     }
 
     let params = parse_params(obj.get("params"), &mut issues);
-    let mut ctx = Ctx { issues: &mut issues, params: &params };
+    let api = api.filter(|n| (1..=RULES_API).contains(n)).unwrap_or(RULES_API);
+    let mut ctx = Ctx { issues: &mut issues, params: &params, api };
 
     let mut rules = Vec::new();
     match obj.get("rules").and_then(Value::as_array) {
@@ -444,7 +460,7 @@ fn parse_rule(path: &str, v: &Value, ctx: &mut Ctx) -> Option<Rule> {
 
 const WHEN_KEYS: &[&str] = &[
     "purpose", "purpose_guessed", "virtual_model", "client_tool", "entry", "model_requested", "stream", "has_tools",
-    "has_images", "thinking", "approx_input_tokens", "time", "param",
+    "has_images", "thinking", "approx_input_tokens", "time", "param", "tool_type", "tool_offered", "tool_forced", "prev_tool",
 ];
 
 fn parse_when(path: &str, v: &Value, ctx: &mut Ctx) -> Option<When> {
@@ -455,8 +471,24 @@ fn parse_when(path: &str, v: &Value, ctx: &mut Ctx) -> Option<When> {
     let mut w = When::default();
     for (k, val) in o {
         let at = format!("{path}.{k}");
+        if let Some((_, since)) = WHEN_KEYS_SINCE.iter().find(|(name, _)| name == k) {
+            if ctx.api < *since {
+                ctx.bad(&at, format!("requires \"rulesApi\": {since}"));
+                continue;
+            }
+        }
         match k.as_str() {
-            "purpose" => w.purpose = ctx.string_list(&at, val, Some(PURPOSES)),
+            "tool_type" => w.tool_type = ctx.string_list(&at, val, None),
+            "tool_offered" => w.tool_offered = ctx.string_list(&at, val, None),
+            "tool_forced" => w.tool_forced = ctx.string_list(&at, val, None),
+            "prev_tool" => w.prev_tool = ctx.string_list(&at, val, None),
+            "purpose" => {
+                w.purpose = ctx.string_list(&at, val, Some(PURPOSES));
+                // `search` 是 rulesApi 2 才有的取值, 旧版 app 会当成非法值
+                if ctx.api < 2 && w.purpose.as_ref().is_some_and(|l| l.iter().any(|x| x == "search")) {
+                    ctx.bad(&at, "\"search\" requires \"rulesApi\": 2");
+                }
+            }
             "virtual_model" => w.virtual_model = ctx.string_list(&at, val, Some(VIRTUAL_MODELS)),
             "entry" => w.entry = ctx.string_list(&at, val, Some(ENTRIES)),
             "client_tool" => w.client_tool = ctx.string_list(&at, val, None),
@@ -677,8 +709,24 @@ mod tests {
         assert!(parse(&rule(r#"{"id":"a","hook":"request","do":[{"redact":{"patterns":["(unclosed"]}}]}"#)).is_err());
         assert!(parse(&rule(r#"{"id":"a","hook":"route","when":{"time":[{"days":[8],"start":"25:00","end":"01:00"}]},"do":[{"reject":{"message":"x"}}]}"#)).is_err());
         assert!(parse(&rule(r#"{"id":"Bad Id","hook":"route","do":[{"reject":{"message":"x"}}]}"#)).is_err());
-        assert!(parse(r#"{"rulesApi":2,"rules":[{"id":"a","hook":"route","do":[{"reject":{"message":"x"}}]}]}"#).is_err());
+        assert!(parse(r#"{"rulesApi":3,"rules":[{"id":"a","hook":"route","do":[{"reject":{"message":"x"}}]}]}"#).is_err());
+        assert!(parse(r#"{"rulesApi":0,"rules":[{"id":"a","hook":"route","do":[{"reject":{"message":"x"}}]}]}"#).is_err());
         let dup = format!(r#"{{"rulesApi":1,"rules":[{0},{0}]}}"#, r#"{"id":"a","hook":"route","do":[{"reject":{"message":"x"}}]}"#);
         assert!(parse(&dup).is_err());
+    }
+
+    #[test]
+    fn tool_conditions_need_rules_api_2() {
+        let r = r#"{"id":"a","hook":"route","when":{"tool_type":["web_search_*"],"tool_offered":["mcp__*"],"tool_forced":["x"],"prev_tool":["Read"]},"do":[{"use_virtual_model":"haiku"}]}"#;
+        let c = codes(&rule(r));
+        assert_eq!(c.len(), 4, "rulesApi 1 下四个工具条件都报错: {c:?}");
+        assert!(c.iter().all(|(_, code)| *code == IssueCode::InvalidValue));
+        let (p, _) = parse(&format!(r#"{{"rulesApi":2,"rules":[{r}]}}"#)).unwrap();
+        let w = &p.rules[0].when;
+        assert_eq!(w.tool_type.as_deref(), Some(&["web_search_*".to_string()][..]));
+        assert_eq!(w.prev_tool.as_deref(), Some(&["Read".to_string()][..]));
+        let search = r#"{"id":"a","hook":"route","when":{"purpose":["search"]},"do":[{"use_virtual_model":"haiku"}]}"#;
+        assert!(parse(&rule(search)).is_err(), "search 用途同样要求 rulesApi 2");
+        assert!(parse(&format!(r#"{{"rulesApi":2,"rules":[{search}]}}"#)).is_ok());
     }
 }

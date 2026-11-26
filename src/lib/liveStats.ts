@@ -3,7 +3,7 @@
  * 组件只负责画, 口径全在这里, 改统计规则只动这一个文件。
  */
 import type { LucideIcon } from "lucide-react";
-import { Bot, Cog, Globe, HelpCircle, MessageSquare, Radio, ShieldCheck, Shrink, Tag } from "lucide-react";
+import { Bot, Cog, Globe, HelpCircle, MessageSquare, Radio, Search, ShieldCheck, Shrink, Tag } from "lucide-react";
 import { CLIENT_TOOLS_BY_ID } from "@/lib/clientTools";
 import type { ClientToolId, LiveRequest, PurposeKind, RequestPurpose } from "@/types";
 
@@ -83,12 +83,13 @@ export const PURPOSE_META: Record<PurposeKind, { icon: LucideIcon; tone: Purpose
   guard: { icon: ShieldCheck, tone: "bg" },
   title: { icon: Tag, tone: "bg" },
   fetch: { icon: Globe, tone: "bg" },
+  search: { icon: Search, tone: "bg" },
   probe: { icon: Radio, tone: "bg" },
   background: { icon: Cog, tone: "bg" },
   unknown: { icon: HelpCircle, tone: "unknown" },
 };
 
-export const PURPOSE_ORDER: PurposeKind[] = ["main", "agent", "compact", "guard", "title", "fetch", "probe", "background", "unknown"];
+export const PURPOSE_ORDER: PurposeKind[] = ["main", "agent", "compact", "guard", "title", "fetch", "search", "probe", "background", "unknown"];
 
 export const isBackground = (kind: PurposeKind) => PURPOSE_META[kind].tone === "bg";
 

@@ -1398,6 +1398,7 @@
   "live.purpose.guard": "Safety check",
   "live.purpose.title": "Title",
   "live.purpose.fetch": "Web summary",
+  "live.purpose.search": "Web search",
   "live.purpose.probe": "Probe",
   "live.purpose.background": "Background",
   "live.purpose.unknown": "Unknown",
