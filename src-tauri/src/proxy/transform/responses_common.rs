@@ -226,16 +226,16 @@ pub fn build_responses_body(body: &Value, config: &ResponsesTransformConfig) -> 
     }
 
     // tools[] → tools[]
-    if let Some(tools) = body.get("tools").and_then(|t| t.as_array()) {
-        let converted: Vec<Value> = tools.iter().filter_map(convert_tool).collect();
-        if !converted.is_empty() {
-            out["tools"] = json!(converted);
-        }
+    // Anthropic 内置工具 (web_search_* …) 丢弃, 见 transform::is_builtin_tool
+    let functions = super::function_tools(body);
+    let converted: Vec<Value> = functions.iter().copied().filter_map(convert_tool).collect();
+    if !converted.is_empty() {
+        out["tools"] = json!(converted);
     }
 
     // tool_choice — disable_parallel_tool_use 是 Anthropic 放在 tool_choice 里的独立开关,
     // OpenAI 侧对应顶层 parallel_tool_calls
-    if let Some(tc) = body.get("tool_choice") {
+    if let Some(tc) = super::usable_tool_choice(body, &functions) {
         if let Some(mapped) = map_tool_choice(tc) {
             out["tool_choice"] = mapped;
         }

@@ -230,11 +230,10 @@ pub fn anthropic_to_interactions(
     }
 
     // tools[] → 扁平 function 声明
-    if let Some(tools) = body.get("tools").and_then(|t| t.as_array()) {
-        let decls: Vec<Value> = tools.iter().filter_map(convert_tool).collect();
-        if !decls.is_empty() {
-            out["tools"] = json!(decls);
-        }
+    // Anthropic 内置工具 (web_search_* …) 丢弃, 见 transform::is_builtin_tool
+    let decls: Vec<Value> = super::function_tools(body).into_iter().filter_map(convert_tool).collect();
+    if !decls.is_empty() {
+        out["tools"] = json!(decls);
     }
     // tool_choice: Interactions 映射待 Phase 0 确认, CC 极少传, 暂不翻译。
 

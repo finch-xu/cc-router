@@ -157,19 +157,18 @@ pub fn anthropic_to_openai_chat(
 
     out.insert("messages".into(), Value::Array(messages));
 
-    // tools
-    if let Some(tools) = body.get("tools").and_then(Value::as_array) {
-        let mut translated = Vec::with_capacity(tools.len());
-        for t in tools {
-            translated.push(translate_tool_definition(t)?);
-        }
-        if !translated.is_empty() {
-            out.insert("tools".into(), Value::Array(translated));
-        }
+    // tools — Anthropic 内置工具 (web_search_* …) 丢弃, 见 transform::is_builtin_tool
+    let functions = super::function_tools(body);
+    let mut translated = Vec::with_capacity(functions.len());
+    for t in &functions {
+        translated.push(translate_tool_definition(t)?);
+    }
+    if !translated.is_empty() {
+        out.insert("tools".into(), Value::Array(translated));
     }
 
     // tool_choice
-    if let Some(tc) = body.get("tool_choice") {
+    if let Some(tc) = super::usable_tool_choice(body, &functions) {
         out.insert("tool_choice".into(), translate_tool_choice(tc));
     }
 
@@ -1438,6 +1437,19 @@ mod tests {
         });
         let out = anthropic_to_openai_chat(&body, &c, &extras()).unwrap();
         assert!(out.get("max_tokens").is_none());
+    }
+
+    #[test]
+    fn anthropic_builtin_tools_are_not_sent_as_empty_functions() {
+        let body = json!({
+            "model": "m",
+            "messages": [{"role": "user", "content": "Perform a web search for the query: rust"}],
+            "tools": [{"type": "web_search_20250305", "name": "web_search", "max_uses": 8}],
+            "tool_choice": {"type": "tool", "name": "web_search"},
+        });
+        let out = anthropic_to_openai_chat(&body, &cfg(), &extras()).unwrap();
+        assert!(out.get("tools").is_none());
+        assert!(out.get("tool_choice").is_none());
     }
 
     #[test]

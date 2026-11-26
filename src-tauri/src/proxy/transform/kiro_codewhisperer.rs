@@ -288,8 +288,13 @@ fn build_current_user_input(
     let mut ctx_has_field = false;
 
     if let Some(tools_arr) = tools {
+        // Anthropic 内置工具 (web_search_* …) 没有对应物, 见 transform::is_builtin_tool
+        if tools_arr.iter().any(super::is_builtin_tool) {
+            tracing::warn!("Kiro 上游不支持 Anthropic 内置工具, 已从请求中去掉");
+        }
         let kiro_tools: Vec<Value> = tools_arr
             .iter()
+            .filter(|t| !super::is_builtin_tool(t))
             .filter_map(|t| {
                 let name = t.get("name").and_then(|v| v.as_str())?;
                 let desc = t.get("description").and_then(|v| v.as_str()).unwrap_or("");
