@@ -21,6 +21,9 @@ pub struct RequestToolShape {
     pub tools_offered_count: Option<u32>,
     /// **最后一条** user 消息里的 `tool_result` 块数; 没有 user 消息 → None
     pub tool_result_count: Option<u32>,
+    /// `tools[]` 里出现过的工具类型 (去重排序, 普通工具记 `custom`), 与规则条件 `tool_type`
+    /// 同一个定义; `tools` 缺失 → None。落库供规则试运行判断 (migration 035)。
+    pub tool_types: Option<Vec<String>>,
     /// 这个请求在干什么 (实时路由页用, 不落库), 见 [`crate::proxy::purpose`]。
     /// handler 构造 `ClientContext` 时用 [`RequestToolShape::with_purpose`] 补上。
     pub purpose: crate::proxy::purpose::RequestPurpose,
@@ -60,7 +63,12 @@ pub fn request_tool_shape(body: &Value) -> RequestToolShape {
                 .unwrap_or(0)
         });
 
-    RequestToolShape { tools_offered_count, tool_result_count, purpose: Default::default() }
+    RequestToolShape {
+        tools_offered_count,
+        tool_result_count,
+        tool_types: cc_router_plugin_spec::rules_engine::offered_tool_types(body),
+        purpose: Default::default(),
+    }
 }
 
 fn is_tool_block(block: &Value) -> bool {
@@ -157,9 +165,16 @@ impl ToolUseTally {
             } else {
                 Some(names_json_truncated(&self.names))
             },
+            tools_offered_types: types_json(req),
             purpose: req.purpose.clone(),
         }
     }
+}
+
+/// 工具类型数组的 JSON 文本; 类型只是协议里的固定标识 (`custom` / `web_search_20250305` …),
+/// 不含工具名或 schema。序列化失败就不记。
+fn types_json(req: &RequestToolShape) -> Option<String> {
+    req.tool_types.as_ref().and_then(|t| serde_json::to_string(t).ok())
 }
 
 /// 序列化名字数组; 超过 [`TOOL_NAMES_LIMIT`] 时从尾部丢名并追加 [`TRUNCATED_MARKER`]。
@@ -187,6 +202,8 @@ pub struct ToolLogFields {
     pub tool_result_count: Option<u32>,
     pub tool_use_count: Option<u32>,
     pub tool_use_names: Option<String>,
+    /// 请求 `tools[]` 的类型集合 (JSON 数组), 见 [`RequestToolShape::tool_types`]
+    pub tools_offered_types: Option<String>,
     /// 随请求侧形状带过来的用途; 写进 requests.purpose_* (migration 030)。
     pub purpose: crate::proxy::purpose::RequestPurpose,
 }
@@ -200,6 +217,7 @@ impl ToolLogFields {
             tool_result_count: req.tool_result_count,
             tool_use_count: None,
             tool_use_names: None,
+            tools_offered_types: types_json(req),
             purpose: req.purpose.clone(),
         }
     }
@@ -253,7 +271,7 @@ mod tests {
         );
         assert_eq!(
             request_tool_shape(&json!({"tools": [], "messages": []})),
-            RequestToolShape { tools_offered_count: Some(0), tool_result_count: None, ..Default::default() }
+            RequestToolShape { tools_offered_count: Some(0), tool_result_count: None, tool_types: Some(vec![]), ..Default::default() }
         );
         assert_eq!(
             request_tool_shape(&json!({"tools": "oops", "messages": "oops"})),

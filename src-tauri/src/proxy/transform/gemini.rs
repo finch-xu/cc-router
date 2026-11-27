@@ -254,17 +254,17 @@ pub fn anthropic_to_gemini(body: &Value, extras: &GeminiExtras) -> AppResult<Val
     }
 
     // tools[]
-    if let Some(tools) = body.get("tools").and_then(|t| t.as_array()) {
-        let declarations: Vec<Value> = tools.iter().filter_map(convert_tool).collect();
-        if !declarations.is_empty() {
-            out["tools"] = json!([
-                {"functionDeclarations": declarations}
-            ]);
-        }
+    // Anthropic 内置工具 (web_search_* …) 丢弃, 见 transform::is_builtin_tool
+    let functions = super::function_tools(body);
+    let declarations: Vec<Value> = functions.iter().copied().filter_map(convert_tool).collect();
+    if !declarations.is_empty() {
+        out["tools"] = json!([
+            {"functionDeclarations": declarations}
+        ]);
     }
 
     // tool_choice → toolConfig.functionCallingConfig
-    if let Some(tc) = body.get("tool_choice") {
+    if let Some(tc) = super::usable_tool_choice(body, &functions) {
         if let Some(cfg) = map_tool_choice(tc) {
             out["toolConfig"] = json!({"functionCallingConfig": cfg});
         }

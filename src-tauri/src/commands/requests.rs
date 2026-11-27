@@ -105,7 +105,7 @@ pub struct RequestLogFilters {
 }
 
 /// 实时路由里算作「后台任务」的用途, 与前端 `liveStats.ts::isBackground` 同表
-const BACKGROUND_KINDS: &[&str] = &["compact", "guard", "title", "fetch", "probe", "background"];
+const BACKGROUND_KINDS: &[&str] = &["compact", "guard", "title", "fetch", "search", "probe", "background"];
 
 // client_tool 特殊值 → 拼 `IS NULL` 而非 `= ?`. 与前端
 // `src/types.ts::CLIENT_TOOL_UNKNOWN_SENTINEL` 必须保持同值, 否则筛选「未识别」会静默失效.

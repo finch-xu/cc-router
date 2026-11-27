@@ -1,0 +1,17 @@
+{
+  "manifest": 1,
+  "id": "rules-builtin-tools-route",
+  "type": "rules",
+  "version": "1.0.0",
+  "name": { "zh": "联网搜索走支持的订阅", "zh-Hant": "聯網搜尋走支援的訂閱", "en": "Web search on a capable subscription", "ja": "Web 検索は対応サブスクへ" },
+  "description": {
+    "zh": "主力模型不支持联网搜索时，把 Claude Code 的联网搜索请求（以及可选的其他 Anthropic 内置工具请求，如网页抓取、代码执行）改道到绑定了支持这些能力的订阅的虚拟模型。",
+    "zh-Hant": "主力模型不支援聯網搜尋時，把 Claude Code 的聯網搜尋請求（以及可選的其他 Anthropic 內建工具請求，如網頁擷取、程式碼執行）改道到綁定了支援這些能力之訂閱的虛擬模型。",
+    "en": "When your main model can't run web search, send Claude Code's web-search requests (and optionally other Anthropic built-in tool requests such as web fetch and code execution) to a virtual model bound to a subscription that supports them.",
+    "ja": "メインのモデルが Web 検索に対応していないとき、Claude Code の Web 検索リクエスト（必要なら Web 取得・コード実行など他の Anthropic 組み込みツールのリクエストも）を、それらに対応したサブスクを割り当てた仮想モデルへ回します。"
+  },
+  "author": "cc-router",
+  "license": "MIT",
+  "entry": "rules.json",
+  "assets": []
+}

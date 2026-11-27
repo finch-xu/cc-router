@@ -1398,6 +1398,7 @@
   "live.purpose.guard": "安全检查",
   "live.purpose.title": "会话标题",
   "live.purpose.fetch": "网页摘要",
+  "live.purpose.search": "联网搜索",
   "live.purpose.probe": "探测",
   "live.purpose.background": "后台任务",
   "live.purpose.unknown": "未识别",

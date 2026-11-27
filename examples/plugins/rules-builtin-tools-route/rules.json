@@ -1,0 +1,23 @@
+{
+  "rulesApi": 2,
+  "params": [
+    { "id": "target", "type": "virtual_model",
+      "label": { "zh": "改道到（需绑定支持联网搜索的订阅）", "zh-Hant": "改道到（需綁定支援聯網搜尋的訂閱）", "en": "Send to (bind a subscription that supports web search)", "ja": "送り先（Web 検索対応のサブスクを割り当てた仮想モデル）" } },
+    { "id": "other_builtin", "type": "bool", "default": false,
+      "label": { "zh": "网页抓取、代码执行等其他服务端工具也改道", "zh-Hant": "網頁擷取、程式碼執行等其他伺服器端工具也改道", "en": "Also route other server tools (web fetch, code execution…)", "ja": "Web 取得・コード実行など他のサーバーツールも回す" } }
+  ],
+  "rules": [
+    {
+      "id": "web-search",
+      "hook": "route",
+      "when": { "tool_type": ["web_search_*"] },
+      "do": [ { "use_virtual_model": "{{params.target}}" } ]
+    },
+    {
+      "id": "other-server-tools",
+      "hook": "route",
+      "when": { "param": "other_builtin", "tool_type": ["web_fetch_*", "code_execution_*", "tool_search_tool_*"] },
+      "do": [ { "use_virtual_model": "{{params.target}}" } ]
+    }
+  ]
+}

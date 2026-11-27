@@ -1261,6 +1261,7 @@ export type PurposeKind =
   | "guard"
   | "title"
   | "fetch"
+  | "search"
   | "probe"
   | "background"
   | "unknown";
